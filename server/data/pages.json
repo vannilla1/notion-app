@@ -1,0 +1,42 @@
+[
+  {
+    "id": "60ba4d10-7618-4bf4-a137-bd2db1e24f3a",
+    "title": "Untitled",
+    "icon": "📄",
+    "ownerId": "7a239cee-2ff8-4a73-97c9-8f41d3eb4e36",
+    "ownerName": "user2",
+    "parentId": null,
+    "sharedWith": [
+      "77fb0715-6d69-486f-b9ea-6300824a30cc"
+    ],
+    "blocks": [
+      {
+        "id": "e638bfcd-3929-4cac-8354-236c0ee92fe6",
+        "type": "paragraph",
+        "content": "dsyvsdv"
+      }
+    ],
+    "createdAt": "2025-12-16T12:56:11.688Z",
+    "updatedAt": "2025-12-16T12:56:19.611Z"
+  },
+  {
+    "id": "54dde762-f39e-406d-8536-885cb79dc088",
+    "title": "cwefds",
+    "icon": "📄",
+    "ownerId": "7a239cee-2ff8-4a73-97c9-8f41d3eb4e36",
+    "ownerName": "user2",
+    "parentId": null,
+    "sharedWith": [
+      "77fb0715-6d69-486f-b9ea-6300824a30cc"
+    ],
+    "blocks": [
+      {
+        "id": "ae5fab8b-43d9-4d25-bc5a-b1a522ce87cd",
+        "type": "paragraph",
+        "content": "vydvd"
+      }
+    ],
+    "createdAt": "2025-12-16T12:56:21.161Z",
+    "updatedAt": "2025-12-16T12:56:25.746Z"
+  }
+]

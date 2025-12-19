@@ -1,0 +1,46 @@
+[
+  {
+    "id": "2154bd83-372f-448c-a8e5-ff5ba8c16046",
+    "title": "Testovacie uloha",
+    "description": "hop-cip",
+    "dueDate": "2025-12-28",
+    "priority": "high",
+    "completed": false,
+    "contactId": "89f0e679-6f14-46f6-b841-b1a73f74eb7e",
+    "subtasks": [
+      {
+        "id": "57a68da9-fd20-47f9-91f0-351ee1d94e9d",
+        "title": "test",
+        "completed": false,
+        "subtasks": [
+          {
+            "id": "d03c3006-9fe0-4478-88a5-c6ce6b8aaab6",
+            "title": "hop",
+            "completed": false,
+            "subtasks": [
+              {
+                "id": "d35285ed-7ffb-4909-8542-2f1dc3104a5a",
+                "title": "nehej",
+                "completed": false,
+                "subtasks": [],
+                "createdAt": "2025-12-18T15:36:46.702Z"
+              }
+            ],
+            "createdAt": "2025-12-18T15:36:40.207Z"
+          }
+        ],
+        "createdAt": "2025-12-18T15:36:27.786Z"
+      },
+      {
+        "id": "8462b66d-6875-4eb0-b846-f194215d2229",
+        "title": "test 2",
+        "completed": false,
+        "subtasks": [],
+        "createdAt": "2025-12-18T15:36:33.916Z"
+      }
+    ],
+    "createdBy": "user1",
+    "createdAt": "2025-12-18T10:49:42.443Z",
+    "updatedAt": "2025-12-18T15:36:51.726Z"
+  }
+]

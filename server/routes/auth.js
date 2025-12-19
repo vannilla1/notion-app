@@ -1,0 +1,273 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const db = require('../config/database');
+const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Configure multer for avatar uploads
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/avatars');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `avatar-${req.user.id}-${Date.now()}${ext}`);
+  }
+});
+
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Neplatný typ súboru. Povolené sú len obrázky (JPEG, PNG, GIF, WebP).'));
+    }
+  }
+});
+
+// Register
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    // Check if user exists
+    if (db.users.findByEmail(email)) {
+      return res.status(400).json({ message: 'Email already registered' });
+    }
+
+    if (db.users.findByUsername(username)) {
+      return res.status(400).json({ message: 'Username already taken' });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Generate random color for user
+    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+
+    // Create user
+    const user = db.users.create({
+      username,
+      email,
+      password: hashedPassword,
+      color
+    });
+
+    // Generate token
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        color: user.color
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Find user
+    const user = db.users.findByEmail(email);
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Generate token
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        color: user.color
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get current user
+router.get('/me', authenticateToken, (req, res) => {
+  res.json(req.user);
+});
+
+// Get user profile
+router.get('/profile', authenticateToken, (req, res) => {
+  const user = db.users.findById(req.user.id);
+  if (!user) {
+    return res.status(404).json({ message: 'Užívateľ nenájdený' });
+  }
+  res.json({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    color: user.color,
+    avatar: user.avatar || null,
+    createdAt: user.createdAt
+  });
+});
+
+// Update user profile
+router.put('/profile', authenticateToken, async (req, res) => {
+  try {
+    const { username, email, color } = req.body;
+    const userId = req.user.id;
+
+    // Check if email is taken by another user
+    if (email) {
+      const existingUser = db.users.findByEmail(email);
+      if (existingUser && existingUser.id !== userId) {
+        return res.status(400).json({ message: 'Email je už registrovaný' });
+      }
+    }
+
+    // Check if username is taken by another user
+    if (username) {
+      const existingUser = db.users.findByUsername(username);
+      if (existingUser && existingUser.id !== userId) {
+        return res.status(400).json({ message: 'Užívateľské meno je už obsadené' });
+      }
+    }
+
+    const updates = {};
+    if (username) updates.username = username;
+    if (email) updates.email = email;
+    if (color) updates.color = color;
+
+    const updatedUser = db.users.update(userId, updates);
+
+    res.json({
+      id: updatedUser.id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      color: updatedUser.color,
+      avatar: updatedUser.avatar || null
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Upload avatar
+router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Žiadny súbor nebol nahraný' });
+    }
+
+    const userId = req.user.id;
+    const user = db.users.findById(userId);
+
+    // Delete old avatar if exists
+    if (user.avatar) {
+      const oldAvatarPath = path.join(__dirname, '../uploads/avatars', user.avatar);
+      if (fs.existsSync(oldAvatarPath)) {
+        fs.unlinkSync(oldAvatarPath);
+      }
+    }
+
+    const updatedUser = db.users.update(userId, { avatar: req.file.filename });
+
+    res.json({
+      message: 'Avatar bol úspešne nahraný',
+      avatar: updatedUser.avatar
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri nahrávaní avatara', error: error.message });
+  }
+});
+
+// Delete avatar
+router.delete('/avatar', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = db.users.findById(userId);
+
+    if (user.avatar) {
+      const avatarPath = path.join(__dirname, '../uploads/avatars', user.avatar);
+      if (fs.existsSync(avatarPath)) {
+        fs.unlinkSync(avatarPath);
+      }
+      db.users.update(userId, { avatar: null });
+    }
+
+    res.json({ message: 'Avatar bol odstránený' });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri odstraňovaní avatara', error: error.message });
+  }
+});
+
+// Change password
+router.put('/password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: 'Nové heslo musí mať aspoň 6 znakov' });
+    }
+
+    const user = db.users.findById(userId);
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Aktuálne heslo nie je správne' });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    db.users.update(userId, { password: hashedPassword });
+
+    res.json({ message: 'Heslo bolo úspešne zmenené' });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri zmene hesla', error: error.message });
+  }
+});
+
+// Get all users (for sharing)
+router.get('/users', authenticateToken, (req, res) => {
+  const users = db.users.findAll().map(u => ({
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    color: u.color
+  }));
+  res.json(users);
+});
+
+module.exports = router;

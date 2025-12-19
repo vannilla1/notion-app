@@ -1,0 +1,69 @@
+[
+  {
+    "id": "01ffcf21-49e6-4768-adec-df8e2c91d997",
+    "name": "Kasigarda",
+    "email": "test@test.sk",
+    "phone": "+421903485701",
+    "company": "Firma s.r.o.",
+    "notes": "test",
+    "status": "new",
+    "files": [
+      {
+        "id": "1a05661d-2050-4ec4-b87a-fbc22e3f1a87",
+        "filename": "0734d798-ce65-4a22-9378-0a37a31d19cb.xlsx",
+        "originalName": "report_podrobnÃ½_Svit_10-2025.xlsx",
+        "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "size": 6374,
+        "uploadedBy": "user1",
+        "uploadedAt": "2025-12-16T13:16:33.934Z"
+      }
+    ],
+    "createdBy": "user1",
+    "createdAt": "2025-12-16T13:02:56.195Z",
+    "updatedAt": "2025-12-18T16:11:00.019Z",
+    "tasks": [
+      {
+        "id": "58beed92-0fe4-4fc9-aa83-4c7961588cc0",
+        "title": "Stretnutie",
+        "description": "",
+        "dueDate": null,
+        "priority": "medium",
+        "completed": false,
+        "subtasks": [
+          {
+            "id": "22f3e6f9-e668-409d-8755-1c87d5266780",
+            "title": "stretnutie 2",
+            "completed": false,
+            "createdAt": "2025-12-18T10:45:48.193Z",
+            "subtasks": [
+              {
+                "id": "5c510ee1-f14f-4f43-83c1-87d4a8a2365d",
+                "title": "stretnutie 3",
+                "completed": false,
+                "subtasks": [],
+                "createdAt": "2025-12-18T16:11:00.018Z"
+              }
+            ]
+          }
+        ],
+        "createdBy": "user1",
+        "createdAt": "2025-12-18T10:43:21.179Z"
+      }
+    ],
+    "website": ""
+  },
+  {
+    "id": "89f0e679-6f14-46f6-b841-b1a73f74eb7e",
+    "name": "Suché",
+    "email": "",
+    "phone": "+421",
+    "company": "Obec Suché",
+    "notes": "",
+    "status": "new",
+    "files": [],
+    "tasks": [],
+    "createdBy": "user2",
+    "createdAt": "2025-12-17T21:20:47.620Z",
+    "updatedAt": "2025-12-17T21:23:55.553Z"
+  }
+]
