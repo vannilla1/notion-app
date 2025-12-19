@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '..api/api';
 
 const AuthContext = createContext(null);
 
@@ -18,7 +18,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       fetchUser();
     } else {
       setLoading(false);
@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
-      const res = await axios.get('/api/auth/me');
+      const res = await api.get('/api/auth/me');
       setUser(res.data);
     } catch (error) {
       console.error('Failed to fetch user:', error);
@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
-    const res = await axios.post('/api/auth/login', { email, password });
+    const res = await api.post('/api/auth/login', { email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('token', newToken);
     axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (username, email, password) => {
-    const res = await axios.post('/api/auth/register', { username, email, password });
+    const res = await api.post('/api/auth/register', { username, email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('token', newToken);
     axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
@@ -59,7 +59,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
   };
