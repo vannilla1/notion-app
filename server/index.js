@@ -25,6 +25,7 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Make io accessible to routes
 app.set('io', io);
