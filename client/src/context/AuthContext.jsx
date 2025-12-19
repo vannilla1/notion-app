@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import api from '../api/api';
+import api from '@/api/api';
 
 const AuthContext = createContext(null);
 
@@ -26,22 +26,25 @@ export const AuthProvider = ({ children }) => {
   }, [token]);
 
   const fetchUser = async () => {
-    try {
-      const res = await api.get('/api/auth/me');
-      setUser(res.data);
-    } catch (error) {
-      console.error('Failed to fetch user:', error);
-      logout();
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    const res = await api.get('/api/auth/me');
+    setUser(res.data);
+  } catch (error) {
+    console.error('Failed to fetch user:', error);
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   const login = async (email, password) => {
     const res = await api.post('/api/auth/login', { email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('token', newToken);
-    axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
     return userData;
@@ -51,7 +54,7 @@ export const AuthProvider = ({ children }) => {
     const res = await api.post('/api/auth/register', { username, email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('token', newToken);
-    axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
     return userData;
@@ -76,7 +79,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     updateUser,
-    isAuthenticated: !!user
+    isAuthenticated: !!token && !!user
   };
 
   return (
