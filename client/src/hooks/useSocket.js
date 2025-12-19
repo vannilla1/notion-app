@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE_URL } from '../api/api';
 
 export const useSocket = () => {
   const { token, isAuthenticated } = useAuth();
@@ -12,7 +13,7 @@ export const useSocket = () => {
       return;
     }
 
-    const newSocket = io('http://localhost:5001', {
+    const newSocket = io(API_BASE_URL, {
       auth: { token }
     });
 

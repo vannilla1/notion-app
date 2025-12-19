@@ -20,7 +20,7 @@
     ],
     "createdBy": "user1",
     "createdAt": "2025-12-16T13:02:56.195Z",
-    "updatedAt": "2025-12-18T16:11:00.019Z",
+    "updatedAt": "2025-12-19T19:58:17.954Z",
     "tasks": [
       {
         "id": "58beed92-0fe4-4fc9-aa83-4c7961588cc0",
@@ -50,7 +50,7 @@
         "createdAt": "2025-12-18T10:43:21.179Z"
       }
     ],
-    "website": ""
+    "website": "www.kasigarda.sk"
   },
   {
     "id": "89f0e679-6f14-46f6-b841-b1a73f74eb7e",
@@ -65,5 +65,20 @@
     "createdBy": "user2",
     "createdAt": "2025-12-17T21:20:47.620Z",
     "updatedAt": "2025-12-17T21:23:55.553Z"
+  },
+  {
+    "id": "61d2362d-137b-4ec8-a6c6-235539dce69b",
+    "name": "test",
+    "email": "test@test.sk",
+    "phone": "+421903485701",
+    "company": "rgvers",
+    "website": "avewed",
+    "notes": "sdvad",
+    "status": "new",
+    "files": [],
+    "tasks": [],
+    "createdBy": "user1",
+    "createdAt": "2025-12-19T19:57:49.559Z",
+    "updatedAt": "2025-12-19T19:57:49.559Z"
   }
 ]

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
@@ -76,7 +76,7 @@ function Tasks() {
 
   const fetchTasks = async () => {
     try {
-      const res = await axios.get('/api/tasks');
+      const res = await api.get('/api/tasks');
       setTasks(res.data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -87,7 +87,7 @@ function Tasks() {
 
   const fetchContacts = async () => {
     try {
-      const res = await axios.get('/api/contacts');
+      const res = await api.get('/api/contacts');
       setContacts(res.data);
     } catch (error) {
       console.error('Failed to fetch contacts:', error);
@@ -96,7 +96,7 @@ function Tasks() {
 
   const refreshTask = async (taskId) => {
     try {
-      const res = await axios.get(`/api/tasks/${taskId}`);
+      const res = await api.get(`/api/tasks/${taskId}`);
       setTasks(prev => prev.map(t => t.id === taskId ? res.data : t));
       if (selectedTask?.id === taskId) {
         setSelectedTask(res.data);
@@ -111,7 +111,7 @@ function Tasks() {
     if (!newTaskForm.title.trim()) return;
 
     try {
-      await axios.post('/api/tasks', {
+      await api.post('/api/tasks', {
         ...newTaskForm,
         contactId: newTaskForm.contactId || null
       });
@@ -130,7 +130,7 @@ function Tasks() {
 
   const toggleTask = async (task) => {
     try {
-      await axios.put(`/api/tasks/${task.id}`, {
+      await api.put(`/api/tasks/${task.id}`, {
         completed: !task.completed,
         source: task.source
       });
@@ -142,7 +142,7 @@ function Tasks() {
   const deleteTask = async (task) => {
     if (!window.confirm('Vymazať túto úlohu?')) return;
     try {
-      await axios.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
+      await api.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
@@ -162,7 +162,7 @@ function Tasks() {
 
   const saveTask = async (taskId) => {
     try {
-      await axios.put(`/api/tasks/${taskId}`, {
+      await api.put(`/api/tasks/${taskId}`, {
         ...editForm,
         contactId: editForm.contactId || null
       });
@@ -180,7 +180,7 @@ function Tasks() {
     if (!subtaskTitle.trim()) return;
 
     try {
-      await axios.post(`/api/tasks/${task.id}/subtasks`, {
+      await api.post(`/api/tasks/${task.id}/subtasks`, {
         title: subtaskTitle,
         source: task.source,
         parentSubtaskId: parentSubtaskId
@@ -194,7 +194,7 @@ function Tasks() {
 
   const toggleSubtask = async (task, subtaskId, completed) => {
     try {
-      await axios.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
+      await api.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
         completed: !completed,
         source: task.source
       });
@@ -206,7 +206,7 @@ function Tasks() {
 
   const deleteSubtask = async (task, subtaskId) => {
     try {
-      await axios.delete(`/api/tasks/${task.id}/subtasks/${subtaskId}?source=${task.source || 'global'}`);
+      await api.delete(`/api/tasks/${task.id}/subtasks/${subtaskId}?source=${task.source || 'global'}`);
       await fetchTasks();
     } catch (error) {
       console.error('Failed to delete subtask:', error);
@@ -221,7 +221,7 @@ function Tasks() {
   const saveSubtask = async (task, subtaskId) => {
     if (!editSubtaskTitle.trim()) return;
     try {
-      await axios.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
+      await api.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
         title: editSubtaskTitle,
         source: task.source
       });

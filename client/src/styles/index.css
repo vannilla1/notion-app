@@ -2637,26 +2637,33 @@ body {
 /* Color Picker */
 .color-picker {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
+  padding: 8px 0;
 }
 
 .color-option {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius);
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   cursor: pointer;
   transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .color-option:hover {
   transform: scale(1.1);
 }
 
+.color-option:active {
+  transform: scale(0.95);
+}
+
 .color-option.selected {
   border-color: var(--text-primary);
-  box-shadow: 0 0 0 2px var(--bg-card);
+  box-shadow: 0 0 0 3px var(--bg-card), 0 0 0 5px var(--text-primary);
 }
 
 /* Password Form */

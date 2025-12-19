@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
+import { API_BASE_URL } from '../api/api';
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
@@ -297,7 +298,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                   {isImage(file.mimetype) ? (
                     <div className="file-preview">
                       <img
-                        src={`http://localhost:5001/uploads/${file.filename}`}
+                        src={`${API_BASE_URL}/uploads/${file.filename}`}
                         alt={file.originalName}
                       />
                     </div>
@@ -314,7 +315,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                   </div>
                   <div className="file-actions">
                     <a
-                      href={`http://localhost:5001/uploads/${file.filename}`}
+                      href={`${API_BASE_URL}/uploads/${file.filename}`}
                       download={file.originalName}
                       className="btn-icon"
                       title="Stiahnuť"

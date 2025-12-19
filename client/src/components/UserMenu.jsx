@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../api/api';
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -22,7 +23,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const API_URL = 'http://localhost:5001/api';
+  const API_URL = `${API_BASE_URL}/api`;
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -232,7 +233,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       >
         {user?.avatar ? (
           <img
-            src={`http://localhost:5001/uploads/avatars/${user.avatar}`}
+            src={`${API_BASE_URL}/uploads/avatars/${user.avatar}`}
             alt={user.username}
             className="user-avatar-img"
           />
@@ -253,7 +254,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           <div className="user-menu-header">
             {user?.avatar ? (
               <img
-                src={`http://localhost:5001/uploads/avatars/${user.avatar}`}
+                src={`${API_BASE_URL}/uploads/avatars/${user.avatar}`}
                 alt={user.username}
                 className="dropdown-avatar-img"
               />
@@ -311,14 +312,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 <div className="profile-avatar-section">
                   {profile.avatar ? (
                     <img
-                      src={`http://localhost:5001/uploads/avatars/${profile.avatar}`}
+                      src={`${API_BASE_URL}/uploads/avatars/${profile.avatar}`}
                       alt={profile.username}
                       className="profile-avatar-img"
                     />
                   ) : (
                     <div
                       className="profile-avatar-placeholder"
-                      style={{ backgroundColor: profile.color }}
+                      style={{ backgroundColor: formData.color || profile.color }}
                     >
                       {getInitials(profile.username)}
                     </div>
@@ -374,11 +375,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     <label>Farba profilu</label>
                     <div className="color-picker">
                       {colorOptions.map(color => (
-                        <button
+                        <div
                           key={color}
                           className={`color-option ${formData.color === color ? 'selected' : ''}`}
                           style={{ backgroundColor: color }}
                           onClick={() => setFormData({ ...formData, color })}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && setFormData({ ...formData, color })}
                         />
                       ))}
                     </div>

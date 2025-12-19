@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
@@ -48,8 +48,8 @@ function Dashboard() {
   const fetchData = async () => {
     try {
       const [contactsRes, tasksRes] = await Promise.all([
-        axios.get('/api/contacts'),
-        axios.get('/api/tasks')
+        api.get('/api/contacts'),
+        api.get('/api/tasks')
       ]);
       setContacts(contactsRes.data);
       setTasks(tasksRes.data.filter(t => t.source === 'global'));

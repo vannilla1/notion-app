@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '@/api/api';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -119,7 +119,7 @@ function CRM() {
 
   const fetchContacts = async () => {
     try {
-      const res = await axios.get('/api/contacts');
+      const res = await api.get('/api/contacts');
       setContacts(res.data);
     } catch (error) {
       console.error('Failed to fetch contacts:', error);
@@ -130,7 +130,7 @@ function CRM() {
 
   const fetchGlobalTasks = async () => {
     try {
-      const res = await axios.get('/api/tasks');
+      const res = await api.get('/api/tasks');
       // Filter only global tasks that have contactId
       const globalOnly = res.data.filter(t => t.source === 'global');
       setGlobalTasks(globalOnly);
@@ -144,7 +144,7 @@ function CRM() {
     if (!newContactForm.name.trim()) return;
 
     try {
-      await axios.post('/api/contacts', newContactForm);
+      await api.post('/api/contacts', newContactForm);
       setNewContactForm({
         name: '',
         email: '',
@@ -163,7 +163,7 @@ function CRM() {
   const deleteContact = async (contact) => {
     if (!window.confirm('Vymazať tento kontakt?')) return;
     try {
-      await axios.delete(`/api/contacts/${contact.id}`);
+      await api.delete(`/api/contacts/${contact.id}`);
     } catch (error) {
       console.error('Failed to delete contact:', error);
     }
@@ -184,7 +184,7 @@ function CRM() {
 
   const saveContact = async (contactId) => {
     try {
-      await axios.put(`/api/contacts/${contactId}`, editForm);
+      await api.put(`/api/contacts/${contactId}`, editForm);
       setEditingContact(null);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladaní kontaktu');
@@ -198,7 +198,7 @@ function CRM() {
     if (!taskTitle.trim()) return;
 
     try {
-      await axios.post(`/api/contacts/${contact.id}/tasks`, { title: taskTitle });
+      await api.post(`/api/contacts/${contact.id}/tasks`, { title: taskTitle });
       setTaskInputs(prev => ({ ...prev, [contact.id]: '' }));
       await fetchContacts();
     } catch (error) {
@@ -210,14 +210,14 @@ function CRM() {
     try {
       if (task.source === 'global') {
         // Global task - use /api/tasks endpoint
-        await axios.put(`/api/tasks/${task.id}`, {
+        await api.put(`/api/tasks/${task.id}`, {
           completed: !task.completed,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
         // Contact embedded task
-        await axios.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
+        await api.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
           completed: !task.completed
         });
         await fetchContacts();
@@ -231,11 +231,11 @@ function CRM() {
     try {
       if (task.source === 'global') {
         // Global task - use /api/tasks endpoint
-        await axios.delete(`/api/tasks/${task.id}?source=global`);
+        await api.delete(`/api/tasks/${task.id}?source=global`);
         await fetchGlobalTasks();
       } else {
         // Contact embedded task
-        await axios.delete(`/api/contacts/${contact.id}/tasks/${task.id}`);
+        await api.delete(`/api/contacts/${contact.id}/tasks/${task.id}`);
         await fetchContacts();
       }
     } catch (error) {
@@ -253,14 +253,14 @@ function CRM() {
     try {
       if (task.source === 'global') {
         // Global task
-        await axios.put(`/api/tasks/${task.id}`, {
+        await api.put(`/api/tasks/${task.id}`, {
           title: editTaskTitle,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
         // Contact embedded task
-        await axios.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
+        await api.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
           title: editTaskTitle
         });
         await fetchContacts();
@@ -317,14 +317,14 @@ function CRM() {
 
     try {
       if (task.source === 'global') {
-        await axios.post(`/api/tasks/${task.id}/subtasks`, {
+        await api.post(`/api/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           source: 'global',
           parentSubtaskId: parentSubtaskId
         });
         await fetchGlobalTasks();
       } else {
-        await axios.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
+        await api.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           parentSubtaskId: parentSubtaskId
         });
@@ -339,13 +339,13 @@ function CRM() {
   const toggleSubtask = async (task, subtask) => {
     try {
       if (task.source === 'global') {
-        await axios.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           completed: !subtask.completed,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
-        await axios.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           completed: !subtask.completed
         });
         await fetchContacts();
@@ -358,10 +358,10 @@ function CRM() {
   const deleteSubtask = async (task, subtask) => {
     try {
       if (task.source === 'global') {
-        await axios.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=global`);
+        await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=global`);
         await fetchGlobalTasks();
       } else {
-        await axios.delete(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`);
+        await api.delete(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`);
         await fetchContacts();
       }
     } catch (error) {
@@ -378,13 +378,13 @@ function CRM() {
     if (!editSubtaskTitle.trim()) return;
     try {
       if (task.source === 'global') {
-        await axios.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
-        await axios.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle
         });
         await fetchContacts();
@@ -679,10 +679,10 @@ function CRM() {
                   <div className="form-group">
                     <label>Webstránka</label>
                     <input
-                      type="url"
+                      type="text"
                       value={newContactForm.website}
                       onChange={(e) => setNewContactForm({ ...newContactForm, website: e.target.value })}
-                      placeholder="https://www.example.sk"
+                      placeholder="www.example.sk"
                       className="form-input"
                     />
                   </div>
@@ -791,11 +791,11 @@ function CRM() {
                               </select>
                             </div>
                             <input
-                              type="url"
+                              type="text"
                               value={editForm.website}
                               onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
                               className="form-input"
-                              placeholder="Webstránka"
+                              placeholder="www.example.sk"
                             />
                             <textarea
                               value={editForm.notes}
@@ -864,7 +864,7 @@ function CRM() {
                             {contact.website && (
                               <div className="detail-item">
                                 <span className="detail-label">🌐 Web:</span>
-                                <a href={contact.website} target="_blank" rel="noopener noreferrer" className="detail-value website-link">
+                                <a href={contact.website.startsWith('http') ? contact.website : `https://${contact.website}`} target="_blank" rel="noopener noreferrer" className="detail-value website-link">
                                   {contact.website}
                                 </a>
                               </div>
