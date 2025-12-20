@@ -4,7 +4,7 @@ const subtaskSchema = new mongoose.Schema({
   id: String,
   title: String,
   completed: { type: Boolean, default: false },
-  subtasks: { type: [this], default: [] }
+  subtasks: { type: Array, default: [] }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -21,6 +21,10 @@ const taskSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  description: {
+    type: String,
+    default: ''
+  },
   completed: {
     type: Boolean,
     default: false
@@ -30,9 +34,24 @@ const taskSchema = new mongoose.Schema({
     default: 'medium'
   },
   dueDate: String,
-  subtasks: { type: [subtaskSchema], default: [] }
+  subtasks: { type: [subtaskSchema], default: [] },
+  createdBy: String
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  },
+  toObject: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  }
 });
 
 module.exports = mongoose.model('Task', taskSchema);

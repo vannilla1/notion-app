@@ -122,6 +122,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const task = new Task({
+      userId: req.user.id,
       title: title.trim(),
       description: description || '',
       dueDate: dueDate || null,
