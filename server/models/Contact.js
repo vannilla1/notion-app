@@ -4,12 +4,13 @@ const subtaskSchema = new mongoose.Schema({
   id: String,
   title: String,
   completed: { type: Boolean, default: false },
-  subtasks: { type: [this], default: [] }
+  subtasks: { type: Array, default: [] }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
   id: String,
   title: String,
+  description: { type: String, default: '' },
   completed: { type: Boolean, default: false },
   priority: { type: String, default: 'medium' },
   dueDate: String,
@@ -34,7 +35,7 @@ const contactSchema = new mongoose.Schema({
   },
   name: {
     type: String,
-    required: true
+    default: ''
   },
   email: String,
   phone: String,
