@@ -27,7 +27,22 @@ const userSchema = new mongoose.Schema({
     default: null
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret.password;
+      return ret;
+    }
+  },
+  toObject: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  }
 });
 
 module.exports = mongoose.model('User', userSchema);

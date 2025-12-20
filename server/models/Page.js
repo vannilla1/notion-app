@@ -21,7 +21,21 @@ const pageSchema = new mongoose.Schema({
     default: null
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  },
+  toObject: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  }
 });
 
 module.exports = mongoose.model('Page', pageSchema);

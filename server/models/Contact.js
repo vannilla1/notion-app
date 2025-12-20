@@ -49,7 +49,21 @@ const contactSchema = new mongoose.Schema({
   tasks: { type: [taskSchema], default: [] },
   files: { type: [fileSchema], default: [] }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  },
+  toObject: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      ret.id = ret._id.toString();
+      return ret;
+    }
+  }
 });
 
 module.exports = mongoose.model('Contact', contactSchema);
