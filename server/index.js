@@ -7,12 +7,12 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const path = require('path');
+const { connectDB } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const pageRoutes = require('./routes/pages');
 const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
 const { authenticateSocket } = require('./middleware/auth');
-const db = require('./config/database');
 
 const app = express();
 const server = http.createServer(app);
@@ -91,6 +91,17 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 5001;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
+// Connect to MongoDB and start server
+const startServer = async () => {
+  const dbConnected = await connectDB();
+  if (!dbConnected) {
+    console.log('Warning: MongoDB not connected. Some features may not work.');
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+};
+
+startServer();

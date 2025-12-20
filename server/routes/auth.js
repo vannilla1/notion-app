@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const db = require('../config/database');
+const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -43,11 +43,13 @@ router.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
 
     // Check if user exists
-    if (db.users.findByEmail(email)) {
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
       return res.status(400).json({ message: 'Email already registered' });
     }
 
-    if (db.users.findByUsername(username)) {
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) {
       return res.status(400).json({ message: 'Username already taken' });
     }
 
@@ -60,20 +62,21 @@ router.post('/register', async (req, res) => {
     const color = colors[Math.floor(Math.random() * colors.length)];
 
     // Create user
-    const user = db.users.create({
+    const user = new User({
       username,
       email,
       password: hashedPassword,
       color
     });
+    await user.save();
 
     // Generate token
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
       token,
       user: {
-        id: user.id,
+        id: user._id,
         username: user.username,
         email: user.email,
         color: user.color
@@ -90,7 +93,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = db.users.findByEmail(email);
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -102,15 +105,16 @@ router.post('/login', async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       token,
       user: {
-        id: user.id,
+        id: user._id,
         username: user.username,
         email: user.email,
-        color: user.color
+        color: user.color,
+        avatar: user.avatar
       }
     });
   } catch (error) {
@@ -124,19 +128,23 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 // Get user profile
-router.get('/profile', authenticateToken, (req, res) => {
-  const user = db.users.findById(req.user.id);
-  if (!user) {
-    return res.status(404).json({ message: 'Užívateľ nenájdený' });
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+    res.json({
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      color: user.color,
+      avatar: user.avatar || null,
+      createdAt: user.createdAt
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
-  res.json({
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    color: user.color,
-    avatar: user.avatar || null,
-    createdAt: user.createdAt
-  });
 });
 
 // Update user profile
@@ -147,16 +155,16 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
     // Check if email is taken by another user
     if (email) {
-      const existingUser = db.users.findByEmail(email);
-      if (existingUser && existingUser.id !== userId) {
+      const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+      if (existingUser) {
         return res.status(400).json({ message: 'Email je už registrovaný' });
       }
     }
 
     // Check if username is taken by another user
     if (username) {
-      const existingUser = db.users.findByUsername(username);
-      if (existingUser && existingUser.id !== userId) {
+      const existingUser = await User.findOne({ username, _id: { $ne: userId } });
+      if (existingUser) {
         return res.status(400).json({ message: 'Užívateľské meno je už obsadené' });
       }
     }
@@ -166,10 +174,10 @@ router.put('/profile', authenticateToken, async (req, res) => {
     if (email) updates.email = email;
     if (color) updates.color = color;
 
-    const updatedUser = db.users.update(userId, updates);
+    const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true });
 
     res.json({
-      id: updatedUser.id,
+      id: updatedUser._id,
       username: updatedUser.username,
       email: updatedUser.email,
       color: updatedUser.color,
@@ -188,7 +196,7 @@ router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (
     }
 
     const userId = req.user.id;
-    const user = db.users.findById(userId);
+    const user = await User.findById(userId);
 
     // Delete old avatar if exists
     if (user.avatar) {
@@ -198,7 +206,11 @@ router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (
       }
     }
 
-    const updatedUser = db.users.update(userId, { avatar: req.file.filename });
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { avatar: req.file.filename },
+      { new: true }
+    );
 
     res.json({
       message: 'Avatar bol úspešne nahraný',
@@ -213,14 +225,14 @@ router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (
 router.delete('/avatar', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = db.users.findById(userId);
+    const user = await User.findById(userId);
 
     if (user.avatar) {
       const avatarPath = path.join(__dirname, '../uploads/avatars', user.avatar);
       if (fs.existsSync(avatarPath)) {
         fs.unlinkSync(avatarPath);
       }
-      db.users.update(userId, { avatar: null });
+      await User.findByIdAndUpdate(userId, { avatar: null });
     }
 
     res.json({ message: 'Avatar bol odstránený' });
@@ -239,7 +251,7 @@ router.put('/password', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Nové heslo musí mať aspoň 6 znakov' });
     }
 
-    const user = db.users.findById(userId);
+    const user = await User.findById(userId);
 
     // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
@@ -251,7 +263,7 @@ router.put('/password', authenticateToken, async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    db.users.update(userId, { password: hashedPassword });
+    await User.findByIdAndUpdate(userId, { password: hashedPassword });
 
     res.json({ message: 'Heslo bolo úspešne zmenené' });
   } catch (error) {
@@ -260,14 +272,18 @@ router.put('/password', authenticateToken, async (req, res) => {
 });
 
 // Get all users (for sharing)
-router.get('/users', authenticateToken, (req, res) => {
-  const users = db.users.findAll().map(u => ({
-    id: u.id,
-    username: u.username,
-    email: u.email,
-    color: u.color
-  }));
-  res.json(users);
+router.get('/users', authenticateToken, async (req, res) => {
+  try {
+    const users = await User.find({}, 'username email color');
+    res.json(users.map(u => ({
+      id: u._id,
+      username: u.username,
+      email: u.email,
+      color: u.color
+    })));
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
 });
 
 module.exports = router;
