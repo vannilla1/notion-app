@@ -160,7 +160,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(contact);
   } catch (error) {
@@ -224,7 +224,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(fileInfo);
   } catch (error) {
@@ -258,7 +258,7 @@ router.delete('/:contactId/files/:fileId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'File deleted' });
   } catch (error) {
@@ -324,7 +324,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(task);
   } catch (error) {
@@ -362,7 +362,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
@@ -389,7 +389,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -448,7 +448,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(subtask);
   } catch (error) {
@@ -490,7 +490,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(found.parent[found.index]);
   } catch (error) {
@@ -526,7 +526,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact);
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
