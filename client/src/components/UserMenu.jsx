@@ -170,21 +170,22 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('avatar', file);
+    const uploadData = new FormData();
+    uploadData.append('avatar', file);
 
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_URL}/auth/avatar`, formData, {
+      const response = await axios.post(`${API_URL}/auth/avatar`, uploadData, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
         }
       });
-      setProfile({ ...profile, avatar: response.data.avatar });
+      const newAvatar = response.data.avatar;
+      setProfile(prev => ({ ...prev, avatar: newAvatar }));
       setMessage('Avatar bol úspešne nahraný');
       if (onUserUpdate) {
-        onUserUpdate({ ...profile, avatar: response.data.avatar });
+        onUserUpdate({ avatar: newAvatar });
       }
     } catch (error) {
       setErrors({ general: error.response?.data?.message || 'Chyba pri nahrávaní avatara' });
@@ -198,10 +199,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await axios.delete(`${API_URL}/auth/avatar`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setProfile({ ...profile, avatar: null });
+      setProfile(prev => ({ ...prev, avatar: null }));
       setMessage('Avatar bol odstránený');
       if (onUserUpdate) {
-        onUserUpdate({ ...profile, avatar: null });
+        onUserUpdate({ avatar: null });
       }
     } catch (error) {
       setErrors({ general: error.response?.data?.message || 'Chyba pri odstraňovaní avatara' });
