@@ -47,8 +47,9 @@ router.get('/', authenticateToken, async (req, res) => {
     contacts.forEach(contact => {
       if (contact.tasks && contact.tasks.length > 0) {
         contact.tasks.forEach(task => {
+          const taskObj = typeof task.toObject === 'function' ? task.toObject() : { ...task };
           contactTasks.push({
-            ...task,
+            ...taskObj,
             id: task.id,
             contactId: contact._id.toString(),
             contactName: contact.name,
