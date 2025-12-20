@@ -52,7 +52,7 @@ function Dashboard() {
         api.get('/api/tasks')
       ]);
       setContacts(contactsRes.data);
-      setTasks(tasksRes.data.filter(t => t.source === 'global'));
+      setTasks(tasksRes.data);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
