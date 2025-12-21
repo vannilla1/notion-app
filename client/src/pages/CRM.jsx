@@ -969,16 +969,18 @@ function CRM() {
                                       {renderCRMSubtasks({ ...task, contactId: contact.id }, task.subtasks, 0)}
                                     </div>
 
-                                    <form onSubmit={(e) => addSubtask(e, { ...task, contactId: contact.id })} className="add-subtask-inline">
-                                      <input
-                                        type="text"
-                                        value={subtaskInputs[task.id] || ''}
-                                        onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                        placeholder="Pridat podulohu..."
-                                        className="form-input form-input-sm"
-                                      />
-                                      <button type="submit" className="btn btn-secondary btn-sm">+</button>
-                                    </form>
+                                    {!task.completed && (
+                                      <form onSubmit={(e) => addSubtask(e, { ...task, contactId: contact.id })} className="add-subtask-inline">
+                                        <input
+                                          type="text"
+                                          value={subtaskInputs[task.id] || ''}
+                                          onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                          placeholder="Pridat podulohu..."
+                                          className="form-input form-input-sm"
+                                        />
+                                        <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                                      </form>
+                                    )}
                                   </div>
                                 )}
                               </div>

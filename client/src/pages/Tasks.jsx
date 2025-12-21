@@ -689,16 +689,18 @@ function Tasks() {
                               {renderSubtasks(task, task.subtasks, 0)}
                             </div>
 
-                            <form onSubmit={(e) => addSubtask(e, task)} className="add-subtask-form">
-                              <input
-                                type="text"
-                                value={subtaskInputs[task.id] || ''}
-                                onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                placeholder="Pridat podulohu..."
-                                className="form-input form-input-sm"
-                              />
-                              <button type="submit" className="btn btn-secondary btn-sm">+</button>
-                            </form>
+                            {!task.completed && (
+                              <form onSubmit={(e) => addSubtask(e, task)} className="add-subtask-form">
+                                <input
+                                  type="text"
+                                  value={subtaskInputs[task.id] || ''}
+                                  onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                  placeholder="Pridat podulohu..."
+                                  className="form-input form-input-sm"
+                                />
+                                <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                              </form>
+                            )}
                           </div>
                         </div>
                       )}
