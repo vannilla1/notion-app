@@ -114,11 +114,13 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Verify contact exists if contactId is provided
+    let contactName = null;
     if (contactId) {
       const contact = await Contact.findById(contactId);
       if (!contact) {
         return res.status(400).json({ message: 'Kontakt neexistuje' });
       }
+      contactName = contact.name;
     }
 
     const task = new Task({
@@ -137,6 +139,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const taskObj = task.toObject();
     taskObj.id = taskObj._id.toString();
+    taskObj.contactName = contactName;
+    taskObj.source = 'global';
 
     // Emit socket event
     const io = req.app.get('io');
