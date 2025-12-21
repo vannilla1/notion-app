@@ -177,7 +177,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contact);
+            io.emit('contact-updated', contact.toJSON());
             io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
@@ -243,7 +243,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          io.emit('contact-updated', contact);
+          io.emit('contact-updated', contact.toJSON());
           io.emit('task-updated', {
             ...contact.tasks[taskIndex],
             contactId: contact._id.toString(),
@@ -284,7 +284,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contact);
+            io.emit('contact-updated', contact.toJSON());
             io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
             return res.json({ message: 'Task deleted' });
@@ -311,7 +311,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          io.emit('contact-updated', contact);
+          io.emit('contact-updated', contact.toJSON());
           io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
           return res.json({ message: 'Task deleted' });
@@ -377,9 +377,12 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contact);
+              io.emit('contact-updated', contact.toJSON());
+              const taskObj = typeof contact.tasks[taskIndex].toObject === 'function'
+                ? contact.tasks[taskIndex].toObject()
+                : { ...contact.tasks[taskIndex] };
               io.emit('task-updated', {
-                ...contact.tasks[taskIndex],
+                ...taskObj,
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
@@ -417,7 +420,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contact);
+            io.emit('contact-updated', contact.toJSON());
             io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
@@ -470,7 +473,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contact);
+              io.emit('contact-updated', contact.toJSON());
               io.emit('task-updated', {
                 ...contact.tasks[taskIndex],
                 contactId: contact._id.toString(),
@@ -511,7 +514,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contact);
+            io.emit('contact-updated', contact.toJSON());
             io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
@@ -558,7 +561,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contact);
+              io.emit('contact-updated', contact.toJSON());
               io.emit('task-updated', {
                 ...contact.tasks[taskIndex],
                 contactId: contact._id.toString(),
@@ -597,7 +600,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contact);
+            io.emit('contact-updated', contact.toJSON());
             io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
