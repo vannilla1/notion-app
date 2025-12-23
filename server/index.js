@@ -48,6 +48,9 @@ io.use(authenticateSocket);
 io.on('connection', (socket) => {
   console.log('User connected:', socket.user.username);
 
+  // Join user's personal room for private updates
+  socket.join(`user-${socket.user.id}`);
+
   socket.on('join-page', (pageId) => {
     socket.join(`page-${pageId}`);
     console.log(`${socket.user.username} joined page ${pageId}`);
