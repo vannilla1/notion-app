@@ -14,6 +14,10 @@ function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { socket, isConnected } = useSocket();
 
+  // Detail view state
+  const [detailView, setDetailView] = useState(null); // 'contacts', 'tasks', 'active', 'pending', 'completed', 'contactTasks'
+  const [selectedContact, setSelectedContact] = useState(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -101,7 +105,13 @@ function Dashboard() {
   // Get all tasks for a contact (embedded + global assigned)
   const getContactTasks = (contact) => {
     const embeddedTasks = (contact.tasks || []).map(t => ({
-      ...t,
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      completed: t.completed,
+      priority: t.priority,
+      dueDate: t.dueDate,
+      subtasks: t.subtasks || [],
       source: 'contact'
     }));
     const assignedGlobalTasks = tasks
@@ -120,7 +130,41 @@ function Dashboard() {
   const activeContacts = contacts.filter(c => c.status === 'active').length;
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const completedTasks = tasks.filter(t => t.completed).length;
-  const totalContactTasks = contacts.reduce((sum, c) => sum + (c.tasks?.length || 0), 0);
+
+  // Get items for detail view
+  const getDetailItems = () => {
+    switch (detailView) {
+      case 'contacts':
+        return { type: 'contacts', items: contacts, title: 'Vsetky kontakty' };
+      case 'active':
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'active'), title: 'Aktivne kontakty' };
+      case 'tasks':
+        return { type: 'tasks', items: tasks, title: 'Vsetky ulohy' };
+      case 'pending':
+        return { type: 'tasks', items: tasks.filter(t => !t.completed), title: 'Nesplnene ulohy' };
+      case 'completed':
+        return { type: 'tasks', items: tasks.filter(t => t.completed), title: 'Splnene ulohy' };
+      case 'contactTasks':
+        if (selectedContact) {
+          return { type: 'tasks', items: getContactTasks(selectedContact), title: `Ulohy: ${selectedContact.name}` };
+        }
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  const closeDetailView = () => {
+    setDetailView(null);
+    setSelectedContact(null);
+  };
+
+  const openContactTasks = (contact) => {
+    setSelectedContact(contact);
+    setDetailView('contactTasks');
+  };
+
+  const detailData = getDetailItems();
 
   return (
     <div className="crm-container">
@@ -135,7 +179,7 @@ function Dashboard() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link active">Perun CRM</h1>
+          <h1 className="header-title-link active" onClick={closeDetailView}>Perun CRM</h1>
         </div>
         <div className="crm-header-right">
           <button
@@ -167,23 +211,38 @@ function Dashboard() {
         <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
           <div className="dashboard-stats">
             <h3>Prehlad</h3>
-            <div className="stat-item">
+            <div
+              className={`stat-item clickable ${detailView === 'contacts' ? 'active' : ''}`}
+              onClick={() => setDetailView('contacts')}
+            >
               <span className="stat-label">Celkom kontaktov</span>
               <span className="stat-value">{contacts.length}</span>
             </div>
-            <div className="stat-item">
+            <div
+              className={`stat-item clickable ${detailView === 'active' ? 'active' : ''}`}
+              onClick={() => setDetailView('active')}
+            >
               <span className="stat-label">Aktivnych</span>
               <span className="stat-value">{activeContacts}</span>
             </div>
-            <div className="stat-item">
+            <div
+              className={`stat-item clickable ${detailView === 'tasks' ? 'active' : ''}`}
+              onClick={() => setDetailView('tasks')}
+            >
               <span className="stat-label">Globalnych uloh</span>
               <span className="stat-value">{tasks.length}</span>
             </div>
-            <div className="stat-item">
+            <div
+              className={`stat-item clickable ${detailView === 'pending' ? 'active' : ''}`}
+              onClick={() => setDetailView('pending')}
+            >
               <span className="stat-label">Nesplnenych</span>
               <span className="stat-value">{pendingTasks}</span>
             </div>
-            <div className="stat-item">
+            <div
+              className={`stat-item clickable ${detailView === 'completed' ? 'active' : ''}`}
+              onClick={() => setDetailView('completed')}
+            >
               <span className="stat-label">Splnenych</span>
               <span className="stat-value">{completedTasks}</span>
             </div>
@@ -211,7 +270,113 @@ function Dashboard() {
         <main className="crm-main">
           {loading ? (
             <div className="loading">Nacitavam...</div>
+          ) : detailView && detailData ? (
+            /* Detail View */
+            <div className="dashboard-detail-view">
+              <div className="detail-header">
+                <button className="btn-back" onClick={closeDetailView}>
+                  ← Spat
+                </button>
+                <h2>{detailData.title} ({detailData.items.length})</h2>
+              </div>
+
+              {detailData.items.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">📋</div>
+                  <h3>Ziadne polozky</h3>
+                </div>
+              ) : detailData.type === 'contacts' ? (
+                <div className="detail-list">
+                  {detailData.items.map(contact => {
+                    const contactTasks = getContactTasks(contact);
+                    const completedContactTasks = contactTasks.filter(t => t.completed).length;
+                    return (
+                      <div
+                        key={contact.id}
+                        className="detail-item contact-detail-item"
+                        onClick={() => openContactTasks(contact)}
+                      >
+                        <div
+                          className="contact-avatar"
+                          style={{ backgroundColor: getStatusColor(contact.status) }}
+                        >
+                          {contact.name ? contact.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                        <div className="detail-item-content">
+                          <div className="detail-item-title">{contact.name || 'Bez mena'}</div>
+                          <div className="detail-item-meta">
+                            <span
+                              className="status-badge"
+                              style={{ backgroundColor: getStatusColor(contact.status) }}
+                            >
+                              {getStatusLabel(contact.status)}
+                            </span>
+                            {contact.company && (
+                              <span className="meta-text">{contact.company}</span>
+                            )}
+                            {contact.email && (
+                              <span className="meta-text">{contact.email}</span>
+                            )}
+                          </div>
+                        </div>
+                        {contactTasks.length > 0 && (
+                          <div className="detail-item-badge">
+                            {completedContactTasks}/{contactTasks.length} uloh
+                          </div>
+                        )}
+                        <div className="detail-item-arrow">→</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="detail-list">
+                  {detailData.items.map(task => (
+                    <div
+                      key={task.id}
+                      className={`detail-item task-detail-item ${task.completed ? 'completed' : ''}`}
+                    >
+                      <div
+                        className="task-priority-dot"
+                        style={{ backgroundColor: getPriorityColor(task.priority) }}
+                      />
+                      <div className="detail-item-content">
+                        <div className="detail-item-title">{task.title}</div>
+                        <div className="detail-item-meta">
+                          <span
+                            className="priority-badge"
+                            style={{ backgroundColor: getPriorityColor(task.priority) }}
+                          >
+                            {getPriorityLabel(task.priority)}
+                          </span>
+                          {task.contactName && (
+                            <span className="contact-badge">👤 {task.contactName}</span>
+                          )}
+                          {task.dueDate && (
+                            <span className="date-badge">
+                              📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
+                            </span>
+                          )}
+                          {task.completed && (
+                            <span className="completed-badge">✓ Splnena</span>
+                          )}
+                        </div>
+                        {task.description && (
+                          <div className="detail-item-description">{task.description}</div>
+                        )}
+                      </div>
+                      {task.subtasks?.length > 0 && (
+                        <div className="detail-item-badge">
+                          {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
+            /* Main Dashboard View */
             <div className="dashboard-page">
               <div className="dashboard-header">
                 <h2>Vitajte, {user?.username || 'Pouzivatel'}</h2>
@@ -220,12 +385,12 @@ function Dashboard() {
 
               <div className="dashboard-grid">
                 {/* Contacts Section */}
-                <div className="dashboard-section">
+                <div className="dashboard-section" onClick={() => setDetailView('contacts')}>
                   <div className="section-header">
                     <h3>Kontakty ({contacts.length})</h3>
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={() => navigate('/crm')}
+                      onClick={(e) => { e.stopPropagation(); navigate('/crm'); }}
                     >
                       Zobrazit vsetky
                     </button>
@@ -237,7 +402,7 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-contacts-list">
-                      {contacts.slice(0, 10).map(contact => {
+                      {contacts.slice(0, 5).map(contact => {
                         const contactTasks = getContactTasks(contact);
                         const completedContactTasks = contactTasks.filter(t => t.completed).length;
 
@@ -245,16 +410,16 @@ function Dashboard() {
                           <div
                             key={contact.id}
                             className="dashboard-contact-item"
-                            onClick={() => navigate('/crm')}
+                            onClick={(e) => { e.stopPropagation(); openContactTasks(contact); }}
                           >
                             <div
                               className="contact-avatar-sm"
                               style={{ backgroundColor: getStatusColor(contact.status) }}
                             >
-                              {contact.name.charAt(0).toUpperCase()}
+                              {contact.name ? contact.name.charAt(0).toUpperCase() : '?'}
                             </div>
                             <div className="dashboard-contact-info">
-                              <div className="dashboard-contact-name">{contact.name}</div>
+                              <div className="dashboard-contact-name">{contact.name || 'Bez mena'}</div>
                               <div className="dashboard-contact-meta">
                                 <span
                                   className="status-badge-sm"
@@ -277,9 +442,9 @@ function Dashboard() {
                           </div>
                         );
                       })}
-                      {contacts.length > 10 && (
-                        <div className="show-more" onClick={() => navigate('/crm')}>
-                          + {contacts.length - 10} dalsich kontaktov
+                      {contacts.length > 5 && (
+                        <div className="show-more">
+                          + {contacts.length - 5} dalsich kontaktov
                         </div>
                       )}
                     </div>
@@ -287,12 +452,12 @@ function Dashboard() {
                 </div>
 
                 {/* Tasks Section */}
-                <div className="dashboard-section">
+                <div className="dashboard-section" onClick={() => setDetailView('pending')}>
                   <div className="section-header">
                     <h3>Ulohy ({tasks.length})</h3>
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={() => navigate('/tasks')}
+                      onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
                     >
                       Zobrazit vsetky
                     </button>
@@ -304,11 +469,11 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
-                      {tasks.filter(t => !t.completed).slice(0, 8).map(task => (
+                      {tasks.filter(t => !t.completed).slice(0, 5).map(task => (
                         <div
                           key={task.id}
                           className="dashboard-task-item"
-                          onClick={() => navigate('/tasks')}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <div
                             className="task-priority-indicator"
@@ -342,15 +507,18 @@ function Dashboard() {
                           )}
                         </div>
                       ))}
-                      {tasks.filter(t => !t.completed).length > 8 && (
-                        <div className="show-more" onClick={() => navigate('/tasks')}>
-                          + {tasks.filter(t => !t.completed).length - 8} dalsich uloh
+                      {tasks.filter(t => !t.completed).length > 5 && (
+                        <div className="show-more">
+                          + {tasks.filter(t => !t.completed).length - 5} dalsich uloh
                         </div>
                       )}
 
                       {/* Completed tasks summary */}
                       {completedTasks > 0 && (
-                        <div className="completed-summary" onClick={() => navigate('/tasks')}>
+                        <div
+                          className="completed-summary"
+                          onClick={(e) => { e.stopPropagation(); setDetailView('completed'); }}
+                        >
                           {completedTasks} splnenych uloh
                         </div>
                       )}
@@ -371,15 +539,19 @@ function Dashboard() {
                     .map(contact => {
                       const contactTasks = getContactTasks(contact);
                       return (
-                        <div key={contact.id} className="contact-tasks-card" onClick={() => navigate('/crm')}>
+                        <div
+                          key={contact.id}
+                          className="contact-tasks-card"
+                          onClick={() => openContactTasks(contact)}
+                        >
                           <div className="contact-tasks-header">
                             <div
                               className="contact-avatar-sm"
                               style={{ backgroundColor: getStatusColor(contact.status) }}
                             >
-                              {contact.name.charAt(0).toUpperCase()}
+                              {contact.name ? contact.name.charAt(0).toUpperCase() : '?'}
                             </div>
-                            <div className="contact-tasks-name">{contact.name}</div>
+                            <div className="contact-tasks-name">{contact.name || 'Bez mena'}</div>
                             <span className="tasks-badge">
                               {contactTasks.filter(t => t.completed).length}/{contactTasks.length} uloh
                             </span>

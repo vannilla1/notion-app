@@ -3688,3 +3688,160 @@ a.detail-value:hover {
   border-left-color: var(--warning);
   opacity: 0.8;
 }
+
+/* Dashboard Detail View */
+.dashboard-detail-view {
+  padding: 20px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.detail-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.btn-back {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: var(--transition);
+}
+
+.btn-back:hover {
+  background: var(--bg-secondary);
+}
+
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.detail-item:hover {
+  border-color: var(--accent-color);
+  box-shadow: var(--shadow);
+}
+
+.detail-item.completed {
+  opacity: 0.7;
+}
+
+.detail-item.completed .detail-item-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.detail-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-item-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.detail-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.detail-item-description {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.detail-item-badge {
+  background: var(--bg-secondary);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.detail-item-arrow {
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+.task-priority-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.meta-text {
+  color: var(--text-secondary);
+}
+
+.date-badge {
+  color: var(--text-secondary);
+}
+
+.completed-badge {
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* Clickable stat items */
+.stat-item.clickable {
+  cursor: pointer;
+  transition: var(--transition);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin: -8px;
+  margin-bottom: 4px;
+}
+
+.stat-item.clickable:hover {
+  background: var(--bg-hover);
+}
+
+.stat-item.clickable.active {
+  background: var(--accent-color);
+}
+
+.stat-item.clickable.active .stat-label,
+.stat-item.clickable.active .stat-value {
+  color: white;
+}
+
+/* Dashboard section clickable */
+.dashboard-section {
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.dashboard-section:hover {
+  border-color: var(--accent-color);
+}
