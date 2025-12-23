@@ -6,11 +6,6 @@ const Contact = require('../models/Contact');
 
 const router = express.Router();
 
-// Helper to emit to specific user only
-const emitToUser = (io, userId, event, data) => {
-  io.to(`user-${userId}`).emit(event, data);
-};
-
 // Helper function to find a subtask recursively
 const findSubtaskRecursive = (subtasks, subtaskId) => {
   if (!subtasks) return null;
@@ -26,11 +21,11 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
-// Get all tasks (including tasks from contacts) for current user
+// Get all tasks (including tasks from contacts) - shared workspace
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const globalTasks = await Task.find({ userId: req.user.id });
-    const contacts = await Contact.find({ userId: req.user.id });
+    const globalTasks = await Task.find({});
+    const contacts = await Contact.find({});
 
     // Enrich global tasks with contact info
     const enrichedGlobalTasks = globalTasks.map(task => {
@@ -149,7 +144,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Emit socket event
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'task-created', taskObj);
+    io.emit('task-created', taskObj);
 
     res.status(201).json(taskObj);
   } catch (error) {
@@ -182,8 +177,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-            emitToUser(io, req.user.id, 'task-updated', {
+            io.emit('contact-updated', contact.toJSON());
+            io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
               contactName: contact.name,
@@ -226,7 +221,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
 
-      emitToUser(io, req.user.id, 'task-updated', { ...taskObj, source: 'global' });
+      io.emit('task-updated', { ...taskObj, source: 'global' });
       return res.json({ ...taskObj, source: 'global' });
     }
 
@@ -248,8 +243,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-          emitToUser(io, req.user.id, 'task-updated', {
+          io.emit('contact-updated', contact.toJSON());
+          io.emit('task-updated', {
             ...contact.tasks[taskIndex],
             contactId: contact._id.toString(),
             contactName: contact.name,
@@ -289,8 +284,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-            emitToUser(io, req.user.id, 'task-deleted', { id: req.params.id, source: 'contact' });
+            io.emit('contact-updated', contact.toJSON());
+            io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
             return res.json({ message: 'Task deleted' });
           }
@@ -302,7 +297,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     // Try to delete from global tasks first
     const task = await Task.findByIdAndDelete(req.params.id);
     if (task) {
-      emitToUser(io, req.user.id, 'task-deleted', { id: req.params.id, source: 'global' });
+      io.emit('task-deleted', { id: req.params.id, source: 'global' });
       return res.json({ message: 'Task deleted' });
     }
 
@@ -316,8 +311,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-          emitToUser(io, req.user.id, 'task-deleted', { id: req.params.id, source: 'contact' });
+          io.emit('contact-updated', contact.toJSON());
+          io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
           return res.json({ message: 'Task deleted' });
         }
@@ -382,11 +377,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
               contact.markModified('tasks');
               await contact.save();
 
-              emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+              io.emit('contact-updated', contact.toJSON());
               const taskObj = typeof contact.tasks[taskIndex].toObject === 'function'
                 ? contact.tasks[taskIndex].toObject()
                 : { ...contact.tasks[taskIndex] };
-              emitToUser(io, req.user.id, 'task-updated', {
+              io.emit('task-updated', {
                 ...taskObj,
                 contactId: contact._id.toString(),
                 contactName: contact.name,
@@ -409,7 +404,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 
         const taskObj = task.toObject();
         taskObj.id = taskObj._id.toString();
-        emitToUser(io, req.user.id, 'task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', { ...taskObj, source: 'global' });
         return res.status(201).json(subtask);
       }
       return res.status(404).json({ message: 'Parent subtask not found' });
@@ -425,8 +420,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-            emitToUser(io, req.user.id, 'task-updated', {
+            io.emit('contact-updated', contact.toJSON());
+            io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
               contactName: contact.name,
@@ -478,8 +473,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               contact.markModified('tasks');
               await contact.save();
 
-              emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-              emitToUser(io, req.user.id, 'task-updated', {
+              io.emit('contact-updated', contact.toJSON());
+              io.emit('task-updated', {
                 ...contact.tasks[taskIndex],
                 contactId: contact._id.toString(),
                 contactName: contact.name,
@@ -503,7 +498,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
         const taskObj = task.toObject();
         taskObj.id = taskObj._id.toString();
-        emitToUser(io, req.user.id, 'task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', { ...taskObj, source: 'global' });
         return res.json(updated);
       }
     }
@@ -519,8 +514,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
             contact.markModified('tasks');
             await contact.save();
 
-            emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-            emitToUser(io, req.user.id, 'task-updated', {
+            io.emit('contact-updated', contact.toJSON());
+            io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
               contactName: contact.name,
@@ -566,8 +561,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               contact.markModified('tasks');
               await contact.save();
 
-              emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-              emitToUser(io, req.user.id, 'task-updated', {
+              io.emit('contact-updated', contact.toJSON());
+              io.emit('task-updated', {
                 ...contact.tasks[taskIndex],
                 contactId: contact._id.toString(),
                 contactName: contact.name,
@@ -590,7 +585,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
 
         const taskObj = task.toObject();
         taskObj.id = taskObj._id.toString();
-        emitToUser(io, req.user.id, 'task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', { ...taskObj, source: 'global' });
         return res.json({ message: 'Subtask deleted' });
       }
     }
@@ -605,8 +600,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
             contact.markModified('tasks');
             await contact.save();
 
-            emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
-            emitToUser(io, req.user.id, 'task-updated', {
+            io.emit('contact-updated', contact.toJSON());
+            io.emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
               contactName: contact.name,

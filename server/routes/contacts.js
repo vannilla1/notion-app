@@ -8,11 +8,6 @@ const Contact = require('../models/Contact');
 
 const router = express.Router();
 
-// Helper to emit to specific user only
-const emitToUser = (io, userId, event, data) => {
-  io.to(`user-${userId}`).emit(event, data);
-};
-
 const UPLOADS_DIR = path.join(__dirname, '../uploads');
 
 // Ensure upload directory exists
@@ -79,10 +74,10 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
-// Get all contacts for current user
+// Get all contacts (shared workspace)
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const contacts = await Contact.find({ userId: req.user.id });
+    const contacts = await Contact.find({});
     res.json(contacts);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -92,7 +87,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get single contact
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const contact = await Contact.findOne({ _id: req.params.id, userId: req.user.id });
+    const contact = await Contact.findById(req.params.id);
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
@@ -131,7 +126,7 @@ router.post('/', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-created', contact);
+    io.emit('contact-created', contact);
 
     res.status(201).json(contact);
   } catch (error) {
@@ -165,7 +160,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(contact);
   } catch (error) {
@@ -195,7 +190,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await Contact.findByIdAndDelete(req.params.id);
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-deleted', { id: req.params.id });
+    io.emit('contact-deleted', { id: req.params.id });
 
     res.json({ message: 'Contact deleted' });
   } catch (error) {
@@ -229,7 +224,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(fileInfo);
   } catch (error) {
@@ -263,7 +258,7 @@ router.delete('/:contactId/files/:fileId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'File deleted' });
   } catch (error) {
@@ -329,7 +324,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(task);
   } catch (error) {
@@ -367,7 +362,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
@@ -394,7 +389,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -453,7 +448,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.status(201).json(subtask);
   } catch (error) {
@@ -495,7 +490,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json(found.parent[found.index]);
   } catch (error) {
@@ -531,7 +526,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     await contact.save();
 
     const io = req.app.get('io');
-    emitToUser(io, req.user.id, 'contact-updated', contact.toJSON());
+    io.emit('contact-updated', contact.toJSON());
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
