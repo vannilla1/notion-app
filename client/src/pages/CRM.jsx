@@ -62,8 +62,14 @@ function CRM() {
       source: 'contact',
       contactId: contact.id
     }));
+    // Support both old contactId and new contactIds
     const assignedGlobalTasks = globalTasks
-      .filter(t => t.contactId === contact.id && t.source === 'global')
+      .filter(t => {
+        const taskContactIds = t.contactIds?.length > 0
+          ? t.contactIds
+          : (t.contactId ? [t.contactId] : []);
+        return taskContactIds.includes(contact.id) && t.source === 'global';
+      })
       .map(t => ({ ...t, source: 'global' }));
     return [...embeddedTasks, ...assignedGlobalTasks];
   };

@@ -31,15 +31,28 @@ router.get('/', authenticateToken, async (req, res) => {
     const enrichedGlobalTasks = globalTasks.map(task => {
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
-      if (taskObj.contactId) {
-        const contact = contacts.find(c => c._id.toString() === taskObj.contactId.toString());
+
+      // Support both old contactId (single) and new contactIds (array)
+      const contactIds = taskObj.contactIds?.length > 0
+        ? taskObj.contactIds
+        : (taskObj.contactId ? [taskObj.contactId] : []);
+
+      if (contactIds.length > 0) {
+        const contactNames = contactIds
+          .map(cId => {
+            const contact = contacts.find(c => c._id.toString() === cId.toString());
+            return contact ? contact.name : null;
+          })
+          .filter(Boolean);
         return {
           ...taskObj,
-          contactName: contact ? contact.name : null,
+          contactIds,
+          contactNames,
+          contactName: contactNames.join(', ') || null,
           source: 'global'
         };
       }
-      return { ...taskObj, source: 'global' };
+      return { ...taskObj, contactIds: [], contactNames: [], source: 'global' };
     });
 
     // Extract tasks from contacts
@@ -107,20 +120,28 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create task
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, contactId } = req.body;
+    const { title, description, dueDate, priority, contactId, contactIds } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
     }
 
-    // Verify contact exists if contactId is provided
-    let contactName = null;
-    if (contactId) {
-      const contact = await Contact.findById(contactId);
-      if (!contact) {
-        return res.status(400).json({ message: 'Kontakt neexistuje' });
+    // Support both old contactId (single) and new contactIds (array)
+    let finalContactIds = [];
+    if (contactIds && Array.isArray(contactIds) && contactIds.length > 0) {
+      finalContactIds = contactIds;
+    } else if (contactId) {
+      finalContactIds = [contactId];
+    }
+
+    // Verify contacts exist
+    let contactNames = [];
+    if (finalContactIds.length > 0) {
+      const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+      if (contacts.length !== finalContactIds.length) {
+        return res.status(400).json({ message: 'Niektore kontakty neexistuju' });
       }
-      contactName = contact.name;
+      contactNames = contacts.map(c => c.name);
     }
 
     const task = new Task({
@@ -130,7 +151,7 @@ router.post('/', authenticateToken, async (req, res) => {
       dueDate: dueDate || null,
       priority: priority || 'medium',
       completed: false,
-      contactId: contactId || null,
+      contactIds: finalContactIds,
       subtasks: [],
       createdBy: req.user.username
     });
@@ -139,7 +160,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const taskObj = task.toObject();
     taskObj.id = taskObj._id.toString();
-    taskObj.contactName = contactName;
+    taskObj.contactIds = finalContactIds;
+    taskObj.contactNames = contactNames;
+    taskObj.contactName = contactNames.join(', ') || null;
     taskObj.source = 'global';
 
     // Emit socket event
@@ -155,7 +178,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed, contactId, source } = req.body;
+    const { title, description, dueDate, priority, completed, contactId, contactIds, source } = req.body;
     const io = req.app.get('io');
 
     // If source is 'contact', update in contacts
@@ -201,11 +224,29 @@ router.put('/:id', authenticateToken, async (req, res) => {
     let task = await Task.findById(req.params.id);
 
     if (task) {
-      // Verify contact exists if contactId is provided
-      if (contactId) {
-        const contact = await Contact.findById(contactId);
-        if (!contact) {
-          return res.status(400).json({ message: 'Kontakt neexistuje' });
+      // Support both old contactId and new contactIds
+      let finalContactIds = task.contactIds || [];
+      let contactNames = [];
+
+      if (contactIds !== undefined) {
+        finalContactIds = Array.isArray(contactIds) ? contactIds : [];
+        if (finalContactIds.length > 0) {
+          const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+          contactNames = contacts.map(c => c.name);
+        }
+      } else if (contactId !== undefined) {
+        finalContactIds = contactId ? [contactId] : [];
+        if (contactId) {
+          const contact = await Contact.findById(contactId);
+          if (contact) {
+            contactNames = [contact.name];
+          }
+        }
+      } else {
+        // Keep existing and fetch names
+        if (finalContactIds.length > 0) {
+          const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+          contactNames = contacts.map(c => c.name);
         }
       }
 
@@ -214,12 +255,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
       task.dueDate = dueDate !== undefined ? dueDate : task.dueDate;
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
-      task.contactId = contactId !== undefined ? contactId : task.contactId;
+      task.contactIds = finalContactIds;
 
       await task.save();
 
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
+      taskObj.contactIds = finalContactIds;
+      taskObj.contactNames = contactNames;
+      taskObj.contactName = contactNames.join(', ') || null;
 
       io.emit('task-updated', { ...taskObj, source: 'global' });
       return res.json({ ...taskObj, source: 'global' });

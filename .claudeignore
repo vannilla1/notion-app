@@ -1,0 +1,50 @@
+# root dependencies
+node_modules/
+
+# frontend (Vite)
+client/node_modules/
+client/dist/
+
+# backend
+server/node_modules/
+server/dist/
+
+# generic build outputs
+dist/
+build/
+.out/
+.next/
+
+# Render
+.render/
+.render-build-cache/
+
+# tests
+coverage/
+
+# environment variables (never send to Claude)
+.env
+.env.*
+.env.production
+.env.local
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# MongoDB (local data / dumps)
+data/
+dump/
+*.bson
+*.json.gz
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# lock files
+*.lock
+

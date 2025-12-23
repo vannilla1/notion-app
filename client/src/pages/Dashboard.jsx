@@ -114,22 +114,43 @@ function Dashboard() {
       subtasks: t.subtasks || [],
       source: 'contact'
     }));
+    // Support both old contactId and new contactIds
     const assignedGlobalTasks = tasks
-      .filter(t => t.contactId === contact.id)
+      .filter(t => {
+        const taskContactIds = t.contactIds?.length > 0
+          ? t.contactIds
+          : (t.contactId ? [t.contactId] : []);
+        return taskContactIds.includes(contact.id);
+      })
       .map(t => ({ ...t, source: 'global' }));
     return [...embeddedTasks, ...assignedGlobalTasks];
   };
 
-  // Get contact name by ID
-  const getContactName = (contactId) => {
-    const contact = contacts.find(c => c.id === contactId);
-    return contact ? contact.name : null;
+  // Get contact names (supports multiple contacts)
+  const getContactNames = (task) => {
+    if (task.contactNames?.length > 0) {
+      return task.contactNames;
+    }
+    if (task.contactName) {
+      return [task.contactName];
+    }
+    const taskContactIds = task.contactIds?.length > 0
+      ? task.contactIds
+      : (task.contactId ? [task.contactId] : []);
+    return taskContactIds
+      .map(id => contacts.find(c => c.id === id)?.name)
+      .filter(Boolean);
   };
 
   // Stats
   const activeContacts = contacts.filter(c => c.status === 'active').length;
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const completedTasks = tasks.filter(t => t.completed).length;
+
+  // Priority stats
+  const lowPriorityTasks = tasks.filter(t => t.priority === 'low' && !t.completed).length;
+  const mediumPriorityTasks = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
+  const highPriorityTasks = tasks.filter(t => t.priority === 'high' && !t.completed).length;
 
   // Get items for detail view
   const getDetailItems = () => {
@@ -149,6 +170,12 @@ function Dashboard() {
           return { type: 'tasks', items: getContactTasks(selectedContact), title: `Ulohy: ${selectedContact.name}` };
         }
         return null;
+      case 'priority-low':
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'low' && !t.completed), title: 'Ulohy s nizkou prioritou' };
+      case 'priority-medium':
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'medium' && !t.completed), title: 'Ulohy so strednou prioritou' };
+      case 'priority-high':
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'high' && !t.completed), title: 'Ulohy s vysokou prioritou' };
       default:
         return null;
     }
@@ -245,6 +272,38 @@ function Dashboard() {
             >
               <span className="stat-label">Splnenych</span>
               <span className="stat-value">{completedTasks}</span>
+            </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podla priority</h4>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'priority-high' ? 'active' : ''}`}
+              onClick={() => setDetailView('priority-high')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Vysoka priorita
+              </span>
+              <span className="stat-value">{highPriorityTasks}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'priority-medium' ? 'active' : ''}`}
+              onClick={() => setDetailView('priority-medium')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#F59E0B' }}></span>
+                Stredna priorita
+              </span>
+              <span className="stat-value">{mediumPriorityTasks}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'priority-low' ? 'active' : ''}`}
+              onClick={() => setDetailView('priority-low')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Nizka priorita
+              </span>
+              <span className="stat-value">{lowPriorityTasks}</span>
             </div>
           </div>
 
@@ -349,8 +408,8 @@ function Dashboard() {
                           >
                             {getPriorityLabel(task.priority)}
                           </span>
-                          {task.contactName && (
-                            <span className="contact-badge">👤 {task.contactName}</span>
+                          {getContactNames(task).length > 0 && (
+                            <span className="contact-badge">👤 {getContactNames(task).join(', ')}</span>
                           )}
                           {task.dueDate && (
                             <span className="date-badge">
@@ -472,8 +531,8 @@ function Dashboard() {
                       {tasks.filter(t => !t.completed).slice(0, 5).map(task => (
                         <div
                           key={task.id}
-                          className="dashboard-task-item"
-                          onClick={(e) => e.stopPropagation()}
+                          className="dashboard-task-item clickable-task"
+                          onClick={(e) => { e.stopPropagation(); navigate('/tasks', { state: { highlightTaskId: task.id } }); }}
                         >
                           <div
                             className="task-priority-indicator"
@@ -488,9 +547,9 @@ function Dashboard() {
                               >
                                 {getPriorityLabel(task.priority)}
                               </span>
-                              {task.contactId && getContactName(task.contactId) && (
+                              {getContactNames(task).length > 0 && (
                                 <span className="contact-link-badge">
-                                  {getContactName(task.contactId)}
+                                  {getContactNames(task).join(', ')}
                                 </span>
                               )}
                               {task.dueDate && (

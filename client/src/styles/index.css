@@ -1154,6 +1154,60 @@ body {
   grid-column: span 2;
 }
 
+/* Multi-select contacts */
+.multi-select-contacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.multi-select-contacts.compact {
+  max-height: 100px;
+  padding: 8px;
+  gap: 6px;
+}
+
+.contact-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 13px;
+}
+
+.contact-checkbox:hover {
+  border-color: var(--accent-color);
+  background: var(--accent-light);
+}
+
+.contact-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.contact-checkbox input[type="checkbox"]:checked + span {
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+.no-contacts {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
 .form-group textarea {
   resize: vertical;
   min-height: 100px;
@@ -1519,6 +1573,27 @@ body {
 .task-card.completed .task-title {
   text-decoration: line-through;
   color: var(--text-muted);
+}
+
+.task-card.highlighted {
+  animation: highlight-pulse 3s ease-out;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+@keyframes highlight-pulse {
+  0% {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 6px var(--accent-light);
+  }
+  50% {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+  100% {
+    border-color: var(--border-color);
+    box-shadow: none;
+  }
 }
 
 /* Task stats in sidebar */
@@ -3350,6 +3425,14 @@ a.detail-value:hover {
   transform: translateX(4px);
 }
 
+.dashboard-task-item.clickable-task {
+  cursor: pointer;
+}
+
+.dashboard-task-item.clickable-task:hover {
+  border-left: 3px solid var(--accent-color);
+}
+
 .task-priority-indicator {
   width: 4px;
   height: 32px;
@@ -3834,6 +3917,20 @@ a.detail-value:hover {
 .stat-item.clickable.active .stat-label,
 .stat-item.clickable.active .stat-value {
   color: white;
+}
+
+/* Priority dot in sidebar */
+.priority-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.stat-item.priority-stat .stat-label {
+  display: flex;
+  align-items: center;
 }
 
 /* Dashboard section clickable */

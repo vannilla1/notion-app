@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [tasks, setTasks] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +18,8 @@ function Tasks() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [expandedTask, setExpandedTask] = useState(null);
   const { socket, isConnected } = useSocket();
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null);
+  const taskRefs = useRef({});
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -24,7 +27,7 @@ function Tasks() {
     description: '',
     dueDate: '',
     priority: 'medium',
-    contactId: ''
+    contactIds: []
   });
 
   // Edit states
@@ -41,6 +44,30 @@ function Tasks() {
     fetchTasks();
     fetchContacts();
   }, []);
+
+  // Handle highlight from navigation state
+  useEffect(() => {
+    if (location.state?.highlightTaskId && tasks.length > 0) {
+      const taskId = location.state.highlightTaskId;
+      setHighlightedTaskId(taskId);
+      setExpandedTask(taskId);
+
+      // Scroll to the task after a short delay
+      setTimeout(() => {
+        if (taskRefs.current[taskId]) {
+          taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+
+      // Remove highlight after 3 seconds
+      setTimeout(() => {
+        setHighlightedTaskId(null);
+      }, 3000);
+
+      // Clear the navigation state
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, tasks, navigate, location.pathname]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
@@ -113,14 +140,14 @@ function Tasks() {
     try {
       await api.post('/api/tasks', {
         ...newTaskForm,
-        contactId: newTaskForm.contactId || null
+        contactIds: newTaskForm.contactIds.length > 0 ? newTaskForm.contactIds : []
       });
       setNewTaskForm({
         title: '',
         description: '',
         dueDate: '',
         priority: 'medium',
-        contactId: ''
+        contactIds: []
       });
       setShowForm(false);
     } catch (error) {
@@ -152,12 +179,16 @@ function Tasks() {
 
   const startEditTask = (task) => {
     setEditingTask(task.id);
+    // Support both old contactId and new contactIds
+    const taskContactIds = task.contactIds?.length > 0
+      ? task.contactIds
+      : (task.contactId ? [task.contactId] : []);
     setEditForm({
       title: task.title,
       description: task.description || '',
       dueDate: task.dueDate || '',
       priority: task.priority || 'medium',
-      contactId: task.contactId || '',
+      contactIds: taskContactIds,
       source: task.source
     });
   };
@@ -166,7 +197,7 @@ function Tasks() {
     try {
       await api.put(`/api/tasks/${taskId}`, {
         ...editForm,
-        contactId: editForm.contactId || null
+        contactIds: editForm.contactIds || []
       });
       setEditingTask(null);
     } catch (error) {
@@ -414,7 +445,10 @@ function Tasks() {
     if (filter === 'completed') return t.completed;
     if (filter === 'active') return !t.completed;
     if (filter === 'high') return t.priority === 'high';
-    if (filter === 'with-contact') return t.contactId;
+    if (filter === 'with-contact') {
+      const hasContacts = (t.contactIds?.length > 0) || t.contactId;
+      return hasContacts;
+    }
     return true;
   });
 
@@ -543,19 +577,30 @@ function Tasks() {
                     </select>
                   </div>
                   <div className="form-group full-width">
-                    <label>Priradiť ku kontaktu</label>
-                    <select
-                      value={newTaskForm.contactId}
-                      onChange={(e) => setNewTaskForm({ ...newTaskForm, contactId: e.target.value })}
-                      className="form-input"
-                    >
-                      <option value="">-- Bez kontaktu --</option>
+                    <label>Priradiť ku kontaktom</label>
+                    <div className="multi-select-contacts">
                       {contacts.map(contact => (
-                        <option key={contact.id} value={contact.id}>
-                          {contact.name} {contact.company ? `(${contact.company})` : ''}
-                        </option>
+                        <label key={contact.id} className="contact-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={newTaskForm.contactIds.includes(contact.id)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setNewTaskForm(prev => ({
+                                ...prev,
+                                contactIds: checked
+                                  ? [...prev.contactIds, contact.id]
+                                  : prev.contactIds.filter(id => id !== contact.id)
+                              }));
+                            }}
+                          />
+                          <span>{contact.name} {contact.company ? `(${contact.company})` : ''}</span>
+                        </label>
                       ))}
-                    </select>
+                      {contacts.length === 0 && (
+                        <span className="no-contacts">Žiadne kontakty</span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="form-actions">
@@ -585,7 +630,11 @@ function Tasks() {
               ) : (
                 <div className="tasks-list">
                   {filteredTasks.map(task => (
-                    <div key={task.id} className={`task-card ${task.completed ? 'completed' : ''}`}>
+                    <div
+                      key={task.id}
+                      ref={el => taskRefs.current[task.id] = el}
+                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''}`}
+                    >
                       <div className="task-main">
                         <input
                           type="checkbox"
@@ -628,19 +677,27 @@ function Tasks() {
                               </select>
                             </div>
                             <div className="form-group">
-                              <label>Kontakt</label>
-                              <select
-                                value={editForm.contactId}
-                                onChange={(e) => setEditForm({ ...editForm, contactId: e.target.value })}
-                                className="form-input"
-                              >
-                                <option value="">-- Bez kontaktu --</option>
+                              <label>Kontakty</label>
+                              <div className="multi-select-contacts compact">
                                 {contacts.map(contact => (
-                                  <option key={contact.id} value={contact.id}>
-                                    {contact.name}
-                                  </option>
+                                  <label key={contact.id} className="contact-checkbox">
+                                    <input
+                                      type="checkbox"
+                                      checked={(editForm.contactIds || []).includes(contact.id)}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setEditForm(prev => ({
+                                          ...prev,
+                                          contactIds: checked
+                                            ? [...(prev.contactIds || []), contact.id]
+                                            : (prev.contactIds || []).filter(id => id !== contact.id)
+                                        }));
+                                      }}
+                                    />
+                                    <span>{contact.name}</span>
+                                  </label>
                                 ))}
-                              </select>
+                              </div>
                             </div>
                             <div className="task-edit-actions">
                               <button onClick={() => saveTask(task.id)} className="btn btn-primary btn-sm">Uložiť</button>
@@ -660,8 +717,10 @@ function Tasks() {
                               {task.dueDate && (
                                 <span className="due-date">📅 {formatDate(task.dueDate)}</span>
                               )}
-                              {task.contactName && (
-                                <span className="contact-badge">👤 {task.contactName}</span>
+                              {(task.contactName || task.contactNames?.length > 0) && (
+                                <span className="contact-badge">
+                                  👤 {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
+                                </span>
                               )}
                               {task.subtasks?.length > 0 && (
                                 <span className="subtask-count">

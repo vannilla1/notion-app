@@ -13,9 +13,9 @@ const taskSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
-  contactId: {
-    type: String,
-    default: null
+  contactIds: {
+    type: [String],
+    default: []
   },
   title: {
     type: String,
