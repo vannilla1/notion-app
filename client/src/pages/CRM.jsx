@@ -52,9 +52,15 @@ function CRM() {
   // Get all tasks for a contact (embedded + global assigned)
   const getContactTasks = (contact) => {
     const embeddedTasks = (contact.tasks || []).map(t => ({
-      ...t,
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      completed: t.completed,
+      priority: t.priority,
+      dueDate: t.dueDate,
+      subtasks: t.subtasks || [],
       source: 'contact',
-      contactId: contact.id  // Add contactId for API calls
+      contactId: contact.id
     }));
     const assignedGlobalTasks = globalTasks
       .filter(t => t.contactId === contact.id && t.source === 'global')
