@@ -277,7 +277,8 @@ function Tasks() {
             <input
               type="checkbox"
               checked={subtask.completed}
-              onChange={() => toggleSubtask(task, subtask.id, subtask.completed)}
+              onChange={() => !subtask.completed && toggleSubtask(task, subtask.id, subtask.completed)}
+              disabled={subtask.completed}
               className="task-checkbox"
             />
 
@@ -587,7 +588,8 @@ function Tasks() {
                         <input
                           type="checkbox"
                           checked={task.completed}
-                          onChange={() => toggleTask(task)}
+                          onChange={() => !task.completed && toggleTask(task)}
+                          disabled={task.completed}
                           className="task-checkbox"
                         />
 

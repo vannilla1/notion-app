@@ -416,7 +416,8 @@ function CRM() {
             <input
               type="checkbox"
               checked={subtask.completed}
-              onChange={() => toggleSubtask(task, subtask)}
+              onChange={() => !subtask.completed && toggleSubtask(task, subtask)}
+              disabled={subtask.completed}
               className="task-checkbox"
             />
 
@@ -886,7 +887,8 @@ function CRM() {
                                 <input
                                   type="checkbox"
                                   checked={task.completed}
-                                  onChange={() => toggleTask(contact, task)}
+                                  onChange={() => !task.completed && toggleTask(contact, task)}
+                                  disabled={task.completed}
                                   className="task-checkbox"
                                 />
                                 {editingTask?.contactId === contact.id && editingTask?.taskId === task.id ? (
