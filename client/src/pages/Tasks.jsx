@@ -143,8 +143,10 @@ function Tasks() {
     if (!window.confirm('Vymazať túto úlohu?')) return;
     try {
       await api.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
+      await fetchTasks();
     } catch (error) {
       console.error('Failed to delete task:', error);
+      alert('Chyba pri mazaní úlohy');
     }
   };
 
