@@ -615,29 +615,56 @@ function CRM() {
             + Nový kontakt
           </button>
 
-          <div className="filter-section">
-            <h3>Filter</h3>
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="filter-select"
+          <div className="dashboard-stats">
+            <h3>Prehľad</h3>
+            <div
+              className={`stat-item clickable ${filter === 'all' ? 'active' : ''}`}
+              onClick={() => setFilter('all')}
             >
-              <option value="all">Všetky ({statusCounts.all})</option>
-              <option value="new">Nové ({statusCounts.new})</option>
-              <option value="active">Aktívne ({statusCounts.active})</option>
-              <option value="completed">Dokončené ({statusCounts.completed})</option>
-              <option value="cancelled">Zrušené ({statusCounts.cancelled})</option>
-            </select>
-          </div>
-
-          <div className="task-stats">
-            <div className="stat-item">
-              <span className="stat-label">Celkom</span>
+              <span className="stat-label">Celkom kontaktov</span>
               <span className="stat-value">{contacts.length}</span>
             </div>
-            <div className="stat-item">
-              <span className="stat-label">Aktívne</span>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa stavu</h4>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'new' ? 'active' : ''}`}
+              onClick={() => setFilter('new')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#3B82F6' }}></span>
+                Nový
+              </span>
+              <span className="stat-value">{statusCounts.new}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'active' ? 'active' : ''}`}
+              onClick={() => setFilter('active')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Aktívny
+              </span>
               <span className="stat-value">{statusCounts.active}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'completed' ? 'active' : ''}`}
+              onClick={() => setFilter('completed')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#6366F1' }}></span>
+                Dokončený
+              </span>
+              <span className="stat-value">{statusCounts.completed}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'cancelled' ? 'active' : ''}`}
+              onClick={() => setFilter('cancelled')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Zrušený
+              </span>
+              <span className="stat-value">{statusCounts.cancelled}</span>
             </div>
           </div>
         </aside>
