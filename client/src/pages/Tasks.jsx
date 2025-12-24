@@ -444,7 +444,9 @@ function Tasks() {
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
     if (filter === 'active') return !t.completed;
-    if (filter === 'high') return t.priority === 'high';
+    if (filter === 'high') return t.priority === 'high' && !t.completed;
+    if (filter === 'medium') return t.priority === 'medium' && !t.completed;
+    if (filter === 'low') return t.priority === 'low' && !t.completed;
     if (filter === 'with-contact') {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
@@ -453,6 +455,11 @@ function Tasks() {
   });
 
   const completedCount = tasks.filter(t => t.completed).length;
+  const activeCount = tasks.filter(t => !t.completed).length;
+  const highPriorityCount = tasks.filter(t => t.priority === 'high' && !t.completed).length;
+  const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
+  const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
+  const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
 
   return (
     <div className="crm-container">
@@ -501,29 +508,67 @@ function Tasks() {
             + Nová úloha
           </button>
 
-          <div className="filter-section">
-            <h3>Filter</h3>
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="filter-select"
+          <div className="dashboard-stats">
+            <h3>Prehľad</h3>
+            <div
+              className={`stat-item clickable ${filter === 'all' ? 'active' : ''}`}
+              onClick={() => setFilter('all')}
             >
-              <option value="all">Všetky ({tasks.length})</option>
-              <option value="active">Aktívne ({tasks.length - completedCount})</option>
-              <option value="completed">Dokončené ({completedCount})</option>
-              <option value="high">Vysoká priorita</option>
-              <option value="with-contact">S kontaktom</option>
-            </select>
-          </div>
-
-          <div className="task-stats">
-            <div className="stat-item">
-              <span className="stat-label">Celkom</span>
+              <span className="stat-label">Celkom úloh</span>
               <span className="stat-value">{tasks.length}</span>
             </div>
-            <div className="stat-item">
-              <span className="stat-label">Dokončené</span>
+            <div
+              className={`stat-item clickable ${filter === 'active' ? 'active' : ''}`}
+              onClick={() => setFilter('active')}
+            >
+              <span className="stat-label">Nesplnených</span>
+              <span className="stat-value">{activeCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${filter === 'completed' ? 'active' : ''}`}
+              onClick={() => setFilter('completed')}
+            >
+              <span className="stat-label">Splnených</span>
               <span className="stat-value">{completedCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${filter === 'with-contact' ? 'active' : ''}`}
+              onClick={() => setFilter('with-contact')}
+            >
+              <span className="stat-label">S kontaktom</span>
+              <span className="stat-value">{withContactCount}</span>
+            </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa priority</h4>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'high' ? 'active' : ''}`}
+              onClick={() => setFilter('high')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Vysoká priorita
+              </span>
+              <span className="stat-value">{highPriorityCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'medium' ? 'active' : ''}`}
+              onClick={() => setFilter('medium')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#F59E0B' }}></span>
+                Stredná priorita
+              </span>
+              <span className="stat-value">{mediumPriorityCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${filter === 'low' ? 'active' : ''}`}
+              onClick={() => setFilter('low')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Nízka priorita
+              </span>
+              <span className="stat-value">{lowPriorityCount}</span>
             </div>
           </div>
         </aside>
