@@ -144,6 +144,9 @@ function Dashboard() {
 
   // Stats
   const activeContacts = contacts.filter(c => c.status === 'active').length;
+  const newContacts = contacts.filter(c => c.status === 'new').length;
+  const completedContacts = contacts.filter(c => c.status === 'completed').length;
+  const cancelledContacts = contacts.filter(c => c.status === 'cancelled').length;
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const completedTasks = tasks.filter(t => t.completed).length;
 
@@ -159,6 +162,12 @@ function Dashboard() {
         return { type: 'contacts', items: contacts, title: 'Vsetky kontakty' };
       case 'active':
         return { type: 'contacts', items: contacts.filter(c => c.status === 'active'), title: 'Aktivne kontakty' };
+      case 'new':
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'new'), title: 'Nove kontakty' };
+      case 'completed-contacts':
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'completed'), title: 'Dokoncene kontakty' };
+      case 'cancelled':
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'cancelled'), title: 'Zrusene kontakty' };
       case 'tasks':
         return { type: 'tasks', items: tasks, title: 'Vsetky ulohy' };
       case 'pending':
@@ -304,6 +313,48 @@ function Dashboard() {
                 Nizka priorita
               </span>
               <span className="stat-value">{lowPriorityTasks}</span>
+            </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podla stavu kontaktu</h4>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'new' ? 'active' : ''}`}
+              onClick={() => setDetailView('new')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#3B82F6' }}></span>
+                Novy
+              </span>
+              <span className="stat-value">{newContacts}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'active' ? 'active' : ''}`}
+              onClick={() => setDetailView('active')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Aktivny
+              </span>
+              <span className="stat-value">{activeContacts}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'completed-contacts' ? 'active' : ''}`}
+              onClick={() => setDetailView('completed-contacts')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#6366F1' }}></span>
+                Dokonceny
+              </span>
+              <span className="stat-value">{completedContacts}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'cancelled' ? 'active' : ''}`}
+              onClick={() => setDetailView('cancelled')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Zruseny
+              </span>
+              <span className="stat-value">{cancelledContacts}</span>
             </div>
           </div>
 
