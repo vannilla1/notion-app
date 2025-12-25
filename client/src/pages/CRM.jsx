@@ -44,6 +44,10 @@ function CRM() {
   const [expandedTasks, setExpandedTasks] = useState({});
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
+  // File states
+  const [uploadingFile, setUploadingFile] = useState(null);
+  const fileInputRefs = {};
+
   useEffect(() => {
     fetchContacts();
     fetchGlobalTasks();
@@ -179,6 +183,65 @@ function CRM() {
     } catch (error) {
       console.error('Failed to delete contact:', error);
     }
+  };
+
+  // File functions
+  const handleFileUpload = async (contactId, file) => {
+    if (!file) return;
+
+    setUploadingFile(contactId);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      await api.post(`/api/contacts/${contactId}/files`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+    } finally {
+      setUploadingFile(null);
+    }
+  };
+
+  const deleteFile = async (contactId, fileId) => {
+    if (!window.confirm('Vymazať tento súbor?')) return;
+    try {
+      await api.delete(`/api/contacts/${contactId}/files/${fileId}`);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri mazaní súboru');
+    }
+  };
+
+  const downloadFile = (contactId, fileId, fileName) => {
+    const token = localStorage.getItem('token');
+    const url = `${api.defaults.baseURL}/api/contacts/${contactId}/files/${fileId}/download`;
+
+    fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(response => response.blob())
+      .then(blob => {
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = fileName;
+        link.click();
+      })
+      .catch(err => alert('Chyba pri sťahovaní súboru'));
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const getFileIcon = (mimetype) => {
+    if (mimetype?.startsWith('image/')) return '🖼️';
+    if (mimetype === 'application/pdf') return '📄';
+    if (mimetype?.includes('word')) return '📝';
+    if (mimetype?.includes('excel') || mimetype?.includes('spreadsheet')) return '📊';
+    return '📎';
   };
 
   const startEditContact = (contact) => {
@@ -914,6 +977,57 @@ function CRM() {
                                 <span className="detail-label">📝 Poznámky:</span>
                                 <span className="detail-value">{contact.notes}</span>
                               </div>
+                            )}
+                          </div>
+
+                          {/* Files Section */}
+                          <div className="contact-files">
+                            <div className="files-section-header">
+                              <span>Súbory</span>
+                              <label className="btn btn-secondary btn-sm file-upload-btn">
+                                {uploadingFile === contact.id ? 'Nahrávam...' : '+ Pridať súbor'}
+                                <input
+                                  type="file"
+                                  hidden
+                                  onChange={(e) => {
+                                    handleFileUpload(contact.id, e.target.files[0]);
+                                    e.target.value = '';
+                                  }}
+                                  disabled={uploadingFile === contact.id}
+                                />
+                              </label>
+                            </div>
+
+                            {contact.files && contact.files.length > 0 ? (
+                              <div className="files-list">
+                                {contact.files.map(file => (
+                                  <div key={file.id} className="file-item">
+                                    <span className="file-icon">{getFileIcon(file.mimetype)}</span>
+                                    <div className="file-info">
+                                      <span className="file-name">{file.originalName}</span>
+                                      <span className="file-size">{formatFileSize(file.size)}</span>
+                                    </div>
+                                    <div className="file-actions">
+                                      <button
+                                        onClick={() => downloadFile(contact.id, file.id, file.originalName)}
+                                        className="btn-icon-sm"
+                                        title="Stiahnuť"
+                                      >
+                                        ⬇️
+                                      </button>
+                                      <button
+                                        onClick={() => deleteFile(contact.id, file.id)}
+                                        className="btn-icon-sm btn-danger"
+                                        title="Vymazať"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="no-files">Žiadne súbory</div>
                             )}
                           </div>
 

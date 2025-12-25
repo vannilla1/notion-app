@@ -534,4 +534,106 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
   }
 });
 
+// ==================== FILE UPLOAD ====================
+
+// Upload file to contact
+router.post('/:id/files', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id);
+    if (!contact) {
+      // Delete uploaded file if contact not found
+      if (req.file) {
+        fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename));
+      }
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const fileData = {
+      id: uuidv4(),
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      uploadedAt: new Date()
+    };
+
+    contact.files.push(fileData);
+    await contact.save();
+
+    const io = req.app.get('io');
+    io.emit('contact-updated', contact.toJSON());
+
+    res.status(201).json(fileData);
+  } catch (error) {
+    // Clean up uploaded file on error
+    if (req.file) {
+      try {
+        fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename));
+      } catch (e) {}
+    }
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Download file
+router.get('/:id/files/:fileId/download', authenticateToken, async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id);
+    if (!contact) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const file = contact.files.find(f => f.id === req.params.fileId);
+    if (!file) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+
+    const filePath = path.join(UPLOADS_DIR, file.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'File not found on server' });
+    }
+
+    res.download(filePath, file.originalName);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Delete file from contact
+router.delete('/:id/files/:fileId', authenticateToken, async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id);
+    if (!contact) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const fileIndex = contact.files.findIndex(f => f.id === req.params.fileId);
+    if (fileIndex === -1) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+
+    const file = contact.files[fileIndex];
+
+    // Delete file from filesystem
+    const filePath = path.join(UPLOADS_DIR, file.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    contact.files.splice(fileIndex, 1);
+    await contact.save();
+
+    const io = req.app.get('io');
+    io.emit('contact-updated', contact.toJSON());
+
+    res.json({ message: 'File deleted' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 module.exports = router;
