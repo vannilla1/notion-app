@@ -40,6 +40,11 @@ function Tasks() {
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
+  // Duplicate modal states
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicatingTask, setDuplicatingTask] = useState(null);
+  const [duplicateContactIds, setDuplicateContactIds] = useState([]);
+
   useEffect(() => {
     fetchTasks();
     fetchContacts();
@@ -174,6 +179,32 @@ function Tasks() {
     } catch (error) {
       console.error('Failed to delete task:', error);
       alert('Chyba pri mazaní úlohy');
+    }
+  };
+
+  // Duplicate task functions
+  const openDuplicateModal = (task) => {
+    setDuplicatingTask(task);
+    setDuplicateContactIds([]);
+    setShowDuplicateModal(true);
+  };
+
+  const closeDuplicateModal = () => {
+    setShowDuplicateModal(false);
+    setDuplicatingTask(null);
+    setDuplicateContactIds([]);
+  };
+
+  const duplicateTask = async () => {
+    if (!duplicatingTask) return;
+    try {
+      await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
+        contactIds: duplicateContactIds,
+        source: duplicatingTask.source
+      });
+      closeDuplicateModal();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri duplikovaní úlohy');
     }
   };
 
@@ -778,6 +809,7 @@ function Tasks() {
 
                         {editingTask !== task.id && (
                           <div className="task-actions">
+                            <button onClick={() => openDuplicateModal(task)} className="btn-icon" title="Duplikovať">📋</button>
                             <button onClick={() => startEditTask(task)} className="btn-icon" title="Upraviť">✏️</button>
                             <button onClick={() => deleteTask(task)} className="btn-icon" title="Vymazať">🗑️</button>
                           </div>
@@ -820,6 +852,56 @@ function Tasks() {
           )}
         </main>
       </div>
+
+      {/* Duplicate Modal */}
+      {showDuplicateModal && duplicatingTask && (
+        <div className="modal-overlay" onClick={closeDuplicateModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Duplikovať úlohu</h3>
+              <button className="modal-close" onClick={closeDuplicateModal}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="duplicate-info">
+                Duplikuje sa úloha: <strong>{duplicatingTask.title}</strong>
+                {duplicatingTask.subtasks?.length > 0 && (
+                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} podúloh)</span>
+                )}
+              </p>
+
+              <div className="form-group">
+                <label>Priradiť ku kontaktom</label>
+                <div className="multi-select-contacts">
+                  {contacts.map(contact => (
+                    <label key={contact.id} className="contact-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={duplicateContactIds.includes(contact.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setDuplicateContactIds(prev =>
+                            checked
+                              ? [...prev, contact.id]
+                              : prev.filter(id => id !== contact.id)
+                          );
+                        }}
+                      />
+                      <span>{contact.name} {contact.company ? `(${contact.company})` : ''}</span>
+                    </label>
+                  ))}
+                  {contacts.length === 0 && (
+                    <span className="no-contacts">Žiadne kontakty</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
+              <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

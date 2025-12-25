@@ -48,6 +48,11 @@ function CRM() {
   const [uploadingFile, setUploadingFile] = useState(null);
   const fileInputRefs = {};
 
+  // Duplicate modal states
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicatingTask, setDuplicatingTask] = useState(null);
+  const [duplicateContactIds, setDuplicateContactIds] = useState([]);
+
   useEffect(() => {
     fetchContacts();
     fetchGlobalTasks();
@@ -242,6 +247,33 @@ function CRM() {
     if (mimetype?.includes('word')) return '📝';
     if (mimetype?.includes('excel') || mimetype?.includes('spreadsheet')) return '📊';
     return '📎';
+  };
+
+  // Duplicate task functions
+  const openDuplicateModal = (task, currentContactId) => {
+    setDuplicatingTask({ ...task, currentContactId });
+    setDuplicateContactIds([]);
+    setShowDuplicateModal(true);
+  };
+
+  const closeDuplicateModal = () => {
+    setShowDuplicateModal(false);
+    setDuplicatingTask(null);
+    setDuplicateContactIds([]);
+  };
+
+  const duplicateTask = async () => {
+    if (!duplicatingTask) return;
+    try {
+      await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
+        contactIds: duplicateContactIds,
+        source: duplicatingTask.source
+      });
+      closeDuplicateModal();
+      fetchGlobalTasks();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri duplikovaní úlohy');
+    }
   };
 
   const startEditContact = (contact) => {
@@ -1100,6 +1132,13 @@ function CRM() {
                                         {expandedTasks[task.id] ? '▼' : '▶'}
                                       </button>
                                       <button
+                                        onClick={() => openDuplicateModal(task, contact.id)}
+                                        className="btn-icon-sm"
+                                        title="Duplikovať"
+                                      >
+                                        📋
+                                      </button>
+                                      <button
                                         onClick={() => startEditTask(contact, task)}
                                         className="btn-icon-sm"
                                         title="Upraviť"
@@ -1162,6 +1201,56 @@ function CRM() {
           )}
         </main>
       </div>
+
+      {/* Duplicate Modal */}
+      {showDuplicateModal && duplicatingTask && (
+        <div className="modal-overlay" onClick={closeDuplicateModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Duplikovať úlohu</h3>
+              <button className="modal-close" onClick={closeDuplicateModal}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="duplicate-info">
+                Duplikuje sa úloha: <strong>{duplicatingTask.title}</strong>
+                {duplicatingTask.subtasks?.length > 0 && (
+                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} podúloh)</span>
+                )}
+              </p>
+
+              <div className="form-group">
+                <label>Priradiť ku kontaktom</label>
+                <div className="multi-select-contacts">
+                  {contacts.map(contact => (
+                    <label key={contact.id} className="contact-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={duplicateContactIds.includes(contact.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setDuplicateContactIds(prev =>
+                            checked
+                              ? [...prev, contact.id]
+                              : prev.filter(id => id !== contact.id)
+                          );
+                        }}
+                      />
+                      <span>{contact.name} {contact.company ? `(${contact.company})` : ''}</span>
+                    </label>
+                  ))}
+                  {contacts.length === 0 && (
+                    <span className="no-contacts">Žiadne kontakty</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
+              <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

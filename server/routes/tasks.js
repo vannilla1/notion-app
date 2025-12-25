@@ -369,6 +369,95 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ==================== DUPLICATE TASK ====================
+
+// Helper function to duplicate subtasks recursively with new IDs
+const duplicateSubtasksRecursive = (subtasks) => {
+  if (!subtasks || !Array.isArray(subtasks)) return [];
+  return subtasks.map(subtask => ({
+    id: uuidv4(),
+    title: subtask.title,
+    completed: false,
+    subtasks: duplicateSubtasksRecursive(subtask.subtasks),
+    createdAt: new Date().toISOString()
+  }));
+};
+
+// Duplicate task with new contact assignment
+router.post('/:id/duplicate', authenticateToken, async (req, res) => {
+  try {
+    const { contactIds, source } = req.body;
+    const io = req.app.get('io');
+
+    let originalTask = null;
+    let originalContactId = null;
+
+    // Find original task - check global tasks first
+    const globalTask = await Task.findById(req.params.id);
+    if (globalTask) {
+      originalTask = globalTask.toObject();
+      originalTask.source = 'global';
+    } else {
+      // Search in contacts
+      const contacts = await Contact.find({});
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          const found = contact.tasks.find(t => t.id === req.params.id);
+          if (found) {
+            originalTask = typeof found.toObject === 'function' ? found.toObject() : { ...found };
+            originalTask.source = 'contact';
+            originalContactId = contact._id.toString();
+            break;
+          }
+        }
+      }
+    }
+
+    if (!originalTask) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    // Verify new contacts exist
+    let contactNames = [];
+    const finalContactIds = contactIds && Array.isArray(contactIds) ? contactIds : [];
+    if (finalContactIds.length > 0) {
+      const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+      if (contacts.length !== finalContactIds.length) {
+        return res.status(400).json({ message: 'Niektore kontakty neexistuju' });
+      }
+      contactNames = contacts.map(c => c.name);
+    }
+
+    // Create duplicated task as global task
+    const duplicatedTask = new Task({
+      userId: req.user.id,
+      title: originalTask.title + ' (kópia)',
+      description: originalTask.description || '',
+      dueDate: originalTask.dueDate || null,
+      priority: originalTask.priority || 'medium',
+      completed: false,
+      contactIds: finalContactIds,
+      subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
+      createdBy: req.user.username
+    });
+
+    await duplicatedTask.save();
+
+    const taskObj = duplicatedTask.toObject();
+    taskObj.id = taskObj._id.toString();
+    taskObj.contactIds = finalContactIds;
+    taskObj.contactNames = contactNames;
+    taskObj.contactName = contactNames.join(', ') || null;
+    taskObj.source = 'global';
+
+    io.emit('task-created', taskObj);
+
+    res.status(201).json(taskObj);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // ==================== SUBTASKS (RECURSIVE) ====================
 
 // Add subtask to task (global or from contact)
