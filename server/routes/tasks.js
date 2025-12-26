@@ -117,10 +117,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create task
+// Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { title, description, dueDate, priority, contactId, contactIds } = req.body;
+    const io = req.app.get('io');
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
@@ -134,42 +135,77 @@ router.post('/', authenticateToken, async (req, res) => {
       finalContactIds = [contactId];
     }
 
-    // Verify contacts exist
-    let contactNames = [];
-    if (finalContactIds.length > 0) {
-      const contacts = await Contact.find({ _id: { $in: finalContactIds } });
-      if (contacts.length !== finalContactIds.length) {
-        return res.status(400).json({ message: 'Niektore kontakty neexistuju' });
-      }
-      contactNames = contacts.map(c => c.name);
+    // If no contacts selected, create as global task
+    if (finalContactIds.length === 0) {
+      const task = new Task({
+        userId: req.user.id,
+        title: title.trim(),
+        description: description || '',
+        dueDate: dueDate || null,
+        priority: priority || 'medium',
+        completed: false,
+        contactIds: [],
+        subtasks: [],
+        createdBy: req.user.username
+      });
+
+      await task.save();
+
+      const taskObj = task.toObject();
+      taskObj.id = taskObj._id.toString();
+      taskObj.contactIds = [];
+      taskObj.contactNames = [];
+      taskObj.contactName = null;
+      taskObj.source = 'global';
+
+      io.emit('task-created', taskObj);
+
+      return res.status(201).json(taskObj);
     }
 
-    const task = new Task({
-      userId: req.user.id,
-      title: title.trim(),
-      description: description || '',
-      dueDate: dueDate || null,
-      priority: priority || 'medium',
-      completed: false,
-      contactIds: finalContactIds,
-      subtasks: [],
-      createdBy: req.user.username
-    });
+    // Create independent embedded task in each selected contact
+    const createdTasks = [];
+    const updatedContacts = [];
 
-    await task.save();
+    for (const cId of finalContactIds) {
+      const contact = await Contact.findById(cId);
+      if (!contact) continue;
 
-    const taskObj = task.toObject();
-    taskObj.id = taskObj._id.toString();
-    taskObj.contactIds = finalContactIds;
-    taskObj.contactNames = contactNames;
-    taskObj.contactName = contactNames.join(', ') || null;
-    taskObj.source = 'global';
+      // Create new embedded task for this contact
+      const newTask = {
+        id: uuidv4(),
+        title: title.trim(),
+        description: description || '',
+        completed: false,
+        priority: priority || 'medium',
+        dueDate: dueDate || null,
+        subtasks: [],
+        createdAt: new Date().toISOString()
+      };
 
-    // Emit socket event
-    const io = req.app.get('io');
-    io.emit('task-created', taskObj);
+      contact.tasks.push(newTask);
+      contact.markModified('tasks');
+      await contact.save();
 
-    res.status(201).json(taskObj);
+      createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+      updatedContacts.push(contact);
+    }
+
+    // Emit updates for all affected contacts
+    for (const contact of updatedContacts) {
+      io.emit('contact-updated', contact.toJSON());
+    }
+
+    // Return first task for compatibility (or all tasks info)
+    if (createdTasks.length === 1) {
+      res.status(201).json(createdTasks[0]);
+    } else {
+      res.status(201).json({
+        createdCount: createdTasks.length,
+        tasks: createdTasks,
+        message: `Úloha bola vytvorená v ${createdTasks.length} kontaktoch`
+      });
+    }
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
