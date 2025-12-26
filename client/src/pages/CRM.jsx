@@ -264,14 +264,21 @@ function CRM() {
 
   const duplicateTask = async () => {
     if (!duplicatingTask) return;
+    console.log('Duplicating task:', duplicatingTask);
+    console.log('Task ID:', duplicatingTask.id);
+    console.log('Contact IDs:', duplicateContactIds);
     try {
-      await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
+      const response = await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
         contactIds: duplicateContactIds,
         source: duplicatingTask.source
       });
+      console.log('Duplicate response:', response.data);
       closeDuplicateModal();
       fetchGlobalTasks();
+      fetchContacts();
     } catch (error) {
+      console.error('Duplicate error:', error);
+      console.error('Error response:', error.response?.data);
       alert(error.response?.data?.message || 'Chyba pri duplikovaní úlohy');
     }
   };

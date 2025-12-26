@@ -183,6 +183,10 @@ router.post('/', authenticateToken, async (req, res) => {
         createdAt: new Date().toISOString()
       };
 
+      // Ensure tasks array exists
+      if (!contact.tasks) {
+        contact.tasks = [];
+      }
       contact.tasks.push(newTask);
       contact.markModified('tasks');
       await contact.save();
@@ -424,21 +428,41 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
   try {
     const { contactIds, source } = req.body;
     const io = req.app.get('io');
+    const mongoose = require('mongoose');
+
+    console.log('Duplicate request for task ID:', req.params.id);
+    console.log('Request body:', req.body);
 
     let originalTask = null;
 
-    // Find original task - check global tasks first
-    const globalTask = await Task.findById(req.params.id);
-    if (globalTask) {
-      originalTask = globalTask.toObject();
-      originalTask.source = 'global';
-    } else {
-      // Search in contacts
+    // Check if ID is valid MongoDB ObjectId
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+    console.log('Is valid ObjectId:', isValidObjectId);
+
+    // Find original task - check global tasks first (only if valid ObjectId)
+    if (isValidObjectId) {
+      const globalTask = await Task.findById(req.params.id);
+      console.log('Global task found:', !!globalTask);
+      if (globalTask) {
+        originalTask = globalTask.toObject();
+        originalTask.source = 'global';
+      }
+    }
+
+    // If not found in global tasks, search in contacts
+    if (!originalTask) {
+      console.log('Searching in contacts...');
       const allContacts = await Contact.find({});
+      console.log('Total contacts:', allContacts.length);
       for (const contact of allContacts) {
-        if (contact.tasks) {
-          const found = contact.tasks.find(t => t.id === req.params.id);
+        if (contact.tasks && contact.tasks.length > 0) {
+          console.log(`Contact ${contact.name} has ${contact.tasks.length} tasks`);
+          const found = contact.tasks.find(t => {
+            console.log(`  Comparing task.id "${t.id}" with "${req.params.id}"`);
+            return t.id === req.params.id;
+          });
           if (found) {
+            console.log('Found task in contact:', contact.name);
             originalTask = typeof found.toObject === 'function' ? found.toObject() : { ...found };
             originalTask.source = 'contact';
             break;
@@ -446,6 +470,8 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
         }
       }
     }
+
+    console.log('Original task found:', !!originalTask);
 
     if (!originalTask) {
       return res.status(404).json({ message: 'Task not found' });
@@ -501,6 +527,10 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
         createdAt: new Date().toISOString()
       };
 
+      // Ensure tasks array exists
+      if (!contact.tasks) {
+        contact.tasks = [];
+      }
       contact.tasks.push(newTask);
       contact.markModified('tasks');
       await contact.save();
@@ -520,6 +550,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       message: `Úloha bola duplikovaná do ${duplicatedTasks.length} kontaktov`
     });
   } catch (error) {
+    console.error('Duplicate task error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
