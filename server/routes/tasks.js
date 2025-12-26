@@ -383,14 +383,13 @@ const duplicateSubtasksRecursive = (subtasks) => {
   }));
 };
 
-// Duplicate task with new contact assignment
+// Duplicate task with new contact assignment - creates independent embedded tasks in each contact
 router.post('/:id/duplicate', authenticateToken, async (req, res) => {
   try {
     const { contactIds, source } = req.body;
     const io = req.app.get('io');
 
     let originalTask = null;
-    let originalContactId = null;
 
     // Find original task - check global tasks first
     const globalTask = await Task.findById(req.params.id);
@@ -399,14 +398,13 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       originalTask.source = 'global';
     } else {
       // Search in contacts
-      const contacts = await Contact.find({});
-      for (const contact of contacts) {
+      const allContacts = await Contact.find({});
+      for (const contact of allContacts) {
         if (contact.tasks) {
           const found = contact.tasks.find(t => t.id === req.params.id);
           if (found) {
             originalTask = typeof found.toObject === 'function' ? found.toObject() : { ...found };
             originalTask.source = 'contact';
-            originalContactId = contact._id.toString();
             break;
           }
         }
@@ -417,42 +415,74 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    // Verify new contacts exist
-    let contactNames = [];
     const finalContactIds = contactIds && Array.isArray(contactIds) ? contactIds : [];
-    if (finalContactIds.length > 0) {
-      const contacts = await Contact.find({ _id: { $in: finalContactIds } });
-      if (contacts.length !== finalContactIds.length) {
-        return res.status(400).json({ message: 'Niektore kontakty neexistuju' });
-      }
-      contactNames = contacts.map(c => c.name);
+
+    if (finalContactIds.length === 0) {
+      // No contacts selected - create as global task
+      const duplicatedTask = new Task({
+        userId: req.user.id,
+        title: originalTask.title + ' (kópia)',
+        description: originalTask.description || '',
+        dueDate: originalTask.dueDate || null,
+        priority: originalTask.priority || 'medium',
+        completed: false,
+        contactIds: [],
+        subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
+        createdBy: req.user.username
+      });
+
+      await duplicatedTask.save();
+
+      const taskObj = duplicatedTask.toObject();
+      taskObj.id = taskObj._id.toString();
+      taskObj.contactIds = [];
+      taskObj.contactNames = [];
+      taskObj.contactName = null;
+      taskObj.source = 'global';
+
+      io.emit('task-created', taskObj);
+
+      return res.status(201).json({ duplicatedCount: 1, tasks: [taskObj] });
     }
 
-    // Create duplicated task as global task
-    const duplicatedTask = new Task({
-      userId: req.user.id,
-      title: originalTask.title + ' (kópia)',
-      description: originalTask.description || '',
-      dueDate: originalTask.dueDate || null,
-      priority: originalTask.priority || 'medium',
-      completed: false,
-      contactIds: finalContactIds,
-      subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
-      createdBy: req.user.username
+    // Create independent embedded task in each selected contact
+    const duplicatedTasks = [];
+    const updatedContacts = [];
+
+    for (const contactId of finalContactIds) {
+      const contact = await Contact.findById(contactId);
+      if (!contact) continue;
+
+      // Create new embedded task for this contact
+      const newTask = {
+        id: uuidv4(),
+        title: originalTask.title + ' (kópia)',
+        description: originalTask.description || '',
+        completed: false,
+        priority: originalTask.priority || 'medium',
+        dueDate: originalTask.dueDate || null,
+        subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
+        createdAt: new Date().toISOString()
+      };
+
+      contact.tasks.push(newTask);
+      contact.markModified('tasks');
+      await contact.save();
+
+      duplicatedTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name });
+      updatedContacts.push(contact);
+    }
+
+    // Emit updates for all affected contacts
+    for (const contact of updatedContacts) {
+      io.emit('contact-updated', contact.toJSON());
+    }
+
+    res.status(201).json({
+      duplicatedCount: duplicatedTasks.length,
+      tasks: duplicatedTasks,
+      message: `Úloha bola duplikovaná do ${duplicatedTasks.length} kontaktov`
     });
-
-    await duplicatedTask.save();
-
-    const taskObj = duplicatedTask.toObject();
-    taskObj.id = taskObj._id.toString();
-    taskObj.contactIds = finalContactIds;
-    taskObj.contactNames = contactNames;
-    taskObj.contactName = contactNames.join(', ') || null;
-    taskObj.source = 'global';
-
-    io.emit('task-created', taskObj);
-
-    res.status(201).json(taskObj);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
