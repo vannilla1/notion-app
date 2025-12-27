@@ -172,7 +172,7 @@ function Tasks() {
   };
 
   const deleteTask = async (task) => {
-    if (!window.confirm('Vymazať túto úlohu?')) return;
+    if (!window.confirm(`Naozaj chcete vymazať úlohu "${task.title}"?`)) return;
     try {
       await api.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
       await fetchTasks();
@@ -268,9 +268,10 @@ function Tasks() {
     }
   };
 
-  const deleteSubtask = async (task, subtaskId) => {
+  const deleteSubtask = async (task, subtask) => {
+    if (!window.confirm(`Naozaj chcete vymazať podúlohu "${subtask.title}"?`)) return;
     try {
-      await api.delete(`/api/tasks/${task.id}/subtasks/${subtaskId}?source=${task.source || 'global'}`);
+      await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=${task.source || 'global'}`);
       await fetchTasks();
     } catch (error) {
       console.error('Failed to delete subtask:', error);
@@ -401,7 +402,7 @@ function Tasks() {
                     +
                   </button>
                   <button onClick={() => startEditSubtask(task, subtask)} className="btn-icon-sm" title="Upravit">✏️</button>
-                  <button onClick={() => deleteSubtask(task, subtask.id)} className="btn-icon-sm" title="Vymazat">×</button>
+                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm" title="Vymazat">×</button>
                 </div>
               </>
             )}

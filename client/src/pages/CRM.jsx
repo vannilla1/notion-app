@@ -342,6 +342,7 @@ function CRM() {
   };
 
   const deleteTask = async (contact, task) => {
+    if (!window.confirm(`Naozaj chcete vymazať úlohu "${task.title}"?`)) return;
     try {
       if (task.source === 'global') {
         // Global task - use /api/tasks endpoint
@@ -471,6 +472,7 @@ function CRM() {
   };
 
   const deleteSubtask = async (task, subtask) => {
+    if (!window.confirm(`Naozaj chcete vymazať podúlohu "${subtask.title}"?`)) return;
     try {
       if (task.source === 'global') {
         await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=global`);
