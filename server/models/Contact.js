@@ -4,6 +4,7 @@ const subtaskSchema = new mongoose.Schema({
   id: String,
   title: String,
   completed: { type: Boolean, default: false },
+  dueDate: String,
   subtasks: { type: Array, default: [] }
 }, { _id: false });
 

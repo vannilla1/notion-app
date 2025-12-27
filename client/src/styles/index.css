@@ -4064,3 +4064,56 @@ a.detail-value:hover {
 .dashboard-section:hover {
   border-color: var(--accent-color);
 }
+
+/* Task and Subtask Due Date Styles */
+.task-due-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.task-due-date.overdue {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.subtask-due-date {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  padding: 1px 4px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.subtask-due-date.overdue {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.subtask-date-input {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--transition);
+}
+
+.subtask-date-input:hover {
+  opacity: 1;
+}
+
+.subtask-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.subtask-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}

@@ -404,7 +404,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
 // Add subtask to task
 router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req, res) => {
   try {
-    const { title, parentSubtaskId } = req.body;
+    const { title, parentSubtaskId, dueDate } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Nazov podulohy je povinny' });
@@ -430,6 +430,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       id: uuidv4(),
       title: title.trim(),
       completed: false,
+      dueDate: dueDate || null,
       subtasks: []
     };
 
@@ -467,7 +468,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
 // Update subtask
 router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
   try {
-    const { title, completed } = req.body;
+    const { title, completed, dueDate } = req.body;
 
     const contact = await Contact.findById(req.params.contactId);
 
@@ -493,7 +494,8 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
     found.parent[found.index] = {
       ...found.subtask,
       title: title !== undefined ? title : found.subtask.title,
-      completed: completed !== undefined ? completed : found.subtask.completed
+      completed: completed !== undefined ? completed : found.subtask.completed,
+      dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate
     };
 
     contact.markModified('tasks');

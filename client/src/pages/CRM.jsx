@@ -518,6 +518,25 @@ function CRM() {
     setEditSubtaskTitle('');
   };
 
+  const updateSubtaskDueDate = async (task, subtask, dueDate) => {
+    try {
+      if (task.source === 'global') {
+        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+          dueDate: dueDate || null,
+          source: 'global'
+        });
+        await fetchGlobalTasks();
+      } else {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
+          dueDate: dueDate || null
+        });
+        await fetchContacts();
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri nastavovaní termínu');
+    }
+  };
+
   // Recursive subtask renderer for CRM
   const renderCRMSubtasks = (task, subtasks, depth = 0) => {
     if (!subtasks || subtasks.length === 0) return null;
@@ -576,12 +595,24 @@ function CRM() {
                 >
                   {subtask.title}
                 </span>
+                {subtask.dueDate && (
+                  <span className={`subtask-due-date ${new Date(subtask.dueDate) < new Date() && !subtask.completed ? 'overdue' : ''}`}>
+                    📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                  </span>
+                )}
                 {hasChildren && (
                   <span className="subtask-child-count">
                     ({childCounts.completed}/{childCounts.total})
                   </span>
                 )}
                 <div className="subtask-actions">
+                  <input
+                    type="date"
+                    className="subtask-date-input"
+                    value={subtask.dueDate || ''}
+                    onChange={(e) => updateSubtaskDueDate(task, subtask, e.target.value)}
+                    title="Nastaviť termín"
+                  />
                   <button
                     onClick={() => {
                       setExpandedSubtasks(prev => ({ ...prev, [subtask.id]: true }));
@@ -1127,6 +1158,11 @@ function CRM() {
                                     >
                                       {task.title}
                                       {task.source === 'global' && <span className="task-source-badge">z Úloh</span>}
+                                      {task.dueDate && (
+                                        <span className={`task-due-date ${new Date(task.dueDate) < new Date() && !task.completed ? 'overdue' : ''}`}>
+                                          📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
+                                        </span>
+                                      )}
                                       {task.subtasks?.length > 0 && (
                                         <span className="subtask-count">
                                           ({countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total})
