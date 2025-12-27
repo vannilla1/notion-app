@@ -34,6 +34,7 @@ function CRM() {
 
   // Task states
   const [taskInputs, setTaskInputs] = useState({});
+  const [taskDueDates, setTaskDueDates] = useState({});
   const [editingTask, setEditingTask] = useState(null);
   const [editTaskTitle, setEditTaskTitle] = useState('');
 
@@ -309,11 +310,16 @@ function CRM() {
   const addTask = async (e, contact) => {
     e.preventDefault();
     const taskTitle = taskInputs[contact.id] || '';
+    const taskDueDate = taskDueDates[contact.id] || null;
     if (!taskTitle.trim()) return;
 
     try {
-      await api.post(`/api/contacts/${contact.id}/tasks`, { title: taskTitle });
+      await api.post(`/api/contacts/${contact.id}/tasks`, {
+        title: taskTitle,
+        dueDate: taskDueDate
+      });
       setTaskInputs(prev => ({ ...prev, [contact.id]: '' }));
+      setTaskDueDates(prev => ({ ...prev, [contact.id]: '' }));
       await fetchContacts();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytváraní úlohy');
@@ -1233,6 +1239,13 @@ function CRM() {
                                 onChange={(e) => setTaskInputs(prev => ({ ...prev, [contact.id]: e.target.value }))}
                                 placeholder="Pridať úlohu..."
                                 className="form-input form-input-sm"
+                              />
+                              <input
+                                type="date"
+                                value={taskDueDates[contact.id] || ''}
+                                onChange={(e) => setTaskDueDates(prev => ({ ...prev, [contact.id]: e.target.value }))}
+                                className="form-input form-input-sm task-date-input"
+                                title="Termín úlohy"
                               />
                               <button type="submit" className="btn btn-secondary btn-sm">+</button>
                             </form>

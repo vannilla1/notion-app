@@ -4117,3 +4117,9 @@ a.detail-value:hover {
 .subtask-date-input::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
 }
+
+/* Task date input in add task form */
+.task-date-input {
+  width: 130px;
+  flex-shrink: 0;
+}
