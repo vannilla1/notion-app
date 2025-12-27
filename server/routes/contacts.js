@@ -343,7 +343,9 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+    const taskIndex = contact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
 
     if (taskIndex === -1) {
       return res.status(404).json({ message: 'Task not found' });
@@ -379,7 +381,9 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+    const taskIndex = contact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
 
     if (taskIndex === -1) {
       return res.status(404).json({ message: 'Task not found' });
@@ -412,9 +416,13 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+    const taskIndex = contact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
 
     if (taskIndex === -1) {
+      console.log('Add subtask - Task not found. Looking for:', req.params.taskId);
+      console.log('Available tasks:', contact.tasks.map(t => ({ id: t.id, _id: t._id })));
       return res.status(404).json({ message: 'Task not found' });
     }
 
@@ -467,7 +475,9 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+    const taskIndex = contact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
 
     if (taskIndex === -1) {
       return res.status(404).json({ message: 'Task not found' });
@@ -507,7 +517,9 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+    const taskIndex = contact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
 
     if (taskIndex === -1) {
       return res.status(404).json({ message: 'Task not found' });

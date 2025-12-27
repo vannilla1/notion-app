@@ -425,7 +425,8 @@ function CRM() {
 
   const addSubtask = async (e, task, parentSubtaskId = null) => {
     e.preventDefault();
-    const inputKey = parentSubtaskId || task.id;
+    // Use unique key: contactId-taskId for embedded tasks, or parentSubtaskId for nested subtasks
+    const inputKey = parentSubtaskId || (task.contactId ? `${task.contactId}-${task.id}` : task.id);
     const subtaskTitle = subtaskInputs[inputKey] || '';
     if (!subtaskTitle.trim()) return;
 
@@ -1132,11 +1133,11 @@ function CRM() {
                                     </span>
                                     <div className="task-item-actions">
                                       <button
-                                        onClick={(e) => { e.stopPropagation(); toggleTaskExpanded(task.id); }}
+                                        onClick={(e) => { e.stopPropagation(); toggleTaskExpanded(`${contact.id}-${task.id}`); }}
                                         className="btn-icon-sm"
-                                        title={expandedTasks[task.id] ? 'Skryť podúlohy' : 'Zobraziť podúlohy'}
+                                        title={expandedTasks[`${contact.id}-${task.id}`] ? 'Skryť podúlohy' : 'Zobraziť podúlohy'}
                                       >
-                                        {expandedTasks[task.id] ? '▼' : '▶'}
+                                        {expandedTasks[`${contact.id}-${task.id}`] ? '▼' : '▶'}
                                       </button>
                                       <button
                                         onClick={() => openDuplicateModal(task, contact.id)}
@@ -1164,7 +1165,7 @@ function CRM() {
                                 )}
 
                                 {/* Subtasks - recursive */}
-                                {expandedTasks[task.id] && (
+                                {expandedTasks[`${contact.id}-${task.id}`] && (
                                   <div className="subtasks-container">
                                     <div className="subtask-tree">
                                       {renderCRMSubtasks({ ...task, contactId: contact.id }, task.subtasks, 0)}
@@ -1174,8 +1175,8 @@ function CRM() {
                                       <form onSubmit={(e) => addSubtask(e, { ...task, contactId: contact.id })} className="add-subtask-inline">
                                         <input
                                           type="text"
-                                          value={subtaskInputs[task.id] || ''}
-                                          onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                          value={subtaskInputs[`${contact.id}-${task.id}`] || ''}
+                                          onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [`${contact.id}-${task.id}`]: e.target.value }))}
                                           placeholder="Pridat podulohu..."
                                           className="form-input form-input-sm"
                                         />
