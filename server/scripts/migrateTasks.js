@@ -4,19 +4,16 @@ require('dotenv').config();
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
-const contactSchema = new mongoose.Schema({
-  tasks: { type: Array, default: [] }
-}, { strict: false });
-
-const Contact = mongoose.model('Contact', contactSchema);
-
 async function migrateTasks() {
   try {
     console.log('Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI);
     console.log('Connected to MongoDB');
 
-    const contacts = await Contact.find({});
+    const db = mongoose.connection.db;
+    const contactsCollection = db.collection('contacts');
+
+    const contacts = await contactsCollection.find({}).toArray();
     console.log(`Found ${contacts.length} contacts`);
 
     let migratedCount = 0;
@@ -53,8 +50,11 @@ async function migrateTasks() {
         }
 
         if (modified) {
-          contact.markModified('tasks');
-          await contact.save();
+          // Use direct MongoDB update
+          await contactsCollection.updateOne(
+            { _id: contact._id },
+            { $set: { tasks: contact.tasks } }
+          );
           console.log(`  Saved contact with migrated tasks`);
         }
       }
@@ -62,6 +62,19 @@ async function migrateTasks() {
 
     console.log(`\n=== Migration complete ===`);
     console.log(`Migrated ${migratedCount} tasks/subtasks`);
+
+    // Verify migration
+    console.log('\n=== Verifying migration ===');
+    const verifyContacts = await contactsCollection.find({}).toArray();
+    for (const contact of verifyContacts) {
+      if (contact.tasks && contact.tasks.length > 0) {
+        for (const task of contact.tasks) {
+          if (!task.id) {
+            console.log(`WARNING: Task "${task.title}" in "${contact.name}" still missing id!`);
+          }
+        }
+      }
+    }
 
     await mongoose.disconnect();
     console.log('Disconnected from MongoDB');
