@@ -161,6 +161,9 @@ function Tasks() {
   };
 
   const toggleTask = async (task) => {
+    if (!task.completed) {
+      if (!window.confirm(`Naozaj chcete označiť úlohu "${task.title}" ako dokončenú?`)) return;
+    }
     try {
       await api.put(`/api/tasks/${task.id}`, {
         completed: !task.completed,
@@ -256,10 +259,13 @@ function Tasks() {
     }
   };
 
-  const toggleSubtask = async (task, subtaskId, completed) => {
+  const toggleSubtask = async (task, subtask) => {
+    if (!subtask.completed) {
+      if (!window.confirm(`Naozaj chcete označiť podúlohu "${subtask.title}" ako dokončenú?`)) return;
+    }
     try {
-      await api.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
-        completed: !completed,
+      await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+        completed: !subtask.completed,
         source: task.source
       });
       await fetchTasks();
@@ -342,7 +348,7 @@ function Tasks() {
             <input
               type="checkbox"
               checked={subtask.completed}
-              onChange={() => !subtask.completed && toggleSubtask(task, subtask.id, subtask.completed)}
+              onChange={() => !subtask.completed && toggleSubtask(task, subtask)}
               disabled={subtask.completed}
               className="task-checkbox"
             />

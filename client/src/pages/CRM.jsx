@@ -328,6 +328,9 @@ function CRM() {
   };
 
   const toggleTask = async (contact, task) => {
+    if (!task.completed) {
+      if (!window.confirm(`Naozaj chcete označiť úlohu "${task.title}" ako dokončenú?`)) return;
+    }
     try {
       if (task.source === 'global') {
         // Global task - use /api/tasks endpoint
@@ -464,6 +467,9 @@ function CRM() {
   };
 
   const toggleSubtask = async (task, subtask) => {
+    if (!subtask.completed) {
+      if (!window.confirm(`Naozaj chcete označiť podúlohu "${subtask.title}" ako dokončenú?`)) return;
+    }
     try {
       if (task.source === 'global') {
         await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
