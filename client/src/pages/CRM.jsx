@@ -75,6 +75,7 @@ function CRM() {
 
     if (diffDays < 0) return 'overdue'; // už po termíne
     if (diffDays <= 3) return 'due-soon'; // do 3 dní
+    if (diffDays <= 10) return 'due-week'; // do 10 dní
     return '';
   };
 

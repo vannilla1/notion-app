@@ -1526,6 +1526,11 @@ body {
   background: var(--warning-light);
 }
 
+.due-date.due-week {
+  color: var(--success);
+  background: var(--success-light);
+}
+
 .subtask-count {
   font-size: 12px;
   color: var(--text-secondary);
@@ -4118,6 +4123,11 @@ a.detail-value:hover {
   background: var(--warning-light);
 }
 
+.task-due-date.due-week {
+  color: var(--success);
+  background: var(--success-light);
+}
+
 .subtask-due-date {
   font-size: 10px;
   color: var(--text-muted);
@@ -4135,6 +4145,11 @@ a.detail-value:hover {
 .subtask-due-date.due-soon {
   color: var(--warning);
   background: var(--warning-light);
+}
+
+.subtask-due-date.due-week {
+  color: var(--success);
+  background: var(--success-light);
 }
 
 .subtask-date-input {
@@ -4281,12 +4296,21 @@ a.detail-value:hover {
 }
 
 /* Due date filter dots in sidebar */
+.due-week-dot {
+  background: var(--success) !important;
+}
+
 .due-soon-dot {
   background: var(--warning) !important;
 }
 
 .overdue-dot {
   background: var(--danger) !important;
+}
+
+/* Due date legend colors */
+.due-week-color {
+  background: var(--success);
 }
 
 .due-stat.active {

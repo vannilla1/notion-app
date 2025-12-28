@@ -65,6 +65,7 @@ function Tasks() {
 
     if (diffDays < 0) return 'overdue'; // už po termíne
     if (diffDays <= 3) return 'due-soon'; // do 3 dní
+    if (diffDays <= 10) return 'due-week'; // do 10 dní
     return '';
   };
 
@@ -572,6 +573,9 @@ function Tasks() {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
     }
+    if (filter === 'due-week') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-week';
+    }
     if (filter === 'due-soon') {
       return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon';
     }
@@ -587,6 +591,7 @@ function Tasks() {
   const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
+  const dueWeekCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-week').length;
   const dueSoonCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon').length;
   const overdueCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue').length;
 
@@ -702,6 +707,16 @@ function Tasks() {
 
             <div className="sidebar-section-title">Termín</div>
             <div
+              className={`stat-item clickable due-stat ${filter === 'due-week' ? 'active' : ''}`}
+              onClick={() => setFilter('due-week')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot due-week-dot"></span>
+                Do 10 dní
+              </span>
+              <span className="stat-value">{dueWeekCount}</span>
+            </div>
+            <div
               className={`stat-item clickable due-stat ${filter === 'due-soon' ? 'active' : ''}`}
               onClick={() => setFilter('due-soon')}
             >
@@ -814,6 +829,10 @@ function Tasks() {
               <div className="tasks-header">
                 <h2>Zoznam úloh ({filteredTasks.length})</h2>
                 <div className="due-date-legend">
+                  <span className="legend-item">
+                    <span className="legend-color due-week-color"></span>
+                    <span>Do 10 dní</span>
+                  </span>
                   <span className="legend-item">
                     <span className="legend-color due-soon-color"></span>
                     <span>Do 3 dní</span>
