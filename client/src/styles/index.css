@@ -1757,6 +1757,11 @@ body {
   flex: 1;
 }
 
+.add-subtask-form .form-input.task-date-input {
+  flex: 0 0 auto;
+  width: 130px;
+}
+
 .form-input-sm {
   padding: 8px 12px;
   font-size: 13px;
@@ -3228,6 +3233,11 @@ a.detail-value:hover {
   flex: 1;
 }
 
+.add-task-inline .form-input.task-date-input {
+  flex: 0 0 auto;
+  width: 130px;
+}
+
 /* Subtasks in contact tasks */
 .task-item {
   flex-wrap: wrap;
@@ -3284,6 +3294,11 @@ a.detail-value:hover {
   flex: 1;
   font-size: 12px;
   padding: 6px 10px;
+}
+
+.add-subtask-inline .form-input.task-date-input {
+  flex: 0 0 auto;
+  width: 130px;
 }
 
 .add-subtask-inline .btn {

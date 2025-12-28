@@ -36,6 +36,7 @@ function Tasks() {
 
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
+  const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
@@ -244,15 +245,18 @@ function Tasks() {
     e.preventDefault();
     const inputKey = parentSubtaskId || task.id;
     const subtaskTitle = subtaskInputs[inputKey] || '';
+    const subtaskDueDate = subtaskDueDates[inputKey] || null;
     if (!subtaskTitle.trim()) return;
 
     try {
       await api.post(`/api/tasks/${task.id}/subtasks`, {
         title: subtaskTitle,
+        dueDate: subtaskDueDate,
         source: task.source,
         parentSubtaskId: parentSubtaskId
       });
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
@@ -391,6 +395,11 @@ function Tasks() {
                 >
                   {subtask.title}
                 </span>
+                {subtask.dueDate && (
+                  <span className={`subtask-due-date ${new Date(subtask.dueDate) < new Date() && !subtask.completed ? 'overdue' : ''}`}>
+                    📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                  </span>
+                )}
                 {hasChildren && (
                   <span className="subtask-child-count">
                     ({childCounts.completed}/{childCounts.total})
@@ -436,15 +445,29 @@ function Tasks() {
                 className="form-input form-input-sm"
                 autoFocus
               />
+              <input
+                type="date"
+                value={subtaskDueDates[subtask.id] || ''}
+                onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                className="form-input form-input-sm task-date-input"
+                title="Termín podúlohy"
+              />
               <button type="submit" className="btn btn-secondary btn-sm">+</button>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setSubtaskInputs(prev => {
-                  const newInputs = { ...prev };
-                  delete newInputs[subtask.id];
-                  return newInputs;
-                })}
+                onClick={() => {
+                  setSubtaskInputs(prev => {
+                    const newInputs = { ...prev };
+                    delete newInputs[subtask.id];
+                    return newInputs;
+                  });
+                  setSubtaskDueDates(prev => {
+                    const newDates = { ...prev };
+                    delete newDates[subtask.id];
+                    return newDates;
+                  });
+                }}
               >
                 ×
               </button>
@@ -844,6 +867,13 @@ function Tasks() {
                                   onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
                                   placeholder="Pridat podulohu..."
                                   className="form-input form-input-sm"
+                                />
+                                <input
+                                  type="date"
+                                  value={subtaskDueDates[task.id] || ''}
+                                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                  className="form-input form-input-sm task-date-input"
+                                  title="Termín podúlohy"
                                 />
                                 <button type="submit" className="btn btn-secondary btn-sm">+</button>
                               </form>

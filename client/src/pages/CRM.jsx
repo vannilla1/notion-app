@@ -354,17 +354,25 @@ function CRM() {
   const deleteTask = async (contact, task) => {
     if (!window.confirm(`Naozaj chcete vymazať úlohu "${task.title}"?`)) return;
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         // Global task - use /api/tasks endpoint
         await api.delete(`/api/tasks/${task.id}?source=global`);
         await fetchGlobalTasks();
       } else {
         // Contact embedded task
+        if (!contact.id || !task.id) {
+          console.error('Missing required IDs for delete task:', { contactId: contact.id, taskId: task.id });
+          alert('Chyba: Chýbajúce údaje pre vymazanie úlohy');
+          return;
+        }
         await api.delete(`/api/contacts/${contact.id}/tasks/${task.id}`);
         await fetchContacts();
       }
     } catch (error) {
       console.error('Failed to delete task:', error);
+      alert('Chyba pri mazaní úlohy');
     }
   };
 
@@ -443,7 +451,9 @@ function CRM() {
     if (!subtaskTitle.trim()) return;
 
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         await api.post(`/api/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           dueDate: subtaskDueDate,
@@ -452,6 +462,11 @@ function CRM() {
         });
         await fetchGlobalTasks();
       } else {
+        if (!task.contactId || !task.id) {
+          console.error('Missing required IDs for add subtask:', { contactId: task.contactId, taskId: task.id });
+          alert('Chyba: Chýbajúce údaje');
+          return;
+        }
         await api.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           dueDate: subtaskDueDate,
@@ -471,13 +486,20 @@ function CRM() {
       if (!window.confirm(`Naozaj chcete označiť podúlohu "${subtask.title}" ako dokončenú?`)) return;
     }
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           completed: !subtask.completed,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
+        if (!task.contactId || !task.id || !subtask.id) {
+          console.error('Missing required IDs for toggle:', { contactId: task.contactId, taskId: task.id, subtaskId: subtask.id });
+          alert('Chyba: Chýbajúce údaje');
+          return;
+        }
         await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           completed: !subtask.completed
         });
@@ -485,21 +507,30 @@ function CRM() {
       }
     } catch (error) {
       console.error('Failed to toggle subtask:', error);
+      alert('Chyba pri aktualizácii podúlohy');
     }
   };
 
   const deleteSubtask = async (task, subtask) => {
     if (!window.confirm(`Naozaj chcete vymazať podúlohu "${subtask.title}"?`)) return;
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=global`);
         await fetchGlobalTasks();
       } else {
+        if (!task.contactId || !task.id || !subtask.id) {
+          console.error('Missing required IDs:', { contactId: task.contactId, taskId: task.id, subtaskId: subtask.id });
+          alert('Chyba: Chýbajúce údaje pre vymazanie podúlohy');
+          return;
+        }
         await api.delete(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`);
         await fetchContacts();
       }
     } catch (error) {
       console.error('Failed to delete subtask:', error);
+      alert('Chyba pri mazaní podúlohy');
     }
   };
 
@@ -511,13 +542,20 @@ function CRM() {
   const saveSubtask = async (task, subtask) => {
     if (!editSubtaskTitle.trim()) return;
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
+        if (!task.contactId || !task.id || !subtask.id) {
+          console.error('Missing required IDs for save:', { contactId: task.contactId, taskId: task.id, subtaskId: subtask.id });
+          alert('Chyba: Chýbajúce údaje');
+          return;
+        }
         await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle
         });
@@ -537,13 +575,20 @@ function CRM() {
 
   const updateSubtaskDueDate = async (task, subtask, dueDate) => {
     try {
-      if (task.source === 'global') {
+      // Default to 'contact' source if not specified
+      const source = task.source || 'contact';
+      if (source === 'global') {
         await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           dueDate: dueDate || null,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
+        if (!task.contactId || !task.id || !subtask.id) {
+          console.error('Missing required IDs for due date:', { contactId: task.contactId, taskId: task.id, subtaskId: subtask.id });
+          alert('Chyba: Chýbajúce údaje');
+          return;
+        }
         await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           dueDate: dueDate || null
         });
