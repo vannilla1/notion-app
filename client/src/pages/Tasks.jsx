@@ -39,6 +39,7 @@ function Tasks() {
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
+  const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
   // Duplicate modal states
@@ -291,6 +292,7 @@ function Tasks() {
   const startEditSubtask = (task, subtask) => {
     setEditingSubtask({ taskId: task.id, subtaskId: subtask.id, source: task.source });
     setEditSubtaskTitle(subtask.title);
+    setEditSubtaskNotes(subtask.notes || '');
   };
 
   const saveSubtask = async (task, subtaskId) => {
@@ -298,10 +300,12 @@ function Tasks() {
     try {
       await api.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
         title: editSubtaskTitle,
+        notes: editSubtaskNotes,
         source: task.source
       });
       setEditingSubtask(null);
       setEditSubtaskTitle('');
+      setEditSubtaskNotes('');
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
@@ -311,6 +315,7 @@ function Tasks() {
   const cancelEditSubtask = () => {
     setEditingSubtask(null);
     setEditSubtaskTitle('');
+    setEditSubtaskNotes('');
   };
 
   const toggleSubtaskExpanded = (subtaskId) => {
@@ -367,24 +372,30 @@ function Tasks() {
             )}
 
             {editingSubtask?.taskId === task.id && editingSubtask?.subtaskId === subtask.id ? (
-              <div className="subtask-edit-form">
-                <input
-                  type="text"
-                  value={editSubtaskTitle}
-                  onChange={(e) => setEditSubtaskTitle(e.target.value)}
-                  className="form-input form-input-sm"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      saveSubtask(task, subtask.id);
-                    } else if (e.key === 'Escape') {
-                      cancelEditSubtask();
-                    }
-                  }}
-                />
-                <button onClick={() => saveSubtask(task, subtask.id)} className="btn-icon-sm btn-save" title="Ulozit">✓</button>
-                <button onClick={cancelEditSubtask} className="btn-icon-sm btn-cancel" title="Zrusit">×</button>
+              <div className="subtask-edit-form-full">
+                <div className="subtask-edit-row">
+                  <input
+                    type="text"
+                    value={editSubtaskTitle}
+                    onChange={(e) => setEditSubtaskTitle(e.target.value)}
+                    className="form-input form-input-sm"
+                    autoFocus
+                    placeholder="Názov podúlohy"
+                  />
+                </div>
+                <div className="subtask-edit-row">
+                  <textarea
+                    value={editSubtaskNotes}
+                    onChange={(e) => setEditSubtaskNotes(e.target.value)}
+                    className="form-input form-input-sm subtask-notes-input"
+                    placeholder="Poznámka..."
+                    rows={2}
+                  />
+                </div>
+                <div className="subtask-edit-actions">
+                  <button onClick={() => saveSubtask(task, subtask.id)} className="btn btn-primary btn-sm">Uložiť</button>
+                  <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
+                </div>
               </div>
             ) : (
               <>
@@ -395,6 +406,9 @@ function Tasks() {
                 >
                   {subtask.title}
                 </span>
+                {subtask.notes && (
+                  <span className="subtask-notes-indicator" title={subtask.notes}>📝</span>
+                )}
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${new Date(subtask.dueDate) < new Date() && !subtask.completed ? 'overdue' : ''}`}>
                     📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
@@ -422,6 +436,13 @@ function Tasks() {
               </>
             )}
           </div>
+
+          {/* Notes display */}
+          {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
+            <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
+              {subtask.notes}
+            </div>
+          )}
 
           {/* Nested subtasks */}
           {isExpanded && hasChildren && (

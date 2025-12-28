@@ -560,7 +560,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate } = req.body;
+    const { title, source, parentSubtaskId, dueDate, notes } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -572,6 +572,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
       title: title.trim(),
       completed: false,
       dueDate: dueDate || null,
+      notes: notes || '',
       subtasks: [],
       createdAt: new Date().toISOString()
     };
@@ -675,7 +676,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
   try {
-    const { title, completed, source, dueDate } = req.body;
+    const { title, completed, source, dueDate, notes } = req.body;
     const io = req.app.get('io');
 
     // Helper to update subtask recursively
@@ -686,7 +687,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           ...found.subtask,
           title: title !== undefined ? title : found.subtask.title,
           completed: completed !== undefined ? completed : found.subtask.completed,
-          dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate
+          dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
+          notes: notes !== undefined ? notes : found.subtask.notes
         };
         return found.parent[found.index];
       }

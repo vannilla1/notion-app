@@ -4138,3 +4138,72 @@ a.detail-value:hover {
   width: 130px;
   flex-shrink: 0;
 }
+
+/* Subtask notes styles */
+.subtask-edit-form-full {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.subtask-edit-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.subtask-edit-row input[type="text"] {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.subtask-notes-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 50px;
+}
+
+.subtask-notes-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.subtask-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.subtask-notes-indicator {
+  font-size: 12px;
+  margin-left: 4px;
+  cursor: help;
+  opacity: 0.7;
+}
+
+.subtask-notes-indicator:hover {
+  opacity: 1;
+}
+
+.subtask-notes-display {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  border-left: 3px solid var(--accent-color);
+}
