@@ -702,7 +702,7 @@ function CRM() {
           </div>
 
           {/* Notes display */}
-          {subtask.notes && !editingSubtask?.subtaskId === subtask.id && (
+          {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
             <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
               {subtask.notes}
             </div>
