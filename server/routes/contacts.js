@@ -375,21 +375,30 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
 // Delete task
 router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
   try {
+    console.log('Delete task request:', { contactId: req.params.contactId, taskId: req.params.taskId });
+
     const contact = await Contact.findById(req.params.contactId);
 
     if (!contact) {
+      console.log('Contact not found:', req.params.contactId);
       return res.status(404).json({ message: 'Contact not found' });
     }
+
+    console.log('Contact found:', contact.name, 'with', contact.tasks?.length || 0, 'tasks');
+    console.log('Task IDs in contact:', contact.tasks?.map(t => t.id) || []);
 
     const taskIndex = contact.tasks.findIndex(t =>
       t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
     );
 
     if (taskIndex === -1) {
+      console.log('Task not found with id:', req.params.taskId);
       return res.status(404).json({ message: 'Task not found' });
     }
 
+    console.log('Found task at index:', taskIndex, 'title:', contact.tasks[taskIndex].title);
     contact.tasks.splice(taskIndex, 1);
+    contact.markModified('tasks');
     await contact.save();
 
     const io = req.app.get('io');
