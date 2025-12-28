@@ -40,6 +40,7 @@ function CRM() {
 
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
+  const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [expandedTasks, setExpandedTasks] = useState({});
@@ -435,12 +436,14 @@ function CRM() {
     // Use unique key: contactId-taskId for embedded tasks, or parentSubtaskId for nested subtasks
     const inputKey = parentSubtaskId || (task.contactId ? `${task.contactId}-${task.id}` : task.id);
     const subtaskTitle = subtaskInputs[inputKey] || '';
+    const subtaskDueDate = subtaskDueDates[inputKey] || null;
     if (!subtaskTitle.trim()) return;
 
     try {
       if (task.source === 'global') {
         await api.post(`/api/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
+          dueDate: subtaskDueDate,
           source: 'global',
           parentSubtaskId: parentSubtaskId
         });
@@ -448,11 +451,13 @@ function CRM() {
       } else {
         await api.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
+          dueDate: subtaskDueDate,
           parentSubtaskId: parentSubtaskId
         });
         await fetchContacts();
       }
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
     }
@@ -612,13 +617,6 @@ function CRM() {
                   </span>
                 )}
                 <div className="subtask-actions">
-                  <input
-                    type="date"
-                    className="subtask-date-input"
-                    value={subtask.dueDate || ''}
-                    onChange={(e) => updateSubtaskDueDate(task, subtask, e.target.value)}
-                    title="Nastaviť termín"
-                  />
                   <button
                     onClick={() => {
                       setExpandedSubtasks(prev => ({ ...prev, [subtask.id]: true }));
@@ -657,6 +655,13 @@ function CRM() {
                 placeholder="Nova poduloha..."
                 className="form-input form-input-sm"
                 autoFocus
+              />
+              <input
+                type="date"
+                value={subtaskDueDates[subtask.id] || ''}
+                onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                className="form-input form-input-sm task-date-input"
+                title="Termín podúlohy"
               />
               <button type="submit" className="btn btn-secondary btn-sm">+</button>
               <button
@@ -1223,6 +1228,13 @@ function CRM() {
                                           onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [`${contact.id}-${task.id}`]: e.target.value }))}
                                           placeholder="Pridat podulohu..."
                                           className="form-input form-input-sm"
+                                        />
+                                        <input
+                                          type="date"
+                                          value={subtaskDueDates[`${contact.id}-${task.id}`] || ''}
+                                          onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [`${contact.id}-${task.id}`]: e.target.value }))}
+                                          className="form-input form-input-sm task-date-input"
+                                          title="Termín podúlohy"
                                         />
                                         <button type="submit" className="btn btn-secondary btn-sm">+</button>
                                       </form>
