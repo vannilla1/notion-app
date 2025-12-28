@@ -1552,11 +1552,17 @@ body {
 
 .tasks-header {
   margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .tasks-header h2 {
   font-size: 20px;
   color: var(--text-primary);
+  margin: 0;
 }
 
 .tasks-list {
@@ -4243,4 +4249,33 @@ a.detail-value:hover {
 .btn.active {
   background: var(--accent-color);
   color: white;
+}
+
+/* Due date legend */
+.due-date-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.due-soon-color {
+  background: var(--warning);
+}
+
+.overdue-color {
+  background: var(--danger);
 }

@@ -783,6 +783,16 @@ function Tasks() {
             <div className="tasks-page">
               <div className="tasks-header">
                 <h2>Zoznam úloh ({filteredTasks.length})</h2>
+                <div className="due-date-legend">
+                  <span className="legend-item">
+                    <span className="legend-color due-soon-color"></span>
+                    <span>Do 3 dní</span>
+                  </span>
+                  <span className="legend-item">
+                    <span className="legend-color overdue-color"></span>
+                    <span>Po termíne</span>
+                  </span>
+                </div>
               </div>
 
               {loading ? (
