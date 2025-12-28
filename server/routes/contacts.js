@@ -320,8 +320,11 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       subtasks: []
     };
 
+    console.log('Creating task with id:', task.id, 'title:', task.title);
     contact.tasks.push(task);
+    contact.markModified('tasks');
     await contact.save();
+    console.log('Task saved successfully');
 
     const io = req.app.get('io');
     io.emit('contact-updated', contact.toJSON());
