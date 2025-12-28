@@ -562,6 +562,26 @@ function Tasks() {
     return new Date(dateString).toLocaleDateString('sk-SK');
   };
 
+  const exportToCalendar = async () => {
+    try {
+      const response = await api.get('/api/tasks/export/calendar', {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data], { type: 'text/calendar' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'perun-crm-tasks.ics';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Chyba pri exporte kalendára');
+    }
+  };
+
   const filteredTasks = tasks.filter(t => {
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
@@ -611,6 +631,13 @@ function Tasks() {
           <h1 className="header-title-link" onClick={() => navigate('/')}>Perun CRM</h1>
         </div>
         <div className="crm-header-right">
+          <button
+            className="btn btn-secondary"
+            onClick={exportToCalendar}
+            title="Exportovať termíny do kalendára"
+          >
+            📅 Export
+          </button>
           <button
             className="btn btn-secondary"
             onClick={() => navigate('/crm')}
