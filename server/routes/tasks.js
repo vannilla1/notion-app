@@ -84,6 +84,111 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Export tasks to iCal format - MUST be before /:id route
+router.get('/export/calendar', authenticateToken, async (req, res) => {
+  try {
+    const contacts = await Contact.find({});
+    const globalTasks = await Task.find({});
+    const events = [];
+
+    const formatICalDate = (dateString) => {
+      const date = new Date(dateString);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}${month}${day}`;
+    };
+
+    const createUID = (id) => `${id}@peruncrm`;
+
+    const collectSubtasks = (subtasks, parentTitle, contactName) => {
+      if (!subtasks) return;
+      for (const subtask of subtasks) {
+        if (subtask.dueDate && !subtask.completed) {
+          events.push({
+            uid: createUID(subtask.id),
+            title: `${subtask.title} (${parentTitle})`,
+            dueDate: subtask.dueDate,
+            description: subtask.notes || '',
+            contact: contactName
+          });
+        }
+        if (subtask.subtasks && subtask.subtasks.length > 0) {
+          collectSubtasks(subtask.subtasks, parentTitle, contactName);
+        }
+      }
+    };
+
+    // Collect from global tasks
+    for (const task of globalTasks) {
+      if (task.dueDate && !task.completed) {
+        events.push({
+          uid: createUID(task._id.toString()),
+          title: task.title,
+          dueDate: task.dueDate,
+          description: task.description || '',
+          contact: null
+        });
+      }
+      collectSubtasks(task.subtasks, task.title, null);
+    }
+
+    // Collect from contact tasks
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        for (const task of contact.tasks) {
+          if (task.dueDate && !task.completed) {
+            events.push({
+              uid: createUID(task.id),
+              title: task.title,
+              dueDate: task.dueDate,
+              description: task.description || '',
+              contact: contact.name
+            });
+          }
+          collectSubtasks(task.subtasks, task.title, contact.name);
+        }
+      }
+    }
+
+    let ical = 'BEGIN:VCALENDAR\r\n';
+    ical += 'VERSION:2.0\r\n';
+    ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
+    ical += 'CALSCALE:GREGORIAN\r\n';
+    ical += 'METHOD:PUBLISH\r\n';
+    ical += 'X-WR-CALNAME:Perun CRM Úlohy\r\n';
+
+    for (const event of events) {
+      const dateStr = formatICalDate(event.dueDate);
+      const nextDay = new Date(event.dueDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const nextDayStr = formatICalDate(nextDay.toISOString());
+
+      ical += 'BEGIN:VEVENT\r\n';
+      ical += `UID:${event.uid}\r\n`;
+      ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
+      ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
+      ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
+      if (event.description) {
+        ical += `DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, '\\$&')}\r\n`;
+      }
+      if (event.contact) {
+        ical += `LOCATION:Kontakt: ${event.contact.replace(/[,;\\]/g, '\\$&')}\r\n`;
+      }
+      ical += 'END:VEVENT\r\n';
+    }
+
+    ical += 'END:VCALENDAR\r\n';
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="perun-crm-tasks.ics"');
+    res.send(ical);
+  } catch (error) {
+    console.error('Calendar export error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Get single task (from global tasks or contacts)
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
@@ -850,100 +955,6 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
-
-// Export tasks to iCal format
-router.get('/export/calendar', authenticateToken, async (req, res) => {
-  try {
-    const contacts = await Contact.find({});
-    const events = [];
-
-    // Helper to format date for iCal (YYYYMMDD format for all-day events)
-    const formatICalDate = (dateString) => {
-      const date = new Date(dateString);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}${month}${day}`;
-    };
-
-    // Helper to create unique ID
-    const createUID = (id) => `${id}@peruncrm`;
-
-    // Collect subtasks recursively
-    const collectSubtasks = (subtasks, parentTitle, contactName) => {
-      if (!subtasks) return;
-      for (const subtask of subtasks) {
-        if (subtask.dueDate && !subtask.completed) {
-          events.push({
-            uid: createUID(subtask.id),
-            title: `${subtask.title} (${parentTitle})`,
-            dueDate: subtask.dueDate,
-            description: subtask.notes || '',
-            contact: contactName
-          });
-        }
-        if (subtask.subtasks && subtask.subtasks.length > 0) {
-          collectSubtasks(subtask.subtasks, parentTitle, contactName);
-        }
-      }
-    };
-
-    // Collect tasks from contacts
-    for (const contact of contacts) {
-      if (contact.tasks) {
-        for (const task of contact.tasks) {
-          if (task.dueDate && !task.completed) {
-            events.push({
-              uid: createUID(task.id),
-              title: task.title,
-              dueDate: task.dueDate,
-              description: task.description || '',
-              contact: contact.name
-            });
-          }
-          collectSubtasks(task.subtasks, task.title, contact.name);
-        }
-      }
-    }
-
-    // Generate iCal content
-    let ical = 'BEGIN:VCALENDAR\r\n';
-    ical += 'VERSION:2.0\r\n';
-    ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
-    ical += 'CALSCALE:GREGORIAN\r\n';
-    ical += 'METHOD:PUBLISH\r\n';
-    ical += 'X-WR-CALNAME:Perun CRM Úlohy\r\n';
-
-    for (const event of events) {
-      const dateStr = formatICalDate(event.dueDate);
-      const nextDay = new Date(event.dueDate);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const nextDayStr = formatICalDate(nextDay.toISOString());
-
-      ical += 'BEGIN:VEVENT\r\n';
-      ical += `UID:${event.uid}\r\n`;
-      ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
-      ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
-      ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
-      if (event.description) {
-        ical += `DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, '\\$&')}\r\n`;
-      }
-      if (event.contact) {
-        ical += `LOCATION:Kontakt: ${event.contact.replace(/[,;\\]/g, '\\$&')}\r\n`;
-      }
-      ical += 'END:VEVENT\r\n';
-    }
-
-    ical += 'END:VCALENDAR\r\n';
-
-    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="perun-crm-tasks.ics"');
-    res.send(ical);
-  } catch (error) {
-    console.error('Calendar export error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
