@@ -1512,6 +1512,18 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.due-date.overdue {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.due-date.due-soon {
+  color: var(--warning);
+  background: var(--warning-light);
 }
 
 .subtask-count {
@@ -4095,6 +4107,11 @@ a.detail-value:hover {
   background: var(--danger-light);
 }
 
+.task-due-date.due-soon {
+  color: var(--warning);
+  background: var(--warning-light);
+}
+
 .subtask-due-date {
   font-size: 10px;
   color: var(--text-muted);
@@ -4107,6 +4124,11 @@ a.detail-value:hover {
 .subtask-due-date.overdue {
   color: var(--danger);
   background: var(--danger-light);
+}
+
+.subtask-due-date.due-soon {
+  color: var(--warning);
+  background: var(--warning-light);
 }
 
 .subtask-date-input {

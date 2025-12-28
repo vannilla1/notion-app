@@ -64,6 +64,20 @@ function CRM() {
     fetchGlobalTasks();
   }, []);
 
+  // Helper function to get due date status class
+  const getDueDateClass = (dueDate, completed) => {
+    if (!dueDate || completed) return '';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return 'overdue'; // už po termíne
+    if (diffDays <= 3) return 'due-soon'; // do 3 dní
+    return '';
+  };
+
   // Get all tasks for a contact (embedded + global assigned)
   const getContactTasks = (contact) => {
     const embeddedTasks = (contact.tasks || []).map(t => ({
@@ -681,7 +695,7 @@ function CRM() {
                   <span className="subtask-notes-indicator" title={subtask.notes}>📝</span>
                 )}
                 {subtask.dueDate && (
-                  <span className={`subtask-due-date ${new Date(subtask.dueDate) < new Date() && !subtask.completed ? 'overdue' : ''}`}>
+                  <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
                     📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
                   </span>
                 )}
@@ -1272,7 +1286,7 @@ function CRM() {
                                       {task.title}
                                       {task.source === 'global' && <span className="task-source-badge">z Úloh</span>}
                                       {task.dueDate && (
-                                        <span className={`task-due-date ${new Date(task.dueDate) < new Date() && !task.completed ? 'overdue' : ''}`}>
+                                        <span className={`task-due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
                                           📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
                                         </span>
                                       )}
