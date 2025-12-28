@@ -37,6 +37,8 @@ function Tasks() {
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
+  const [subtaskNotes, setSubtaskNotes] = useState({});
+  const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
@@ -247,17 +249,21 @@ function Tasks() {
     const inputKey = parentSubtaskId || task.id;
     const subtaskTitle = subtaskInputs[inputKey] || '';
     const subtaskDueDate = subtaskDueDates[inputKey] || null;
+    const subtaskNote = subtaskNotes[inputKey] || '';
     if (!subtaskTitle.trim()) return;
 
     try {
       await api.post(`/api/tasks/${task.id}/subtasks`, {
         title: subtaskTitle,
         dueDate: subtaskDueDate,
+        notes: subtaskNote,
         source: task.source,
         parentSubtaskId: parentSubtaskId
       });
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
+      setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
@@ -453,46 +459,65 @@ function Tasks() {
 
           {/* Add child subtask form */}
           {isExpanded && subtaskInputs[subtask.id] !== undefined && (
-            <form
-              onSubmit={(e) => addSubtask(e, task, subtask.id)}
-              className="add-subtask-form nested"
-              style={{ marginLeft: (depth + 1) * 16 }}
-            >
-              <input
-                type="text"
-                value={subtaskInputs[subtask.id] || ''}
-                onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                placeholder="Nova poduloha..."
-                className="form-input form-input-sm"
-                autoFocus
-              />
-              <input
-                type="date"
-                value={subtaskDueDates[subtask.id] || ''}
-                onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                className="form-input form-input-sm task-date-input"
-                title="Termín podúlohy"
-              />
-              <button type="submit" className="btn btn-secondary btn-sm">+</button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  setSubtaskInputs(prev => {
-                    const newInputs = { ...prev };
-                    delete newInputs[subtask.id];
-                    return newInputs;
-                  });
-                  setSubtaskDueDates(prev => {
-                    const newDates = { ...prev };
-                    delete newDates[subtask.id];
-                    return newDates;
-                  });
-                }}
+            <div className="add-subtask-wrapper" style={{ marginLeft: (depth + 1) * 16 }}>
+              <form
+                onSubmit={(e) => addSubtask(e, task, subtask.id)}
+                className="add-subtask-form nested"
               >
-                ×
-              </button>
-            </form>
+                <input
+                  type="text"
+                  value={subtaskInputs[subtask.id] || ''}
+                  onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                  placeholder="Nová podúloha..."
+                  className="form-input form-input-sm"
+                  autoFocus
+                />
+                <input
+                  type="date"
+                  value={subtaskDueDates[subtask.id] || ''}
+                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                  className="form-input form-input-sm task-date-input"
+                  title="Termín podúlohy"
+                />
+                <button
+                  type="button"
+                  className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
+                  onClick={() => setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
+                  title="Pridať poznámku"
+                >
+                  📝
+                </button>
+                <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setSubtaskInputs(prev => {
+                      const newInputs = { ...prev };
+                      delete newInputs[subtask.id];
+                      return newInputs;
+                    });
+                    setSubtaskDueDates(prev => {
+                      const newDates = { ...prev };
+                      delete newDates[subtask.id];
+                      return newDates;
+                    });
+                    setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
+                  }}
+                >
+                  ×
+                </button>
+              </form>
+              {showSubtaskNotesInput[subtask.id] && (
+                <textarea
+                  value={subtaskNotes[subtask.id] || ''}
+                  onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                  placeholder="Poznámka k podúlohe..."
+                  className="form-input form-input-sm subtask-notes-input"
+                  rows={2}
+                />
+              )}
+            </div>
           )}
         </div>
       );
@@ -881,23 +906,42 @@ function Tasks() {
                             </div>
 
                             {!task.completed && (
-                              <form onSubmit={(e) => addSubtask(e, task)} className="add-subtask-form">
-                                <input
-                                  type="text"
-                                  value={subtaskInputs[task.id] || ''}
-                                  onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                  placeholder="Pridat podulohu..."
-                                  className="form-input form-input-sm"
-                                />
-                                <input
-                                  type="date"
-                                  value={subtaskDueDates[task.id] || ''}
-                                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                  className="form-input form-input-sm task-date-input"
-                                  title="Termín podúlohy"
-                                />
-                                <button type="submit" className="btn btn-secondary btn-sm">+</button>
-                              </form>
+                              <div className="add-subtask-wrapper">
+                                <form onSubmit={(e) => addSubtask(e, task)} className="add-subtask-form">
+                                  <input
+                                    type="text"
+                                    value={subtaskInputs[task.id] || ''}
+                                    onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                    placeholder="Pridať podúlohu..."
+                                    className="form-input form-input-sm"
+                                  />
+                                  <input
+                                    type="date"
+                                    value={subtaskDueDates[task.id] || ''}
+                                    onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                    className="form-input form-input-sm task-date-input"
+                                    title="Termín podúlohy"
+                                  />
+                                  <button
+                                    type="button"
+                                    className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[task.id] ? 'active' : ''}`}
+                                    onClick={() => setShowSubtaskNotesInput(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                    title="Pridať poznámku"
+                                  >
+                                    📝
+                                  </button>
+                                  <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                                </form>
+                                {showSubtaskNotesInput[task.id] && (
+                                  <textarea
+                                    value={subtaskNotes[task.id] || ''}
+                                    onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                    placeholder="Poznámka k podúlohe..."
+                                    className="form-input form-input-sm subtask-notes-input"
+                                    rows={2}
+                                  />
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

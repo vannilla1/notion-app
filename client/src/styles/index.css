@@ -4207,3 +4207,18 @@ a.detail-value:hover {
   white-space: pre-wrap;
   border-left: 3px solid var(--accent-color);
 }
+
+.add-subtask-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-subtask-wrapper .subtask-notes-input {
+  margin-top: 0;
+}
+
+.btn.active {
+  background: var(--accent-color);
+  color: white;
+}
