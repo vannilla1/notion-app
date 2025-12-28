@@ -58,7 +58,7 @@ const taskSchema = new mongoose.Schema({
 });
 
 // Pre-save middleware to ensure all subtasks have IDs
-taskSchema.pre('save', function(next) {
+taskSchema.pre('save', function() {
   const generateIdsRecursive = (subtasks) => {
     if (!subtasks || !Array.isArray(subtasks)) return;
     for (let i = 0; i < subtasks.length; i++) {
@@ -73,7 +73,6 @@ taskSchema.pre('save', function(next) {
   };
 
   generateIdsRecursive(this.subtasks);
-  next();
 });
 
 module.exports = mongoose.model('Task', taskSchema);

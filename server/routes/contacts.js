@@ -409,6 +409,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
+    console.error('Delete task error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

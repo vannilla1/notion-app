@@ -70,7 +70,7 @@ const contactSchema = new mongoose.Schema({
 });
 
 // Pre-save middleware to ensure all tasks and subtasks have IDs
-contactSchema.pre('save', function(next) {
+contactSchema.pre('save', function() {
   const generateIdsRecursive = (subtasks) => {
     if (!subtasks || !Array.isArray(subtasks)) return;
     for (let i = 0; i < subtasks.length; i++) {
@@ -93,7 +93,6 @@ contactSchema.pre('save', function(next) {
       generateIdsRecursive(this.tasks[i].subtasks);
     }
   }
-  next();
 });
 
 module.exports = mongoose.model('Contact', contactSchema);
