@@ -572,6 +572,12 @@ function Tasks() {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
     }
+    if (filter === 'due-soon') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon';
+    }
+    if (filter === 'overdue') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue';
+    }
     return true;
   });
 
@@ -581,6 +587,8 @@ function Tasks() {
   const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
+  const dueSoonCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon').length;
+  const overdueCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue').length;
 
   return (
     <div className="crm-container">
@@ -690,6 +698,28 @@ function Tasks() {
                 Nízka priorita
               </span>
               <span className="stat-value">{lowPriorityCount}</span>
+            </div>
+
+            <div className="sidebar-section-title">Termín</div>
+            <div
+              className={`stat-item clickable due-stat ${filter === 'due-soon' ? 'active' : ''}`}
+              onClick={() => setFilter('due-soon')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot due-soon-dot"></span>
+                Do 3 dní
+              </span>
+              <span className="stat-value">{dueSoonCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable due-stat ${filter === 'overdue' ? 'active' : ''}`}
+              onClick={() => setFilter('overdue')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot overdue-dot"></span>
+                Po termíne
+              </span>
+              <span className="stat-value">{overdueCount}</span>
             </div>
           </div>
         </aside>

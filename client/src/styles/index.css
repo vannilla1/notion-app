@@ -4279,3 +4279,27 @@ a.detail-value:hover {
 .overdue-color {
   background: var(--danger);
 }
+
+/* Due date filter dots in sidebar */
+.due-soon-dot {
+  background: var(--warning) !important;
+}
+
+.overdue-dot {
+  background: var(--danger) !important;
+}
+
+.due-stat.active {
+  background: var(--accent-light);
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 16px;
+  margin-bottom: 8px;
+  padding: 0 12px;
+}
