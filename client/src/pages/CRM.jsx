@@ -651,13 +651,15 @@ function CRM() {
       return (
         <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
           <div className={`subtask-item ${subtask.completed ? 'completed' : ''}`}>
-            <input
-              type="checkbox"
-              checked={subtask.completed}
-              onChange={() => !subtask.completed && toggleSubtask(task, subtask)}
-              disabled={subtask.completed}
-              className="task-checkbox"
-            />
+            <div
+              className="subtask-checkbox-styled"
+              onClick={() => !subtask.completed && toggleSubtask(task, subtask)}
+              style={{
+                backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
+              }}
+            >
+              {subtask.completed && '✓'}
+            </div>
 
             {hasChildren && (
               <button
@@ -1249,13 +1251,16 @@ function CRM() {
 
                             {getContactTasks(contact).map(task => (
                               <div key={`${task.source}-${task.id}`} className={`task-item ${task.completed ? 'completed' : ''} ${task.source === 'global' ? 'global-task' : ''}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={task.completed}
-                                  onChange={() => !task.completed && toggleTask(contact, task)}
-                                  disabled={task.completed}
-                                  className="task-checkbox"
-                                />
+                                <div
+                                  className="task-checkbox-styled"
+                                  onClick={() => !task.completed && toggleTask(contact, task)}
+                                  style={{
+                                    borderColor: task.priority ? (task.priority === 'high' ? '#EF4444' : task.priority === 'medium' ? '#F59E0B' : '#10B981') : 'var(--accent-color)',
+                                    backgroundColor: task.completed ? (task.priority ? (task.priority === 'high' ? '#EF4444' : task.priority === 'medium' ? '#F59E0B' : '#10B981') : 'var(--accent-color)') : 'transparent'
+                                  }}
+                                >
+                                  {task.completed && '✓'}
+                                </div>
                                 {editingTask?.contactId === contact.id && editingTask?.taskId === task.id ? (
                                   <div className="task-edit-inline">
                                     <input

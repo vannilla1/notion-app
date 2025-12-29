@@ -395,13 +395,15 @@ function Tasks() {
       return (
         <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
           <div className={`subtask-item ${subtask.completed ? 'completed' : ''}`}>
-            <input
-              type="checkbox"
-              checked={subtask.completed}
-              onChange={() => !subtask.completed && toggleSubtask(task, subtask)}
-              disabled={subtask.completed}
-              className="task-checkbox"
-            />
+            <div
+              className="subtask-checkbox-styled"
+              onClick={() => !subtask.completed && toggleSubtask(task, subtask)}
+              style={{
+                backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
+              }}
+            >
+              {subtask.completed && '✓'}
+            </div>
 
             {hasChildren && (
               <button
@@ -908,13 +910,16 @@ function Tasks() {
                       className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''}`}
                     >
                       <div className="task-main">
-                        <input
-                          type="checkbox"
-                          checked={task.completed}
-                          onChange={() => !task.completed && toggleTask(task)}
-                          disabled={task.completed}
-                          className="task-checkbox"
-                        />
+                        <div
+                          className="task-checkbox-styled"
+                          onClick={() => !task.completed && toggleTask(task)}
+                          style={{
+                            borderColor: getPriorityColor(task.priority),
+                            backgroundColor: task.completed ? getPriorityColor(task.priority) : 'transparent'
+                          }}
+                        >
+                          {task.completed && '✓'}
+                        </div>
 
                         {editingTask === task.id ? (
                           <div className="task-edit-form">

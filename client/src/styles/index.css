@@ -1477,6 +1477,67 @@ body {
   flex-shrink: 0;
 }
 
+/* Styled checkbox for tasks */
+.task-checkbox-styled {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--accent-color);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: white;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  margin-top: 2px;
+}
+
+.task-checkbox-styled:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.task-card.completed .task-checkbox-styled {
+  cursor: default;
+}
+
+.task-card.completed .task-checkbox-styled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* Styled checkbox for subtasks */
+.subtask-checkbox-styled {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-color);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  color: white;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.subtask-checkbox-styled:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.subtask-item.completed .subtask-checkbox-styled {
+  cursor: default;
+}
+
+.subtask-item.completed .subtask-checkbox-styled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .task-content {
   flex: 1;
   cursor: pointer;
