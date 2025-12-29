@@ -263,10 +263,16 @@ function Tasks() {
 
   const saveTask = async (taskId) => {
     try {
-      await api.put(`/api/tasks/${taskId}`, {
+      const task = tasks.find(t => t.id === taskId);
+      const response = await api.put(`/api/tasks/${taskId}`, {
         ...editForm,
-        contactIds: editForm.contactIds || []
+        contactIds: editForm.contactIds || [],
+        source: task?.source || 'global'
       });
+
+      // Update local state immediately
+      const updatedTask = response.data;
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updatedTask } : t));
       setEditingTask(null);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
