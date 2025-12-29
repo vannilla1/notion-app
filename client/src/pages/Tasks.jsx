@@ -97,7 +97,11 @@ function Tasks() {
     if (!socket || !isConnected) return;
 
     const handleTaskCreated = (task) => {
-      setTasks(prev => [...prev, task]);
+      setTasks(prev => {
+        // Avoid duplicates - check if task already exists
+        if (prev.some(t => t.id === task.id)) return prev;
+        return [...prev, task];
+      });
     };
 
     const handleTaskUpdated = (updatedTask) => {
@@ -162,10 +166,21 @@ function Tasks() {
     if (!newTaskForm.title.trim()) return;
 
     try {
-      await api.post('/api/tasks', {
+      const response = await api.post('/api/tasks', {
         ...newTaskForm,
         contactIds: newTaskForm.contactIds.length > 0 ? newTaskForm.contactIds : []
       });
+
+      // Add the created task to the list immediately
+      const newTask = response.data;
+      if (newTask && newTask.id) {
+        setTasks(prev => {
+          // Avoid duplicates
+          if (prev.some(t => t.id === newTask.id)) return prev;
+          return [newTask, ...prev];
+        });
+      }
+
       setNewTaskForm({
         title: '',
         description: '',
