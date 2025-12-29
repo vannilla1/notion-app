@@ -102,9 +102,9 @@ function Dashboard() {
     }
   };
 
-  // Get all tasks for a contact (embedded + global assigned)
+  // Get all tasks for a contact (only embedded tasks)
   const getContactTasks = (contact) => {
-    const embeddedTasks = (contact.tasks || []).map(t => ({
+    return (contact.tasks || []).map(t => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -114,16 +114,6 @@ function Dashboard() {
       subtasks: t.subtasks || [],
       source: 'contact'
     }));
-    // Support both old contactId and new contactIds
-    const assignedGlobalTasks = tasks
-      .filter(t => {
-        const taskContactIds = t.contactIds?.length > 0
-          ? t.contactIds
-          : (t.contactId ? [t.contactId] : []);
-        return taskContactIds.includes(contact.id);
-      })
-      .map(t => ({ ...t, source: 'global' }));
-    return [...embeddedTasks, ...assignedGlobalTasks];
   };
 
   // Get contact names (supports multiple contacts)
