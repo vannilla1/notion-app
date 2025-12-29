@@ -435,7 +435,15 @@ function Dashboard() {
                     <div
                       key={task.id}
                       className={`detail-item task-detail-item clickable ${task.completed ? 'completed' : ''}`}
-                      onClick={() => navigate('/tasks', { state: { highlightTaskId: task.id } })}
+                      onClick={() => {
+                        // Navigate to CRM with the contact expanded
+                        const contactId = task.contactId || (task.contactIds && task.contactIds[0]);
+                        if (contactId) {
+                          navigate('/crm', { state: { expandContactId: contactId } });
+                        } else {
+                          navigate('/tasks', { state: { highlightTaskId: task.id } });
+                        }
+                      }}
                       style={{ cursor: 'pointer' }}
                     >
                       <div

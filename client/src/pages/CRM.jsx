@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '@/api/api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import UserMenu from '../components/UserMenu';
@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 function CRM() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [contacts, setContacts] = useState([]);
   const [globalTasks, setGlobalTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,25 @@ function CRM() {
     fetchContacts();
     fetchGlobalTasks();
   }, []);
+
+  // Handle navigation state to expand contact from Dashboard
+  useEffect(() => {
+    if (location.state?.expandContactId && contacts.length > 0) {
+      const contactId = location.state.expandContactId;
+      setExpandedContact(contactId);
+
+      // Clear the navigation state
+      navigate(location.pathname, { replace: true, state: {} });
+
+      // Scroll to contact after a short delay
+      setTimeout(() => {
+        const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
+        if (contactElement) {
+          contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+  }, [location.state, contacts, navigate, location.pathname]);
 
   // Helper function to get due date status class
   const getDueDateClass = (dueDate, completed) => {
@@ -1032,7 +1052,7 @@ function CRM() {
               ) : (
                 <div className="contacts-list">
                   {filteredContacts.map(contact => (
-                    <div key={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''}`}>
+                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''}`}>
                       <div className="contact-main">
                         <div
                           className="contact-avatar"
