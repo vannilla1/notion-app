@@ -24,35 +24,24 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
 // Get all tasks (including tasks from contacts) - shared workspace
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const globalTasks = await Task.find({});
+    // Only get truly global tasks (without contact assignments)
+    const globalTasks = await Task.find({
+      $or: [
+        { contactIds: { $exists: false } },
+        { contactIds: { $size: 0 } },
+        { contactIds: null }
+      ],
+      $and: [
+        { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
+      ]
+    });
     const contacts = await Contact.find({});
 
-    // Enrich global tasks with contact info
+    // Enrich global tasks (these should have no contacts)
     const enrichedGlobalTasks = globalTasks.map(task => {
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
-
-      // Support both old contactId (single) and new contactIds (array)
-      const contactIds = taskObj.contactIds?.length > 0
-        ? taskObj.contactIds
-        : (taskObj.contactId ? [taskObj.contactId] : []);
-
-      if (contactIds.length > 0) {
-        const contactNames = contactIds
-          .map(cId => {
-            const contact = contacts.find(c => c._id.toString() === cId.toString());
-            return contact ? contact.name : null;
-          })
-          .filter(Boolean);
-        return {
-          ...taskObj,
-          contactIds,
-          contactNames,
-          contactName: contactNames.join(', ') || null,
-          source: 'global'
-        };
-      }
-      return { ...taskObj, contactIds: [], contactNames: [], source: 'global' };
+      return { ...taskObj, contactIds: [], contactNames: [], contactName: null, source: 'global' };
     });
 
     // Extract tasks from contacts
