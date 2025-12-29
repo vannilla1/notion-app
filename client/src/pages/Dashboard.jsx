@@ -434,7 +434,9 @@ function Dashboard() {
                   {detailData.items.map(task => (
                     <div
                       key={task.id}
-                      className={`detail-item task-detail-item ${task.completed ? 'completed' : ''}`}
+                      className={`detail-item task-detail-item clickable ${task.completed ? 'completed' : ''}`}
+                      onClick={() => navigate('/tasks', { state: { highlightTaskId: task.id } })}
+                      style={{ cursor: 'pointer' }}
                     >
                       <div
                         className="task-priority-dot"
