@@ -3308,6 +3308,115 @@ a.detail-value:hover {
   margin-left: 30px;
 }
 
+/* Dashboard subtasks */
+.dashboard-subtasks-container {
+  width: 100%;
+  margin-top: 12px;
+  margin-left: 30px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent-color);
+}
+
+.dashboard-subtasks-container .subtasks-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dashboard-subtask-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  transition: all 0.2s ease;
+}
+
+.dashboard-subtask-item:hover {
+  background: var(--bg-hover);
+}
+
+.dashboard-subtask-item.completed .subtask-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.dashboard-subtask-item .subtask-checkbox {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-color);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  color: white;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.dashboard-subtask-item .subtask-checkbox:hover {
+  transform: scale(1.1);
+}
+
+.dashboard-subtask-item .subtask-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-subtask-item .subtask-title {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.dashboard-subtask-item .subtask-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dashboard-subtask-item .subtask-date {
+  color: var(--text-secondary);
+}
+
+.dashboard-subtask-item .subtask-notes {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.subtask-edit-inline {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subtask-edit-row {
+  display: flex;
+  gap: 8px;
+}
+
+.subtask-edit-row .form-input {
+  flex: 1;
+}
+
+.subtask-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .add-task-inline {
   display: flex;
   gap: 8px;

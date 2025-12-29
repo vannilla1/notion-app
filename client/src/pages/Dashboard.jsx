@@ -22,6 +22,8 @@ function Dashboard() {
   const [expandedTask, setExpandedTask] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [editingSubtask, setEditingSubtask] = useState(null);
+  const [subtaskEditForm, setSubtaskEditForm] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -243,6 +245,55 @@ function Dashboard() {
       await fetchData();
     } catch (error) {
       alert('Chyba pri aktualizácii úlohy');
+    }
+  };
+
+  // Subtask functions
+  const startEditSubtask = (subtask) => {
+    setEditingSubtask(subtask.id);
+    setSubtaskEditForm({
+      title: subtask.title,
+      dueDate: subtask.dueDate || '',
+      notes: subtask.notes || ''
+    });
+  };
+
+  const cancelEditSubtask = () => {
+    setEditingSubtask(null);
+    setSubtaskEditForm({});
+  };
+
+  const saveSubtask = async (task, subtask) => {
+    try {
+      const updatedSubtasks = task.subtasks.map(s =>
+        s.id === subtask.id ? { ...s, ...subtaskEditForm } : s
+      );
+      if (task.source === 'contact' && task.contactId) {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}`, { subtasks: updatedSubtasks });
+      } else {
+        await api.put(`/api/tasks/${task.id}`, { subtasks: updatedSubtasks });
+      }
+      await fetchData();
+      setEditingSubtask(null);
+      setSubtaskEditForm({});
+    } catch (error) {
+      alert('Chyba pri ukladaní podúlohy');
+    }
+  };
+
+  const toggleSubtaskComplete = async (task, subtask) => {
+    try {
+      const updatedSubtasks = task.subtasks.map(s =>
+        s.id === subtask.id ? { ...s, completed: !s.completed } : s
+      );
+      if (task.source === 'contact' && task.contactId) {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}`, { subtasks: updatedSubtasks });
+      } else {
+        await api.put(`/api/tasks/${task.id}`, { subtasks: updatedSubtasks });
+      }
+      await fetchData();
+    } catch (error) {
+      alert('Chyba pri aktualizácii podúlohy');
     }
   };
 
@@ -580,9 +631,89 @@ function Dashboard() {
                               ✏️
                             </button>
                           </div>
-                          {task.subtasks?.length > 0 && (
+                          {task.subtasks?.length > 0 && !expandedTask && (
                             <div className="detail-item-badge">
                               {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                            </div>
+                          )}
+                          {/* Subtasks list when expanded */}
+                          {expandedTask === task.id && task.subtasks?.length > 0 && (
+                            <div className="dashboard-subtasks-container">
+                              <div className="subtasks-header">
+                                Podúlohy ({task.subtasks.filter(s => s.completed).length}/{task.subtasks.length})
+                              </div>
+                              {task.subtasks.map(subtask => (
+                                <div
+                                  key={subtask.id}
+                                  className={`dashboard-subtask-item ${subtask.completed ? 'completed' : ''}`}
+                                >
+                                  {editingSubtask === subtask.id ? (
+                                    <div className="subtask-edit-inline">
+                                      <input
+                                        type="text"
+                                        value={subtaskEditForm.title}
+                                        onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, title: e.target.value })}
+                                        className="form-input"
+                                        placeholder="Názov podúlohy"
+                                        autoFocus
+                                      />
+                                      <div className="subtask-edit-row">
+                                        <input
+                                          type="date"
+                                          value={subtaskEditForm.dueDate}
+                                          onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, dueDate: e.target.value })}
+                                          className="form-input"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={subtaskEditForm.notes}
+                                          onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, notes: e.target.value })}
+                                          className="form-input"
+                                          placeholder="Poznámky"
+                                        />
+                                      </div>
+                                      <div className="subtask-edit-actions">
+                                        <button onClick={() => saveSubtask(task, subtask)} className="btn btn-primary btn-sm">Uložiť</button>
+                                        <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div
+                                        className="subtask-checkbox"
+                                        onClick={(e) => { e.stopPropagation(); toggleSubtaskComplete(task, subtask); }}
+                                        style={{
+                                          backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
+                                        }}
+                                      >
+                                        {subtask.completed && '✓'}
+                                      </div>
+                                      <div className="subtask-content">
+                                        <div className="subtask-title">{subtask.title}</div>
+                                        {(subtask.dueDate || subtask.notes) && (
+                                          <div className="subtask-meta">
+                                            {subtask.dueDate && (
+                                              <span className="subtask-date">
+                                                📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                                              </span>
+                                            )}
+                                            {subtask.notes && (
+                                              <span className="subtask-notes">{subtask.notes}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); startEditSubtask(subtask); }}
+                                        className="btn-icon-sm"
+                                        title="Upraviť"
+                                      >
+                                        ✏️
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </>
