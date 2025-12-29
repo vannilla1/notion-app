@@ -512,6 +512,8 @@ const duplicateSubtasksRecursive = (subtasks) => {
     id: uuidv4(),
     title: subtask.title,
     completed: false,
+    dueDate: subtask.dueDate || null,
+    notes: subtask.notes || '',
     subtasks: duplicateSubtasksRecursive(subtask.subtasks),
     createdAt: new Date().toISOString()
   }));
