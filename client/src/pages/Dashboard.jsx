@@ -18,6 +18,11 @@ function Dashboard() {
   const [detailView, setDetailView] = useState(null); // 'contacts', 'tasks', 'active', 'pending', 'completed', 'contactTasks'
   const [selectedContact, setSelectedContact] = useState(null);
 
+  // Task editing state
+  const [expandedTask, setExpandedTask] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
+  const [editForm, setEditForm] = useState({});
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -112,7 +117,9 @@ function Dashboard() {
       priority: t.priority,
       dueDate: t.dueDate,
       subtasks: t.subtasks || [],
-      source: 'contact'
+      notes: t.notes,
+      source: 'contact',
+      contactId: contact.id
     }));
   };
 
@@ -183,11 +190,60 @@ function Dashboard() {
   const closeDetailView = () => {
     setDetailView(null);
     setSelectedContact(null);
+    setExpandedTask(null);
+    setEditingTask(null);
   };
 
   const openContactTasks = (contact) => {
     setSelectedContact(contact);
     setDetailView('contactTasks');
+  };
+
+  // Task editing functions
+  const startEditTask = (task) => {
+    setEditingTask(task.id);
+    setEditForm({
+      title: task.title,
+      description: task.description || '',
+      dueDate: task.dueDate || '',
+      priority: task.priority || 'medium'
+    });
+  };
+
+  const cancelEditTask = () => {
+    setEditingTask(null);
+    setEditForm({});
+  };
+
+  const saveTask = async (task) => {
+    try {
+      if (task.source === 'contact' && task.contactId) {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}`, editForm);
+      } else {
+        await api.put(`/api/tasks/${task.id}`, { ...editForm, source: task.source });
+      }
+      await fetchData();
+      setEditingTask(null);
+      setEditForm({});
+    } catch (error) {
+      alert('Chyba pri ukladaní úlohy');
+    }
+  };
+
+  const toggleTaskComplete = async (task) => {
+    if (!task.completed) {
+      if (!window.confirm(`Označiť úlohu "${task.title}" ako dokončenú?`)) return;
+    }
+    try {
+      if (task.source === 'contact' && task.contactId) {
+        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}`, { completed: !task.completed });
+      } else {
+        await api.put(`/api/tasks/${task.id}`, { completed: !task.completed, source: task.source });
+      }
+      await fetchData();
+    } catch (error) {
+      alert('Chyba pri aktualizácii úlohy');
+    }
   };
 
   const detailData = getDetailItems();
@@ -434,51 +490,102 @@ function Dashboard() {
                   {detailData.items.map(task => (
                     <div
                       key={task.id}
-                      className={`detail-item task-detail-item clickable ${task.completed ? 'completed' : ''}`}
-                      onClick={() => {
-                        // Navigate to CRM with the contact expanded
-                        const contactId = task.contactId || (task.contactIds && task.contactIds[0]);
-                        if (contactId) {
-                          navigate('/crm', { state: { expandContactId: contactId } });
-                        } else {
-                          navigate('/tasks', { state: { highlightTaskId: task.id } });
-                        }
-                      }}
-                      style={{ cursor: 'pointer' }}
+                      className={`detail-item task-detail-item ${task.completed ? 'completed' : ''} ${expandedTask === task.id ? 'expanded' : ''}`}
                     >
-                      <div
-                        className="task-priority-dot"
-                        style={{ backgroundColor: getPriorityColor(task.priority) }}
-                      />
-                      <div className="detail-item-content">
-                        <div className="detail-item-title">{task.title}</div>
-                        <div className="detail-item-meta">
-                          <span
-                            className="priority-badge"
-                            style={{ backgroundColor: getPriorityColor(task.priority) }}
+                      {editingTask === task.id ? (
+                        /* Edit mode */
+                        <div className="task-edit-inline">
+                          <input
+                            type="text"
+                            value={editForm.title}
+                            onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                            className="form-input"
+                            placeholder="Názov úlohy"
+                            autoFocus
+                          />
+                          <textarea
+                            value={editForm.description}
+                            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                            className="form-input"
+                            placeholder="Popis"
+                            rows={2}
+                          />
+                          <div className="task-edit-row">
+                            <input
+                              type="date"
+                              value={editForm.dueDate}
+                              onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
+                              className="form-input"
+                            />
+                            <select
+                              value={editForm.priority}
+                              onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
+                              className="form-input"
+                            >
+                              <option value="low">Nízka</option>
+                              <option value="medium">Stredná</option>
+                              <option value="high">Vysoká</option>
+                            </select>
+                          </div>
+                          <div className="task-edit-actions">
+                            <button onClick={() => saveTask(task)} className="btn btn-primary btn-sm">Uložiť</button>
+                            <button onClick={cancelEditTask} className="btn btn-secondary btn-sm">Zrušiť</button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* View mode */
+                        <>
+                          <div
+                            className="task-checkbox"
+                            onClick={(e) => { e.stopPropagation(); toggleTaskComplete(task); }}
+                            style={{
+                              borderColor: getPriorityColor(task.priority),
+                              backgroundColor: task.completed ? getPriorityColor(task.priority) : 'transparent'
+                            }}
                           >
-                            {getPriorityLabel(task.priority)}
-                          </span>
-                          {getContactNames(task).length > 0 && (
-                            <span className="contact-badge">👤 {getContactNames(task).join(', ')}</span>
+                            {task.completed && '✓'}
+                          </div>
+                          <div
+                            className="detail-item-content"
+                            onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div className="detail-item-title">{task.title}</div>
+                            <div className="detail-item-meta">
+                              <span
+                                className="priority-badge"
+                                style={{ backgroundColor: getPriorityColor(task.priority) }}
+                              >
+                                {getPriorityLabel(task.priority)}
+                              </span>
+                              {getContactNames(task).length > 0 && (
+                                <span className="contact-badge">👤 {getContactNames(task).join(', ')}</span>
+                              )}
+                              {task.dueDate && (
+                                <span className="date-badge">
+                                  📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
+                                </span>
+                              )}
+                            </div>
+                            {task.description && expandedTask === task.id && (
+                              <div className="detail-item-description">{task.description}</div>
+                            )}
+                          </div>
+                          <div className="task-item-actions">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startEditTask(task); }}
+                              className="btn-icon"
+                              title="Upraviť"
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                          {task.subtasks?.length > 0 && (
+                            <div className="detail-item-badge">
+                              {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                            </div>
                           )}
-                          {task.dueDate && (
-                            <span className="date-badge">
-                              📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
-                            </span>
-                          )}
-                          {task.completed && (
-                            <span className="completed-badge">✓ Splnena</span>
-                          )}
-                        </div>
-                        {task.description && (
-                          <div className="detail-item-description">{task.description}</div>
-                        )}
-                      </div>
-                      {task.subtasks?.length > 0 && (
-                        <div className="detail-item-badge">
-                          {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
-                        </div>
+                        </>
                       )}
                     </div>
                   ))}
