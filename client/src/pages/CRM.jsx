@@ -79,9 +79,9 @@ function CRM() {
     return '';
   };
 
-  // Get all tasks for a contact (embedded + global assigned)
+  // Get all tasks for a contact (only embedded tasks)
   const getContactTasks = (contact) => {
-    const embeddedTasks = (contact.tasks || []).map(t => ({
+    return (contact.tasks || []).map(t => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -89,19 +89,10 @@ function CRM() {
       priority: t.priority,
       dueDate: t.dueDate,
       subtasks: t.subtasks || [],
+      notes: t.notes,
       source: 'contact',
       contactId: contact.id
     }));
-    // Support both old contactId and new contactIds
-    const assignedGlobalTasks = globalTasks
-      .filter(t => {
-        const taskContactIds = t.contactIds?.length > 0
-          ? t.contactIds
-          : (t.contactId ? [t.contactId] : []);
-        return taskContactIds.includes(contact.id) && t.source === 'global';
-      })
-      .map(t => ({ ...t, source: 'global' }));
-    return [...embeddedTasks, ...assignedGlobalTasks];
   };
 
   useEffect(() => {
