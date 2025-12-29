@@ -74,10 +74,10 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
-// Get all contacts (shared workspace)
+// Get all contacts (shared workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({}).sort({ name: 1 });
     res.json(contacts);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
