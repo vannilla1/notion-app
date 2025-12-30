@@ -4238,42 +4238,38 @@ a.detail-value:hover {
   flex: 1;
   min-width: 0;
   text-align: left;
-  padding: 8px 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Expand button for mobile */
-.btn-expand {
-  font-size: 12px !important;
-  min-width: 36px;
-  min-height: 36px;
+  padding: 10px 8px;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  cursor: pointer;
 }
 
 /* Better touch targets for mobile task items */
 @media (hover: none) and (pointer: coarse) {
   .detail-item.task-detail-item {
-    padding: 12px;
+    padding: 10px 12px;
+    min-height: 56px;
   }
 
   .detail-item.task-detail-item .task-checkbox {
-    min-width: 32px;
-    min-height: 32px;
-    width: 32px;
-    height: 32px;
-  }
-
-  .detail-item.task-detail-item .task-item-actions {
-    gap: 8px;
+    min-width: 28px;
+    min-height: 28px;
+    width: 28px;
+    height: 28px;
   }
 
   .detail-item.task-detail-item .task-item-actions .btn-icon {
-    min-width: 44px;
-    min-height: 44px;
-    font-size: 18px;
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 16px;
   }
 
   .detail-item-content {
-    padding: 12px 8px;
+    padding: 10px 8px;
+  }
+
+  .detail-item-badge {
+    padding: 5px 10px;
+    font-size: 12px;
   }
 }
 

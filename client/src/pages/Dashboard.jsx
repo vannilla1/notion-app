@@ -623,15 +623,6 @@ function Dashboard() {
                             )}
                           </div>
                           <div className="task-item-actions">
-                            {task.subtasks?.length > 0 && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setExpandedTask(expandedTask === task.id ? null : task.id); }}
-                                className="btn-icon btn-expand"
-                                title={expandedTask === task.id ? 'Skryť podúlohy' : 'Zobraziť podúlohy'}
-                              >
-                                {expandedTask === task.id ? '▲' : '▼'}
-                              </button>
-                            )}
                             <button
                               onClick={(e) => { e.stopPropagation(); startEditTask(task); }}
                               className="btn-icon"
