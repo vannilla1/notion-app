@@ -669,6 +669,12 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       contact.markModified('tasks');
       await contact.save();
 
+      // Reload contact to see what was actually saved
+      const savedContact = await Contact.findById(contactId);
+      const savedTask = savedContact.tasks.find(t => t.id === newTask.id);
+      console.log('AFTER SAVE - Task subtasks count:', savedTask?.subtasks?.length || 0);
+      console.log('AFTER SAVE - Task subtasks:', JSON.stringify(savedTask?.subtasks, null, 2));
+
       duplicatedTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name });
       updatedContacts.push(contact);
     }
