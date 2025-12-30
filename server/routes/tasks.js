@@ -216,16 +216,31 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Helper function to clone subtasks with new IDs
+const cloneSubtasksWithNewIds = (subtasks) => {
+  if (!subtasks || !Array.isArray(subtasks)) return [];
+  return subtasks.map(subtask => ({
+    id: uuidv4(),
+    title: subtask.title,
+    completed: subtask.completed || false,
+    dueDate: subtask.dueDate || null,
+    notes: subtask.notes || '',
+    subtasks: cloneSubtasksWithNewIds(subtask.subtasks),
+    createdAt: new Date().toISOString()
+  }));
+};
+
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, contactId, contactIds } = req.body;
+    const { title, description, dueDate, priority, contactId, contactIds, subtasks } = req.body;
     const io = req.app.get('io');
 
     console.log('=== CREATE TASK ===');
     console.log('Request body:', req.body);
     console.log('contactIds:', contactIds);
     console.log('contactId:', contactId);
+    console.log('subtasks:', subtasks);
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
@@ -249,7 +264,7 @@ router.post('/', authenticateToken, async (req, res) => {
         priority: priority || 'medium',
         completed: false,
         contactIds: [],
-        subtasks: [],
+        subtasks: cloneSubtasksWithNewIds(subtasks),
         createdBy: req.user.username
       });
 
@@ -283,7 +298,7 @@ router.post('/', authenticateToken, async (req, res) => {
         completed: false,
         priority: priority || 'medium',
         dueDate: dueDate || null,
-        subtasks: [],
+        subtasks: cloneSubtasksWithNewIds(subtasks),
         createdAt: new Date().toISOString()
       };
 
@@ -554,7 +569,8 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       const globalTask = await Task.findById(req.params.id);
       console.log('Global task found:', !!globalTask);
       if (globalTask) {
-        originalTask = globalTask.toObject();
+        // Deep copy to ensure subtasks are properly copied
+        originalTask = JSON.parse(JSON.stringify(globalTask.toObject()));
         originalTask.source = 'global';
       }
     }
@@ -573,7 +589,8 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
           });
           if (found) {
             console.log('Found task in contact:', contact.name);
-            originalTask = typeof found.toObject === 'function' ? found.toObject() : { ...found };
+            // Deep copy the task to ensure subtasks are properly copied
+            originalTask = JSON.parse(JSON.stringify(found));
             originalTask.source = 'contact';
             break;
           }
@@ -582,6 +599,10 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
     }
 
     console.log('Original task found:', !!originalTask);
+    if (originalTask) {
+      console.log('Original task subtasks:', JSON.stringify(originalTask.subtasks, null, 2));
+      console.log('Subtasks count:', originalTask.subtasks?.length || 0);
+    }
 
     if (!originalTask) {
       return res.status(404).json({ message: 'Task not found' });
@@ -641,6 +662,9 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       if (!contact.tasks) {
         contact.tasks = [];
       }
+      console.log('Creating duplicated task with subtasks:', JSON.stringify(newTask.subtasks, null, 2));
+      console.log('Duplicated subtasks count:', newTask.subtasks?.length || 0);
+
       contact.tasks.push(newTask);
       contact.markModified('tasks');
       await contact.save();
