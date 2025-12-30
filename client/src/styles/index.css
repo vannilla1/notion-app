@@ -4428,6 +4428,28 @@ a.detail-value:hover {
   background: var(--success-light);
 }
 
+/* Dashboard date badges */
+.date-badge.overdue,
+.due-date-badge.overdue,
+.subtask-date.overdue {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.date-badge.due-soon,
+.due-date-badge.due-soon,
+.subtask-date.due-soon {
+  color: var(--warning);
+  background: var(--warning-light);
+}
+
+.date-badge.due-week,
+.due-date-badge.due-week,
+.subtask-date.due-week {
+  color: var(--success);
+  background: var(--success-light);
+}
+
 .subtask-date-input {
   width: 24px;
   height: 24px;

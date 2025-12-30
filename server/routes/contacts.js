@@ -376,11 +376,14 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
     const task = contact.tasks[taskIndex];
     contact.tasks[taskIndex] = {
       ...task,
+      id: task.id,
       title: title !== undefined ? title : task.title,
       description: description !== undefined ? description : task.description,
       dueDate: dueDate !== undefined ? dueDate : task.dueDate,
       priority: priority !== undefined ? priority : task.priority,
-      completed: completed !== undefined ? completed : task.completed
+      completed: completed !== undefined ? completed : task.completed,
+      subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
+      createdAt: task.createdAt
     };
 
     await contact.save();
