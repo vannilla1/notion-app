@@ -24,6 +24,7 @@ function Dashboard() {
   const [editForm, setEditForm] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [subtaskEditForm, setSubtaskEditForm] = useState({});
+  const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -295,6 +296,136 @@ function Dashboard() {
     } catch (error) {
       alert('Chyba pri aktualizácii podúlohy');
     }
+  };
+
+  // Helper to count all subtasks recursively
+  const countSubtasksRecursive = (subtasks) => {
+    if (!subtasks || subtasks.length === 0) return { total: 0, completed: 0 };
+    let total = 0;
+    let completed = 0;
+    subtasks.forEach(s => {
+      total++;
+      if (s.completed) completed++;
+      if (s.subtasks && s.subtasks.length > 0) {
+        const childCounts = countSubtasksRecursive(s.subtasks);
+        total += childCounts.total;
+        completed += childCounts.completed;
+      }
+    });
+    return { total, completed };
+  };
+
+  // Toggle expand/collapse for nested subtasks
+  const toggleSubtaskExpanded = (subtaskId) => {
+    setExpandedSubtasks(prev => ({
+      ...prev,
+      [subtaskId]: !prev[subtaskId]
+    }));
+  };
+
+  // Recursive subtask renderer for Dashboard
+  const renderDashboardSubtasks = (task, subtasks, depth = 0) => {
+    if (!subtasks || subtasks.length === 0) return null;
+
+    return subtasks.map(subtask => {
+      const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
+      const isExpanded = expandedSubtasks[subtask.id];
+      const childCounts = hasChildren ? countSubtasksRecursive(subtask.subtasks) : { total: 0, completed: 0 };
+
+      return (
+        <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
+          <div className={`dashboard-subtask-item ${subtask.completed ? 'completed' : ''}`}>
+            <div
+              className="subtask-checkbox"
+              onClick={(e) => { e.stopPropagation(); toggleSubtaskComplete(task, subtask); }}
+              style={{
+                backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
+              }}
+            >
+              {subtask.completed && '✓'}
+            </div>
+
+            {hasChildren && (
+              <button
+                className="subtask-expand-btn"
+                onClick={(e) => { e.stopPropagation(); toggleSubtaskExpanded(subtask.id); }}
+              >
+                {isExpanded ? '▼' : '▶'}
+              </button>
+            )}
+
+            {editingSubtask === subtask.id ? (
+              <div className="subtask-edit-inline" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  value={subtaskEditForm.title}
+                  onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, title: e.target.value })}
+                  className="form-input"
+                  placeholder="Názov podúlohy"
+                  autoFocus
+                />
+                <div className="subtask-edit-row">
+                  <input
+                    type="date"
+                    value={subtaskEditForm.dueDate}
+                    onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, dueDate: e.target.value })}
+                    className="form-input"
+                  />
+                  <input
+                    type="text"
+                    value={subtaskEditForm.notes}
+                    onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, notes: e.target.value })}
+                    className="form-input"
+                    placeholder="Poznámky"
+                  />
+                </div>
+                <div className="subtask-edit-actions">
+                  <button onClick={() => saveSubtask(task, subtask)} className="btn btn-primary btn-sm">Uložiť</button>
+                  <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="subtask-content">
+                  <div className="subtask-title">{subtask.title}</div>
+                  {(subtask.dueDate || subtask.notes) && (
+                    <div className="subtask-meta">
+                      {subtask.dueDate && (
+                        <span className="subtask-date">
+                          📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                        </span>
+                      )}
+                      {subtask.notes && (
+                        <span className="subtask-notes">{subtask.notes}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {hasChildren && (
+                  <span className="subtask-child-count">
+                    ({childCounts.completed}/{childCounts.total})
+                  </span>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); startEditSubtask(subtask); }}
+                  className="btn-icon-sm"
+                  title="Upraviť"
+                >
+                  ✏️
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Nested subtasks */}
+          {isExpanded && hasChildren && (
+            <div className="subtask-children">
+              {renderDashboardSubtasks(task, subtask.subtasks, depth + 1)}
+            </div>
+          )}
+        </div>
+      );
+    });
   };
 
   const detailData = getDetailItems();
@@ -631,87 +762,18 @@ function Dashboard() {
                           </div>
                           {task.subtasks?.length > 0 && expandedTask !== task.id && (
                             <div className="detail-item-badge">
-                              {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+                              {countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total}
                             </div>
                           )}
                           {/* Subtasks list when expanded */}
                           {expandedTask === task.id && task.subtasks?.length > 0 && (
                             <div className="dashboard-subtasks-container">
                               <div className="subtasks-header">
-                                Podúlohy ({task.subtasks.filter(s => s.completed).length}/{task.subtasks.length})
+                                Podúlohy ({countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total})
                               </div>
-                              {task.subtasks.map(subtask => (
-                                <div
-                                  key={subtask.id}
-                                  className={`dashboard-subtask-item ${subtask.completed ? 'completed' : ''}`}
-                                >
-                                  {editingSubtask === subtask.id ? (
-                                    <div className="subtask-edit-inline">
-                                      <input
-                                        type="text"
-                                        value={subtaskEditForm.title}
-                                        onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, title: e.target.value })}
-                                        className="form-input"
-                                        placeholder="Názov podúlohy"
-                                        autoFocus
-                                      />
-                                      <div className="subtask-edit-row">
-                                        <input
-                                          type="date"
-                                          value={subtaskEditForm.dueDate}
-                                          onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, dueDate: e.target.value })}
-                                          className="form-input"
-                                        />
-                                        <input
-                                          type="text"
-                                          value={subtaskEditForm.notes}
-                                          onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, notes: e.target.value })}
-                                          className="form-input"
-                                          placeholder="Poznámky"
-                                        />
-                                      </div>
-                                      <div className="subtask-edit-actions">
-                                        <button onClick={() => saveSubtask(task, subtask)} className="btn btn-primary btn-sm">Uložiť</button>
-                                        <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div
-                                        className="subtask-checkbox"
-                                        onClick={(e) => { e.stopPropagation(); toggleSubtaskComplete(task, subtask); }}
-                                        style={{
-                                          backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
-                                        }}
-                                      >
-                                        {subtask.completed && '✓'}
-                                      </div>
-                                      <div className="subtask-content">
-                                        <div className="subtask-title">{subtask.title}</div>
-                                        {(subtask.dueDate || subtask.notes) && (
-                                          <div className="subtask-meta">
-                                            {subtask.dueDate && (
-                                              <span className="subtask-date">
-                                                📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
-                                              </span>
-                                            )}
-                                            {subtask.notes && (
-                                              <span className="subtask-notes">{subtask.notes}</span>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); startEditSubtask(subtask); }}
-                                        className="btn-icon-sm"
-                                        title="Upraviť"
-                                      >
-                                        ✏️
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              ))}
+                              <div className="subtask-tree">
+                                {renderDashboardSubtasks(task, task.subtasks, 0)}
+                              </div>
                             </div>
                           )}
                         </>
