@@ -76,7 +76,6 @@ contactSchema.pre('save', function() {
     for (let i = 0; i < subtasks.length; i++) {
       if (!subtasks[i].id) {
         subtasks[i].id = uuidv4();
-        console.log('Generated missing subtask ID:', subtasks[i].id, 'for:', subtasks[i].title);
       }
       if (subtasks[i].subtasks && subtasks[i].subtasks.length > 0) {
         generateIdsRecursive(subtasks[i].subtasks);
@@ -88,7 +87,6 @@ contactSchema.pre('save', function() {
     for (let i = 0; i < this.tasks.length; i++) {
       if (!this.tasks[i].id) {
         this.tasks[i].id = uuidv4();
-        console.log('Generated missing task ID:', this.tasks[i].id, 'for:', this.tasks[i].title);
       }
       generateIdsRecursive(this.tasks[i].subtasks);
     }

@@ -299,15 +299,11 @@ function CRM() {
 
   const duplicateTask = async () => {
     if (!duplicatingTask) return;
-    console.log('Duplicating task:', duplicatingTask);
-    console.log('Task ID:', duplicatingTask.id);
-    console.log('Contact IDs:', duplicateContactIds);
     try {
-      const response = await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
+      await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
         contactIds: duplicateContactIds,
         source: duplicatingTask.source
       });
-      console.log('Duplicate response:', response.data);
       closeDuplicateModal();
       fetchGlobalTasks();
       fetchContacts();

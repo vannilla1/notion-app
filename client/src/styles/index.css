@@ -5037,8 +5037,63 @@ a.detail-value:hover {
   .crm-main {
     padding-bottom: env(safe-area-inset-bottom);
   }
-  
+
   .modal-actions {
     padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Calendar Export Dropdown */
+.calendar-export-dropdown {
+  position: relative;
+}
+
+.calendar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.calendar-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.calendar-menu-item:last-child {
+  border-bottom: none;
+}
+
+.calendar-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.calendar-menu-item .menu-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+  .calendar-menu {
+    right: -50px;
+    min-width: 200px;
   }
 }

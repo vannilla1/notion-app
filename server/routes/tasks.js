@@ -42,7 +42,6 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
 // Get all tasks (including tasks from contacts) - shared workspace
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    console.log('=== GET TASKS ===');
     // Only get truly global tasks (without contact assignments)
     const globalTasks = await Task.find({
       $or: [
@@ -86,10 +85,6 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Sort by createdAt descending (newest first)
     allTasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    console.log('Global tasks count:', enrichedGlobalTasks.length);
-    console.log('Contact tasks count:', contactTasks.length);
-    console.log('Total tasks:', allTasks.length);
 
     res.json(allTasks);
   } catch (error) {
@@ -171,6 +166,9 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     ical += 'METHOD:PUBLISH\r\n';
     ical += 'X-WR-CALNAME:Perun CRM Úlohy\r\n';
 
+    const now = new Date();
+    const dtstamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+
     for (const event of events) {
       const dateStr = formatICalDate(event.dueDate);
       const nextDay = new Date(event.dueDate);
@@ -179,6 +177,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
 
       ical += 'BEGIN:VEVENT\r\n';
       ical += `UID:${event.uid}\r\n`;
+      ical += `DTSTAMP:${dtstamp}\r\n`;
       ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
       ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
       ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
@@ -188,6 +187,9 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
       if (event.contact) {
         ical += `LOCATION:Kontakt: ${event.contact.replace(/[,;\\]/g, '\\$&')}\r\n`;
       }
+      ical += `CREATED:${dtstamp}\r\n`;
+      ical += `LAST-MODIFIED:${dtstamp}\r\n`;
+      ical += 'TRANSP:TRANSPARENT\r\n';
       ical += 'END:VEVENT\r\n';
     }
 
@@ -251,12 +253,6 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const { title, description, dueDate, priority, contactId, contactIds, subtasks } = req.body;
     const io = req.app.get('io');
-
-    console.log('=== CREATE TASK ===');
-    console.log('Request body:', req.body);
-    console.log('contactIds:', contactIds);
-    console.log('contactId:', contactId);
-    console.log('subtasks:', subtasks);
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
@@ -328,11 +324,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
       createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
       updatedContacts.push(contact);
-      console.log('Task embedded in contact:', contact.name, 'Task ID:', newTask.id);
     }
-
-    console.log('Created tasks:', createdTasks.length);
-    console.log('Tasks:', JSON.stringify(createdTasks, null, 2));
 
     // Emit updates for all affected contacts
     for (const contact of updatedContacts) {
@@ -578,19 +570,14 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
     const io = req.app.get('io');
     const mongoose = require('mongoose');
 
-    console.log('Duplicate request for task ID:', req.params.id);
-    console.log('Request body:', req.body);
-
     let originalTask = null;
 
     // Check if ID is valid MongoDB ObjectId
     const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
-    console.log('Is valid ObjectId:', isValidObjectId);
 
     // Find original task - check global tasks first (only if valid ObjectId)
     if (isValidObjectId) {
       const globalTask = await Task.findById(req.params.id);
-      console.log('Global task found:', !!globalTask);
       if (globalTask) {
         // Deep copy to ensure subtasks are properly copied
         originalTask = JSON.parse(JSON.stringify(globalTask.toObject()));
@@ -600,18 +587,11 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
 
     // If not found in global tasks, search in contacts
     if (!originalTask) {
-      console.log('Searching in contacts...');
       const allContacts = await Contact.find({});
-      console.log('Total contacts:', allContacts.length);
       for (const contact of allContacts) {
         if (contact.tasks && contact.tasks.length > 0) {
-          console.log(`Contact ${contact.name} has ${contact.tasks.length} tasks`);
-          const found = contact.tasks.find(t => {
-            console.log(`  Comparing task.id "${t.id}" with "${req.params.id}"`);
-            return t.id === req.params.id;
-          });
+          const found = contact.tasks.find(t => t.id === req.params.id);
           if (found) {
-            console.log('Found task in contact:', contact.name);
             // Deep copy the task to ensure subtasks are properly copied
             originalTask = JSON.parse(JSON.stringify(found));
             originalTask.source = 'contact';
@@ -619,12 +599,6 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
           }
         }
       }
-    }
-
-    console.log('Original task found:', !!originalTask);
-    if (originalTask) {
-      console.log('Original task subtasks:', JSON.stringify(originalTask.subtasks, null, 2));
-      console.log('Subtasks count:', originalTask.subtasks?.length || 0);
     }
 
     if (!originalTask) {
@@ -685,18 +659,10 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       if (!contact.tasks) {
         contact.tasks = [];
       }
-      console.log('Creating duplicated task with subtasks:', JSON.stringify(newTask.subtasks, null, 2));
-      console.log('Duplicated subtasks count:', newTask.subtasks?.length || 0);
 
       contact.tasks.push(newTask);
       contact.markModified('tasks');
       await contact.save();
-
-      // Reload contact to see what was actually saved
-      const savedContact = await Contact.findById(contactId);
-      const savedTask = savedContact.tasks.find(t => t.id === newTask.id);
-      console.log('AFTER SAVE - Task subtasks count:', savedTask?.subtasks?.length || 0);
-      console.log('AFTER SAVE - Task subtasks:', JSON.stringify(savedTask?.subtasks, null, 2));
 
       duplicatedTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name });
       updatedContacts.push(contact);

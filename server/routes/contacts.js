@@ -339,11 +339,9 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       subtasks: []
     };
 
-    console.log('Creating task with id:', task.id, 'title:', task.title);
     contact.tasks.push(task);
     contact.markModified('tasks');
     await contact.save();
-    console.log('Task saved successfully');
 
     const io = req.app.get('io');
     io.emit('contact-updated', contactToPlainObject(contact));
@@ -400,28 +398,20 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
 // Delete task
 router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
   try {
-    console.log('Delete task request:', { contactId: req.params.contactId, taskId: req.params.taskId });
-
     const contact = await Contact.findById(req.params.contactId);
 
     if (!contact) {
-      console.log('Contact not found:', req.params.contactId);
       return res.status(404).json({ message: 'Contact not found' });
     }
-
-    console.log('Contact found:', contact.name, 'with', contact.tasks?.length || 0, 'tasks');
-    console.log('Task IDs in contact:', contact.tasks?.map(t => t.id) || []);
 
     const taskIndex = contact.tasks.findIndex(t =>
       t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
     );
 
     if (taskIndex === -1) {
-      console.log('Task not found with id:', req.params.taskId);
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    console.log('Found task at index:', taskIndex, 'title:', contact.tasks[taskIndex].title);
     contact.tasks.splice(taskIndex, 1);
     contact.markModified('tasks');
     await contact.save();
@@ -456,8 +446,6 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
     );
 
     if (taskIndex === -1) {
-      console.log('Add subtask - Task not found. Looking for:', req.params.taskId);
-      console.log('Available tasks:', contact.tasks.map(t => ({ id: t.id, _id: t._id })));
       return res.status(404).json({ message: 'Task not found' });
     }
 
