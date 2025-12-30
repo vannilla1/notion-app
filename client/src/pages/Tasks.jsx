@@ -651,35 +651,30 @@ function Tasks() {
     }
   };
 
-  // Open in Google Calendar (creates events via URL)
-  const openInGoogleCalendar = () => {
-    // Get incomplete tasks with due dates
-    const tasksWithDates = tasks.filter(t => !t.completed && t.dueDate);
+  // Open Google Calendar import page and download ICS file
+  const openInGoogleCalendar = async () => {
+    try {
+      // First download the ICS file
+      const response = await api.get('/api/tasks/export/calendar', {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data], { type: 'text/calendar;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'perun-crm-tasks.ics';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
-    if (tasksWithDates.length === 0) {
-      alert('Žiadne úlohy s termínom na export');
+      // Then open Google Calendar import page
+      window.open('https://calendar.google.com/calendar/r/settings/export', '_blank');
+
       setShowCalendarMenu(false);
-      return;
+    } catch (error) {
+      alert('Chyba pri exporte kalendára');
     }
-
-    // Open first task in Google Calendar (user can add more via ICS)
-    const task = tasksWithDates[0];
-    const date = new Date(task.dueDate);
-    const dateStr = date.toISOString().replace(/[-:]/g, '').split('T')[0];
-
-    const params = new URLSearchParams({
-      action: 'TEMPLATE',
-      text: task.title,
-      dates: `${dateStr}/${dateStr}`,
-      details: task.description || ''
-    });
-
-    if (tasksWithDates.length > 1) {
-      alert(`Otvorí sa prvá úloha v Google Calendar. Pre viacero úloh použite "Stiahnuť .ics súbor" a importujte ho do Google Calendar cez Nastavenia > Import a export.`);
-    }
-
-    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank');
-    setShowCalendarMenu(false);
   };
 
   // Copy ICS URL for subscription (if available)
@@ -776,7 +771,7 @@ function Tasks() {
                 </button>
                 <button onClick={openInGoogleCalendar} className="calendar-menu-item">
                   🌐 Google Calendar
-                  <span className="menu-hint">Otvoriť priamo</span>
+                  <span className="menu-hint">Stiahne súbor + otvorí import</span>
                 </button>
                 <button onClick={showImportInstructions} className="calendar-menu-item">
                   ❓ Návod na import
