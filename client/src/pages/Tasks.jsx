@@ -171,15 +171,25 @@ function Tasks() {
         contactIds: newTaskForm.contactIds.length > 0 ? newTaskForm.contactIds : []
       });
 
-      // Add the created task to the list immediately
-      const newTask = response.data;
-      if (newTask && newTask.id) {
+      // Handle response - could be single task or multiple tasks
+      const responseData = response.data;
+
+      if (responseData.tasks && Array.isArray(responseData.tasks)) {
+        // Multiple tasks created (one per contact)
         setTasks(prev => {
-          // Avoid duplicates
-          if (prev.some(t => t.id === newTask.id)) return prev;
-          return [newTask, ...prev];
+          const newTasks = responseData.tasks.filter(t => !prev.some(existing => existing.id === t.id));
+          return [...newTasks, ...prev];
+        });
+      } else if (responseData && responseData.id) {
+        // Single task created
+        setTasks(prev => {
+          if (prev.some(t => t.id === responseData.id)) return prev;
+          return [responseData, ...prev];
         });
       }
+
+      // Refresh to get updated list from server
+      await fetchTasks();
 
       setNewTaskForm({
         title: '',
