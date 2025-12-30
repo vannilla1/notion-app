@@ -4238,6 +4238,43 @@ a.detail-value:hover {
   flex: 1;
   min-width: 0;
   text-align: left;
+  padding: 8px 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Expand button for mobile */
+.btn-expand {
+  font-size: 12px !important;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+/* Better touch targets for mobile task items */
+@media (hover: none) and (pointer: coarse) {
+  .detail-item.task-detail-item {
+    padding: 12px;
+  }
+
+  .detail-item.task-detail-item .task-checkbox {
+    min-width: 32px;
+    min-height: 32px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .detail-item.task-detail-item .task-item-actions {
+    gap: 8px;
+  }
+
+  .detail-item.task-detail-item .task-item-actions .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
+  }
+
+  .detail-item-content {
+    padding: 12px 8px;
+  }
 }
 
 .detail-item-title {
