@@ -38,6 +38,8 @@ function CRM() {
   const [taskDueDates, setTaskDueDates] = useState({});
   const [editingTask, setEditingTask] = useState(null);
   const [editTaskTitle, setEditTaskTitle] = useState('');
+  const [editTaskDueDate, setEditTaskDueDate] = useState('');
+  const [editTaskDescription, setEditTaskDescription] = useState('');
 
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
@@ -410,6 +412,8 @@ function CRM() {
   const startEditTask = (contact, task) => {
     setEditingTask({ contactId: contact.id, taskId: task.id, source: task.source });
     setEditTaskTitle(task.title);
+    setEditTaskDueDate(task.dueDate || '');
+    setEditTaskDescription(task.description || '');
   };
 
   const saveTask = async (contact, task) => {
@@ -419,18 +423,24 @@ function CRM() {
         // Global task
         await api.put(`/api/tasks/${task.id}`, {
           title: editTaskTitle,
+          dueDate: editTaskDueDate || null,
+          description: editTaskDescription,
           source: 'global'
         });
         await fetchGlobalTasks();
       } else {
         // Contact embedded task
         await api.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
-          title: editTaskTitle
+          title: editTaskTitle,
+          dueDate: editTaskDueDate || null,
+          description: editTaskDescription
         });
         await fetchContacts();
       }
       setEditingTask(null);
       setEditTaskTitle('');
+      setEditTaskDueDate('');
+      setEditTaskDescription('');
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
     }
@@ -439,6 +449,8 @@ function CRM() {
   const cancelEditTask = () => {
     setEditingTask(null);
     setEditTaskTitle('');
+    setEditTaskDueDate('');
+    setEditTaskDescription('');
   };
 
   // Subtask functions - with recursive support
@@ -1277,36 +1289,39 @@ function CRM() {
                                   {task.completed && '✓'}
                                 </div>
                                 {editingTask?.contactId === contact.id && editingTask?.taskId === task.id ? (
-                                  <div className="task-edit-inline">
-                                    <input
-                                      type="text"
-                                      value={editTaskTitle}
-                                      onChange={(e) => setEditTaskTitle(e.target.value)}
-                                      className="form-input form-input-sm"
-                                      autoFocus
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          saveTask(contact, task);
-                                        } else if (e.key === 'Escape') {
-                                          cancelEditTask();
-                                        }
-                                      }}
-                                    />
-                                    <button
-                                      onClick={() => saveTask(contact, task)}
-                                      className="btn-icon-sm btn-save"
-                                      title="Uložiť"
-                                    >
-                                      ✓
-                                    </button>
-                                    <button
-                                      onClick={cancelEditTask}
-                                      className="btn-icon-sm btn-cancel"
-                                      title="Zrušiť"
-                                    >
-                                      ×
-                                    </button>
+                                  <div className="subtask-edit-form-full">
+                                    <div className="subtask-edit-row">
+                                      <input
+                                        type="text"
+                                        value={editTaskTitle}
+                                        onChange={(e) => setEditTaskTitle(e.target.value)}
+                                        className="form-input form-input-sm"
+                                        autoFocus
+                                        placeholder="Názov úlohy"
+                                      />
+                                    </div>
+                                    <div className="subtask-edit-row">
+                                      <input
+                                        type="date"
+                                        value={editTaskDueDate}
+                                        onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                        className="form-input form-input-sm task-date-input"
+                                        title="Termín úlohy"
+                                      />
+                                    </div>
+                                    <div className="subtask-edit-row">
+                                      <textarea
+                                        value={editTaskDescription}
+                                        onChange={(e) => setEditTaskDescription(e.target.value)}
+                                        className="form-input form-input-sm subtask-notes-input"
+                                        placeholder="Poznámka..."
+                                        rows={2}
+                                      />
+                                    </div>
+                                    <div className="subtask-edit-actions">
+                                      <button onClick={() => saveTask(contact, task)} className="btn btn-primary btn-sm">Uložiť</button>
+                                      <button onClick={cancelEditTask} className="btn btn-secondary btn-sm">Zrušiť</button>
+                                    </div>
                                   </div>
                                 ) : (
                                   <>
