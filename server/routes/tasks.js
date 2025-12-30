@@ -333,6 +333,11 @@ router.post('/', authenticateToken, async (req, res) => {
       io.emit('contact-updated', contactToPlainObject(contact));
     }
 
+    // Emit task-created for each new task so Tasks view updates in real-time
+    for (const task of createdTasks) {
+      io.emit('task-created', task);
+    }
+
     // Return first task for compatibility (or all tasks info)
     if (createdTasks.length === 1) {
       res.status(201).json(createdTasks[0]);

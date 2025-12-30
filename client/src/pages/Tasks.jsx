@@ -118,14 +118,21 @@ function Tasks() {
       setSelectedTask(prev => prev?.id === id ? null : prev);
     };
 
+    // When a contact is updated, refresh tasks to get updated embedded tasks
+    const handleContactUpdated = () => {
+      fetchTasks();
+    };
+
     socket.on('task-created', handleTaskCreated);
     socket.on('task-updated', handleTaskUpdated);
     socket.on('task-deleted', handleTaskDeleted);
+    socket.on('contact-updated', handleContactUpdated);
 
     return () => {
       socket.off('task-created', handleTaskCreated);
       socket.off('task-updated', handleTaskUpdated);
       socket.off('task-deleted', handleTaskDeleted);
+      socket.off('contact-updated', handleContactUpdated);
     };
   }, [socket, isConnected]);
 
