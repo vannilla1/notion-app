@@ -4218,11 +4218,19 @@ a.detail-value:hover {
   border-radius: var(--radius);
   cursor: pointer;
   transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .detail-item:hover {
   border-color: var(--accent-color);
   background: var(--bg-secondary);
+}
+
+.detail-item:active,
+.detail-item.task-detail-item:active {
+  background: var(--bg-hover);
+  transform: scale(0.99);
 }
 
 .detail-item.completed {
@@ -4238,38 +4246,32 @@ a.detail-value:hover {
   flex: 1;
   min-width: 0;
   text-align: left;
-  padding: 10px 8px;
-  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
-  cursor: pointer;
 }
 
 /* Better touch targets for mobile task items */
 @media (hover: none) and (pointer: coarse) {
   .detail-item.task-detail-item {
-    padding: 10px 12px;
-    min-height: 56px;
+    padding: 14px 12px;
+    min-height: 60px;
   }
 
   .detail-item.task-detail-item .task-checkbox {
-    min-width: 28px;
-    min-height: 28px;
-    width: 28px;
-    height: 28px;
+    min-width: 32px;
+    min-height: 32px;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
   }
 
   .detail-item.task-detail-item .task-item-actions .btn-icon {
-    min-width: 40px;
-    min-height: 40px;
-    font-size: 16px;
-  }
-
-  .detail-item-content {
-    padding: 10px 8px;
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
   }
 
   .detail-item-badge {
-    padding: 5px 10px;
-    font-size: 12px;
+    padding: 6px 12px;
+    font-size: 13px;
   }
 }
 

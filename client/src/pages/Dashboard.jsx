@@ -542,10 +542,12 @@ function Dashboard() {
                     <div
                       key={task.id}
                       className={`detail-item task-detail-item ${task.completed ? 'completed' : ''} ${expandedTask === task.id ? 'expanded' : ''}`}
+                      onClick={() => editingTask !== task.id && setExpandedTask(expandedTask === task.id ? null : task.id)}
+                      style={{ cursor: editingTask === task.id ? 'default' : 'pointer' }}
                     >
                       {editingTask === task.id ? (
                         /* Edit mode */
-                        <div className="task-edit-inline">
+                        <div className="task-edit-inline" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="text"
                             value={editForm.title}
@@ -596,11 +598,7 @@ function Dashboard() {
                           >
                             {task.completed && '✓'}
                           </div>
-                          <div
-                            className="detail-item-content"
-                            onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
-                            style={{ cursor: 'pointer' }}
-                          >
+                          <div className="detail-item-content">
                             <div className="detail-item-title">{task.title}</div>
                             <div className="detail-item-meta">
                               <span
