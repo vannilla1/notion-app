@@ -59,6 +59,15 @@ const isValidPhone = (phone) => {
   return phoneRegex.test(phone);
 };
 
+// Helper function to convert contact to plain object with deep copy of nested subtasks
+const contactToPlainObject = (contact) => {
+  const obj = contact.toObject ? contact.toObject() : contact;
+  return JSON.parse(JSON.stringify({
+    ...obj,
+    id: obj._id ? obj._id.toString() : obj.id
+  }));
+};
+
 // Helper function to find a subtask recursively
 const findSubtaskRecursive = (subtasks, subtaskId) => {
   if (!subtasks) return null;
@@ -77,8 +86,13 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
 // Get all contacts (shared workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const contacts = await Contact.find({}).sort({ name: 1 });
-    res.json(contacts);
+    const contacts = await Contact.find({}).sort({ name: 1 }).lean();
+    // Add id field to each contact (lean() doesn't apply toJSON transforms)
+    const contactsWithId = contacts.map(c => ({
+      ...c,
+      id: c._id.toString()
+    }));
+    res.json(contactsWithId);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -87,11 +101,14 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get single contact
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id);
+    const contact = await Contact.findById(req.params.id).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
-    res.json(contact);
+    res.json({
+      ...contact,
+      id: contact._id.toString()
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -126,9 +143,10 @@ router.post('/', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-created', contact);
+    const contactData = contactToPlainObject(contact);
+    io.emit('contact-created', contactData);
 
-    res.status(201).json(contact);
+    res.status(201).json(contactData);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -160,9 +178,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    const contactData = contactToPlainObject(contact);
+    io.emit('contact-updated', contactData);
 
-    res.json(contact);
+    res.json(contactData);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -224,7 +243,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(fileInfo);
   } catch (error) {
@@ -258,7 +277,7 @@ router.delete('/:contactId/files/:fileId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'File deleted' });
   } catch (error) {
@@ -327,7 +346,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
     console.log('Task saved successfully');
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(task);
   } catch (error) {
@@ -367,7 +386,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
@@ -405,7 +424,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -471,7 +490,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(subtask);
   } catch (error) {
@@ -517,7 +536,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json(found.parent[found.index]);
   } catch (error) {
@@ -555,7 +574,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
@@ -594,7 +613,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(fileData);
   } catch (error) {
@@ -657,7 +676,7 @@ router.delete('/:id/files/:fileId', authenticateToken, async (req, res) => {
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contact.toJSON());
+    io.emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'File deleted' });
   } catch (error) {

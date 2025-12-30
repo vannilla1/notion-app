@@ -7,7 +7,7 @@ const subtaskSchema = new mongoose.Schema({
   completed: { type: Boolean, default: false },
   dueDate: String,
   notes: { type: String, default: '' },
-  subtasks: { type: Array, default: [] }
+  subtasks: { type: mongoose.Schema.Types.Mixed, default: [] }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
