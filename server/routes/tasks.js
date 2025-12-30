@@ -375,11 +375,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
             const task = contact.tasks[taskIndex];
             contact.tasks[taskIndex] = {
               ...task,
+              id: task.id,
               title: title !== undefined ? title : task.title,
               description: description !== undefined ? description : task.description,
               dueDate: dueDate !== undefined ? dueDate : task.dueDate,
               priority: priority !== undefined ? priority : task.priority,
-              completed: completed !== undefined ? completed : task.completed
+              completed: completed !== undefined ? completed : task.completed,
+              subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
+              createdAt: task.createdAt
             };
             contact.markModified('tasks');
             await contact.save();
@@ -435,6 +438,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
       task.contactIds = finalContactIds;
+      // Preserve subtasks if not explicitly provided
+      if (req.body.subtasks !== undefined) {
+        task.subtasks = req.body.subtasks;
+      }
 
       await task.save();
 
@@ -459,11 +466,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
           const ctask = contact.tasks[taskIndex];
           contact.tasks[taskIndex] = {
             ...ctask,
+            id: ctask.id,
             title: title !== undefined ? title : ctask.title,
             description: description !== undefined ? description : ctask.description,
             dueDate: dueDate !== undefined ? dueDate : ctask.dueDate,
             priority: priority !== undefined ? priority : ctask.priority,
-            completed: completed !== undefined ? completed : ctask.completed
+            completed: completed !== undefined ? completed : ctask.completed,
+            subtasks: req.body.subtasks !== undefined ? req.body.subtasks : ctask.subtasks,
+            createdAt: ctask.createdAt
           };
           contact.markModified('tasks');
           await contact.save();
