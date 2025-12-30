@@ -110,6 +110,21 @@ function Dashboard() {
     }
   };
 
+  // Helper function to get due date status class
+  const getDueDateClass = (dueDate, completed) => {
+    if (!dueDate || completed) return '';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return 'overdue';
+    if (diffDays <= 3) return 'due-soon';
+    if (diffDays <= 10) return 'due-week';
+    return '';
+  };
+
   // Get all tasks for a contact (only embedded tasks)
   const getContactTasks = (contact) => {
     return (contact.tasks || []).map(t => ({
@@ -391,7 +406,7 @@ function Dashboard() {
                   {(subtask.dueDate || subtask.notes) && (
                     <div className="subtask-meta">
                       {subtask.dueDate && (
-                        <span className="subtask-date">
+                        <span className={`subtask-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
                           📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
                         </span>
                       )}
@@ -742,7 +757,7 @@ function Dashboard() {
                                 <span className="contact-badge">👤 {getContactNames(task).join(', ')}</span>
                               )}
                               {task.dueDate && (
-                                <span className="date-badge">
+                                <span className={`date-badge ${getDueDateClass(task.dueDate, task.completed)}`}>
                                   📅 {new Date(task.dueDate).toLocaleDateString('sk-SK')}
                                 </span>
                               )}
@@ -902,7 +917,7 @@ function Dashboard() {
                                 </span>
                               )}
                               {task.dueDate && (
-                                <span className="due-date-badge">
+                                <span className={`due-date-badge ${getDueDateClass(task.dueDate, task.completed)}`}>
                                   {new Date(task.dueDate).toLocaleDateString('sk-SK')}
                                 </span>
                               )}
