@@ -15,6 +15,15 @@ const contactToPlainObject = (contact) => {
   }));
 };
 
+// Helper function to deep copy a task with all nested subtasks
+const taskToPlainObject = (task, extras = {}) => {
+  const obj = task.toObject ? task.toObject() : task;
+  return JSON.parse(JSON.stringify({
+    ...obj,
+    ...extras
+  }));
+};
+
 // Helper function to find a subtask recursively
 const findSubtaskRecursive = (subtasks, subtaskId) => {
   if (!subtasks) return null;
@@ -199,9 +208,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // First check global tasks
     const task = await Task.findById(req.params.id);
     if (task) {
-      const taskObj = task.toObject();
-      taskObj.id = taskObj._id.toString();
-      return res.json({ ...taskObj, source: 'global' });
+      return res.json(taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
     }
 
     // Check tasks in contacts
@@ -210,12 +217,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
       if (contact.tasks) {
         const foundTask = contact.tasks.find(t => t.id === req.params.id);
         if (foundTask) {
-          return res.json({
-            ...foundTask,
+          return res.json(taskToPlainObject(foundTask, {
             contactId: contact._id.toString(),
             contactName: contact.name,
             source: 'contact'
-          });
+          }));
         }
       }
     }
@@ -379,19 +385,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
             await contact.save();
 
             io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', {
-              ...contact.tasks[taskIndex],
+            const taskData = taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
             });
+            io.emit('task-updated', taskData);
 
-            return res.json({
-              ...contact.tasks[taskIndex],
-              contactId: contact._id.toString(),
-              contactName: contact.name,
-              source: 'contact'
-            });
+            return res.json(taskData);
           }
         }
       }
@@ -437,14 +438,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       await task.save();
 
-      const taskObj = task.toObject();
-      taskObj.id = taskObj._id.toString();
-      taskObj.contactIds = finalContactIds;
-      taskObj.contactNames = contactNames;
-      taskObj.contactName = contactNames.join(', ') || null;
+      const taskData = taskToPlainObject(task, {
+        source: 'global',
+        id: task._id.toString(),
+        contactIds: finalContactIds,
+        contactNames: contactNames,
+        contactName: contactNames.join(', ') || null
+      });
 
-      io.emit('task-updated', { ...taskObj, source: 'global' });
-      return res.json({ ...taskObj, source: 'global' });
+      io.emit('task-updated', taskData);
+      return res.json(taskData);
     }
 
     // Task not found in global tasks, try to find in contacts
@@ -466,19 +469,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
           await contact.save();
 
           io.emit('contact-updated', contactToPlainObject(contact));
-          io.emit('task-updated', {
-            ...contact.tasks[taskIndex],
+          const taskData = taskToPlainObject(contact.tasks[taskIndex], {
             contactId: contact._id.toString(),
             contactName: contact.name,
             source: 'contact'
           });
+          io.emit('task-updated', taskData);
 
-          return res.json({
-            ...contact.tasks[taskIndex],
-            contactId: contact._id.toString(),
-            contactName: contact.name,
-            source: 'contact'
-          });
+          return res.json(taskData);
         }
       }
     }
@@ -765,15 +763,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
               await contact.save();
 
               io.emit('contact-updated', contactToPlainObject(contact));
-              const taskObj = typeof contact.tasks[taskIndex].toObject === 'function'
-                ? contact.tasks[taskIndex].toObject()
-                : { ...contact.tasks[taskIndex] };
-              io.emit('task-updated', {
-                ...taskObj,
+              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
-              });
+              }));
 
               return res.status(201).json(subtask);
             }
@@ -789,9 +783,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
         task.markModified('subtasks');
         await task.save();
 
-        const taskObj = task.toObject();
-        taskObj.id = taskObj._id.toString();
-        io.emit('task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
         return res.status(201).json(subtask);
       }
       return res.status(404).json({ message: 'Parent subtask not found' });
@@ -808,12 +800,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             await contact.save();
 
             io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', {
-              ...contact.tasks[taskIndex],
+            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
-            });
+            }));
 
             return res.status(201).json(subtask);
           }
@@ -863,12 +854,11 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               await contact.save();
 
               io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', {
-                ...contact.tasks[taskIndex],
+              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
-              });
+              }));
 
               return res.json(updated);
             }
@@ -885,9 +875,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
         task.markModified('subtasks');
         await task.save();
 
-        const taskObj = task.toObject();
-        taskObj.id = taskObj._id.toString();
-        io.emit('task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
         return res.json(updated);
       }
     }
@@ -904,12 +892,11 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
             await contact.save();
 
             io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', {
-              ...contact.tasks[taskIndex],
+            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
-            });
+            }));
 
             return res.json(updated);
           }
@@ -951,12 +938,11 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               await contact.save();
 
               io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', {
-                ...contact.tasks[taskIndex],
+              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
-              });
+              }));
 
               return res.json({ message: 'Subtask deleted' });
             }
@@ -972,9 +958,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
         task.markModified('subtasks');
         await task.save();
 
-        const taskObj = task.toObject();
-        taskObj.id = taskObj._id.toString();
-        io.emit('task-updated', { ...taskObj, source: 'global' });
+        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
         return res.json({ message: 'Subtask deleted' });
       }
     }
@@ -990,12 +974,11 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
             await contact.save();
 
             io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', {
-              ...contact.tasks[taskIndex],
+            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
-            });
+            }));
 
             return res.json({ message: 'Subtask deleted' });
           }
