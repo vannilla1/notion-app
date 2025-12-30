@@ -50,7 +50,8 @@ router.get('/', authenticateToken, async (req, res) => {
     contacts.forEach(contact => {
       if (contact.tasks && contact.tasks.length > 0) {
         contact.tasks.forEach(task => {
-          const taskObj = typeof task.toObject === 'function' ? task.toObject() : { ...task };
+          // Deep copy to ensure nested subtasks are properly included
+          const taskObj = JSON.parse(JSON.stringify(task));
           contactTasks.push({
             ...taskObj,
             id: task.id,
