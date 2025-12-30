@@ -24,6 +24,7 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
 // Get all tasks (including tasks from contacts) - shared workspace
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    console.log('=== GET TASKS ===');
     // Only get truly global tasks (without contact assignments)
     const globalTasks = await Task.find({
       $or: [
@@ -66,6 +67,10 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Sort by createdAt descending (newest first)
     allTasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    console.log('Global tasks count:', enrichedGlobalTasks.length);
+    console.log('Contact tasks count:', contactTasks.length);
+    console.log('Total tasks:', allTasks.length);
 
     res.json(allTasks);
   } catch (error) {
@@ -217,6 +222,11 @@ router.post('/', authenticateToken, async (req, res) => {
     const { title, description, dueDate, priority, contactId, contactIds } = req.body;
     const io = req.app.get('io');
 
+    console.log('=== CREATE TASK ===');
+    console.log('Request body:', req.body);
+    console.log('contactIds:', contactIds);
+    console.log('contactId:', contactId);
+
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
     }
@@ -287,7 +297,11 @@ router.post('/', authenticateToken, async (req, res) => {
 
       createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
       updatedContacts.push(contact);
+      console.log('Task embedded in contact:', contact.name, 'Task ID:', newTask.id);
     }
+
+    console.log('Created tasks:', createdTasks.length);
+    console.log('Tasks:', JSON.stringify(createdTasks, null, 2));
 
     // Emit updates for all affected contacts
     for (const contact of updatedContacts) {
