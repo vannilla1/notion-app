@@ -42,6 +42,7 @@ function Tasks() {
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
+  const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
   // Duplicate modal states
@@ -351,6 +352,7 @@ function Tasks() {
     setEditingSubtask({ taskId: task.id, subtaskId: subtask.id, source: task.source });
     setEditSubtaskTitle(subtask.title);
     setEditSubtaskNotes(subtask.notes || '');
+    setEditSubtaskDueDate(subtask.dueDate || '');
   };
 
   const saveSubtask = async (task, subtaskId) => {
@@ -359,11 +361,13 @@ function Tasks() {
       await api.put(`/api/tasks/${task.id}/subtasks/${subtaskId}`, {
         title: editSubtaskTitle,
         notes: editSubtaskNotes,
+        dueDate: editSubtaskDueDate || null,
         source: task.source
       });
       setEditingSubtask(null);
       setEditSubtaskTitle('');
       setEditSubtaskNotes('');
+      setEditSubtaskDueDate('');
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
@@ -374,6 +378,7 @@ function Tasks() {
     setEditingSubtask(null);
     setEditSubtaskTitle('');
     setEditSubtaskNotes('');
+    setEditSubtaskDueDate('');
   };
 
   const toggleSubtaskExpanded = (subtaskId) => {
@@ -441,6 +446,15 @@ function Tasks() {
                     className="form-input form-input-sm"
                     autoFocus
                     placeholder="Názov podúlohy"
+                  />
+                </div>
+                <div className="subtask-edit-row">
+                  <input
+                    type="date"
+                    value={editSubtaskDueDate}
+                    onChange={(e) => setEditSubtaskDueDate(e.target.value)}
+                    className="form-input form-input-sm task-date-input"
+                    title="Termín podúlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">

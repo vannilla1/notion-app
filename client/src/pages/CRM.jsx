@@ -47,6 +47,7 @@ function CRM() {
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
+  const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
   const [expandedTasks, setExpandedTasks] = useState({});
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
   const [showNotesFor, setShowNotesFor] = useState(null);
@@ -573,6 +574,7 @@ function CRM() {
     setEditingSubtask({ taskId: task.id, subtaskId: subtask.id, source: task.source });
     setEditSubtaskTitle(subtask.title);
     setEditSubtaskNotes(subtask.notes || '');
+    setEditSubtaskDueDate(subtask.dueDate || '');
   };
 
   const saveSubtask = async (task, subtask) => {
@@ -584,6 +586,7 @@ function CRM() {
         await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle,
           notes: editSubtaskNotes,
+          dueDate: editSubtaskDueDate || null,
           source: 'global'
         });
         await fetchGlobalTasks();
@@ -595,13 +598,15 @@ function CRM() {
         }
         await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle,
-          notes: editSubtaskNotes
+          notes: editSubtaskNotes,
+          dueDate: editSubtaskDueDate || null
         });
         await fetchContacts();
       }
       setEditingSubtask(null);
       setEditSubtaskTitle('');
       setEditSubtaskNotes('');
+      setEditSubtaskDueDate('');
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
     }
@@ -611,6 +616,7 @@ function CRM() {
     setEditingSubtask(null);
     setEditSubtaskTitle('');
     setEditSubtaskNotes('');
+    setEditSubtaskDueDate('');
   };
 
   const updateSubtaskDueDate = async (task, subtask, dueDate) => {
@@ -680,6 +686,15 @@ function CRM() {
                     className="form-input form-input-sm"
                     autoFocus
                     placeholder="Názov podúlohy"
+                  />
+                </div>
+                <div className="subtask-edit-row">
+                  <input
+                    type="date"
+                    value={editSubtaskDueDate}
+                    onChange={(e) => setEditSubtaskDueDate(e.target.value)}
+                    className="form-input form-input-sm task-date-input"
+                    title="Termín podúlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">
