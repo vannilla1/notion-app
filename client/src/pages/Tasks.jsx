@@ -651,30 +651,16 @@ function Tasks() {
     }
   };
 
-  // Open Google Calendar import page and download ICS file
-  const openInGoogleCalendar = async () => {
-    try {
-      // First download the ICS file
-      const response = await api.get('/api/tasks/export/calendar', {
-        responseType: 'blob'
-      });
-      const blob = new Blob([response.data], { type: 'text/calendar;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'perun-crm-tasks.ics';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+  // Open Google Calendar import page
+  const openInGoogleCalendar = () => {
+    // Open Google Calendar import page directly
+    // User will need to download .ics file separately and import it there
+    window.open('https://calendar.google.com/calendar/r/settings/export', '_blank');
 
-      // Then open Google Calendar import page
-      window.open('https://calendar.google.com/calendar/r/settings/export', '_blank');
+    // Show instructions
+    alert('Google Calendar sa otvoril v novom tabe.\n\nPre import úloh:\n1. Kliknite na "Stiahnuť .ics súbor" v menu\n2. V Google Calendar kliknite na "Vybrať súbor"\n3. Vyberte stiahnutý súbor a importujte');
 
-      setShowCalendarMenu(false);
-    } catch (error) {
-      alert('Chyba pri exporte kalendára');
-    }
+    setShowCalendarMenu(false);
   };
 
   // Copy ICS URL for subscription (if available)
@@ -771,7 +757,7 @@ function Tasks() {
                 </button>
                 <button onClick={openInGoogleCalendar} className="calendar-menu-item">
                   🌐 Google Calendar
-                  <span className="menu-hint">Stiahne súbor + otvorí import</span>
+                  <span className="menu-hint">Otvorí import stránku</span>
                 </button>
                 <button onClick={showImportInstructions} className="calendar-menu-item">
                   ❓ Návod na import
