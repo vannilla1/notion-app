@@ -14,6 +14,10 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: SENTRY_DSN
+        sync: false
 
   # Frontend
   - type: web

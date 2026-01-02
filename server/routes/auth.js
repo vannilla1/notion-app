@@ -6,6 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
+const { loginLimiter, registerLimiter, passwordChangeLimiter } = require('../middleware/rateLimiter');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -37,19 +39,30 @@ const avatarUpload = multer({
   }
 });
 
-// Register
-router.post('/register', async (req, res) => {
+// Register - with rate limiting
+router.post('/register', registerLimiter, async (req, res) => {
   try {
     const { username, email, password } = req.body;
+
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: 'Všetky polia sú povinné' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov' });
+    }
 
     // Check if user exists
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
+      logger.auth('register', null, null, false, req.ip);
       return res.status(400).json({ message: 'Email already registered' });
     }
 
     const existingUsername = await User.findOne({ username });
     if (existingUsername) {
+      logger.auth('register', null, null, false, req.ip);
       return res.status(400).json({ message: 'Username already taken' });
     }
 
@@ -73,6 +86,8 @@ router.post('/register', async (req, res) => {
     // Generate token
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
 
+    logger.auth('register', user._id, username, true, req.ip);
+
     res.status(201).json({
       token,
       user: {
@@ -83,29 +98,39 @@ router.post('/register', async (req, res) => {
       }
     });
   } catch (error) {
+    logger.error('Registration error', { error: error.message, ip: req.ip });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Login
-router.post('/login', async (req, res) => {
+// Login - with rate limiting
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email a heslo sú povinné' });
+    }
 
     // Find user
     const user = await User.findOne({ email });
     if (!user) {
+      logger.auth('login', null, email, false, req.ip);
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      logger.auth('login', user._id, user.username, false, req.ip);
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
     // Generate token
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    logger.auth('login', user._id, user.username, true, req.ip);
 
     res.json({
       token,
@@ -118,6 +143,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
+    logger.error('Login error', { error: error.message, ip: req.ip });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -143,6 +169,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       createdAt: user.createdAt
     });
   } catch (error) {
+    logger.error('Get profile error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -176,6 +203,8 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true });
 
+    logger.info('Profile updated', { userId, updates: Object.keys(updates) });
+
     res.json({
       id: updatedUser._id,
       username: updatedUser.username,
@@ -184,6 +213,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
       avatar: updatedUser.avatar || null
     });
   } catch (error) {
+    logger.error('Update profile error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -212,11 +242,14 @@ router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (
       { new: true }
     );
 
+    logger.info('Avatar uploaded', { userId, filename: req.file.filename });
+
     res.json({
       message: 'Avatar bol úspešne nahraný',
       avatar: updatedUser.avatar
     });
   } catch (error) {
+    logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba pri nahrávaní avatara', error: error.message });
   }
 });
@@ -233,16 +266,18 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
         fs.unlinkSync(avatarPath);
       }
       await User.findByIdAndUpdate(userId, { avatar: null });
+      logger.info('Avatar deleted', { userId });
     }
 
     res.json({ message: 'Avatar bol odstránený' });
   } catch (error) {
+    logger.error('Avatar delete error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba pri odstraňovaní avatara', error: error.message });
   }
 });
 
-// Change password
-router.put('/password', authenticateToken, async (req, res) => {
+// Change password - with rate limiting
+router.put('/password', authenticateToken, passwordChangeLimiter, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
@@ -256,6 +291,7 @@ router.put('/password', authenticateToken, async (req, res) => {
     // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
+      logger.auth('password-change', userId, user.username, false, req.ip);
       return res.status(400).json({ message: 'Aktuálne heslo nie je správne' });
     }
 
@@ -265,8 +301,11 @@ router.put('/password', authenticateToken, async (req, res) => {
 
     await User.findByIdAndUpdate(userId, { password: hashedPassword });
 
+    logger.auth('password-change', userId, user.username, true, req.ip);
+
     res.json({ message: 'Heslo bolo úspešne zmenené' });
   } catch (error) {
+    logger.error('Password change error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba pri zmene hesla', error: error.message });
   }
 });
@@ -282,6 +321,7 @@ router.get('/users', authenticateToken, async (req, res) => {
       color: u.color
     })));
   } catch (error) {
+    logger.error('Get users error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });

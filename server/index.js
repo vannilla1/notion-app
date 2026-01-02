@@ -13,8 +13,18 @@ const pageRoutes = require('./routes/pages');
 const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
 const { authenticateSocket } = require('./middleware/auth');
+const { apiLimiter } = require('./middleware/rateLimiter');
+const logger = require('./utils/logger');
+const { initSentry } = require('./utils/sentry');
 
 const app = express();
+
+// Initialize Sentry (must be before other middleware)
+const sentry = initSentry(app);
+if (sentry.requestHandler) {
+  app.use(sentry.requestHandler);
+}
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -23,15 +33,27 @@ const io = new Server(server, {
   }
 });
 
+// CORS configuration
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:5173'],
   credentials: true
 }));
+
+// Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Make io accessible to routes
+// Apply general API rate limiting
+app.use('/api', apiLimiter);
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Make io and sentry accessible to routes
 app.set('io', io);
+app.set('sentry', sentry);
 
 // Static files for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -42,18 +64,40 @@ app.use('/api/pages', pageRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/tasks', taskRoutes);
 
+// Sentry error handler (must be before other error handlers)
+if (sentry.errorHandler) {
+  app.use(sentry.errorHandler);
+}
+
+// Global error handler
+app.use((err, req, res, next) => {
+  logger.error('Unhandled error', {
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    userId: req.user?.id
+  });
+
+  res.status(err.status || 500).json({
+    message: process.env.NODE_ENV === 'production'
+      ? 'Nastala chyba servera'
+      : err.message
+  });
+});
+
 // Socket.io for real-time collaboration
 io.use(authenticateSocket);
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.user.username);
+  logger.socket('connected', socket.user.id, socket.user.username);
 
   // Join user's personal room for private updates
   socket.join(`user-${socket.user.id}`);
 
   socket.on('join-page', (pageId) => {
     socket.join(`page-${pageId}`);
-    console.log(`${socket.user.username} joined page ${pageId}`);
+    logger.socket('join-page', socket.user.id, socket.user.username, { pageId });
   });
 
   socket.on('leave-page', (pageId) => {
@@ -89,7 +133,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.user.username);
+    logger.socket('disconnected', socket.user.id, socket.user.username);
+  });
+
+  socket.on('error', (error) => {
+    logger.error('Socket error', {
+      error: error.message,
+      userId: socket.user.id,
+      username: socket.user.username
+    });
   });
 });
 
@@ -99,12 +151,28 @@ const PORT = process.env.PORT || 5001;
 const startServer = async () => {
   const dbConnected = await connectDB();
   if (!dbConnected) {
-    console.log('Warning: MongoDB not connected. Some features may not work.');
+    logger.warn('MongoDB not connected. Some features may not work.');
   }
 
   server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    logger.info(`Server running on port ${PORT}`, {
+      port: PORT,
+      environment: process.env.NODE_ENV || 'development'
+    });
   });
 };
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
+  sentry.captureException(error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection', { reason: reason?.message || reason, stack: reason?.stack });
+  sentry.captureException(reason);
+});
 
 startServer();
