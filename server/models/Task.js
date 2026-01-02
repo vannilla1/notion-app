@@ -64,7 +64,6 @@ taskSchema.pre('save', function() {
     for (let i = 0; i < subtasks.length; i++) {
       if (!subtasks[i].id) {
         subtasks[i].id = uuidv4();
-        console.log('Generated missing subtask ID:', subtasks[i].id, 'for:', subtasks[i].title);
       }
       if (subtasks[i].subtasks && subtasks[i].subtasks.length > 0) {
         generateIdsRecursive(subtasks[i].subtasks);
