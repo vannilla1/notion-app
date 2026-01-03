@@ -8,9 +8,12 @@ const initSentry = (app) => {
   if (!dsn) {
     logger.info('Sentry DSN not configured, error tracking disabled');
     return {
+      requestHandler: null,
       errorHandler: (err, req, res, next) => next(err),
       captureException: () => {},
-      captureMessage: () => {}
+      captureMessage: () => {},
+      setUser: () => {},
+      clearUser: () => {}
     };
   }
 
@@ -18,16 +21,9 @@ const initSentry = (app) => {
     dsn,
     environment: process.env.NODE_ENV || 'development',
     tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-    integrations: [
-      // Enable HTTP calls tracing
-      Sentry.httpIntegration(),
-      // Enable Express.js middleware tracing
-      Sentry.expressIntegration({ app })
-    ],
-    beforeSend(event, hint) {
+    beforeSend(event) {
       // Filter out sensitive data
       if (event.request?.data) {
-        // Remove password from request data
         if (event.request.data.password) {
           event.request.data.password = '[FILTERED]';
         }
@@ -45,23 +41,22 @@ const initSentry = (app) => {
   logger.info('Sentry initialized', { environment: process.env.NODE_ENV });
 
   return {
-    // Request handler - must be first middleware
-    requestHandler: Sentry.Handlers.requestHandler(),
+    requestHandler: null, // Not needed in newer Sentry versions
 
-    // Error handler - must be before any other error handlers
-    errorHandler: Sentry.Handlers.errorHandler({
-      shouldHandleError(error) {
-        // Capture 5xx errors
-        if (error.status >= 500) {
-          return true;
-        }
-        // Also capture unhandled errors
-        if (!error.status) {
-          return true;
-        }
-        return false;
+    // Custom error handler middleware
+    errorHandler: (err, req, res, next) => {
+      // Capture 5xx errors or unhandled errors
+      if (!err.status || err.status >= 500) {
+        Sentry.captureException(err, {
+          extra: {
+            path: req.path,
+            method: req.method,
+            userId: req.user?.id
+          }
+        });
       }
-    }),
+      next(err);
+    },
 
     // Manual error capture
     captureException: (error, context = {}) => {

@@ -11,6 +11,7 @@ const loginLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
   handler: (req, res, next, options) => {
     logger.warn('Rate limit exceeded: login', {
       ip: req.ip,
@@ -19,7 +20,6 @@ const loginLimiter = rateLimit({
     res.status(options.statusCode).json(options.message);
   },
   skip: (req) => {
-    // Skip rate limiting in development if desired
     return process.env.NODE_ENV === 'development' && process.env.SKIP_RATE_LIMIT === 'true';
   }
 });
@@ -34,6 +34,7 @@ const registerLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
   handler: (req, res, next, options) => {
     logger.warn('Rate limit exceeded: registration', {
       ip: req.ip,
@@ -56,10 +57,7 @@ const passwordChangeLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Use user ID if available, otherwise IP
-    return req.user?.id || req.ip;
-  },
+  validate: { xForwardedForHeader: false, trustProxy: false },
   handler: (req, res, next, options) => {
     logger.warn('Rate limit exceeded: password change', {
       ip: req.ip,
@@ -79,8 +77,8 @@ const apiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
   skip: (req) => {
-    // Skip for health checks or static files
     return req.path === '/health' || req.path.startsWith('/uploads');
   }
 });

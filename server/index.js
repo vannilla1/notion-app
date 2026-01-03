@@ -19,11 +19,11 @@ const { initSentry } = require('./utils/sentry');
 
 const app = express();
 
-// Initialize Sentry (must be before other middleware)
+// Trust proxy for rate limiting behind reverse proxy (Render, Heroku, etc.)
+app.set('trust proxy', 1);
+
+// Initialize Sentry
 const sentry = initSentry(app);
-if (sentry.requestHandler) {
-  app.use(sentry.requestHandler);
-}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -65,9 +65,7 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/tasks', taskRoutes);
 
 // Sentry error handler (must be before other error handlers)
-if (sentry.errorHandler) {
-  app.use(sentry.errorHandler);
-}
+app.use(sentry.errorHandler);
 
 // Global error handler
 app.use((err, req, res, next) => {
