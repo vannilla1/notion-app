@@ -51,13 +51,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Test endpoint for Sentry (remove after testing)
-app.get('/api/test-sentry', (req, res, next) => {
-  const error = new Error('Test error for Sentry verification');
-  error.status = 500;
-  next(error);
-});
-
 // Make io and sentry accessible to routes
 app.set('io', io);
 app.set('sentry', sentry);
