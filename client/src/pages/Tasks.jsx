@@ -704,6 +704,10 @@ function Tasks() {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
     }
+    if (filter === 'without-contact') {
+      const hasContacts = (t.contactIds?.length > 0) || t.contactId;
+      return !hasContacts;
+    }
     if (filter === 'due-success') {
       return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success';
     }
@@ -725,6 +729,7 @@ function Tasks() {
   const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
+  const withoutContactCount = tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length;
   const dueSuccessCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success').length;
   const dueWarningCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning').length;
   const dueDangerCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger').length;
@@ -831,6 +836,13 @@ function Tasks() {
             >
               <span className="stat-label">S kontaktom</span>
               <span className="stat-value">{withContactCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${filter === 'without-contact' ? 'active' : ''}`}
+              onClick={() => setFilter('without-contact')}
+            >
+              <span className="stat-label">Bez kontaktu</span>
+              <span className="stat-value">{withoutContactCount}</span>
             </div>
 
             <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa priority</h4>
