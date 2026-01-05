@@ -1582,12 +1582,17 @@ body {
   background: var(--danger-light);
 }
 
-.due-date.due-soon {
+.due-date.due-danger {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.due-date.due-warning {
   color: var(--warning);
   background: var(--warning-light);
 }
 
-.due-date.due-week {
+.due-date.due-success {
   color: var(--success);
   background: var(--success-light);
 }
@@ -4394,12 +4399,17 @@ a.detail-value:hover {
   background: var(--danger-light);
 }
 
-.task-due-date.due-soon {
+.task-due-date.due-danger {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.task-due-date.due-warning {
   color: var(--warning);
   background: var(--warning-light);
 }
 
-.task-due-date.due-week {
+.task-due-date.due-success {
   color: var(--success);
   background: var(--success-light);
 }
@@ -4418,12 +4428,17 @@ a.detail-value:hover {
   background: var(--danger-light);
 }
 
-.subtask-due-date.due-soon {
+.subtask-due-date.due-danger {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.subtask-due-date.due-warning {
   color: var(--warning);
   background: var(--warning-light);
 }
 
-.subtask-due-date.due-week {
+.subtask-due-date.due-success {
   color: var(--success);
   background: var(--success-light);
 }
@@ -4436,16 +4451,23 @@ a.detail-value:hover {
   background: var(--danger-light);
 }
 
-.date-badge.due-soon,
-.due-date-badge.due-soon,
-.subtask-date.due-soon {
+.date-badge.due-danger,
+.due-date-badge.due-danger,
+.subtask-date.due-danger {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.date-badge.due-warning,
+.due-date-badge.due-warning,
+.subtask-date.due-warning {
   color: var(--warning);
   background: var(--warning-light);
 }
 
-.date-badge.due-week,
-.due-date-badge.due-week,
-.subtask-date.due-week {
+.date-badge.due-success,
+.due-date-badge.due-success,
+.subtask-date.due-success {
   color: var(--success);
   background: var(--success-light);
 }
@@ -4585,8 +4607,16 @@ a.detail-value:hover {
   border-radius: 3px;
 }
 
-.due-soon-color {
+.due-danger-color {
+  background: var(--danger);
+}
+
+.due-warning-color {
   background: var(--warning);
+}
+
+.due-success-color {
+  background: var(--success);
 }
 
 .overdue-color {
@@ -4594,21 +4624,20 @@ a.detail-value:hover {
 }
 
 /* Due date filter dots in sidebar */
-.due-week-dot {
+.due-success-dot {
   background: var(--success) !important;
 }
 
-.due-soon-dot {
+.due-warning-dot {
   background: var(--warning) !important;
+}
+
+.due-danger-dot {
+  background: var(--danger) !important;
 }
 
 .overdue-dot {
   background: var(--danger) !important;
-}
-
-/* Due date legend colors */
-.due-week-color {
-  background: var(--success);
 }
 
 .due-stat.active {

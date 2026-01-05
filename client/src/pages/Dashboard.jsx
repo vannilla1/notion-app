@@ -119,9 +119,10 @@ function Dashboard() {
     due.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
 
-    if (diffDays < 0) return 'overdue';
-    if (diffDays <= 3) return 'due-soon';
-    if (diffDays <= 10) return 'due-week';
+    if (diffDays < 0) return 'overdue'; // po termíne - červená + výkričník
+    if (diffDays <= 3) return 'due-danger'; // do 3 dní - červená
+    if (diffDays <= 7) return 'due-warning'; // do 7 dní - žltá
+    if (diffDays <= 14) return 'due-success'; // do 14 dní - zelená
     return '';
   };
 

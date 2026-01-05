@@ -79,9 +79,10 @@ function Tasks() {
     due.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
 
-    if (diffDays < 0) return 'overdue'; // už po termíne
-    if (diffDays <= 3) return 'due-soon'; // do 3 dní
-    if (diffDays <= 10) return 'due-week'; // do 10 dní
+    if (diffDays < 0) return 'overdue'; // po termíne - červená + výkričník
+    if (diffDays <= 3) return 'due-danger'; // do 3 dní - červená
+    if (diffDays <= 7) return 'due-warning'; // do 7 dní - žltá
+    if (diffDays <= 14) return 'due-success'; // do 14 dní - zelená
     return '';
   };
 
@@ -703,11 +704,14 @@ function Tasks() {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
     }
-    if (filter === 'due-week') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-week';
+    if (filter === 'due-success') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success';
     }
-    if (filter === 'due-soon') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon';
+    if (filter === 'due-warning') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning';
+    }
+    if (filter === 'due-danger') {
+      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger';
     }
     if (filter === 'overdue') {
       return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue';
@@ -721,8 +725,9 @@ function Tasks() {
   const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
-  const dueWeekCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-week').length;
-  const dueSoonCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-soon').length;
+  const dueSuccessCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success').length;
+  const dueWarningCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning').length;
+  const dueDangerCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger').length;
   const overdueCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue').length;
 
   return (
@@ -862,24 +867,34 @@ function Tasks() {
 
             <div className="sidebar-section-title">Termín</div>
             <div
-              className={`stat-item clickable due-stat ${filter === 'due-week' ? 'active' : ''}`}
-              onClick={() => setFilter('due-week')}
+              className={`stat-item clickable due-stat ${filter === 'due-success' ? 'active' : ''}`}
+              onClick={() => setFilter('due-success')}
             >
               <span className="stat-label">
-                <span className="priority-dot due-week-dot"></span>
-                Do 10 dní
+                <span className="priority-dot due-success-dot"></span>
+                Do 14 dní
               </span>
-              <span className="stat-value">{dueWeekCount}</span>
+              <span className="stat-value">{dueSuccessCount}</span>
             </div>
             <div
-              className={`stat-item clickable due-stat ${filter === 'due-soon' ? 'active' : ''}`}
-              onClick={() => setFilter('due-soon')}
+              className={`stat-item clickable due-stat ${filter === 'due-warning' ? 'active' : ''}`}
+              onClick={() => setFilter('due-warning')}
             >
               <span className="stat-label">
-                <span className="priority-dot due-soon-dot"></span>
+                <span className="priority-dot due-warning-dot"></span>
+                Do 7 dní
+              </span>
+              <span className="stat-value">{dueWarningCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable due-stat ${filter === 'due-danger' ? 'active' : ''}`}
+              onClick={() => setFilter('due-danger')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot due-danger-dot"></span>
                 Do 3 dní
               </span>
-              <span className="stat-value">{dueSoonCount}</span>
+              <span className="stat-value">{dueDangerCount}</span>
             </div>
             <div
               className={`stat-item clickable due-stat ${filter === 'overdue' ? 'active' : ''}`}
@@ -887,7 +902,7 @@ function Tasks() {
             >
               <span className="stat-label">
                 <span className="priority-dot overdue-dot"></span>
-                Po termíne
+                Po termíne ⚠
               </span>
               <span className="stat-value">{overdueCount}</span>
             </div>
@@ -985,16 +1000,20 @@ function Tasks() {
                 <h2>Zoznam úloh ({filteredTasks.length})</h2>
                 <div className="due-date-legend">
                   <span className="legend-item">
-                    <span className="legend-color due-week-color"></span>
-                    <span>Do 10 dní</span>
+                    <span className="legend-color due-success-color"></span>
+                    <span>Do 14 dní</span>
                   </span>
                   <span className="legend-item">
-                    <span className="legend-color due-soon-color"></span>
+                    <span className="legend-color due-warning-color"></span>
+                    <span>Do 7 dní</span>
+                  </span>
+                  <span className="legend-item">
+                    <span className="legend-color due-danger-color"></span>
                     <span>Do 3 dní</span>
                   </span>
                   <span className="legend-item">
                     <span className="legend-color overdue-color"></span>
-                    <span>Po termíne</span>
+                    <span>Po termíne ⚠</span>
                   </span>
                 </div>
               </div>
