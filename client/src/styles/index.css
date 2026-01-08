@@ -4124,6 +4124,24 @@ a.detail-value:hover {
   background: var(--bg-hover);
 }
 
+/* Highlight subtasks that match the current due date filter */
+.subtask-item.filter-match {
+  background: var(--accent-light);
+  border-left: 3px solid var(--accent-color);
+  padding-left: 9px;
+  border-radius: var(--radius-sm);
+  animation: pulse-highlight 1s ease-in-out 2;
+}
+
+.subtask-item.filter-match:hover {
+  background: var(--accent-light);
+}
+
+@keyframes pulse-highlight {
+  0%, 100% { background: var(--accent-light); }
+  50% { background: rgba(59, 130, 246, 0.25); }
+}
+
 .subtask-item.completed .subtask-title {
   text-decoration: line-through;
   color: var(--text-muted);

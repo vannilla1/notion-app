@@ -86,6 +86,51 @@ function Tasks() {
     return '';
   };
 
+  // Check if current filter is a due date filter
+  const isDueDateFilter = (f) => ['due-success', 'due-warning', 'due-danger', 'overdue'].includes(f);
+
+  // Check if task or any subtask has specific due date class (recursive)
+  const hasSubtaskWithDueClass = (subtasks, dueClass) => {
+    if (!subtasks || subtasks.length === 0) return false;
+    for (const subtask of subtasks) {
+      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) return true;
+      if (subtask.subtasks && hasSubtaskWithDueClass(subtask.subtasks, dueClass)) return true;
+    }
+    return false;
+  };
+
+  // Get IDs of subtasks matching due date class (recursive)
+  const getMatchingSubtaskIds = (subtasks, dueClass) => {
+    const ids = new Set();
+    if (!subtasks || subtasks.length === 0) return ids;
+    for (const subtask of subtasks) {
+      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) {
+        ids.add(subtask.id);
+      }
+      if (subtask.subtasks) {
+        const childIds = getMatchingSubtaskIds(subtask.subtasks, dueClass);
+        childIds.forEach(id => ids.add(id));
+      }
+    }
+    return ids;
+  };
+
+  // Get IDs of parent subtasks that need to be expanded to show matching children
+  const getParentSubtaskIds = (subtasks, dueClass, parentIds = new Set()) => {
+    if (!subtasks || subtasks.length === 0) return parentIds;
+    for (const subtask of subtasks) {
+      if (subtask.subtasks && subtask.subtasks.length > 0) {
+        const hasMatchingChild = hasSubtaskWithDueClass(subtask.subtasks, dueClass);
+        const selfMatches = !subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass;
+        if (hasMatchingChild || selfMatches) {
+          parentIds.add(subtask.id);
+        }
+        getParentSubtaskIds(subtask.subtasks, dueClass, parentIds);
+      }
+    }
+    return parentIds;
+  };
+
   // Handle highlight from navigation state
   useEffect(() => {
     if (location.state?.highlightTaskId && tasks.length > 0) {
@@ -152,6 +197,44 @@ function Tasks() {
       socket.off('contact-updated', handleContactUpdated);
     };
   }, [socket, isConnected]);
+
+  // Auto-expand tasks and subtasks when due date filter is active
+  useEffect(() => {
+    if (!isDueDateFilter(filter) || tasks.length === 0) return;
+
+    const dueClass = filter;
+    const tasksToExpand = new Set();
+    const subtasksToExpand = {};
+
+    for (const task of tasks) {
+      // Check if task itself matches or has matching subtasks
+      const taskMatches = !task.completed && getDueDateClass(task.dueDate, task.completed) === dueClass;
+      const hasMatchingSubtasks = hasSubtaskWithDueClass(task.subtasks, dueClass);
+
+      if (taskMatches || hasMatchingSubtasks) {
+        tasksToExpand.add(task.id);
+
+        // Get parent subtask IDs that need to be expanded
+        if (hasMatchingSubtasks) {
+          const parentIds = getParentSubtaskIds(task.subtasks, dueClass);
+          parentIds.forEach(id => {
+            subtasksToExpand[id] = true;
+          });
+        }
+      }
+    }
+
+    // Expand first matching task
+    if (tasksToExpand.size > 0) {
+      const firstTaskId = Array.from(tasksToExpand)[0];
+      setExpandedTask(firstTaskId);
+    }
+
+    // Expand subtasks that have matching children
+    if (Object.keys(subtasksToExpand).length > 0) {
+      setExpandedSubtasks(prev => ({ ...prev, ...subtasksToExpand }));
+    }
+  }, [filter, tasks]);
 
   const fetchTasks = async () => {
     try {
@@ -431,16 +514,6 @@ function Tasks() {
     return false;
   };
 
-  // Check if task or any subtask has specific due date class (recursive)
-  const hasSubtaskWithDueClass = (subtasks, dueClass) => {
-    if (!subtasks || subtasks.length === 0) return false;
-    for (const subtask of subtasks) {
-      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) return true;
-      if (subtask.subtasks && hasSubtaskWithDueClass(subtask.subtasks, dueClass)) return true;
-    }
-    return false;
-  };
-
   // Count tasks and subtasks with specific priority (recursive)
   const countWithPriority = (tasks, priority) => {
     let count = 0;
@@ -493,14 +566,20 @@ function Tasks() {
   const renderSubtasks = (task, subtasks, depth = 0) => {
     if (!subtasks || subtasks.length === 0) return null;
 
+    const currentDueClass = isDueDateFilter(filter) ? filter : null;
+
     return subtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
       const isExpanded = expandedSubtasks[subtask.id];
       const childCounts = hasChildren ? countSubtasksRecursive(subtask.subtasks) : { total: 0, completed: 0 };
 
+      // Check if this subtask matches the current due date filter
+      const matchesFilter = currentDueClass && !subtask.completed &&
+        getDueDateClass(subtask.dueDate, subtask.completed) === currentDueClass;
+
       return (
         <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
-          <div className={`subtask-item ${subtask.completed ? 'completed' : ''}`}>
+          <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''}`}>
             <div
               className="subtask-checkbox-styled"
               onClick={() => !subtask.completed && toggleSubtask(task, subtask)}
