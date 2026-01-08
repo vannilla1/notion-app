@@ -421,6 +421,74 @@ function Tasks() {
     return { total, completed };
   };
 
+  // Check if task or any subtask has specific priority (recursive)
+  const hasSubtaskWithPriority = (subtasks, priority) => {
+    if (!subtasks || subtasks.length === 0) return false;
+    for (const subtask of subtasks) {
+      if (subtask.priority === priority && !subtask.completed) return true;
+      if (subtask.subtasks && hasSubtaskWithPriority(subtask.subtasks, priority)) return true;
+    }
+    return false;
+  };
+
+  // Check if task or any subtask has specific due date class (recursive)
+  const hasSubtaskWithDueClass = (subtasks, dueClass) => {
+    if (!subtasks || subtasks.length === 0) return false;
+    for (const subtask of subtasks) {
+      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) return true;
+      if (subtask.subtasks && hasSubtaskWithDueClass(subtask.subtasks, dueClass)) return true;
+    }
+    return false;
+  };
+
+  // Count tasks and subtasks with specific priority (recursive)
+  const countWithPriority = (tasks, priority) => {
+    let count = 0;
+    for (const task of tasks) {
+      if (task.priority === priority && !task.completed) count++;
+      if (task.subtasks) {
+        count += countSubtasksWithPriority(task.subtasks, priority);
+      }
+    }
+    return count;
+  };
+
+  const countSubtasksWithPriority = (subtasks, priority) => {
+    if (!subtasks || subtasks.length === 0) return 0;
+    let count = 0;
+    for (const subtask of subtasks) {
+      if (subtask.priority === priority && !subtask.completed) count++;
+      if (subtask.subtasks) {
+        count += countSubtasksWithPriority(subtask.subtasks, priority);
+      }
+    }
+    return count;
+  };
+
+  // Count tasks and subtasks with specific due date class (recursive)
+  const countWithDueClass = (tasks, dueClass) => {
+    let count = 0;
+    for (const task of tasks) {
+      if (!task.completed && getDueDateClass(task.dueDate, task.completed) === dueClass) count++;
+      if (task.subtasks) {
+        count += countSubtasksWithDueClass(task.subtasks, dueClass);
+      }
+    }
+    return count;
+  };
+
+  const countSubtasksWithDueClass = (subtasks, dueClass) => {
+    if (!subtasks || subtasks.length === 0) return 0;
+    let count = 0;
+    for (const subtask of subtasks) {
+      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) count++;
+      if (subtask.subtasks) {
+        count += countSubtasksWithDueClass(subtask.subtasks, dueClass);
+      }
+    }
+    return count;
+  };
+
   // Recursive subtask renderer
   const renderSubtasks = (task, subtasks, depth = 0) => {
     if (!subtasks || subtasks.length === 0) return null;
@@ -697,9 +765,15 @@ function Tasks() {
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
     if (filter === 'active') return !t.completed;
-    if (filter === 'high') return t.priority === 'high' && !t.completed;
-    if (filter === 'medium') return t.priority === 'medium' && !t.completed;
-    if (filter === 'low') return t.priority === 'low' && !t.completed;
+    if (filter === 'high') {
+      return (t.priority === 'high' && !t.completed) || hasSubtaskWithPriority(t.subtasks, 'high');
+    }
+    if (filter === 'medium') {
+      return (t.priority === 'medium' && !t.completed) || hasSubtaskWithPriority(t.subtasks, 'medium');
+    }
+    if (filter === 'low') {
+      return (t.priority === 'low' && !t.completed) || hasSubtaskWithPriority(t.subtasks, 'low');
+    }
     if (filter === 'with-contact') {
       const hasContacts = (t.contactIds?.length > 0) || t.contactId;
       return hasContacts;
@@ -709,31 +783,35 @@ function Tasks() {
       return !hasContacts;
     }
     if (filter === 'due-success') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success';
+      const taskMatches = !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success';
+      return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'due-success');
     }
     if (filter === 'due-warning') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning';
+      const taskMatches = !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning';
+      return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'due-warning');
     }
     if (filter === 'due-danger') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger';
+      const taskMatches = !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger';
+      return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'due-danger');
     }
     if (filter === 'overdue') {
-      return !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue';
+      const taskMatches = !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue';
+      return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'overdue');
     }
     return true;
   });
 
   const completedCount = tasks.filter(t => t.completed).length;
   const activeCount = tasks.filter(t => !t.completed).length;
-  const highPriorityCount = tasks.filter(t => t.priority === 'high' && !t.completed).length;
-  const mediumPriorityCount = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
-  const lowPriorityCount = tasks.filter(t => t.priority === 'low' && !t.completed).length;
+  const highPriorityCount = countWithPriority(tasks, 'high');
+  const mediumPriorityCount = countWithPriority(tasks, 'medium');
+  const lowPriorityCount = countWithPriority(tasks, 'low');
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
   const withoutContactCount = tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length;
-  const dueSuccessCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-success').length;
-  const dueWarningCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-warning').length;
-  const dueDangerCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'due-danger').length;
-  const overdueCount = tasks.filter(t => !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue').length;
+  const dueSuccessCount = countWithDueClass(tasks, 'due-success');
+  const dueWarningCount = countWithDueClass(tasks, 'due-warning');
+  const dueDangerCount = countWithDueClass(tasks, 'due-danger');
+  const overdueCount = countWithDueClass(tasks, 'overdue');
 
   return (
     <div className="crm-container">
