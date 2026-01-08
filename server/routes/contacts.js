@@ -234,6 +234,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
+    const now = new Date().toISOString();
     const task = {
       id: uuidv4(),
       title: title.trim(),
@@ -241,7 +242,9 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       dueDate: dueDate || null,
       priority: priority || 'medium',
       completed: false,
-      subtasks: []
+      subtasks: [],
+      createdAt: now,
+      updatedAt: now
     };
 
     contact.tasks.push(task);
@@ -286,7 +289,8 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
       priority: priority !== undefined ? priority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
       subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
-      createdAt: task.createdAt
+      createdAt: task.createdAt,
+      updatedAt: new Date().toISOString()
     };
 
     // BUGFIX: Mark tasks as modified to ensure Mongoose persists nested changes
@@ -357,6 +361,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
     }
 
     // BUGFIX: Added priority field support for subtasks
+    const now = new Date().toISOString();
     const subtask = {
       id: uuidv4(),
       title: title.trim(),
@@ -364,7 +369,9 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       dueDate: dueDate || null,
       notes: notes || '',
       priority: priority || null,
-      subtasks: []
+      subtasks: [],
+      createdAt: now,
+      updatedAt: now
     };
 
     const task = contact.tasks[taskIndex];
@@ -433,7 +440,9 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
       dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
       notes: notes !== undefined ? notes : found.subtask.notes,
       priority: found.subtask.priority, // Preserve priority
-      subtasks: found.subtask.subtasks || [] // Preserve nested subtasks
+      subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
+      createdAt: found.subtask.createdAt, // Preserve createdAt
+      updatedAt: new Date().toISOString() // Update timestamp
     };
 
     contact.markModified('tasks');

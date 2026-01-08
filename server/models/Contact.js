@@ -10,7 +10,9 @@ const subtaskSchema = new mongoose.Schema({
   dueDate: String,
   notes: { type: String, default: '' },
   priority: { type: String, default: null },
-  subtasks: { type: Array, default: [] }
+  subtasks: { type: Array, default: [] },
+  createdAt: { type: String, default: () => new Date().toISOString() },
+  updatedAt: { type: String, default: () => new Date().toISOString() }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -21,7 +23,8 @@ const taskSchema = new mongoose.Schema({
   priority: { type: String, default: 'medium' },
   dueDate: String,
   subtasks: { type: [subtaskSchema], default: [] },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: String, default: () => new Date().toISOString() },
+  updatedAt: { type: String, default: () => new Date().toISOString() }
 }, { _id: false });
 
 const fileSchema = new mongoose.Schema({

@@ -748,6 +748,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
     }
 
     // BUGFIX: Added priority field support for subtasks
+    const now = new Date().toISOString();
     const subtask = {
       id: uuidv4(),
       title: title.trim(),
@@ -756,7 +757,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
       notes: notes || '',
       priority: priority || null,
       subtasks: [],
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      updatedAt: now
     };
 
     // Helper to add subtask to parent (task or subtask)
@@ -867,7 +869,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
           notes: notes !== undefined ? notes : found.subtask.notes,
           priority: found.subtask.priority, // Preserve priority
-          subtasks: found.subtask.subtasks || [] // Preserve nested subtasks
+          subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
+          createdAt: found.subtask.createdAt, // Preserve createdAt
+          updatedAt: new Date().toISOString() // Update timestamp
         };
         return found.parent[found.index];
       }
