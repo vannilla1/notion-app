@@ -131,6 +131,41 @@ function Tasks() {
     return parentIds;
   };
 
+  // Check if a date is within the last 24 hours
+  const isWithin24Hours = (dateString) => {
+    if (!dateString) return false;
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now - date;
+    const hours24 = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    return diff >= 0 && diff <= hours24;
+  };
+
+  // Check if task is new or modified in last 24 hours
+  const isNewOrModified = (task) => {
+    return isWithin24Hours(task.createdAt) || isWithin24Hours(task.updatedAt);
+  };
+
+  // Check if any subtask is new or modified (recursive)
+  const hasNewOrModifiedSubtask = (subtasks) => {
+    if (!subtasks || subtasks.length === 0) return false;
+    for (const subtask of subtasks) {
+      if (isWithin24Hours(subtask.createdAt) || isWithin24Hours(subtask.updatedAt)) return true;
+      if (subtask.subtasks && hasNewOrModifiedSubtask(subtask.subtasks)) return true;
+    }
+    return false;
+  };
+
+  // Count tasks and subtasks that are new or modified
+  const countNewOrModified = (tasks) => {
+    let count = 0;
+    for (const task of tasks) {
+      if (isNewOrModified(task)) count++;
+      else if (hasNewOrModifiedSubtask(task.subtasks)) count++;
+    }
+    return count;
+  };
+
   // Handle highlight from navigation state
   useEffect(() => {
     if (location.state?.highlightTaskId && tasks.length > 0) {
@@ -854,6 +889,9 @@ function Tasks() {
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
     if (filter === 'active') return !t.completed;
+    if (filter === 'new') {
+      return isNewOrModified(t) || hasNewOrModifiedSubtask(t.subtasks);
+    }
     if (filter === 'high') {
       return (t.priority === 'high' && !t.completed) || hasSubtaskWithPriority(t.subtasks, 'high');
     }
@@ -892,6 +930,7 @@ function Tasks() {
 
   const completedCount = tasks.filter(t => t.completed).length;
   const activeCount = tasks.filter(t => !t.completed).length;
+  const newCount = countNewOrModified(tasks);
   const highPriorityCount = countWithPriority(tasks, 'high');
   const mediumPriorityCount = countWithPriority(tasks, 'medium');
   const lowPriorityCount = countWithPriority(tasks, 'low');
@@ -991,6 +1030,16 @@ function Tasks() {
             >
               <span className="stat-label">Celkom úloh</span>
               <span className="stat-value">{tasks.length}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${filter === 'new' ? 'active' : ''}`}
+              onClick={() => setFilter('new')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#8B5CF6' }}></span>
+                Nové / Zmenené (24h)
+              </span>
+              <span className="stat-value">{newCount}</span>
             </div>
             <div
               className={`stat-item clickable ${filter === 'active' ? 'active' : ''}`}
