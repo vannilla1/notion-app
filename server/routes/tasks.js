@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const User = require('../models/User');
 
 const router = express.Router();
 
@@ -93,11 +94,27 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Export tasks to iCal format - MUST be before /:id route
+// Query params:
+//   - incremental=true: only export tasks not previously exported
+//   - reset=true: reset export history and export all tasks
 router.get('/export/calendar', authenticateToken, async (req, res) => {
   try {
+    const { incremental, reset } = req.query;
+    const userId = req.user.userId;
+
+    // Get user to check previously exported task IDs
+    const user = await User.findById(userId);
+    let exportedTaskIds = user?.exportedTaskIds || [];
+
+    // If reset requested, clear export history
+    if (reset === 'true') {
+      exportedTaskIds = [];
+    }
+
     const contacts = await Contact.find({});
     const globalTasks = await Task.find({});
     const events = [];
+    const newExportedIds = [];
 
     const formatICalDate = (dateString) => {
       const date = new Date(dateString);
@@ -109,10 +126,16 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
 
     const createUID = (id) => `${id}@peruncrm`;
 
+    // Check if task should be included (not already exported in incremental mode)
+    const shouldIncludeTask = (taskId) => {
+      if (incremental !== 'true') return true;
+      return !exportedTaskIds.includes(taskId);
+    };
+
     const collectSubtasks = (subtasks, parentTitle, contactName) => {
       if (!subtasks) return;
       for (const subtask of subtasks) {
-        if (subtask.dueDate && !subtask.completed) {
+        if (subtask.dueDate && !subtask.completed && shouldIncludeTask(subtask.id)) {
           events.push({
             uid: createUID(subtask.id),
             title: `${subtask.title} (${parentTitle})`,
@@ -120,6 +143,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
             description: subtask.notes || '',
             contact: contactName
           });
+          newExportedIds.push(subtask.id);
         }
         if (subtask.subtasks && subtask.subtasks.length > 0) {
           collectSubtasks(subtask.subtasks, parentTitle, contactName);
@@ -129,14 +153,16 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
 
     // Collect from global tasks
     for (const task of globalTasks) {
-      if (task.dueDate && !task.completed) {
+      const taskId = task._id.toString();
+      if (task.dueDate && !task.completed && shouldIncludeTask(taskId)) {
         events.push({
-          uid: createUID(task._id.toString()),
+          uid: createUID(taskId),
           title: task.title,
           dueDate: task.dueDate,
           description: task.description || '',
           contact: null
         });
+        newExportedIds.push(taskId);
       }
       collectSubtasks(task.subtasks, task.title, null);
     }
@@ -145,7 +171,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
-          if (task.dueDate && !task.completed) {
+          if (task.dueDate && !task.completed && shouldIncludeTask(task.id)) {
             events.push({
               uid: createUID(task.id),
               title: task.title,
@@ -153,6 +179,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
               description: task.description || '',
               contact: contact.name
             });
+            newExportedIds.push(task.id);
           }
           collectSubtasks(task.subtasks, task.title, contact.name);
         }
@@ -194,6 +221,18 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     }
 
     ical += 'END:VCALENDAR\r\n';
+
+    // Update user's exported task IDs
+    if (user && newExportedIds.length > 0) {
+      const updatedExportedIds = reset === 'true'
+        ? newExportedIds
+        : [...new Set([...exportedTaskIds, ...newExportedIds])];
+
+      await User.findByIdAndUpdate(userId, {
+        exportedTaskIds: updatedExportedIds,
+        lastCalendarExport: new Date()
+      });
+    }
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="perun-crm-tasks.ics"');

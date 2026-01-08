@@ -25,6 +25,14 @@ const userSchema = new mongoose.Schema({
   avatar: {
     type: String,
     default: null
+  },
+  lastCalendarExport: {
+    type: Date,
+    default: null
+  },
+  exportedTaskIds: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true,

@@ -779,21 +779,31 @@ function Tasks() {
   };
 
   // Download ICS file (works with all calendar apps)
-  const downloadIcsFile = async () => {
+  // options: { incremental: boolean, reset: boolean }
+  const downloadIcsFile = async (options = {}) => {
     try {
-      const response = await api.get('/api/tasks/export/calendar', {
+      const params = new URLSearchParams();
+      if (options.incremental) params.append('incremental', 'true');
+      if (options.reset) params.append('reset', 'true');
+
+      const url = `/api/tasks/export/calendar${params.toString() ? '?' + params.toString() : ''}`;
+      const response = await api.get(url, {
         responseType: 'blob'
       });
       const blob = new Blob([response.data], { type: 'text/calendar;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
+      const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'perun-crm-tasks.ics';
+      a.href = blobUrl;
+      a.download = options.incremental ? 'perun-crm-tasks-new.ics' : 'perun-crm-tasks.ics';
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
       setShowCalendarMenu(false);
+
+      if (options.incremental) {
+        alert('Stiahnuté iba nové úlohy, ktoré ešte neboli exportované.');
+      }
     } catch (error) {
       alert('Chyba pri exporte kalendára');
     }
@@ -918,10 +928,19 @@ function Tasks() {
             </button>
             {showCalendarMenu && (
               <div className="calendar-menu">
-                <button onClick={downloadIcsFile} className="calendar-menu-item">
-                  📥 Stiahnuť .ics súbor
-                  <span className="menu-hint">Univerzálny formát</span>
+                <button onClick={() => downloadIcsFile({ incremental: true })} className="calendar-menu-item">
+                  📥 Stiahnuť nové úlohy
+                  <span className="menu-hint">Iba ešte neexportované</span>
                 </button>
+                <button onClick={() => downloadIcsFile()} className="calendar-menu-item">
+                  📥 Stiahnuť všetky úlohy
+                  <span className="menu-hint">Kompletný export</span>
+                </button>
+                <button onClick={() => downloadIcsFile({ reset: true })} className="calendar-menu-item">
+                  🔄 Reset a stiahnuť všetko
+                  <span className="menu-hint">Vymaže históriu exportu</span>
+                </button>
+                <div className="calendar-menu-separator"></div>
                 <button onClick={openInGoogleCalendar} className="calendar-menu-item">
                   🌐 Google Calendar
                   <span className="menu-hint">Otvorí import stránku</span>

@@ -5138,6 +5138,12 @@ a.detail-value:hover {
   margin-top: 2px;
 }
 
+.calendar-menu-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
 @media (max-width: 768px) {
   .calendar-menu {
     right: -50px;
