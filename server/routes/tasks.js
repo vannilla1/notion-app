@@ -235,17 +235,23 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Helper function to clone subtasks with new IDs
+// BUGFIX: Added priority field preservation and input validation
 const cloneSubtasksWithNewIds = (subtasks) => {
   if (!subtasks || !Array.isArray(subtasks)) return [];
-  return subtasks.map(subtask => ({
-    id: uuidv4(),
-    title: subtask.title,
-    completed: subtask.completed || false,
-    dueDate: subtask.dueDate || null,
-    notes: subtask.notes || '',
-    subtasks: cloneSubtasksWithNewIds(subtask.subtasks),
-    createdAt: new Date().toISOString()
-  }));
+  return subtasks.map(subtask => {
+    // Validate subtask object
+    if (!subtask || typeof subtask !== 'object') return null;
+    return {
+      id: uuidv4(),
+      title: subtask.title || '',
+      completed: subtask.completed || false,
+      dueDate: subtask.dueDate || null,
+      notes: subtask.notes || '',
+      priority: subtask.priority || null, // Preserve priority
+      subtasks: cloneSubtasksWithNewIds(subtask.subtasks),
+      createdAt: new Date().toISOString()
+    };
+  }).filter(Boolean); // Remove null entries from invalid subtasks
 };
 
 // Create task - creates independent embedded tasks in each selected contact
@@ -550,17 +556,23 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // ==================== DUPLICATE TASK ====================
 
 // Helper function to duplicate subtasks recursively with new IDs
+// BUGFIX: Added priority field preservation and input validation
 const duplicateSubtasksRecursive = (subtasks) => {
   if (!subtasks || !Array.isArray(subtasks)) return [];
-  return subtasks.map(subtask => ({
-    id: uuidv4(),
-    title: subtask.title,
-    completed: false,
-    dueDate: subtask.dueDate || null,
-    notes: subtask.notes || '',
-    subtasks: duplicateSubtasksRecursive(subtask.subtasks),
-    createdAt: new Date().toISOString()
-  }));
+  return subtasks.map(subtask => {
+    // Validate subtask object
+    if (!subtask || typeof subtask !== 'object') return null;
+    return {
+      id: uuidv4(),
+      title: subtask.title || '',
+      completed: false,
+      dueDate: subtask.dueDate || null,
+      notes: subtask.notes || '',
+      priority: subtask.priority || null, // Preserve priority
+      subtasks: duplicateSubtasksRecursive(subtask.subtasks),
+      createdAt: new Date().toISOString()
+    };
+  }).filter(Boolean); // Remove null entries from invalid subtasks
 };
 
 // Duplicate task with new contact assignment - creates independent embedded tasks in each contact
@@ -689,19 +701,21 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, notes } = req.body;
+    const { title, source, parentSubtaskId, dueDate, notes, priority } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Nazov podulohy je povinny' });
     }
 
+    // BUGFIX: Added priority field support for subtasks
     const subtask = {
       id: uuidv4(),
       title: title.trim(),
       completed: false,
       dueDate: dueDate || null,
       notes: notes || '',
+      priority: priority || null,
       subtasks: [],
       createdAt: new Date().toISOString()
     };
@@ -802,15 +816,19 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
     const io = req.app.get('io');
 
     // Helper to update subtask recursively
+    // BUGFIX: Preserve all existing fields including priority and nested subtasks
     const updateSubtaskInTask = (task) => {
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);
       if (found) {
         found.parent[found.index] = {
           ...found.subtask,
+          id: found.subtask.id, // Ensure ID is preserved
           title: title !== undefined ? title : found.subtask.title,
           completed: completed !== undefined ? completed : found.subtask.completed,
           dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
-          notes: notes !== undefined ? notes : found.subtask.notes
+          notes: notes !== undefined ? notes : found.subtask.notes,
+          priority: found.subtask.priority, // Preserve priority
+          subtasks: found.subtask.subtasks || [] // Preserve nested subtasks
         };
         return found.parent[found.index];
       }

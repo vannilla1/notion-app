@@ -289,6 +289,8 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
       createdAt: task.createdAt
     };
 
+    // BUGFIX: Mark tasks as modified to ensure Mongoose persists nested changes
+    contact.markModified('tasks');
     await contact.save();
 
     const io = req.app.get('io');
@@ -334,7 +336,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
 // Add subtask to task
 router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req, res) => {
   try {
-    const { title, parentSubtaskId, dueDate, notes } = req.body;
+    const { title, parentSubtaskId, dueDate, notes, priority } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Nazov podulohy je povinny' });
@@ -354,12 +356,14 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       return res.status(404).json({ message: 'Task not found' });
     }
 
+    // BUGFIX: Added priority field support for subtasks
     const subtask = {
       id: uuidv4(),
       title: title.trim(),
       completed: false,
       dueDate: dueDate || null,
       notes: notes || '',
+      priority: priority || null,
       subtasks: []
     };
 
@@ -420,12 +424,16 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
+    // BUGFIX: Preserve all existing fields including priority and nested subtasks
     found.parent[found.index] = {
       ...found.subtask,
+      id: found.subtask.id, // Ensure ID is preserved
       title: title !== undefined ? title : found.subtask.title,
       completed: completed !== undefined ? completed : found.subtask.completed,
       dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
-      notes: notes !== undefined ? notes : found.subtask.notes
+      notes: notes !== undefined ? notes : found.subtask.notes,
+      priority: found.subtask.priority, // Preserve priority
+      subtasks: found.subtask.subtasks || [] // Preserve nested subtasks
     };
 
     contact.markModified('tasks');

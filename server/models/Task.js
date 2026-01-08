@@ -1,12 +1,14 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
+// BUGFIX: Added priority field to subtask schema for consistency
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
   title: String,
   completed: { type: Boolean, default: false },
   dueDate: String,
   notes: { type: String, default: '' },
+  priority: { type: String, default: null },
   subtasks: { type: Array, default: [] }
 }, { _id: false });
 

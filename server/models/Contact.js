@@ -1,13 +1,16 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
+// BUGFIX: Changed from Mixed type to proper Array for type consistency
+// This prevents potential data loss from type coercion issues
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
   title: String,
   completed: { type: Boolean, default: false },
   dueDate: String,
   notes: { type: String, default: '' },
-  subtasks: { type: mongoose.Schema.Types.Mixed, default: [] }
+  priority: { type: String, default: null },
+  subtasks: { type: Array, default: [] }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
