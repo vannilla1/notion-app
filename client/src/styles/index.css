@@ -746,6 +746,7 @@ body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .crm-sidebar {
@@ -756,6 +757,25 @@ body {
   flex-direction: column;
   padding: 20px;
   box-shadow: var(--shadow-sm);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.crm-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.crm-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.crm-sidebar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.crm-sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .add-contact-btn {
