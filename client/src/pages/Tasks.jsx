@@ -142,20 +142,17 @@ function Tasks() {
     return diff >= 0 && diff <= hours24;
   };
 
-  // Check if task is new (created in last 24h) or modified (has modifiedAt in last 24h)
+  // Check if task is new or modified (uses modifiedAt field only)
+  // modifiedAt is set when task is created or modified by user
   const isNewOrModified = (task) => {
-    // Check if created in last 24 hours
-    if (isWithin24Hours(task.createdAt)) return true;
-
-    // Check modifiedAt field (custom field set only on actual user changes)
+    // Only check modifiedAt - this field is set on creation and updates
     if (task.modifiedAt && isWithin24Hours(task.modifiedAt)) return true;
-
     return false;
   };
 
   // Check if subtask is new or modified
   const isSubtaskNewOrModified = (subtask) => {
-    if (isWithin24Hours(subtask.createdAt)) return true;
+    // Only check modifiedAt - this field is set on creation and updates
     if (subtask.modifiedAt && isWithin24Hours(subtask.modifiedAt)) return true;
     return false;
   };
@@ -338,6 +335,11 @@ function Tasks() {
   const fetchTasks = async () => {
     try {
       const res = await api.get('/api/tasks');
+      // Debug: log first 3 tasks to see their createdAt values
+      console.log('=== DEBUG: First 3 tasks ===');
+      res.data.slice(0, 3).forEach(t => {
+        console.log(`Task: "${t.title}" | createdAt: ${t.createdAt} | modifiedAt: ${t.modifiedAt}`);
+      });
       setTasks(res.data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);

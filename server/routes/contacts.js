@@ -244,7 +244,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       completed: false,
       subtasks: [],
       createdAt: now,
-      updatedAt: now
+      modifiedAt: now // Set on creation for "new" filter
     };
 
     contact.tasks.push(task);
@@ -371,7 +371,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       priority: priority || null,
       subtasks: [],
       createdAt: now,
-      updatedAt: now
+      modifiedAt: now // Set on creation for "new" filter
     };
 
     const task = contact.tasks[taskIndex];

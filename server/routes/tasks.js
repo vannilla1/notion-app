@@ -280,6 +280,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
   return subtasks.map(subtask => {
     // Validate subtask object
     if (!subtask || typeof subtask !== 'object') return null;
+    const now = new Date().toISOString();
     return {
       id: uuidv4(),
       title: subtask.title || '',
@@ -288,7 +289,8 @@ const cloneSubtasksWithNewIds = (subtasks) => {
       notes: subtask.notes || '',
       priority: subtask.priority || null, // Preserve priority
       subtasks: cloneSubtasksWithNewIds(subtask.subtasks),
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      modifiedAt: now // Set on creation for "new" filter
     };
   }).filter(Boolean); // Remove null entries from invalid subtasks
 };
@@ -322,7 +324,8 @@ router.post('/', authenticateToken, async (req, res) => {
         completed: false,
         contactIds: [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
-        createdBy: req.user.username
+        createdBy: req.user.username,
+        modifiedAt: new Date().toISOString() // Set on creation for "new" filter
       });
 
       await task.save();
@@ -356,7 +359,8 @@ router.post('/', authenticateToken, async (req, res) => {
         priority: priority || 'medium',
         dueDate: dueDate || null,
         subtasks: cloneSubtasksWithNewIds(subtasks),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString() // Set on creation for "new" filter
       };
 
       // Ensure tasks array exists
@@ -603,6 +607,7 @@ const duplicateSubtasksRecursive = (subtasks) => {
   return subtasks.map(subtask => {
     // Validate subtask object
     if (!subtask || typeof subtask !== 'object') return null;
+    const now = new Date().toISOString();
     return {
       id: uuidv4(),
       title: subtask.title || '',
@@ -611,7 +616,8 @@ const duplicateSubtasksRecursive = (subtasks) => {
       notes: subtask.notes || '',
       priority: subtask.priority || null, // Preserve priority
       subtasks: duplicateSubtasksRecursive(subtask.subtasks),
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      modifiedAt: now // Set on creation for "new" filter
     };
   }).filter(Boolean); // Remove null entries from invalid subtasks
 };
@@ -671,7 +677,8 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
         completed: false,
         contactIds: [],
         subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
-        createdBy: req.user.username
+        createdBy: req.user.username,
+        modifiedAt: new Date().toISOString() // Set on creation for "new" filter
       });
 
       await duplicatedTask.save();
@@ -697,6 +704,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       if (!contact) continue;
 
       // Create new embedded task for this contact
+      const now = new Date().toISOString();
       const newTask = {
         id: uuidv4(),
         title: originalTask.title + ' (kópia)',
@@ -705,7 +713,8 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
         priority: originalTask.priority || 'medium',
         dueDate: originalTask.dueDate || null,
         subtasks: duplicateSubtasksRecursive(originalTask.subtasks),
-        createdAt: new Date().toISOString()
+        createdAt: now,
+        modifiedAt: now // Set on creation for "new" filter
       };
 
       // Ensure tasks array exists
@@ -760,7 +769,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
       priority: priority || null,
       subtasks: [],
       createdAt: now,
-      updatedAt: now
+      modifiedAt: now // Set on creation for "new" filter
     };
 
     // Helper to add subtask to parent (task or subtask)
