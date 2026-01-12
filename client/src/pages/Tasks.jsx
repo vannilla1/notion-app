@@ -135,22 +135,48 @@ function Tasks() {
   const isWithin24Hours = (dateString) => {
     if (!dateString) return false;
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return false; // Invalid date
     const now = new Date();
     const diff = now - date;
     const hours24 = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
     return diff >= 0 && diff <= hours24;
   };
 
-  // Check if task is new or modified in last 24 hours
+  // Check if task is new (created in last 24h) or modified (updatedAt differs from createdAt and is in last 24h)
   const isNewOrModified = (task) => {
-    return isWithin24Hours(task.createdAt) || isWithin24Hours(task.updatedAt);
+    // Check if created in last 24 hours
+    if (isWithin24Hours(task.createdAt)) return true;
+
+    // Check if modified in last 24 hours (only if updatedAt is different from createdAt)
+    if (task.updatedAt && task.createdAt) {
+      const created = new Date(task.createdAt).getTime();
+      const updated = new Date(task.updatedAt).getTime();
+      // Consider as modified only if there's at least 1 second difference
+      if (Math.abs(updated - created) > 1000 && isWithin24Hours(task.updatedAt)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Check if subtask is new or modified
+  const isSubtaskNewOrModified = (subtask) => {
+    if (isWithin24Hours(subtask.createdAt)) return true;
+    if (subtask.updatedAt && subtask.createdAt) {
+      const created = new Date(subtask.createdAt).getTime();
+      const updated = new Date(subtask.updatedAt).getTime();
+      if (Math.abs(updated - created) > 1000 && isWithin24Hours(subtask.updatedAt)) {
+        return true;
+      }
+    }
+    return false;
   };
 
   // Check if any subtask is new or modified (recursive)
   const hasNewOrModifiedSubtask = (subtasks) => {
     if (!subtasks || subtasks.length === 0) return false;
     for (const subtask of subtasks) {
-      if (isWithin24Hours(subtask.createdAt) || isWithin24Hours(subtask.updatedAt)) return true;
+      if (isSubtaskNewOrModified(subtask)) return true;
       if (subtask.subtasks && hasNewOrModifiedSubtask(subtask.subtasks)) return true;
     }
     return false;
@@ -171,7 +197,7 @@ function Tasks() {
     const ids = new Set();
     if (!subtasks || subtasks.length === 0) return ids;
     for (const subtask of subtasks) {
-      if (isWithin24Hours(subtask.createdAt) || isWithin24Hours(subtask.updatedAt)) {
+      if (isSubtaskNewOrModified(subtask)) {
         ids.add(subtask.id);
       }
       if (subtask.subtasks) {
@@ -188,7 +214,7 @@ function Tasks() {
     for (const subtask of subtasks) {
       if (subtask.subtasks && subtask.subtasks.length > 0) {
         const hasNewChild = hasNewOrModifiedSubtask(subtask.subtasks);
-        const selfIsNew = isWithin24Hours(subtask.createdAt) || isWithin24Hours(subtask.updatedAt);
+        const selfIsNew = isSubtaskNewOrModified(subtask);
         if (hasNewChild || selfIsNew) {
           parentIds.add(subtask.id);
         }
@@ -662,8 +688,7 @@ function Tasks() {
       // Check if this subtask matches the current filter (due date or new)
       const matchesDueFilter = currentDueClass && !subtask.completed &&
         getDueDateClass(subtask.dueDate, subtask.completed) === currentDueClass;
-      const matchesNewFilter = isNewFilter &&
-        (isWithin24Hours(subtask.createdAt) || isWithin24Hours(subtask.updatedAt));
+      const matchesNewFilter = isNewFilter && isSubtaskNewOrModified(subtask);
       const matchesFilter = matchesDueFilter || matchesNewFilter;
 
       return (
