@@ -144,18 +144,28 @@ function Tasks() {
 
   // Check if task is new (created in last 24h) or modified (updatedAt differs from createdAt and is in last 24h)
   const isNewOrModified = (task) => {
+    // Debug logging
+    console.log('Task:', task.title, 'createdAt:', task.createdAt, 'updatedAt:', task.updatedAt);
+
     // Check if created in last 24 hours
-    if (isWithin24Hours(task.createdAt)) return true;
+    if (isWithin24Hours(task.createdAt)) {
+      console.log('  -> NEW (created in 24h)');
+      return true;
+    }
 
     // Check if modified in last 24 hours (only if updatedAt is different from createdAt)
     if (task.updatedAt && task.createdAt) {
       const created = new Date(task.createdAt).getTime();
       const updated = new Date(task.updatedAt).getTime();
+      const diff = Math.abs(updated - created);
+      console.log('  -> Diff:', diff, 'ms, updatedAt in 24h:', isWithin24Hours(task.updatedAt));
       // Consider as modified only if there's at least 1 second difference
-      if (Math.abs(updated - created) > 1000 && isWithin24Hours(task.updatedAt)) {
+      if (diff > 1000 && isWithin24Hours(task.updatedAt)) {
+        console.log('  -> MODIFIED');
         return true;
       }
     }
+    console.log('  -> NOT new or modified');
     return false;
   };
 
