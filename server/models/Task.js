@@ -11,7 +11,7 @@ const subtaskSchema = new mongoose.Schema({
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
   createdAt: { type: String, default: () => new Date().toISOString() },
-  updatedAt: { type: String, default: () => new Date().toISOString() }
+  modifiedAt: { type: String, default: null }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -42,7 +42,8 @@ const taskSchema = new mongoose.Schema({
   },
   dueDate: String,
   subtasks: { type: [subtaskSchema], default: [] },
-  createdBy: String
+  createdBy: String,
+  modifiedAt: { type: String, default: null }
 }, {
   timestamps: true,
   toJSON: {

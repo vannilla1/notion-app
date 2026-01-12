@@ -290,7 +290,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
       completed: completed !== undefined ? completed : task.completed,
       subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
       createdAt: task.createdAt,
-      updatedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString()
     };
 
     // BUGFIX: Mark tasks as modified to ensure Mongoose persists nested changes
@@ -442,7 +442,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
       priority: found.subtask.priority, // Preserve priority
       subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
       createdAt: found.subtask.createdAt, // Preserve createdAt
-      updatedAt: new Date().toISOString() // Update timestamp
+      modifiedAt: new Date().toISOString() // Set modification timestamp
     };
 
     contact.markModified('tasks');

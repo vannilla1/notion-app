@@ -142,43 +142,21 @@ function Tasks() {
     return diff >= 0 && diff <= hours24;
   };
 
-  // Check if task is new (created in last 24h) or modified (updatedAt differs from createdAt and is in last 24h)
+  // Check if task is new (created in last 24h) or modified (has modifiedAt in last 24h)
   const isNewOrModified = (task) => {
-    // Debug logging
-    console.log('Task:', task.title, 'createdAt:', task.createdAt, 'updatedAt:', task.updatedAt);
-
     // Check if created in last 24 hours
-    if (isWithin24Hours(task.createdAt)) {
-      console.log('  -> NEW (created in 24h)');
-      return true;
-    }
+    if (isWithin24Hours(task.createdAt)) return true;
 
-    // Check if modified in last 24 hours (only if updatedAt is different from createdAt)
-    if (task.updatedAt && task.createdAt) {
-      const created = new Date(task.createdAt).getTime();
-      const updated = new Date(task.updatedAt).getTime();
-      const diff = Math.abs(updated - created);
-      console.log('  -> Diff:', diff, 'ms, updatedAt in 24h:', isWithin24Hours(task.updatedAt));
-      // Consider as modified only if there's at least 1 second difference
-      if (diff > 1000 && isWithin24Hours(task.updatedAt)) {
-        console.log('  -> MODIFIED');
-        return true;
-      }
-    }
-    console.log('  -> NOT new or modified');
+    // Check modifiedAt field (custom field set only on actual user changes)
+    if (task.modifiedAt && isWithin24Hours(task.modifiedAt)) return true;
+
     return false;
   };
 
   // Check if subtask is new or modified
   const isSubtaskNewOrModified = (subtask) => {
     if (isWithin24Hours(subtask.createdAt)) return true;
-    if (subtask.updatedAt && subtask.createdAt) {
-      const created = new Date(subtask.createdAt).getTime();
-      const updated = new Date(subtask.updatedAt).getTime();
-      if (Math.abs(updated - created) > 1000 && isWithin24Hours(subtask.updatedAt)) {
-        return true;
-      }
-    }
+    if (subtask.modifiedAt && isWithin24Hours(subtask.modifiedAt)) return true;
     return false;
   };
 

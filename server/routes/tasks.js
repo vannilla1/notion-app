@@ -419,7 +419,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
               priority: priority !== undefined ? priority : task.priority,
               completed: completed !== undefined ? completed : task.completed,
               subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
-              createdAt: task.createdAt
+              createdAt: task.createdAt,
+              modifiedAt: new Date().toISOString()
             };
             contact.markModified('tasks');
             await contact.save();
@@ -475,6 +476,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
       task.contactIds = finalContactIds;
+      task.modifiedAt = new Date().toISOString();
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
         task.subtasks = req.body.subtasks;
@@ -871,7 +873,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           priority: found.subtask.priority, // Preserve priority
           subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
           createdAt: found.subtask.createdAt, // Preserve createdAt
-          updatedAt: new Date().toISOString() // Update timestamp
+          modifiedAt: new Date().toISOString() // Set modification timestamp
         };
         return found.parent[found.index];
       }
