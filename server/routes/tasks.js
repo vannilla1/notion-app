@@ -781,6 +781,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             found.subtask.subtasks = [];
           }
           found.subtask.subtasks.push(subtask);
+          // Update parent subtask's modifiedAt when child is added
+          found.subtask.modifiedAt = now;
           return true;
         }
         return false;
@@ -791,6 +793,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
         task.subtasks.push(subtask);
         return true;
       }
+      // Note: Parent task's modifiedAt is updated after this function returns
     };
 
     // If source is specified as contact, look in contacts first
@@ -801,6 +804,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
           if (taskIndex !== -1) {
             if (addToParent(contact.tasks[taskIndex])) {
+              // Update parent task's modifiedAt when subtask is added
+              contact.tasks[taskIndex].modifiedAt = now;
               contact.markModified('tasks');
               await contact.save();
 
@@ -822,6 +827,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
     const task = await Task.findById(req.params.taskId);
     if (task) {
       if (addToParent(task)) {
+        // Update parent task's modifiedAt when subtask is added
+        task.modifiedAt = now;
         task.markModified('subtasks');
         await task.save();
 
@@ -838,6 +845,8 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
           if (addToParent(contact.tasks[taskIndex])) {
+            // Update parent task's modifiedAt when subtask is added
+            contact.tasks[taskIndex].modifiedAt = now;
             contact.markModified('tasks');
             await contact.save();
 

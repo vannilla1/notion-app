@@ -383,6 +383,8 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
           found.subtask.subtasks = [];
         }
         found.subtask.subtasks.push(subtask);
+        // Update parent subtask's modifiedAt when child is added
+        found.subtask.modifiedAt = now;
       } else {
         return res.status(404).json({ message: 'Parent subtask not found' });
       }
@@ -392,6 +394,9 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       }
       task.subtasks.push(subtask);
     }
+
+    // Update parent task's modifiedAt when subtask is added
+    task.modifiedAt = now;
 
     contact.markModified('tasks');
     await contact.save();
