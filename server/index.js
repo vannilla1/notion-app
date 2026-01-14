@@ -27,31 +27,21 @@ const sentry = initSentry(app);
 
 const server = http.createServer(app);
 
-// CORS configuration - shared between Express and Socket.io
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173'];
-
-// Always allow Render frontend URL
-if (!allowedOrigins.includes('https://perun-crm.onrender.com')) {
-  allowedOrigins.push('https://perun-crm.onrender.com');
-}
-
-console.log('CORS allowed origins:', allowedOrigins);
-
+// CORS configuration - allow all origins for now
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE']
   }
 });
 
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors());
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin}`);
+  next();
+});
 
 // Body parsers
 app.use(express.json());
