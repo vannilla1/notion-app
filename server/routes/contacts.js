@@ -27,19 +27,6 @@ const upload = multer({
   }
 });
 
-// Error handling middleware for multer
-const handleMulterError = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 5MB.' });
-    }
-    return res.status(400).json({ message: 'Chyba pri nahrávaní súboru: ' + err.message });
-  } else if (err) {
-    return res.status(400).json({ message: err.message });
-  }
-  next();
-};
-
 // Validation helpers
 const isValidEmail = (email) => {
   if (!email) return true;
@@ -519,56 +506,69 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 // ==================== FILE UPLOAD ====================
 
 // Upload file to contact (stored in MongoDB as Base64)
-router.post('/:id/files', authenticateToken, upload.single('file'), handleMulterError, async (req, res) => {
-  try {
-    console.log('File upload request for contact:', req.params.id);
+router.post('/:id/files', authenticateToken, (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    try {
+      // Handle multer errors
+      if (err) {
+        console.error('Multer error:', err);
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 5MB.' });
+        }
+        return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
+      }
 
-    const contact = await Contact.findById(req.params.id);
-    if (!contact) {
-      console.log('Contact not found:', req.params.id);
-      return res.status(404).json({ message: 'Contact not found' });
+      console.log('File upload request for contact:', req.params.id);
+
+      const contact = await Contact.findById(req.params.id);
+      if (!contact) {
+        console.log('Contact not found:', req.params.id);
+        return res.status(404).json({ message: 'Contact not found' });
+      }
+
+      if (!req.file) {
+        console.log('No file in request');
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      console.log('File received:', req.file.originalname, 'Size:', req.file.size);
+
+      // Convert file buffer to Base64
+      const base64Data = req.file.buffer.toString('base64');
+
+      const fileData = {
+        id: uuidv4(),
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        data: base64Data,
+        uploadedAt: new Date()
+      };
+
+      contact.files.push(fileData);
+      await contact.save();
+      console.log('File saved to MongoDB:', fileData.id);
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('contact-updated', contactToPlainObject(contact));
+      }
+
+      // Don't send the data field back to client (too large)
+      const responseData = {
+        id: fileData.id,
+        originalName: fileData.originalName,
+        mimetype: fileData.mimetype,
+        size: fileData.size,
+        uploadedAt: fileData.uploadedAt
+      };
+
+      res.status(201).json(responseData);
+    } catch (error) {
+      console.error('File upload error:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
     }
-
-    if (!req.file) {
-      console.log('No file in request');
-      return res.status(400).json({ message: 'No file uploaded' });
-    }
-
-    console.log('File received:', req.file.originalname, 'Size:', req.file.size);
-
-    // Convert file buffer to Base64
-    const base64Data = req.file.buffer.toString('base64');
-
-    const fileData = {
-      id: uuidv4(),
-      originalName: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      data: base64Data,
-      uploadedAt: new Date()
-    };
-
-    contact.files.push(fileData);
-    await contact.save();
-    console.log('File saved to MongoDB:', fileData.id);
-
-    const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
-
-    // Don't send the data field back to client (too large)
-    const responseData = {
-      id: fileData.id,
-      originalName: fileData.originalName,
-      mimetype: fileData.mimetype,
-      size: fileData.size,
-      uploadedAt: fileData.uploadedAt
-    };
-
-    res.status(201).json(responseData);
-  } catch (error) {
-    console.error('File upload error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
+  });
 });
 
 // Download file (from MongoDB Base64)
