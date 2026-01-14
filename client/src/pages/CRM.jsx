@@ -62,6 +62,7 @@ function CRM() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTextContent, setPreviewTextContent] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -318,12 +319,21 @@ function CRM() {
     setPreviewContact(contactId);
     setPreviewLoading(true);
     setPreviewTextContent(null);
+    setPreviewUrl(null);
+    setPreviewError(null);
 
     try {
       const response = await api.get(`/api/contacts/${contactId}/files/${file.id}/download`, {
         responseType: 'blob'
       });
-      const blob = new Blob([response.data], { type: file.mimetype });
+
+      // Skontroluj či response obsahuje dáta
+      if (!response.data || response.data.size === 0) {
+        setPreviewError('Prázdna odpoveď zo servera');
+        return;
+      }
+
+      const blob = new Blob([response.data], { type: file.mimetype || 'application/octet-stream' });
 
       // Pre textové súbory načítaj obsah ako text
       if (isTextFile(file.mimetype, file.originalName)) {
@@ -335,6 +345,7 @@ function CRM() {
       setPreviewUrl(url);
     } catch (error) {
       console.error('Error loading preview:', error);
+      setPreviewError('Nepodarilo sa načítať súbor: ' + (error.message || 'Neznáma chyba'));
     } finally {
       setPreviewLoading(false);
     }
@@ -348,6 +359,7 @@ function CRM() {
     setPreviewContact(null);
     setPreviewUrl(null);
     setPreviewTextContent(null);
+    setPreviewError(null);
   };
 
   // Duplicate task functions
@@ -1607,6 +1619,17 @@ function CRM() {
               {previewLoading ? (
                 <div className="preview-loading">
                   <span>Načítavam náhľad...</span>
+                </div>
+              ) : previewError ? (
+                <div className="preview-error">
+                  <span className="preview-icon">⚠️</span>
+                  <p>{previewError}</p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                  >
+                    Stiahnuť súbor
+                  </button>
                 </div>
               ) : previewFile.mimetype?.startsWith('image/') && previewUrl ? (
                 <img
