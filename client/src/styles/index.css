@@ -5420,3 +5420,74 @@ a.detail-value:hover {
     display: none;
   }
 }
+
+/* Subtask Assignment Styles */
+.subtask-assign-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.subtask-assign-users,
+.subtask-assign-users-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+}
+
+.subtask-user-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  transition: var(--transition);
+}
+
+.subtask-user-checkbox:hover {
+  background: var(--bg-hover);
+}
+
+.subtask-user-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.subtask-user-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.subtask-assigned-users {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.subtask-assigned-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  margin-left: -3px;
+  border: 1px solid var(--bg-card);
+}
+
+.subtask-assigned-avatar:first-child {
+  margin-left: 0;
+}

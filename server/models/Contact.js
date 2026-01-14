@@ -11,6 +11,7 @@ const subtaskSchema = new mongoose.Schema({
   notes: { type: String, default: '' },
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
+  assignedTo: { type: [String], default: [] }, // Array of User IDs
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null }
 }, { _id: false });

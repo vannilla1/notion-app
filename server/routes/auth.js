@@ -337,6 +337,32 @@ router.get('/users', authenticateToken, async (req, res) => {
   }
 });
 
+// Set admin by username (internal use - protected by secret)
+router.post('/set-admin', async (req, res) => {
+  try {
+    const { username, secret } = req.body;
+
+    // Simple secret check - should match JWT_SECRET
+    if (secret !== JWT_SECRET) {
+      return res.status(403).json({ message: 'Neplatný prístup' });
+    }
+
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+
+    await User.findByIdAndUpdate(user._id, { role: 'admin' });
+
+    logger.info('Admin set via secret', { username });
+
+    res.json({ message: `Užívateľ ${username} bol nastavený ako admin`, success: true });
+  } catch (error) {
+    logger.error('Set admin error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
 // Update user role (admin only)
 router.put('/users/:userId/role', authenticateToken, async (req, res) => {
   try {

@@ -808,7 +808,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, notes, priority } = req.body;
+    const { title, source, parentSubtaskId, dueDate, notes, priority, assignedTo } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -825,6 +825,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
       notes: notes || '',
       priority: priority || null,
       subtasks: [],
+      assignedTo: assignedTo || [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
     };
@@ -930,7 +931,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
   try {
-    const { title, completed, source, dueDate, notes } = req.body;
+    const { title, completed, source, dueDate, notes, assignedTo } = req.body;
     const io = req.app.get('io');
 
     // Helper to update subtask recursively
@@ -946,6 +947,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
           notes: notes !== undefined ? notes : found.subtask.notes,
           priority: found.subtask.priority, // Preserve priority
+          assignedTo: assignedTo !== undefined ? assignedTo : (found.subtask.assignedTo || []),
           subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
           createdAt: found.subtask.createdAt, // Preserve createdAt
           modifiedAt: new Date().toISOString() // Set modification timestamp

@@ -40,11 +40,14 @@ function Tasks() {
   const [subtaskInputs, setSubtaskInputs] = useState({});
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [subtaskNotes, setSubtaskNotes] = useState({});
+  const [subtaskAssignedTo, setSubtaskAssignedTo] = useState({});
   const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
+  const [showSubtaskAssignInput, setShowSubtaskAssignInput] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
   const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
+  const [editSubtaskAssignedTo, setEditSubtaskAssignedTo] = useState([]);
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
   // Duplicate modal states
@@ -513,6 +516,7 @@ function Tasks() {
     const subtaskTitle = subtaskInputs[inputKey] || '';
     const subtaskDueDate = subtaskDueDates[inputKey] || null;
     const subtaskNote = subtaskNotes[inputKey] || '';
+    const subtaskAssigned = subtaskAssignedTo[inputKey] || [];
     if (!subtaskTitle.trim()) return;
 
     try {
@@ -520,13 +524,16 @@ function Tasks() {
         title: subtaskTitle,
         dueDate: subtaskDueDate,
         notes: subtaskNote,
+        assignedTo: subtaskAssigned,
         source: task.source,
         parentSubtaskId: parentSubtaskId
       });
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskAssignedTo(prev => ({ ...prev, [inputKey]: [] }));
       setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
+      setShowSubtaskAssignInput(prev => ({ ...prev, [inputKey]: false }));
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
@@ -563,6 +570,7 @@ function Tasks() {
     setEditSubtaskTitle(subtask.title);
     setEditSubtaskNotes(subtask.notes || '');
     setEditSubtaskDueDate(subtask.dueDate || '');
+    setEditSubtaskAssignedTo(subtask.assignedTo || []);
   };
 
   const saveSubtask = async (task, subtaskId) => {
@@ -572,12 +580,14 @@ function Tasks() {
         title: editSubtaskTitle,
         notes: editSubtaskNotes,
         dueDate: editSubtaskDueDate || null,
+        assignedTo: editSubtaskAssignedTo,
         source: task.source
       });
       setEditingSubtask(null);
       setEditSubtaskTitle('');
       setEditSubtaskNotes('');
       setEditSubtaskDueDate('');
+      setEditSubtaskAssignedTo([]);
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
@@ -589,6 +599,7 @@ function Tasks() {
     setEditSubtaskTitle('');
     setEditSubtaskNotes('');
     setEditSubtaskDueDate('');
+    setEditSubtaskAssignedTo([]);
   };
 
   const toggleSubtaskExpanded = (subtaskId) => {
@@ -743,6 +754,29 @@ function Tasks() {
                     rows={2}
                   />
                 </div>
+                <div className="subtask-edit-row">
+                  <label className="subtask-assign-label">Priradení:</label>
+                  <div className="subtask-assign-users">
+                    {users.map(u => (
+                      <label key={u.id} className="subtask-user-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={editSubtaskAssignedTo.includes(u.id)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setEditSubtaskAssignedTo(prev =>
+                              checked
+                                ? [...prev, u.id]
+                                : prev.filter(id => id !== u.id)
+                            );
+                          }}
+                        />
+                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                        <span>{u.username}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <div className="subtask-edit-actions">
                   <button onClick={() => saveSubtask(task, subtask.id)} className="btn btn-primary btn-sm">Uložiť</button>
                   <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
@@ -768,6 +802,24 @@ function Tasks() {
                 {hasChildren && (
                   <span className="subtask-child-count">
                     ({childCounts.completed}/{childCounts.total})
+                  </span>
+                )}
+                {subtask.assignedTo?.length > 0 && (
+                  <span className="subtask-assigned-users">
+                    {subtask.assignedTo.map(userId => {
+                      const u = users.find(user => user.id === userId);
+                      if (!u) return null;
+                      return (
+                        <span
+                          key={u.id}
+                          className="subtask-assigned-avatar"
+                          style={{ backgroundColor: u.color }}
+                          title={u.username}
+                        >
+                          {u.username.charAt(0).toUpperCase()}
+                        </span>
+                      );
+                    })}
                   </span>
                 )}
                 <div className="subtask-actions">
@@ -832,6 +884,14 @@ function Tasks() {
                 >
                   📝
                 </button>
+                <button
+                  type="button"
+                  className={`btn btn-secondary btn-sm ${showSubtaskAssignInput[subtask.id] ? 'active' : ''}`}
+                  onClick={() => setShowSubtaskAssignInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
+                  title="Priradiť používateľom"
+                >
+                  👤
+                </button>
                 <button type="submit" className="btn btn-secondary btn-sm">+</button>
                 <button
                   type="button"
@@ -848,6 +908,8 @@ function Tasks() {
                       return newDates;
                     });
                     setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
+                    setShowSubtaskAssignInput(prev => ({ ...prev, [subtask.id]: false }));
+                    setSubtaskAssignedTo(prev => ({ ...prev, [subtask.id]: [] }));
                   }}
                 >
                   ×
@@ -861,6 +923,29 @@ function Tasks() {
                   className="form-input form-input-sm subtask-notes-input"
                   rows={2}
                 />
+              )}
+              {showSubtaskAssignInput[subtask.id] && (
+                <div className="subtask-assign-users-form">
+                  {users.map(u => (
+                    <label key={u.id} className="subtask-user-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={(subtaskAssignedTo[subtask.id] || []).includes(u.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSubtaskAssignedTo(prev => ({
+                            ...prev,
+                            [subtask.id]: checked
+                              ? [...(prev[subtask.id] || []), u.id]
+                              : (prev[subtask.id] || []).filter(id => id !== u.id)
+                          }));
+                        }}
+                      />
+                      <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                      <span>{u.username}</span>
+                    </label>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -1579,6 +1664,14 @@ function Tasks() {
                                   >
                                     📝
                                   </button>
+                                  <button
+                                    type="button"
+                                    className={`btn btn-secondary btn-sm ${showSubtaskAssignInput[task.id] ? 'active' : ''}`}
+                                    onClick={() => setShowSubtaskAssignInput(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                    title="Priradiť používateľom"
+                                  >
+                                    👤
+                                  </button>
                                   <button type="submit" className="btn btn-secondary btn-sm">+</button>
                                 </form>
                                 {showSubtaskNotesInput[task.id] && (
@@ -1589,6 +1682,29 @@ function Tasks() {
                                     className="form-input form-input-sm subtask-notes-input"
                                     rows={2}
                                   />
+                                )}
+                                {showSubtaskAssignInput[task.id] && (
+                                  <div className="subtask-assign-users-form">
+                                    {users.map(u => (
+                                      <label key={u.id} className="subtask-user-checkbox">
+                                        <input
+                                          type="checkbox"
+                                          checked={(subtaskAssignedTo[task.id] || []).includes(u.id)}
+                                          onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setSubtaskAssignedTo(prev => ({
+                                              ...prev,
+                                              [task.id]: checked
+                                                ? [...(prev[task.id] || []), u.id]
+                                                : (prev[task.id] || []).filter(id => id !== u.id)
+                                            }));
+                                          }}
+                                        />
+                                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                                        <span>{u.username}</span>
+                                      </label>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
                             )}
