@@ -173,27 +173,52 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const uploadData = new FormData();
-    uploadData.append('avatar', file);
+    const formData = new FormData();
+    formData.append('avatar', file);
 
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_URL}/auth/avatar`, uploadData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
+    const token = localStorage.getItem('token');
+    const uploadUrl = `${API_URL}/auth/avatar`;
+
+    // Use XMLHttpRequest for better browser compatibility (Safari)
+    const xhr = new XMLHttpRequest();
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          const newAvatar = response.avatar;
+          setProfile(prev => ({ ...prev, avatar: newAvatar }));
+          setAvatarTimestamp(Date.now());
+          setMessage('Avatar bol úspešne nahraný');
+          if (onUserUpdate) {
+            onUserUpdate({ avatar: newAvatar });
+          }
+        } catch {
+          setErrors({ general: 'Chyba pri spracovaní odpovede' });
         }
-      });
-      const newAvatar = response.data.avatar;
-      setProfile(prev => ({ ...prev, avatar: newAvatar }));
-      setAvatarTimestamp(Date.now());  // Force image refresh
-      setMessage('Avatar bol úspešne nahraný');
-      if (onUserUpdate) {
-        onUserUpdate({ avatar: newAvatar });
+      } else {
+        try {
+          const errorResponse = JSON.parse(xhr.responseText);
+          setErrors({ general: errorResponse.message || 'Chyba pri nahrávaní avatara' });
+        } catch {
+          setErrors({ general: 'Chyba pri nahrávaní avatara' });
+        }
       }
-    } catch (error) {
-      setErrors({ general: error.response?.data?.message || 'Chyba pri nahrávaní avatara' });
-    }
+    });
+
+    xhr.addEventListener('error', () => {
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isSafari) {
+        setErrors({ general: 'Safari má problémy s nahrávaním. Použite Chrome alebo Firefox.' });
+      } else {
+        setErrors({ general: 'Chyba siete pri nahrávaní avatara' });
+      }
+    });
+
+    xhr.open('POST', uploadUrl);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.send(formData);
+
     e.target.value = '';
   };
 
