@@ -5592,7 +5592,54 @@ a.detail-value:hover {
   font-size: 16px;
 }
 
-.preview-unsupported {
+/* Video Preview */
+.preview-video {
+  max-width: 100%;
+  max-height: calc(90vh - 120px);
+  border-radius: var(--radius);
+}
+
+/* Audio Preview */
+.preview-audio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 60px 40px;
+}
+
+.preview-audio .preview-icon {
+  font-size: 80px;
+}
+
+.audio-player {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Text File Preview */
+.preview-text {
+  width: 100%;
+  height: calc(90vh - 120px);
+  overflow: auto;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+}
+
+.preview-text pre {
+  margin: 0;
+  padding: 20px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--text-primary);
+}
+
+/* Office Document Preview */
+.preview-office {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -5602,13 +5649,39 @@ a.detail-value:hover {
   text-align: center;
 }
 
-.preview-unsupported .preview-icon {
+.preview-office .preview-icon {
   font-size: 64px;
 }
 
-.preview-unsupported p {
+.preview-office p {
   color: var(--text-secondary);
   margin: 0;
+}
+
+/* Generic File Preview */
+.preview-generic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px;
+  text-align: center;
+}
+
+.preview-generic .preview-icon {
+  font-size: 64px;
+}
+
+.preview-generic .file-info-text {
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.preview-generic .file-info-text strong {
+  color: var(--text-primary);
+  font-size: 16px;
 }
 
 /* File Thumbnail in List */

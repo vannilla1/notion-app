@@ -61,6 +61,7 @@ function CRM() {
   const [previewContact, setPreviewContact] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewTextContent, setPreviewTextContent] = useState(null);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -289,20 +290,47 @@ function CRM() {
     return '📎';
   };
 
-  const canPreview = (mimetype) => {
-    return mimetype?.startsWith('image/') || mimetype === 'application/pdf';
+  const canPreview = () => {
+    // Všetky súbory môžu mať náhľad
+    return true;
+  };
+
+  const isOfficeDocument = (mimetype) => {
+    const officeTypes = [
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ];
+    return officeTypes.includes(mimetype);
+  };
+
+  const isTextFile = (mimetype, filename) => {
+    if (mimetype?.startsWith('text/')) return true;
+    const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml'];
+    return textExtensions.some(ext => filename?.toLowerCase().endsWith(ext));
   };
 
   const openPreview = async (file, contactId) => {
     setPreviewFile(file);
     setPreviewContact(contactId);
     setPreviewLoading(true);
+    setPreviewTextContent(null);
 
     try {
       const response = await api.get(`/api/contacts/${contactId}/files/${file.id}/download`, {
         responseType: 'blob'
       });
       const blob = new Blob([response.data], { type: file.mimetype });
+
+      // Pre textové súbory načítaj obsah ako text
+      if (isTextFile(file.mimetype, file.originalName)) {
+        const text = await blob.text();
+        setPreviewTextContent(text);
+      }
+
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
     } catch (error) {
@@ -319,6 +347,7 @@ function CRM() {
     setPreviewFile(null);
     setPreviewContact(null);
     setPreviewUrl(null);
+    setPreviewTextContent(null);
   };
 
   // Duplicate task functions
@@ -1591,10 +1620,50 @@ function CRM() {
                   title={previewFile.originalName}
                   className="preview-pdf"
                 />
-              ) : (
-                <div className="preview-unsupported">
+              ) : previewFile.mimetype?.startsWith('video/') && previewUrl ? (
+                <video
+                  src={previewUrl}
+                  controls
+                  className="preview-video"
+                >
+                  Váš prehliadač nepodporuje prehrávanie videa.
+                </video>
+              ) : previewFile.mimetype?.startsWith('audio/') && previewUrl ? (
+                <div className="preview-audio">
+                  <span className="preview-icon">🎵</span>
+                  <audio
+                    src={previewUrl}
+                    controls
+                    className="audio-player"
+                  >
+                    Váš prehliadač nepodporuje prehrávanie audia.
+                  </audio>
+                </div>
+              ) : isTextFile(previewFile.mimetype, previewFile.originalName) && previewTextContent !== null ? (
+                <div className="preview-text">
+                  <pre>{previewTextContent}</pre>
+                </div>
+              ) : isOfficeDocument(previewFile.mimetype) && previewUrl ? (
+                <div className="preview-office">
                   <span className="preview-icon">{getFileIcon(previewFile.mimetype)}</span>
-                  <p>Náhľad nie je dostupný pre tento typ súboru</p>
+                  <p>Pre zobrazenie Office dokumentov stiahnite súbor</p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                  >
+                    Stiahnuť a otvoriť
+                  </button>
+                </div>
+              ) : previewUrl ? (
+                <div className="preview-generic">
+                  <span className="preview-icon">{getFileIcon(previewFile.mimetype)}</span>
+                  <p className="file-info-text">
+                    <strong>{previewFile.originalName}</strong>
+                    <br />
+                    Typ: {previewFile.mimetype || 'Neznámy'}
+                    <br />
+                    Veľkosť: {formatFileSize(previewFile.size)}
+                  </p>
                   <button
                     className="btn btn-primary"
                     onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
