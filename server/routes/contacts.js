@@ -1,37 +1,18 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const Contact = require('../models/Contact');
 
 const router = express.Router();
 
-const UPLOADS_DIR = path.join(__dirname, '../uploads');
-
-// Ensure upload directory exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-// Multer config for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, UPLOADS_DIR);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  }
-});
-
+// Multer config for file uploads - use memory storage for MongoDB
 const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|txt/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const extname = allowedTypes.test(file.originalname.toLowerCase().split('.').pop());
     const mimetype = allowedTypes.test(file.mimetype) ||
                      file.mimetype === 'application/pdf' ||
                      file.mimetype === 'application/msword' ||
@@ -83,15 +64,27 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
+// Helper to strip file data from contacts (too large for list views)
+const stripFileData = (contact) => {
+  const result = { ...contact, id: contact._id.toString() };
+  if (result.files && result.files.length > 0) {
+    result.files = result.files.map(f => ({
+      id: f.id,
+      originalName: f.originalName,
+      mimetype: f.mimetype,
+      size: f.size,
+      uploadedAt: f.uploadedAt
+    }));
+  }
+  return result;
+};
+
 // Get all contacts (shared workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const contacts = await Contact.find({}).sort({ name: 1 }).lean();
-    // Add id field to each contact (lean() doesn't apply toJSON transforms)
-    const contactsWithId = contacts.map(c => ({
-      ...c,
-      id: c._id.toString()
-    }));
+    // Add id field and strip file data from each contact
+    const contactsWithId = contacts.map(stripFileData);
     res.json(contactsWithId);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -105,10 +98,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
-    res.json({
-      ...contact,
-      id: contact._id.toString()
-    });
+    res.json(stripFileData(contact));
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -504,15 +494,11 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 
 // ==================== FILE UPLOAD ====================
 
-// Upload file to contact
+// Upload file to contact (stored in MongoDB as Base64)
 router.post('/:id/files', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const contact = await Contact.findById(req.params.id);
     if (!contact) {
-      // Delete uploaded file if contact not found
-      if (req.file) {
-        fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename));
-      }
       return res.status(404).json({ message: 'Contact not found' });
     }
 
@@ -520,12 +506,15 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
+    // Convert file buffer to Base64
+    const base64Data = req.file.buffer.toString('base64');
+
     const fileData = {
       id: uuidv4(),
-      filename: req.file.filename,
       originalName: req.file.originalname,
       mimetype: req.file.mimetype,
       size: req.file.size,
+      data: base64Data,
       uploadedAt: new Date()
     };
 
@@ -535,19 +524,22 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
     const io = req.app.get('io');
     io.emit('contact-updated', contactToPlainObject(contact));
 
-    res.status(201).json(fileData);
+    // Don't send the data field back to client (too large)
+    const responseData = {
+      id: fileData.id,
+      originalName: fileData.originalName,
+      mimetype: fileData.mimetype,
+      size: fileData.size,
+      uploadedAt: fileData.uploadedAt
+    };
+
+    res.status(201).json(responseData);
   } catch (error) {
-    // Clean up uploaded file on error
-    if (req.file) {
-      try {
-        fs.unlinkSync(path.join(UPLOADS_DIR, req.file.filename));
-      } catch (e) {}
-    }
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Download file
+// Download file (from MongoDB Base64)
 router.get('/:id/files/:fileId/download', authenticateToken, async (req, res) => {
   try {
     const contact = await Contact.findById(req.params.id);
@@ -560,12 +552,21 @@ router.get('/:id/files/:fileId/download', authenticateToken, async (req, res) =>
       return res.status(404).json({ message: 'File not found' });
     }
 
-    const filePath = path.join(UPLOADS_DIR, file.filename);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: 'File not found on server' });
+    if (!file.data) {
+      return res.status(404).json({ message: 'File data not found' });
     }
 
-    res.download(filePath, file.originalName);
+    // Convert Base64 back to buffer
+    const fileBuffer = Buffer.from(file.data, 'base64');
+
+    // Set headers for file download
+    res.set({
+      'Content-Type': file.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Length': fileBuffer.length
+    });
+
+    res.send(fileBuffer);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -582,14 +583,6 @@ router.delete('/:id/files/:fileId', authenticateToken, async (req, res) => {
     const fileIndex = contact.files.findIndex(f => f.id === req.params.fileId);
     if (fileIndex === -1) {
       return res.status(404).json({ message: 'File not found' });
-    }
-
-    const file = contact.files[fileIndex];
-
-    // Delete file from filesystem
-    const filePath = path.join(UPLOADS_DIR, file.filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
     }
 
     contact.files.splice(fileIndex, 1);

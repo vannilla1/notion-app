@@ -31,10 +31,10 @@ const taskSchema = new mongoose.Schema({
 
 const fileSchema = new mongoose.Schema({
   id: String,
-  filename: String,
   originalName: String,
   mimetype: String,
   size: Number,
+  data: String, // Base64 encoded file data
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
