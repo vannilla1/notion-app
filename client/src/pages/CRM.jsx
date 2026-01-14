@@ -1654,7 +1654,7 @@ function CRM() {
                     Stiahnuť a otvoriť
                   </button>
                 </div>
-              ) : previewUrl ? (
+              ) : (
                 <div className="preview-generic">
                   <span className="preview-icon">{getFileIcon(previewFile.mimetype)}</span>
                   <p className="file-info-text">
