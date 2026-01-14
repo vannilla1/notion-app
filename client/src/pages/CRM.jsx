@@ -237,43 +237,73 @@ function CRM() {
     if (!file) return;
 
     setUploadingFile(contactId);
-    const formData = new FormData();
-    formData.append('file', file);
 
     const token = localStorage.getItem('token');
     const uploadUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files`;
 
     console.log('Starting upload to:', uploadUrl);
-    console.log('File:', file.name, 'Size:', file.size);
+    console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
 
-    try {
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          console.log('Upload progress:', Math.round((e.loaded / e.total) * 100) + '%');
+        }
       });
 
-      console.log('Response status:', response.status);
+      xhr.addEventListener('load', async () => {
+        console.log('XHR load - status:', xhr.status);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log('File uploaded successfully:', xhr.responseText);
+          // Refresh contacts
+          try {
+            const contactsRes = await api.get('/api/contacts');
+            setContacts(contactsRes.data);
+          } catch (e) {
+            console.error('Failed to refresh contacts:', e);
+          }
+        } else {
+          console.error('Upload failed:', xhr.status, xhr.responseText);
+          alert('Chyba pri nahrávaní: ' + (xhr.responseText || xhr.status));
+        }
+        setUploadingFile(null);
+        resolve();
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Upload failed');
-      }
+      xhr.addEventListener('error', (e) => {
+        console.error('XHR error event:', e);
+        console.error('XHR readyState:', xhr.readyState);
+        console.error('XHR status:', xhr.status);
+        alert('Chyba siete pri nahrávaní súboru');
+        setUploadingFile(null);
+        resolve();
+      });
 
-      const data = await response.json();
-      console.log('File uploaded:', data);
+      xhr.addEventListener('abort', () => {
+        console.log('Upload aborted');
+        setUploadingFile(null);
+        resolve();
+      });
 
-      // Refresh contacts to show new file
-      const contactsRes = await api.get('/api/contacts');
-      setContacts(contactsRes.data);
-    } catch (error) {
-      console.error('Upload error:', error);
-      alert(error.message || 'Chyba pri nahrávaní súboru');
-    } finally {
-      setUploadingFile(null);
-    }
+      xhr.addEventListener('timeout', () => {
+        console.error('Upload timeout');
+        alert('Časový limit vypršal');
+        setUploadingFile(null);
+        resolve();
+      });
+
+      xhr.open('POST', uploadUrl);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.timeout = 60000; // 60 seconds
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      console.log('Sending XHR request...');
+      xhr.send(formData);
+    });
   };
 
   const deleteFile = async (contactId, fileId) => {
