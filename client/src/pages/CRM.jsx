@@ -241,54 +241,43 @@ function CRM() {
     const token = localStorage.getItem('token');
     const uploadUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files`;
 
-    console.log('Starting upload to:', uploadUrl);
-    console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
-
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
 
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          console.log('Upload progress:', Math.round((e.loaded / e.total) * 100) + '%');
-        }
-      });
-
       xhr.addEventListener('load', async () => {
-        console.log('XHR load - status:', xhr.status);
         if (xhr.status >= 200 && xhr.status < 300) {
-          console.log('File uploaded successfully:', xhr.responseText);
           // Refresh contacts
           try {
             const contactsRes = await api.get('/api/contacts');
             setContacts(contactsRes.data);
           } catch (e) {
-            console.error('Failed to refresh contacts:', e);
+            // Silent fail - contacts will refresh on next action
           }
         } else {
-          console.error('Upload failed:', xhr.status, xhr.responseText);
           alert('Chyba pri nahrávaní: ' + (xhr.responseText || xhr.status));
         }
         setUploadingFile(null);
         resolve();
       });
 
-      xhr.addEventListener('error', (e) => {
-        console.error('XHR error event:', e);
-        console.error('XHR readyState:', xhr.readyState);
-        console.error('XHR status:', xhr.status);
-        alert('Chyba siete pri nahrávaní súboru');
+      xhr.addEventListener('error', () => {
+        // Check if Safari
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        if (isSafari) {
+          alert('Safari má problémy s nahrávaním súborov. Použite prosím Chrome alebo Firefox.');
+        } else {
+          alert('Chyba siete pri nahrávaní súboru');
+        }
         setUploadingFile(null);
         resolve();
       });
 
       xhr.addEventListener('abort', () => {
-        console.log('Upload aborted');
         setUploadingFile(null);
         resolve();
       });
 
       xhr.addEventListener('timeout', () => {
-        console.error('Upload timeout');
         alert('Časový limit vypršal');
         setUploadingFile(null);
         resolve();
@@ -300,8 +289,6 @@ function CRM() {
 
       const formData = new FormData();
       formData.append('file', file);
-
-      console.log('Sending XHR request...');
       xhr.send(formData);
     });
   };

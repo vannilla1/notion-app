@@ -30,7 +30,6 @@ const upload = multer({
     if (extAllowed || mimeAllowed) {
       return cb(null, true);
     }
-    console.log('Rejected file type:', file.originalname, file.mimetype);
     cb(new Error('Nepovolený typ súboru'));
   }
 });
@@ -519,27 +518,20 @@ router.post('/:id/files', authenticateToken, (req, res) => {
     try {
       // Handle multer errors
       if (err) {
-        console.error('Multer error:', err);
         if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 5MB.' });
         }
         return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
       }
 
-      console.log('File upload request for contact:', req.params.id);
-
       const contact = await Contact.findById(req.params.id);
       if (!contact) {
-        console.log('Contact not found:', req.params.id);
         return res.status(404).json({ message: 'Contact not found' });
       }
 
       if (!req.file) {
-        console.log('No file in request');
         return res.status(400).json({ message: 'No file uploaded' });
       }
-
-      console.log('File received:', req.file.originalname, 'Size:', req.file.size);
 
       // Convert file buffer to Base64
       const base64Data = req.file.buffer.toString('base64');
@@ -555,7 +547,6 @@ router.post('/:id/files', authenticateToken, (req, res) => {
 
       contact.files.push(fileData);
       await contact.save();
-      console.log('File saved to MongoDB:', fileData.id);
 
       const io = req.app.get('io');
       if (io) {
