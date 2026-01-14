@@ -27,15 +27,23 @@ const sentry = initSentry(app);
 
 const server = http.createServer(app);
 
-// CORS configuration - allow all origins for now
+// CORS configuration - allow all origins
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false,
+  optionsSuccessStatus: 200,
+  maxAge: 86400
+};
+
 const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE']
-  }
+  cors: corsOptions
 });
 
-app.use(cors());
+// Enable pre-flight across-the-board
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 
 // Request logging middleware
 app.use((req, res, next) => {
