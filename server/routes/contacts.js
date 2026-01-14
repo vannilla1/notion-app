@@ -9,7 +9,7 @@ const router = express.Router();
 // Multer config for file uploads - use memory storage for MongoDB
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit (reduced for Base64 overhead)
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|txt/;
     const extname = allowedTypes.test(file.originalname.toLowerCase().split('.').pop());
@@ -23,9 +23,22 @@ const upload = multer({
     if (extname || mimetype) {
       return cb(null, true);
     }
-    cb(new Error('Invalid file type'));
+    cb(new Error('Nepovolený typ súboru. Povolené: jpg, png, gif, pdf, doc, docx, xls, xlsx, txt'));
   }
 });
+
+// Error handling middleware for multer
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 5MB.' });
+    }
+    return res.status(400).json({ message: 'Chyba pri nahrávaní súboru: ' + err.message });
+  } else if (err) {
+    return res.status(400).json({ message: err.message });
+  }
+  next();
+};
 
 // Validation helpers
 const isValidEmail = (email) => {
@@ -506,7 +519,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 // ==================== FILE UPLOAD ====================
 
 // Upload file to contact (stored in MongoDB as Base64)
-router.post('/:id/files', authenticateToken, upload.single('file'), async (req, res) => {
+router.post('/:id/files', authenticateToken, upload.single('file'), handleMulterError, async (req, res) => {
   try {
     console.log('File upload request for contact:', req.params.id);
 

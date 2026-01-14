@@ -79,7 +79,10 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, trustProxy: false },
   skip: (req) => {
-    return req.path === '/health' || req.path.startsWith('/uploads');
+    // Skip rate limiting for health checks, uploads, and file operations
+    return req.path === '/health' ||
+           req.path.startsWith('/uploads') ||
+           req.path.includes('/files');
   }
 });
 
