@@ -22,6 +22,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   });
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
+  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -185,6 +186,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
       const newAvatar = response.data.avatar;
       setProfile(prev => ({ ...prev, avatar: newAvatar }));
+      setAvatarTimestamp(Date.now());  // Force image refresh
       setMessage('Avatar bol úspešne nahraný');
       if (onUserUpdate) {
         onUserUpdate({ avatar: newAvatar });
@@ -236,7 +238,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       >
         {user?.avatar ? (
           <img
-            src={`${API_BASE_URL}/uploads/avatars/${user.avatar}`}
+            src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${avatarTimestamp}`}
             alt={user.username}
             className="user-avatar-img"
           />
@@ -257,7 +259,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           <div className="user-menu-header">
             {user?.avatar ? (
               <img
-                src={`${API_BASE_URL}/uploads/avatars/${user.avatar}`}
+                src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${avatarTimestamp}`}
                 alt={user.username}
                 className="dropdown-avatar-img"
               />
@@ -324,7 +326,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 <div className="profile-avatar-section">
                   {profile.avatar ? (
                     <img
-                      src={`${API_BASE_URL}/uploads/avatars/${profile.avatar}`}
+                      src={`${API_BASE_URL}/api/auth/avatar/${profile.id}?t=${avatarTimestamp}`}
                       alt={profile.username}
                       className="profile-avatar-img"
                     />

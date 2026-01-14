@@ -119,7 +119,7 @@ function AdminPanel() {
                         <div className="user-cell">
                           {u.avatar ? (
                             <img
-                              src={`${api.defaults.baseURL?.replace('/api', '')}/uploads/avatars/${u.avatar}`}
+                              src={`${api.defaults.baseURL}/auth/avatar/${u.id}`}
                               alt={u.username}
                               className="table-avatar-img"
                             />

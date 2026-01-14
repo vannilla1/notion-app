@@ -26,6 +26,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  avatarData: {
+    type: String,  // Base64 encoded image data
+    default: null
+  },
+  avatarMimetype: {
+    type: String,
+    default: null
+  },
   role: {
     type: String,
     enum: ['admin', 'manager', 'user'],

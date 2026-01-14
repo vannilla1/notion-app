@@ -2,8 +2,6 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 const { loginLimiter, registerLimiter, passwordChangeLimiter } = require('../middleware/rateLimiter');
@@ -11,23 +9,9 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Configure multer for avatar uploads
-const avatarStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../uploads/avatars');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `avatar-${req.user.id}-${Date.now()}${ext}`);
-  }
-});
-
+// Configure multer for avatar uploads - using memory storage for Base64
 const avatarUpload = multer({
-  storage: avatarStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -227,39 +211,63 @@ router.put('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// Upload avatar
-router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'Žiadny súbor nebol nahraný' });
+// Upload avatar - stores Base64 in MongoDB
+router.post('/avatar', authenticateToken, (req, res) => {
+  avatarUpload.single('avatar')(req, res, async (err) => {
+    if (err) {
+      logger.error('Avatar upload multer error', { error: err.message, userId: req.user?.id });
+      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní avatara' });
     }
 
-    const userId = req.user.id;
-    const user = await User.findById(userId);
-
-    // Delete old avatar if exists
-    if (user.avatar) {
-      const oldAvatarPath = path.join(__dirname, '../uploads/avatars', user.avatar);
-      if (fs.existsSync(oldAvatarPath)) {
-        fs.unlinkSync(oldAvatarPath);
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'Žiadny súbor nebol nahraný' });
       }
+
+      const userId = req.user.id;
+
+      // Convert to Base64
+      const base64Data = req.file.buffer.toString('base64');
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        {
+          avatar: `avatar-${userId}`,  // Just an identifier
+          avatarData: base64Data,
+          avatarMimetype: req.file.mimetype
+        },
+        { new: true }
+      );
+
+      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
+
+      res.json({
+        message: 'Avatar bol úspešne nahraný',
+        avatar: updatedUser.avatar
+      });
+    } catch (error) {
+      logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
+      res.status(500).json({ message: 'Chyba pri nahrávaní avatara', error: error.message });
+    }
+  });
+});
+
+// Get avatar image
+router.get('/avatar/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+
+    if (!user || !user.avatarData) {
+      return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { avatar: req.file.filename },
-      { new: true }
-    );
-
-    logger.info('Avatar uploaded', { userId, filename: req.file.filename });
-
-    res.json({
-      message: 'Avatar bol úspešne nahraný',
-      avatar: updatedUser.avatar
-    });
+    const buffer = Buffer.from(user.avatarData, 'base64');
+    res.set('Content-Type', user.avatarMimetype || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');  // Cache for 24 hours
+    res.send(buffer);
   } catch (error) {
-    logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba pri nahrávaní avatara', error: error.message });
+    logger.error('Avatar get error', { error: error.message, userId: req.params.userId });
+    res.status(500).json({ message: 'Chyba pri načítaní avatara' });
   }
 });
 
@@ -267,16 +275,13 @@ router.post('/avatar', authenticateToken, avatarUpload.single('avatar'), async (
 router.delete('/avatar', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
 
-    if (user.avatar) {
-      const avatarPath = path.join(__dirname, '../uploads/avatars', user.avatar);
-      if (fs.existsSync(avatarPath)) {
-        fs.unlinkSync(avatarPath);
-      }
-      await User.findByIdAndUpdate(userId, { avatar: null });
-      logger.info('Avatar deleted', { userId });
-    }
+    await User.findByIdAndUpdate(userId, {
+      avatar: null,
+      avatarData: null,
+      avatarMimetype: null
+    });
+    logger.info('Avatar deleted', { userId });
 
     res.json({ message: 'Avatar bol odstránený' });
   } catch (error) {
