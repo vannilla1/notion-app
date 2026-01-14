@@ -173,16 +173,22 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const file = e.target.files[0];
     if (!file) return;
 
+    console.log('Avatar upload started:', file.name, file.type, file.size);
+    setErrors({});
+    setMessage('');
+
     const formData = new FormData();
     formData.append('avatar', file);
 
     const token = localStorage.getItem('token');
     const uploadUrl = `${API_URL}/auth/avatar`;
+    console.log('Upload URL:', uploadUrl);
 
     // Use XMLHttpRequest for better browser compatibility (Safari)
     const xhr = new XMLHttpRequest();
 
     xhr.addEventListener('load', () => {
+      console.log('XHR load - status:', xhr.status, 'response:', xhr.responseText);
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText);
@@ -193,30 +199,34 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           if (onUserUpdate) {
             onUserUpdate({ avatar: newAvatar });
           }
-        } catch {
+        } catch (parseErr) {
+          console.error('Parse error:', parseErr);
           setErrors({ general: 'Chyba pri spracovaní odpovede' });
         }
       } else {
+        console.log('Upload failed with status:', xhr.status);
         try {
           const errorResponse = JSON.parse(xhr.responseText);
           setErrors({ general: errorResponse.message || 'Chyba pri nahrávaní avatara' });
         } catch {
-          setErrors({ general: 'Chyba pri nahrávaní avatara' });
+          setErrors({ general: `Chyba pri nahrávaní avatara (${xhr.status})` });
         }
       }
     });
 
-    xhr.addEventListener('error', () => {
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      if (isSafari) {
-        setErrors({ general: 'Safari má problémy s nahrávaním. Použite Chrome alebo Firefox.' });
-      } else {
-        setErrors({ general: 'Chyba siete pri nahrávaní avatara' });
-      }
+    xhr.addEventListener('error', (err) => {
+      console.error('XHR error event:', err, 'status:', xhr.status, 'readyState:', xhr.readyState);
+      setErrors({ general: 'Chyba siete pri nahrávaní avatara' });
+    });
+
+    xhr.addEventListener('abort', () => {
+      console.log('XHR aborted');
+      setErrors({ general: 'Nahrávanie bolo zrušené' });
     });
 
     xhr.open('POST', uploadUrl);
     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    console.log('Sending XHR...');
     xhr.send(formData);
 
     e.target.value = '';
