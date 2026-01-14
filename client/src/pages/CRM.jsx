@@ -241,10 +241,11 @@ function CRM() {
     formData.append('file', file);
 
     try {
-      await api.post(`/api/contacts/${contactId}/files`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      // Don't set Content-Type manually - axios will set it with correct boundary
+      const response = await api.post(`/api/contacts/${contactId}/files`, formData);
+      console.log('File uploaded:', response.data);
     } catch (error) {
+      console.error('Upload error:', error);
       alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
     } finally {
       setUploadingFile(null);
