@@ -74,12 +74,17 @@ router.post('/register', registerLimiter, async (req, res) => {
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
     const color = colors[Math.floor(Math.random() * colors.length)];
 
+    // First user becomes admin, others become regular users
+    const userCount = await User.countDocuments();
+    const role = userCount === 0 ? 'admin' : 'user';
+
     // Create user
     const user = new User({
       username,
       email,
       password: hashedPassword,
-      color
+      color,
+      role
     });
     await user.save();
 
@@ -94,7 +99,8 @@ router.post('/register', registerLimiter, async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        color: user.color
+        color: user.color,
+        role: user.role
       }
     });
   } catch (error) {
@@ -139,7 +145,8 @@ router.post('/login', loginLimiter, async (req, res) => {
         username: user.username,
         email: user.email,
         color: user.color,
-        avatar: user.avatar
+        avatar: user.avatar,
+        role: user.role
       }
     });
   } catch (error) {
@@ -166,6 +173,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       email: user.email,
       color: user.color,
       avatar: user.avatar || null,
+      role: user.role,
       createdAt: user.createdAt
     });
   } catch (error) {
@@ -210,7 +218,8 @@ router.put('/profile', authenticateToken, async (req, res) => {
       username: updatedUser.username,
       email: updatedUser.email,
       color: updatedUser.color,
-      avatar: updatedUser.avatar || null
+      avatar: updatedUser.avatar || null,
+      role: updatedUser.role
     });
   } catch (error) {
     logger.error('Update profile error', { error: error.message, userId: req.user.id });
@@ -313,15 +322,78 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
 // Get all users (for sharing)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
-    const users = await User.find({}, 'username email color');
+    const users = await User.find({}, 'username email color avatar role');
     res.json(users.map(u => ({
       id: u._id,
       username: u.username,
       email: u.email,
-      color: u.color
+      color: u.color,
+      avatar: u.avatar,
+      role: u.role
     })));
   } catch (error) {
     logger.error('Get users error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Update user role (admin only)
+router.put('/users/:userId/role', authenticateToken, async (req, res) => {
+  try {
+    const { role } = req.body;
+
+    // Check if current user is admin
+    const currentUser = await User.findById(req.user.id);
+    if (currentUser.role !== 'admin') {
+      return res.status(403).json({ message: 'Len admin môže meniť role' });
+    }
+
+    // Validate role
+    if (!['admin', 'manager', 'user'].includes(role)) {
+      return res.status(400).json({ message: 'Neplatná rola' });
+    }
+
+    // Prevent removing last admin
+    if (role !== 'admin') {
+      const adminCount = await User.countDocuments({ role: 'admin' });
+      const targetUser = await User.findById(req.params.userId);
+      if (targetUser && targetUser.role === 'admin' && adminCount <= 1) {
+        return res.status(400).json({ message: 'Nemôže existovať systém bez admina' });
+      }
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.userId,
+      { role },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+
+    const io = req.app.get('io');
+    io.emit('user-role-updated', {
+      userId: updatedUser._id,
+      role: updatedUser.role
+    });
+
+    logger.info('User role updated', {
+      adminId: req.user.id,
+      targetUserId: req.params.userId,
+      newRole: role
+    });
+
+    res.json({
+      id: updatedUser._id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      color: updatedUser.color,
+      avatar: updatedUser.avatar,
+      role: updatedUser.role
+    });
+  } catch (error) {
+    logger.error('Update user role error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });

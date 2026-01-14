@@ -24,7 +24,8 @@ const authenticateToken = async (req, res, next) => {
       username: user.username,
       email: user.email,
       color: user.color,
-      avatar: user.avatar
+      avatar: user.avatar,
+      role: user.role
     };
     next();
   } catch (err) {
@@ -51,7 +52,8 @@ const authenticateSocket = async (socket, next) => {
       id: user._id,
       username: user.username,
       email: user.email,
-      color: user.color
+      color: user.color,
+      role: user.role
     };
     next();
   } catch (err) {

@@ -26,6 +26,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  role: {
+    type: String,
+    enum: ['admin', 'manager', 'user'],
+    default: 'user'
+  },
   lastCalendarExport: {
     type: Date,
     default: null

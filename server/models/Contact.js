@@ -22,6 +22,7 @@ const taskSchema = new mongoose.Schema({
   completed: { type: Boolean, default: false },
   priority: { type: String, default: 'medium' },
   dueDate: String,
+  assignedTo: { type: [String], default: [] }, // Array of User IDs
   subtasks: { type: [subtaskSchema], default: [] },
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null }

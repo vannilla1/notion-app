@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -281,6 +283,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">🔒</span>
             Zmeniť heslo
           </button>
+          {user?.role === 'admin' && (
+            <>
+              <div className="user-menu-divider"></div>
+              <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/admin'); }}>
+                <span className="menu-icon">⚙️</span>
+                Správa používateľov
+              </button>
+            </>
+          )}
           <div className="user-menu-divider"></div>
           <button className="user-menu-item logout" onClick={onLogout}>
             <span className="menu-icon">🚪</span>

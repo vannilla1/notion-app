@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
+import AdminPanel from './pages/AdminPanel';
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
@@ -38,6 +39,10 @@ function App() {
       <Route
         path="/tasks"
         element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
+      />
+      <Route
+        path="/admin"
+        element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
       />
     </Routes>
   );

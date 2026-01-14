@@ -24,6 +24,13 @@ const taskSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  assignedTo: {
+    type: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
+    default: []
+  },
   title: {
     type: String,
     required: true

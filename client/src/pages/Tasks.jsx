@@ -11,6 +11,7 @@ function Tasks() {
   const location = useLocation();
   const [tasks, setTasks] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -27,7 +28,8 @@ function Tasks() {
     description: '',
     dueDate: '',
     priority: 'medium',
-    contactIds: []
+    contactIds: [],
+    assignedTo: []
   });
 
   // Edit states
@@ -57,7 +59,17 @@ function Tasks() {
   useEffect(() => {
     fetchTasks();
     fetchContacts();
+    fetchUsers();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await api.get('/api/auth/users');
+      setUsers(res.data);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+  };
 
   // Close calendar menu when clicking outside
   useEffect(() => {
@@ -335,11 +347,6 @@ function Tasks() {
   const fetchTasks = async () => {
     try {
       const res = await api.get('/api/tasks');
-      // Debug: log first 3 tasks to see their createdAt values
-      console.log('=== DEBUG: First 3 tasks ===');
-      res.data.slice(0, 3).forEach(t => {
-        console.log(`Task: "${t.title}" | createdAt: ${t.createdAt} | modifiedAt: ${t.modifiedAt}`);
-      });
       setTasks(res.data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -404,7 +411,8 @@ function Tasks() {
         description: '',
         dueDate: '',
         priority: 'medium',
-        contactIds: []
+        contactIds: [],
+        assignedTo: []
       });
       setShowForm(false);
     } catch (error) {
@@ -475,6 +483,7 @@ function Tasks() {
       dueDate: task.dueDate || '',
       priority: task.priority || 'medium',
       contactIds: taskContactIds,
+      assignedTo: task.assignedTo || [],
       source: task.source
     });
   };
@@ -485,6 +494,7 @@ function Tasks() {
       await api.put(`/api/tasks/${taskId}`, {
         ...editForm,
         contactIds: editForm.contactIds || [],
+        assignedTo: editForm.assignedTo || [],
         source: task?.source || 'global'
       });
 
@@ -994,6 +1004,10 @@ function Tasks() {
       const taskMatches = !t.completed && getDueDateClass(t.dueDate, t.completed) === 'overdue';
       return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'overdue');
     }
+    if (filter === 'assigned-to-me') {
+      const userId = user?.id;
+      return (t.assignedTo || []).some(id => id === userId || id?.toString() === userId);
+    }
     return true;
   });
 
@@ -1005,6 +1019,7 @@ function Tasks() {
   const lowPriorityCount = countWithPriority(tasks, 'low');
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
   const withoutContactCount = tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length;
+  const assignedToMeCount = tasks.filter(t => (t.assignedTo || []).some(id => id === user?.id || id?.toString() === user?.id)).length;
   const dueSuccessCount = countWithDueClass(tasks, 'due-success');
   const dueWarningCount = countWithDueClass(tasks, 'due-warning');
   const dueDangerCount = countWithDueClass(tasks, 'due-danger');
@@ -1137,6 +1152,16 @@ function Tasks() {
             >
               <span className="stat-label">Bez kontaktu</span>
               <span className="stat-value">{withoutContactCount}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${filter === 'assigned-to-me' ? 'active' : ''}`}
+              onClick={() => setFilter('assigned-to-me')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#3B82F6' }}></span>
+                Priradené mne
+              </span>
+              <span className="stat-value">{assignedToMeCount}</span>
             </div>
 
             <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa priority</h4>
@@ -1289,6 +1314,36 @@ function Tasks() {
                       )}
                     </div>
                   </div>
+                  <div className="form-group full-width">
+                    <label>Priradiť používateľom</label>
+                    <div className="multi-select-users">
+                      {users.map(u => (
+                        <label key={u.id} className="user-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={newTaskForm.assignedTo.includes(u.id)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setNewTaskForm(prev => ({
+                                ...prev,
+                                assignedTo: checked
+                                  ? [...prev.assignedTo, u.id]
+                                  : prev.assignedTo.filter(id => id !== u.id)
+                              }));
+                            }}
+                          />
+                          <span
+                            className="user-avatar-small"
+                            style={{ backgroundColor: u.color }}
+                          >
+                            {u.username.charAt(0).toUpperCase()}
+                          </span>
+                          <span>{u.username}</span>
+                          <span className="user-role-badge">{u.role === 'admin' ? 'Admin' : u.role === 'manager' ? 'Manažér' : 'Používateľ'}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 <div className="form-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
@@ -1407,6 +1462,30 @@ function Tasks() {
                                 ))}
                               </div>
                             </div>
+                            <div className="form-group">
+                              <label>Priradení</label>
+                              <div className="multi-select-users compact">
+                                {users.map(u => (
+                                  <label key={u.id} className="user-checkbox">
+                                    <input
+                                      type="checkbox"
+                                      checked={(editForm.assignedTo || []).includes(u.id)}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setEditForm(prev => ({
+                                          ...prev,
+                                          assignedTo: checked
+                                            ? [...(prev.assignedTo || []), u.id]
+                                            : (prev.assignedTo || []).filter(id => id !== u.id)
+                                        }));
+                                      }}
+                                    />
+                                    <span className="user-dot" style={{ backgroundColor: u.color }}></span>
+                                    <span>{u.username}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
                             <div className="task-edit-actions">
                               <button onClick={() => saveTask(task.id)} className="btn btn-primary btn-sm">Uložiť</button>
                               <button onClick={() => setEditingTask(null)} className="btn btn-secondary btn-sm">Zrušiť</button>
@@ -1433,6 +1512,20 @@ function Tasks() {
                               {task.subtasks?.length > 0 && (
                                 <span className="subtask-count">
                                   ✓ {countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total}
+                                </span>
+                              )}
+                              {task.assignedUsers?.length > 0 && (
+                                <span className="assigned-users-badge">
+                                  {task.assignedUsers.map(u => (
+                                    <span
+                                      key={u.id}
+                                      className="assigned-user-avatar"
+                                      style={{ backgroundColor: u.color }}
+                                      title={u.username}
+                                    >
+                                      {u.username.charAt(0).toUpperCase()}
+                                    </span>
+                                  ))}
                                 </span>
                               )}
                             </div>

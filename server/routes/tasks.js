@@ -40,6 +40,18 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
+// Helper function to populate assigned users info
+const populateAssignedUsers = async (assignedToIds) => {
+  if (!assignedToIds || assignedToIds.length === 0) return [];
+  const users = await User.find({ _id: { $in: assignedToIds } }, 'username color avatar');
+  return users.map(u => ({
+    id: u._id.toString(),
+    username: u.username,
+    color: u.color,
+    avatar: u.avatar
+  }));
+};
+
 // Get all tasks (including tasks from contacts) - shared workspace
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -56,11 +68,37 @@ router.get('/', authenticateToken, async (req, res) => {
     });
     const contacts = await Contact.find({});
 
+    // Get all unique assigned user IDs for batch query
+    const allAssignedIds = new Set();
+    globalTasks.forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id.toString())));
+    contacts.forEach(c => (c.tasks || []).forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id))));
+
+    // Fetch all assigned users at once
+    const assignedUsers = await User.find({ _id: { $in: Array.from(allAssignedIds) } }, 'username color avatar');
+    const usersMap = {};
+    assignedUsers.forEach(u => {
+      usersMap[u._id.toString()] = {
+        id: u._id.toString(),
+        username: u.username,
+        color: u.color,
+        avatar: u.avatar
+      };
+    });
+
     // Enrich global tasks (these should have no contacts)
     const enrichedGlobalTasks = globalTasks.map(task => {
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
-      return { ...taskObj, contactIds: [], contactNames: [], contactName: null, source: 'global' };
+      const assignedUsersList = (task.assignedTo || []).map(id => usersMap[id.toString()]).filter(Boolean);
+      return {
+        ...taskObj,
+        contactIds: [],
+        contactNames: [],
+        contactName: null,
+        source: 'global',
+        assignedTo: (task.assignedTo || []).map(id => id.toString()),
+        assignedUsers: assignedUsersList
+      };
     });
 
     // Extract tasks from contacts
@@ -70,12 +108,15 @@ router.get('/', authenticateToken, async (req, res) => {
         contact.tasks.forEach(task => {
           // Deep copy to ensure nested subtasks are properly included
           const taskObj = JSON.parse(JSON.stringify(task));
+          const assignedUsersList = (task.assignedTo || []).map(id => usersMap[id]).filter(Boolean);
           contactTasks.push({
             ...taskObj,
             id: task.id,
             contactId: contact._id.toString(),
             contactName: contact.name,
-            source: 'contact'
+            source: 'contact',
+            assignedTo: task.assignedTo || [],
+            assignedUsers: assignedUsersList
           });
         });
       }
@@ -298,7 +339,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, contactId, contactIds, subtasks } = req.body;
+    const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -323,6 +364,7 @@ router.post('/', authenticateToken, async (req, res) => {
         priority: priority || 'medium',
         completed: false,
         contactIds: [],
+        assignedTo: assignedTo || [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
         createdBy: req.user.username,
         modifiedAt: new Date().toISOString() // Set on creation for "new" filter
@@ -330,12 +372,17 @@ router.post('/', authenticateToken, async (req, res) => {
 
       await task.save();
 
+      // Get assigned users info
+      const assignedUsers = await populateAssignedUsers(task.assignedTo);
+
       const taskObj = task.toObject();
       taskObj.id = taskObj._id.toString();
       taskObj.contactIds = [];
       taskObj.contactNames = [];
       taskObj.contactName = null;
       taskObj.source = 'global';
+      taskObj.assignedTo = (task.assignedTo || []).map(id => id.toString());
+      taskObj.assignedUsers = assignedUsers;
 
       io.emit('task-created', taskObj);
 
@@ -358,6 +405,7 @@ router.post('/', authenticateToken, async (req, res) => {
         completed: false,
         priority: priority || 'medium',
         dueDate: dueDate || null,
+        assignedTo: assignedTo || [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
         createdAt: new Date().toISOString(),
         modifiedAt: new Date().toISOString() // Set on creation for "new" filter
@@ -371,7 +419,9 @@ router.post('/', authenticateToken, async (req, res) => {
       contact.markModified('tasks');
       await contact.save();
 
-      createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+      // Get assigned users info
+      const assignedUsers = await populateAssignedUsers(assignedTo);
+      createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact', assignedUsers });
       updatedContacts.push(contact);
     }
 
@@ -403,7 +453,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed, contactId, contactIds, source } = req.body;
+    const { title, description, dueDate, priority, completed, contactId, contactIds, source, assignedTo } = req.body;
     const io = req.app.get('io');
 
     // If source is 'contact', update in contacts
@@ -422,6 +472,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
               dueDate: dueDate !== undefined ? dueDate : task.dueDate,
               priority: priority !== undefined ? priority : task.priority,
               completed: completed !== undefined ? completed : task.completed,
+              assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
               subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
               createdAt: task.createdAt,
               modifiedAt: new Date().toISOString()
@@ -430,10 +481,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
             await contact.save();
 
             io.emit('contact-updated', contactToPlainObject(contact));
+            const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
             const taskData = taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
-              source: 'contact'
+              source: 'contact',
+              assignedUsers
             });
             io.emit('task-updated', taskData);
 
@@ -480,6 +533,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
       task.contactIds = finalContactIds;
+      task.assignedTo = assignedTo !== undefined ? assignedTo : task.assignedTo;
       task.modifiedAt = new Date().toISOString();
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
@@ -488,12 +542,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       await task.save();
 
+      const assignedUsers = await populateAssignedUsers(task.assignedTo);
       const taskData = taskToPlainObject(task, {
         source: 'global',
         id: task._id.toString(),
         contactIds: finalContactIds,
         contactNames: contactNames,
-        contactName: contactNames.join(', ') || null
+        contactName: contactNames.join(', ') || null,
+        assignedTo: (task.assignedTo || []).map(id => id.toString()),
+        assignedUsers
       });
 
       io.emit('task-updated', taskData);

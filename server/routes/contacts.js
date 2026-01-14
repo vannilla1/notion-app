@@ -222,7 +222,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Add task to contact
 router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority } = req.body;
+    const { title, description, dueDate, priority, assignedTo } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
@@ -242,6 +242,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       dueDate: dueDate || null,
       priority: priority || 'medium',
       completed: false,
+      assignedTo: assignedTo || [],
       subtasks: [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
@@ -263,7 +264,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
 // Update task
 router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed } = req.body;
+    const { title, description, dueDate, priority, completed, assignedTo } = req.body;
 
     const contact = await Contact.findById(req.params.contactId);
 
@@ -288,6 +289,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
       dueDate: dueDate !== undefined ? dueDate : task.dueDate,
       priority: priority !== undefined ? priority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
+      assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
       subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
       createdAt: task.createdAt,
       modifiedAt: new Date().toISOString()
