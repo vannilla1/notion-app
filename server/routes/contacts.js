@@ -11,19 +11,27 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit (reduced for Base64 overhead)
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|txt/;
-    const extname = allowedTypes.test(file.originalname.toLowerCase().split('.').pop());
-    const mimetype = allowedTypes.test(file.mimetype) ||
-                     file.mimetype === 'application/pdf' ||
-                     file.mimetype === 'application/msword' ||
-                     file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-                     file.mimetype === 'application/vnd.ms-excel' ||
-                     file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-                     file.mimetype === 'text/plain';
-    if (extname || mimetype) {
+    // Allow most common file types
+    const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
+    const ext = file.originalname.toLowerCase().split('.').pop();
+    const extAllowed = allowedExtensions.test(ext);
+
+    // Allow common mimetypes
+    const allowedMimetypes = [
+      'image/', 'application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument',
+      'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+      'text/', 'audio/', 'video/',
+      'application/zip', 'application/x-rar', 'application/x-7z-compressed',
+      'application/json', 'application/xml'
+    ];
+    const mimeAllowed = allowedMimetypes.some(type => file.mimetype.startsWith(type) || file.mimetype === type);
+
+    if (extAllowed || mimeAllowed) {
       return cb(null, true);
     }
-    cb(new Error('Nepovolený typ súboru. Povolené: jpg, png, gif, pdf, doc, docx, xls, xlsx, txt'));
+    console.log('Rejected file type:', file.originalname, file.mimetype);
+    cb(new Error('Nepovolený typ súboru'));
   }
 });
 
