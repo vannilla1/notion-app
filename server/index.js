@@ -26,17 +26,31 @@ app.set('trust proxy', 1);
 const sentry = initSentry(app);
 
 const server = http.createServer(app);
+
+// CORS configuration - shared between Express and Socket.io
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',')
+  : ['http://localhost:3000', 'http://localhost:5173'];
+
+// Always allow Render frontend URL
+if (!allowedOrigins.includes('https://perun-crm.onrender.com')) {
+  allowedOrigins.push('https://perun-crm.onrender.com');
+}
+
+console.log('CORS allowed origins:', allowedOrigins);
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:5173'],
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE']
   }
 });
 
-// CORS configuration
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:5173'],
-  credentials: true
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Body parsers
