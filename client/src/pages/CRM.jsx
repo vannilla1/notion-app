@@ -1615,11 +1615,22 @@ function CRM() {
                   className="preview-image"
                 />
               ) : previewFile.mimetype === 'application/pdf' && previewUrl ? (
-                <iframe
-                  src={previewUrl}
-                  title={previewFile.originalName}
+                <object
+                  data={previewUrl}
+                  type="application/pdf"
                   className="preview-pdf"
-                />
+                >
+                  <div className="preview-pdf-fallback">
+                    <span className="preview-icon">📄</span>
+                    <p>PDF náhľad nie je dostupný v tomto prehliadači</p>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                    >
+                      Stiahnuť PDF
+                    </button>
+                  </div>
+                </object>
               ) : previewFile.mimetype?.startsWith('video/') && previewUrl ? (
                 <video
                   src={previewUrl}
