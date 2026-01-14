@@ -43,10 +43,21 @@ const isValidPhone = (phone) => {
 // Helper function to convert contact to plain object with deep copy of nested subtasks
 const contactToPlainObject = (contact) => {
   const obj = contact.toObject ? contact.toObject() : contact;
-  return JSON.parse(JSON.stringify({
+  const result = JSON.parse(JSON.stringify({
     ...obj,
     id: obj._id ? obj._id.toString() : obj.id
   }));
+  // Strip file data (too large for socket.io)
+  if (result.files && result.files.length > 0) {
+    result.files = result.files.map(f => ({
+      id: f.id,
+      originalName: f.originalName,
+      mimetype: f.mimetype,
+      size: f.size,
+      uploadedAt: f.uploadedAt
+    }));
+  }
+  return result;
 };
 
 // Helper function to find a subtask recursively
@@ -497,14 +508,20 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 // Upload file to contact (stored in MongoDB as Base64)
 router.post('/:id/files', authenticateToken, upload.single('file'), async (req, res) => {
   try {
+    console.log('File upload request for contact:', req.params.id);
+
     const contact = await Contact.findById(req.params.id);
     if (!contact) {
+      console.log('Contact not found:', req.params.id);
       return res.status(404).json({ message: 'Contact not found' });
     }
 
     if (!req.file) {
+      console.log('No file in request');
       return res.status(400).json({ message: 'No file uploaded' });
     }
+
+    console.log('File received:', req.file.originalname, 'Size:', req.file.size);
 
     // Convert file buffer to Base64
     const base64Data = req.file.buffer.toString('base64');
@@ -520,6 +537,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
 
     contact.files.push(fileData);
     await contact.save();
+    console.log('File saved to MongoDB:', fileData.id);
 
     const io = req.app.get('io');
     io.emit('contact-updated', contactToPlainObject(contact));
@@ -535,6 +553,7 @@ router.post('/:id/files', authenticateToken, upload.single('file'), async (req, 
 
     res.status(201).json(responseData);
   } catch (error) {
+    console.error('File upload error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
