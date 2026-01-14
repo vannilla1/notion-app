@@ -1614,7 +1614,7 @@ function CRM() {
                   alt={previewFile.originalName}
                   className="preview-image"
                 />
-              ) : previewFile.mimetype === 'application/pdf' && previewUrl ? (
+              ) : (previewFile.mimetype === 'application/pdf' || previewFile.originalName?.toLowerCase().endsWith('.pdf')) && previewUrl ? (
                 <object
                   data={previewUrl}
                   type="application/pdf"
