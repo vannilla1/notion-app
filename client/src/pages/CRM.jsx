@@ -240,13 +240,37 @@ function CRM() {
     const formData = new FormData();
     formData.append('file', file);
 
+    const token = localStorage.getItem('token');
+    const uploadUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files`;
+
+    console.log('Starting upload to:', uploadUrl);
+    console.log('File:', file.name, 'Size:', file.size);
+
     try {
-      // Don't set Content-Type manually - axios will set it with correct boundary
-      const response = await api.post(`/api/contacts/${contactId}/files`, formData);
-      console.log('File uploaded:', response.data);
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      console.log('Response status:', response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Upload failed');
+      }
+
+      const data = await response.json();
+      console.log('File uploaded:', data);
+
+      // Refresh contacts to show new file
+      const contactsRes = await api.get('/api/contacts');
+      setContacts(contactsRes.data);
     } catch (error) {
       console.error('Upload error:', error);
-      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+      alert(error.message || 'Chyba pri nahrávaní súboru');
     } finally {
       setUploadingFile(null);
     }
