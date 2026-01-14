@@ -322,8 +322,12 @@ function CRM() {
     setPreviewUrl(null);
     setPreviewError(null);
 
+    console.log('Opening preview for:', { contactId, fileId: file.id, file });
+    const url = `/api/contacts/${contactId}/files/${file.id}/download`;
+    console.log('Request URL:', url);
+
     try {
-      const response = await api.get(`/api/contacts/${contactId}/files/${file.id}/download`, {
+      const response = await api.get(url, {
         responseType: 'blob'
       });
 
