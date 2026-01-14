@@ -59,6 +59,8 @@ function CRM() {
   const fileInputRefs = {};
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -291,18 +293,32 @@ function CRM() {
     return mimetype?.startsWith('image/') || mimetype === 'application/pdf';
   };
 
-  const openPreview = (file, contactId) => {
+  const openPreview = async (file, contactId) => {
     setPreviewFile(file);
     setPreviewContact(contactId);
+    setPreviewLoading(true);
+
+    try {
+      const response = await api.get(`/api/contacts/${contactId}/files/${file.id}/download`, {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data], { type: file.mimetype });
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+    } catch (error) {
+      console.error('Error loading preview:', error);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const closePreview = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setPreviewFile(null);
     setPreviewContact(null);
-  };
-
-  const getPreviewUrl = (contactId, file) => {
-    return `${api.defaults.baseURL}/api/contacts/${contactId}/files/${file.id}/download`;
+    setPreviewUrl(null);
   };
 
   // Duplicate task functions
@@ -1260,26 +1276,13 @@ function CRM() {
                               <div className="files-list">
                                 {contact.files.map(file => (
                                   <div key={file.id} className="file-item">
-                                    {file.mimetype?.startsWith('image/') ? (
-                                      <div
-                                        className="file-thumbnail"
-                                        onClick={() => openPreview(file, contact.id)}
-                                        title="Zobraziť náhľad"
-                                      >
-                                        <img
-                                          src={getPreviewUrl(contact.id, file)}
-                                          alt={file.originalName}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <span
-                                        className={`file-icon ${canPreview(file.mimetype) ? 'clickable' : ''}`}
-                                        onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
-                                        title={canPreview(file.mimetype) ? 'Zobraziť náhľad' : ''}
-                                      >
-                                        {getFileIcon(file.mimetype)}
-                                      </span>
-                                    )}
+                                    <span
+                                      className={`file-icon ${canPreview(file.mimetype) ? 'clickable' : ''}`}
+                                      onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
+                                      title={canPreview(file.mimetype) ? 'Zobraziť náhľad' : ''}
+                                    >
+                                      {getFileIcon(file.mimetype)}
+                                    </span>
                                     <div className="file-info">
                                       <span
                                         className={`file-name ${canPreview(file.mimetype) ? 'clickable' : ''}`}
@@ -1572,15 +1575,19 @@ function CRM() {
               </div>
             </div>
             <div className="file-preview-content">
-              {previewFile.mimetype?.startsWith('image/') ? (
+              {previewLoading ? (
+                <div className="preview-loading">
+                  <span>Načítavam náhľad...</span>
+                </div>
+              ) : previewFile.mimetype?.startsWith('image/') && previewUrl ? (
                 <img
-                  src={getPreviewUrl(previewContact, previewFile)}
+                  src={previewUrl}
                   alt={previewFile.originalName}
                   className="preview-image"
                 />
-              ) : previewFile.mimetype === 'application/pdf' ? (
+              ) : previewFile.mimetype === 'application/pdf' && previewUrl ? (
                 <iframe
-                  src={getPreviewUrl(previewContact, previewFile)}
+                  src={previewUrl}
                   title={previewFile.originalName}
                   className="preview-pdf"
                 />
