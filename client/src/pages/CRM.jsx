@@ -322,31 +322,37 @@ function CRM() {
     setPreviewUrl(null);
     setPreviewError(null);
 
-    console.log('Opening preview for:', { contactId, fileId: file.id, file });
-    const url = `/api/contacts/${contactId}/files/${file.id}/download`;
-    console.log('Request URL:', url);
+    const token = localStorage.getItem('token');
+    const requestUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files/${file.id}/download`;
 
     try {
-      const response = await api.get(url, {
-        responseType: 'blob'
+      const response = await fetch(requestUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+
       // Skontroluj či response obsahuje dáta
-      if (!response.data || response.data.size === 0) {
+      if (!blob || blob.size === 0) {
         setPreviewError('Prázdna odpoveď zo servera');
         return;
       }
 
-      const blob = new Blob([response.data], { type: file.mimetype || 'application/octet-stream' });
-
       // Pre textové súbory načítaj obsah ako text
-      if (isTextFile(file.mimetype, file.originalName)) {
+      const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml', '.txt'];
+      const isText = file.mimetype?.startsWith('text/') || textExtensions.some(ext => file.originalName?.toLowerCase().endsWith(ext));
+
+      if (isText) {
         const text = await blob.text();
         setPreviewTextContent(text);
       }
 
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
+      const blobUrl = URL.createObjectURL(blob);
+      setPreviewUrl(blobUrl);
     } catch (error) {
       console.error('Error loading preview:', error);
       setPreviewError('Nepodarilo sa načítať súbor: ' + (error.message || 'Neznáma chyba'));
