@@ -57,6 +57,8 @@ function CRM() {
   // File states
   const [uploadingFile, setUploadingFile] = useState(null);
   const fileInputRefs = {};
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewContact, setPreviewContact] = useState(null);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -283,6 +285,24 @@ function CRM() {
     if (mimetype?.includes('word')) return '📝';
     if (mimetype?.includes('excel') || mimetype?.includes('spreadsheet')) return '📊';
     return '📎';
+  };
+
+  const canPreview = (mimetype) => {
+    return mimetype?.startsWith('image/') || mimetype === 'application/pdf';
+  };
+
+  const openPreview = (file, contactId) => {
+    setPreviewFile(file);
+    setPreviewContact(contactId);
+  };
+
+  const closePreview = () => {
+    setPreviewFile(null);
+    setPreviewContact(null);
+  };
+
+  const getPreviewUrl = (contactId, file) => {
+    return `${api.defaults.baseURL}/api/contacts/${contactId}/files/${file.id}/download`;
   };
 
   // Duplicate task functions
@@ -1240,12 +1260,45 @@ function CRM() {
                               <div className="files-list">
                                 {contact.files.map(file => (
                                   <div key={file.id} className="file-item">
-                                    <span className="file-icon">{getFileIcon(file.mimetype)}</span>
+                                    {file.mimetype?.startsWith('image/') ? (
+                                      <div
+                                        className="file-thumbnail"
+                                        onClick={() => openPreview(file, contact.id)}
+                                        title="Zobraziť náhľad"
+                                      >
+                                        <img
+                                          src={getPreviewUrl(contact.id, file)}
+                                          alt={file.originalName}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <span
+                                        className={`file-icon ${canPreview(file.mimetype) ? 'clickable' : ''}`}
+                                        onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
+                                        title={canPreview(file.mimetype) ? 'Zobraziť náhľad' : ''}
+                                      >
+                                        {getFileIcon(file.mimetype)}
+                                      </span>
+                                    )}
                                     <div className="file-info">
-                                      <span className="file-name">{file.originalName}</span>
+                                      <span
+                                        className={`file-name ${canPreview(file.mimetype) ? 'clickable' : ''}`}
+                                        onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
+                                      >
+                                        {file.originalName}
+                                      </span>
                                       <span className="file-size">{formatFileSize(file.size)}</span>
                                     </div>
                                     <div className="file-actions">
+                                      {canPreview(file.mimetype) && (
+                                        <button
+                                          onClick={() => openPreview(file, contact.id)}
+                                          className="btn-icon-sm"
+                                          title="Náhľad"
+                                        >
+                                          👁️
+                                        </button>
+                                      )}
                                       <button
                                         onClick={() => downloadFile(contact.id, file.id, file.originalName)}
                                         className="btn-icon-sm"
@@ -1497,6 +1550,52 @@ function CRM() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
               <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewFile && previewContact && (
+        <div className="modal-overlay file-preview-overlay" onClick={closePreview}>
+          <div className="file-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="file-preview-header">
+              <h3>{previewFile.originalName}</h3>
+              <div className="file-preview-actions">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                >
+                  ⬇️ Stiahnuť
+                </button>
+                <button className="btn-icon file-preview-close" onClick={closePreview}>×</button>
+              </div>
+            </div>
+            <div className="file-preview-content">
+              {previewFile.mimetype?.startsWith('image/') ? (
+                <img
+                  src={getPreviewUrl(previewContact, previewFile)}
+                  alt={previewFile.originalName}
+                  className="preview-image"
+                />
+              ) : previewFile.mimetype === 'application/pdf' ? (
+                <iframe
+                  src={getPreviewUrl(previewContact, previewFile)}
+                  title={previewFile.originalName}
+                  className="preview-pdf"
+                />
+              ) : (
+                <div className="preview-unsupported">
+                  <span className="preview-icon">{getFileIcon(previewFile.mimetype)}</span>
+                  <p>Náhľad nie je dostupný pre tento typ súboru</p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                  >
+                    Stiahnuť súbor
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
