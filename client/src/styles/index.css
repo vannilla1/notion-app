@@ -5790,3 +5790,718 @@ a.detail-value:hover {
     height: 40px;
   }
 }
+
+/* ===========================================
+   ENHANCED MOBILE RESPONSIVENESS
+   =========================================== */
+
+/* Tasks page - mobile improvements */
+@media (max-width: 599px) {
+  .tasks-page {
+    padding: 0;
+  }
+
+  .tasks-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .tasks-header h2 {
+    font-size: 18px;
+    width: 100%;
+  }
+
+  .due-date-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 10px;
+    width: 100%;
+  }
+
+  .legend-item {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+  }
+
+  .legend-color {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* Task cards - better mobile layout */
+  .task-card {
+    border-radius: var(--radius-md);
+  }
+
+  .task-main {
+    padding: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .task-checkbox-styled {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
+  .task-content {
+    flex: 1;
+    min-width: 0;
+    width: calc(100% - 80px);
+  }
+
+  .task-title {
+    font-size: 14px;
+    word-break: break-word;
+  }
+
+  .task-meta {
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .task-meta span {
+    font-size: 11px;
+  }
+
+  .priority-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  .task-actions {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    opacity: 1;
+    gap: 4px;
+  }
+
+  .task-actions .btn-icon-sm {
+    padding: 6px;
+    font-size: 12px;
+  }
+
+  /* Task expanded section */
+  .task-expanded {
+    padding: 12px;
+    padding-left: 12px;
+  }
+
+  .task-description {
+    font-size: 12px;
+    padding-top: 8px;
+    margin-bottom: 12px;
+  }
+
+  /* Subtasks mobile */
+  .subtasks {
+    margin-top: 12px;
+  }
+
+  .subtasks-header {
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  .subtask-item {
+    padding: 8px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .subtask-checkbox {
+    width: 18px;
+    height: 18px;
+  }
+
+  .subtask-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .subtask-title {
+    font-size: 12px;
+    word-break: break-word;
+  }
+
+  .subtask-meta {
+    font-size: 10px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .subtask-actions {
+    opacity: 1;
+    position: relative;
+    margin-top: 4px;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Add subtask form */
+  .add-subtask-form {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .add-subtask-form input {
+    width: 100%;
+  }
+
+  .add-subtask-form .btn {
+    width: 100%;
+  }
+
+  /* Task edit form mobile */
+  .task-edit-form {
+    gap: 8px;
+  }
+
+  .task-edit-form .form-input {
+    font-size: 14px;
+  }
+
+  .task-edit-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .task-edit-row input,
+  .task-edit-row select {
+    width: 100%;
+  }
+
+  .task-edit-actions {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .task-edit-actions .btn {
+    width: 100%;
+    padding: 10px;
+  }
+
+  /* Multi-select contacts in task form */
+  .multi-select-contacts {
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  .multi-select-contacts.compact {
+    gap: 6px;
+  }
+
+  .contact-checkbox {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  /* User assignment select */
+  .multi-select-users {
+    max-height: 120px;
+  }
+
+  .user-checkbox {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+}
+
+/* Very small phones - tasks */
+@media (max-width: 380px) {
+  .tasks-header h2 {
+    font-size: 16px;
+  }
+
+  .due-date-legend {
+    font-size: 9px;
+  }
+
+  .legend-item {
+    padding: 3px 6px;
+  }
+
+  .task-main {
+    padding: 10px;
+  }
+
+  .task-title {
+    font-size: 13px;
+  }
+
+  .task-meta span {
+    font-size: 10px;
+  }
+
+  .subtask-title {
+    font-size: 11px;
+  }
+}
+
+/* Dashboard mobile improvements */
+@media (max-width: 599px) {
+  .dashboard-page {
+    padding: 12px;
+  }
+
+  .dashboard-header {
+    margin-bottom: 16px;
+  }
+
+  .dashboard-header h2 {
+    font-size: 20px;
+  }
+
+  .dashboard-subtitle {
+    font-size: 13px;
+  }
+
+  .dashboard-stats {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .dashboard-stats h3 {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+
+  .dashboard-grid {
+    gap: 12px;
+  }
+
+  .dashboard-section {
+    padding: 14px;
+    border-radius: var(--radius-md);
+  }
+
+  .dashboard-section .section-header h3 {
+    font-size: 14px;
+  }
+
+  .dashboard-contact-item,
+  .dashboard-task-item {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .dashboard-contact-name,
+  .dashboard-task-title {
+    font-size: 13px;
+  }
+
+  .dashboard-contact-meta,
+  .dashboard-task-meta {
+    font-size: 10px;
+  }
+}
+
+/* CRM page mobile improvements */
+@media (max-width: 599px) {
+  .crm-main {
+    padding: 12px;
+    padding-bottom: 80px; /* Space for fixed elements */
+  }
+
+  /* Contact list */
+  .contact-list {
+    gap: 8px;
+  }
+
+  .contact-item {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .contact-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .contact-info h3 {
+    font-size: 14px;
+  }
+
+  .contact-info p {
+    font-size: 11px;
+  }
+
+  .contact-status {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+
+  /* Contact detail */
+  .contact-detail-header {
+    gap: 12px;
+  }
+
+  .contact-avatar-large {
+    width: 50px;
+    height: 50px;
+    font-size: 20px;
+  }
+
+  /* Info grid - single column on mobile */
+  .contact-info-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .info-item {
+    padding: 10px 12px;
+  }
+
+  .info-label {
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+
+  .info-value {
+    font-size: 13px;
+  }
+}
+
+/* Admin panel mobile */
+@media (max-width: 599px) {
+  .admin-page {
+    padding: 12px;
+  }
+
+  .admin-header h2 {
+    font-size: 20px;
+  }
+
+  .users-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .users-table table {
+    min-width: 500px;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .table-avatar-img,
+  .table-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+
+  .role-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+
+  .role-select {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+}
+
+/* Sidebar mobile improvements */
+@media (max-width: 767px) {
+  .crm-sidebar {
+    width: 90%;
+    max-width: 340px;
+  }
+
+  .sidebar-header h2 {
+    font-size: 16px;
+  }
+
+  .sidebar-filters {
+    padding: 12px;
+  }
+
+  .filter-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  /* Contact list in sidebar */
+  .sidebar-contacts {
+    padding: 8px;
+  }
+
+  .sidebar-contact-item {
+    padding: 10px;
+  }
+}
+
+/* Header mobile improvements */
+@media (max-width: 599px) {
+  .crm-header {
+    padding: 10px 12px;
+    min-height: 56px;
+  }
+
+  .hamburger-btn {
+    padding: 8px;
+    font-size: 18px;
+  }
+
+  .crm-header h1 {
+    font-size: 14px;
+    margin: 0 8px;
+  }
+
+  .crm-header-right {
+    gap: 6px;
+  }
+
+  .crm-header .btn-secondary {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  /* Hide text on very small screens, show only icon */
+  .crm-header .btn-secondary span.btn-text {
+    display: none;
+  }
+
+  /* User menu */
+  .user-menu-trigger {
+    padding: 4px 8px;
+    gap: 6px;
+  }
+
+  .user-avatar,
+  .user-avatar-img {
+    width: 28px;
+    height: 28px;
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .dropdown-arrow {
+    font-size: 10px;
+  }
+}
+
+/* Modal improvements for mobile */
+@media (max-width: 599px) {
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    max-height: 90vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    margin-bottom: 0;
+  }
+
+  .modal-header {
+    padding: 16px;
+    position: sticky;
+    top: 0;
+    background: var(--bg-card);
+    z-index: 1;
+  }
+
+  .modal-header h3 {
+    font-size: 16px;
+  }
+
+  .modal-body {
+    padding: 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-footer {
+    padding: 12px 16px;
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-color);
+  }
+
+  .modal-footer .btn {
+    flex: 1;
+    padding: 12px;
+  }
+}
+
+/* Profile modal mobile */
+@media (max-width: 599px) {
+  .profile-modal {
+    max-width: 100%;
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 95vh;
+  }
+
+  .profile-avatar-section {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .profile-avatar-img,
+  .profile-avatar-placeholder {
+    width: 80px;
+    height: 80px;
+  }
+
+  .avatar-actions {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .avatar-actions .btn {
+    flex: 1;
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+
+  .profile-form .form-group {
+    margin-bottom: 12px;
+  }
+
+  .profile-form label {
+    font-size: 12px;
+  }
+
+  .profile-form .form-input {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .color-options {
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .color-option {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* Touch-friendly improvements */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .btn,
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .btn-icon,
+  .btn-icon-sm {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 10px;
+  }
+
+  /* Always show action buttons on touch devices */
+  .task-actions,
+  .subtask-actions,
+  .file-actions,
+  .contact-actions {
+    opacity: 1;
+  }
+
+  /* Better spacing for touch */
+  .contact-item,
+  .task-card,
+  .file-item {
+    margin-bottom: 8px;
+  }
+
+  /* Disable hover effects */
+  .contact-item:hover,
+  .task-card:hover,
+  .file-item:hover {
+    transform: none;
+  }
+
+  /* Checkbox touch targets */
+  .task-checkbox-styled,
+  .subtask-checkbox {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  /* Form inputs */
+  .form-input,
+  .form-select,
+  select {
+    min-height: 44px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  /* Links in task/contact meta */
+  .task-meta a,
+  .contact-meta a {
+    padding: 4px 0;
+  }
+}
+
+/* Landscape mode on phones */
+@media (max-height: 500px) and (orientation: landscape) {
+  .crm-header {
+    padding: 8px 12px;
+    min-height: 48px;
+  }
+
+  .crm-sidebar {
+    padding-top: 56px;
+  }
+
+  .modal-content {
+    max-height: 85vh;
+  }
+
+  .profile-modal {
+    max-height: 85vh;
+  }
+
+  .tasks-header {
+    margin-bottom: 8px;
+  }
+
+  .due-date-legend {
+    display: none;
+  }
+}
+
+/* Safe area for notched phones */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  @media (max-width: 599px) {
+    .crm-main {
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+
+    .modal-content {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .crm-sidebar {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
+}
