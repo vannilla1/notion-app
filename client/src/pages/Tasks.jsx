@@ -1052,6 +1052,22 @@ function Tasks() {
     setShowCalendarMenu(false);
   };
 
+  // Helper to check if task or any subtask is assigned to user
+  const isAssignedToUser = (task, userId) => {
+    // Check main task
+    if ((task.assignedTo || []).some(id => id?.toString() === userId)) return true;
+    // Check subtasks recursively
+    const checkSubtasks = (subtasks) => {
+      if (!subtasks) return false;
+      for (const sub of subtasks) {
+        if ((sub.assignedTo || []).some(id => id?.toString() === userId)) return true;
+        if (sub.subtasks && checkSubtasks(sub.subtasks)) return true;
+      }
+      return false;
+    };
+    return checkSubtasks(task.subtasks);
+  };
+
   const filteredTasks = tasks.filter(t => {
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
@@ -1095,7 +1111,7 @@ function Tasks() {
     if (filter === 'assigned-to-me') {
       const userId = user?.id?.toString();
       if (!userId) return false;
-      return (t.assignedTo || []).some(id => id?.toString() === userId);
+      return isAssignedToUser(t, userId);
     }
     return true;
   });
@@ -1111,7 +1127,7 @@ function Tasks() {
   const assignedToMeCount = tasks.filter(t => {
     const userId = user?.id?.toString();
     if (!userId) return false;
-    return (t.assignedTo || []).some(id => id?.toString() === userId);
+    return isAssignedToUser(t, userId);
   }).length;
   const dueSuccessCount = countWithDueClass(tasks, 'due-success');
   const dueWarningCount = countWithDueClass(tasks, 'due-warning');
