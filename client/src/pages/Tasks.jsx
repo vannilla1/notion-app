@@ -1090,8 +1090,9 @@ function Tasks() {
       return taskMatches || hasSubtaskWithDueClass(t.subtasks, 'overdue');
     }
     if (filter === 'assigned-to-me') {
-      const userId = user?.id;
-      return (t.assignedTo || []).some(id => id === userId || id?.toString() === userId);
+      const userId = user?.id?.toString();
+      if (!userId) return false;
+      return (t.assignedTo || []).some(id => id?.toString() === userId);
     }
     return true;
   });
@@ -1104,7 +1105,11 @@ function Tasks() {
   const lowPriorityCount = countWithPriority(tasks, 'low');
   const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
   const withoutContactCount = tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length;
-  const assignedToMeCount = tasks.filter(t => (t.assignedTo || []).some(id => id === user?.id || id?.toString() === user?.id)).length;
+  const assignedToMeCount = tasks.filter(t => {
+    const userId = user?.id?.toString();
+    if (!userId) return false;
+    return (t.assignedTo || []).some(id => id?.toString() === userId);
+  }).length;
   const dueSuccessCount = countWithDueClass(tasks, 'due-success');
   const dueWarningCount = countWithDueClass(tasks, 'due-warning');
   const dueDangerCount = countWithDueClass(tasks, 'due-danger');
