@@ -350,6 +350,9 @@ function Tasks() {
   const fetchTasks = async () => {
     try {
       const res = await api.get('/api/tasks');
+      console.log('Tasks data:', res.data);
+      console.log('User ID:', user?.id);
+      console.log('Tasks with assignedTo:', res.data.filter(t => t.assignedTo?.length > 0).map(t => ({ title: t.title, assignedTo: t.assignedTo })));
       setTasks(res.data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
