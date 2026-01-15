@@ -865,7 +865,7 @@ function Tasks() {
                 )}
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
-                    📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                    {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
                   </span>
                 )}
                 {hasChildren && (
@@ -1683,7 +1683,9 @@ function Tasks() {
                                 {getPriorityLabel(task.priority)}
                               </span>
                               {task.dueDate && (
-                                <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>📅 {formatDate(task.dueDate)}</span>
+                                <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
+                                  {getDueDateClass(task.dueDate, task.completed) === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
+                                </span>
                               )}
                               {(task.contactName || task.contactNames?.length > 0) && (
                                 <span className="contact-badge">
