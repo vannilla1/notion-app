@@ -6576,7 +6576,8 @@ a.detail-value:hover {
 }
 
 .feed-url-input {
-  flex: 1;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   font-size: 12px;
   font-family: monospace;
