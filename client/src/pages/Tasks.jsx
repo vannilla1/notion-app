@@ -104,6 +104,9 @@ function Tasks() {
   // Check if current filter is a due date filter
   const isDueDateFilter = (f) => ['due-success', 'due-warning', 'due-danger', 'overdue'].includes(f);
 
+  // Check if current filter is assigned-to-me filter
+  const isAssignedFilter = (f) => f === 'assigned-to-me';
+
   // Check if task or any subtask has specific due date class (recursive)
   const hasSubtaskWithDueClass = (subtasks, dueClass) => {
     if (!subtasks || subtasks.length === 0) return false;
@@ -141,6 +144,48 @@ function Tasks() {
           parentIds.add(subtask.id);
         }
         getParentSubtaskIds(subtask.subtasks, dueClass, parentIds);
+      }
+    }
+    return parentIds;
+  };
+
+  // Get IDs of subtasks assigned to user (recursive)
+  const getAssignedSubtaskIds = (subtasks, userId) => {
+    const ids = new Set();
+    if (!subtasks || subtasks.length === 0 || !userId) return ids;
+    for (const subtask of subtasks) {
+      if ((subtask.assignedTo || []).some(id => id?.toString() === userId)) {
+        ids.add(subtask.id);
+      }
+      if (subtask.subtasks) {
+        const childIds = getAssignedSubtaskIds(subtask.subtasks, userId);
+        childIds.forEach(id => ids.add(id));
+      }
+    }
+    return ids;
+  };
+
+  // Check if any subtask is assigned to user (recursive)
+  const hasAssignedSubtask = (subtasks, userId) => {
+    if (!subtasks || subtasks.length === 0 || !userId) return false;
+    for (const subtask of subtasks) {
+      if ((subtask.assignedTo || []).some(id => id?.toString() === userId)) return true;
+      if (subtask.subtasks && hasAssignedSubtask(subtask.subtasks, userId)) return true;
+    }
+    return false;
+  };
+
+  // Get IDs of parent subtasks that need to be expanded to show assigned children
+  const getAssignedParentSubtaskIds = (subtasks, userId, parentIds = new Set()) => {
+    if (!subtasks || subtasks.length === 0 || !userId) return parentIds;
+    for (const subtask of subtasks) {
+      if (subtask.subtasks && subtask.subtasks.length > 0) {
+        const hasAssignedChild = hasAssignedSubtask(subtask.subtasks, userId);
+        const selfAssigned = (subtask.assignedTo || []).some(id => id?.toString() === userId);
+        if (hasAssignedChild || selfAssigned) {
+          parentIds.add(subtask.id);
+        }
+        getAssignedParentSubtaskIds(subtask.subtasks, userId, parentIds);
       }
     }
     return parentIds;
@@ -291,12 +336,13 @@ function Tasks() {
     };
   }, [socket, isConnected]);
 
-  // Auto-expand tasks and subtasks when due date filter or 'new' filter is active
+  // Auto-expand tasks and subtasks when due date filter, 'new' filter, or 'assigned-to-me' filter is active
   useEffect(() => {
-    if ((!isDueDateFilter(filter) && filter !== 'new') || tasks.length === 0) return;
+    if ((!isDueDateFilter(filter) && filter !== 'new' && !isAssignedFilter(filter)) || tasks.length === 0) return;
 
     const tasksToExpand = new Set();
     const subtasksToExpand = {};
+    const currentUserId = user?.id?.toString();
 
     if (filter === 'new') {
       // Handle 'new' filter
@@ -312,6 +358,25 @@ function Tasks() {
             parentIds.forEach(id => {
               subtasksToExpand[id] = true;
             });
+          }
+        }
+      }
+    } else if (isAssignedFilter(filter)) {
+      // Handle assigned-to-me filter
+      if (currentUserId) {
+        for (const task of tasks) {
+          const taskAssigned = (task.assignedTo || []).some(id => id?.toString() === currentUserId);
+          const hasAssignedSubs = hasAssignedSubtask(task.subtasks, currentUserId);
+
+          if (taskAssigned || hasAssignedSubs) {
+            tasksToExpand.add(task.id);
+
+            if (hasAssignedSubs) {
+              const parentIds = getAssignedParentSubtaskIds(task.subtasks, currentUserId);
+              parentIds.forEach(id => {
+                subtasksToExpand[id] = true;
+              });
+            }
           }
         }
       }
@@ -345,14 +410,11 @@ function Tasks() {
     if (Object.keys(subtasksToExpand).length > 0) {
       setExpandedSubtasks(prev => ({ ...prev, ...subtasksToExpand }));
     }
-  }, [filter, tasks]);
+  }, [filter, tasks, user]);
 
   const fetchTasks = async () => {
     try {
       const res = await api.get('/api/tasks');
-      console.log('Tasks data:', res.data);
-      console.log('User ID:', user?.id);
-      console.log('Tasks with assignedTo:', res.data.filter(t => t.assignedTo?.length > 0).map(t => ({ title: t.title, assignedTo: t.assignedTo })));
       setTasks(res.data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -693,17 +755,21 @@ function Tasks() {
 
     const currentDueClass = isDueDateFilter(filter) ? filter : null;
     const isNewFilter = filter === 'new';
+    const isAssigned = isAssignedFilter(filter);
+    const currentUserId = user?.id?.toString();
 
     return subtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
       const isExpanded = expandedSubtasks[subtask.id];
       const childCounts = hasChildren ? countSubtasksRecursive(subtask.subtasks) : { total: 0, completed: 0 };
 
-      // Check if this subtask matches the current filter (due date or new)
+      // Check if this subtask matches the current filter (due date, new, or assigned)
       const matchesDueFilter = currentDueClass && !subtask.completed &&
         getDueDateClass(subtask.dueDate, subtask.completed) === currentDueClass;
       const matchesNewFilter = isNewFilter && isSubtaskNewOrModified(subtask);
-      const matchesFilter = matchesDueFilter || matchesNewFilter;
+      const matchesAssignedFilter = isAssigned && currentUserId &&
+        (subtask.assignedTo || []).some(id => id?.toString() === currentUserId);
+      const matchesFilter = matchesDueFilter || matchesNewFilter || matchesAssignedFilter;
 
       return (
         <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
@@ -1498,11 +1564,17 @@ function Tasks() {
                 </div>
               ) : (
                 <div className="tasks-list">
-                  {filteredTasks.map(task => (
+                  {filteredTasks.map(task => {
+                    // Check if main task matches assigned filter
+                    const currentUserId = user?.id?.toString();
+                    const taskMatchesAssigned = isAssignedFilter(filter) && currentUserId &&
+                      (task.assignedTo || []).some(id => id?.toString() === currentUserId);
+
+                    return (
                     <div
                       key={task.id}
                       ref={el => taskRefs.current[task.id] = el}
-                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''}`}
+                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''}`}
                     >
                       <div className="task-main">
                         <div
@@ -1736,7 +1808,7 @@ function Tasks() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
