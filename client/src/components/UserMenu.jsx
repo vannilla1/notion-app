@@ -173,7 +173,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const file = e.target.files[0];
     if (!file) return;
 
-    console.log('Avatar upload started:', file.name, file.type, file.size);
     setErrors({});
     setMessage('');
 
@@ -182,29 +181,25 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
     const token = localStorage.getItem('token');
     const uploadUrl = `${API_URL}/auth/avatar`;
-    console.log('Upload URL:', uploadUrl);
 
-    // Use XMLHttpRequest for better browser compatibility (Safari)
     const xhr = new XMLHttpRequest();
 
     xhr.addEventListener('load', () => {
-      console.log('XHR load - status:', xhr.status, 'response:', xhr.responseText);
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText);
           const newAvatar = response.avatar;
+          const newTimestamp = Date.now();
           setProfile(prev => ({ ...prev, avatar: newAvatar }));
-          setAvatarTimestamp(Date.now());
+          setAvatarTimestamp(newTimestamp);
           setMessage('Avatar bol úspešne nahraný');
           if (onUserUpdate) {
-            onUserUpdate({ avatar: newAvatar });
+            onUserUpdate({ avatar: newAvatar, avatarTimestamp: newTimestamp });
           }
-        } catch (parseErr) {
-          console.error('Parse error:', parseErr);
+        } catch {
           setErrors({ general: 'Chyba pri spracovaní odpovede' });
         }
       } else {
-        console.log('Upload failed with status:', xhr.status);
         try {
           const errorResponse = JSON.parse(xhr.responseText);
           setErrors({ general: errorResponse.message || 'Chyba pri nahrávaní avatara' });
@@ -214,19 +209,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       }
     });
 
-    xhr.addEventListener('error', (err) => {
-      console.error('XHR error event:', err, 'status:', xhr.status, 'readyState:', xhr.readyState);
+    xhr.addEventListener('error', () => {
       setErrors({ general: 'Chyba siete pri nahrávaní avatara' });
-    });
-
-    xhr.addEventListener('abort', () => {
-      console.log('XHR aborted');
-      setErrors({ general: 'Nahrávanie bolo zrušené' });
     });
 
     xhr.open('POST', uploadUrl);
     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    console.log('Sending XHR...');
     xhr.send(formData);
 
     e.target.value = '';
@@ -273,7 +261,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       >
         {user?.avatar ? (
           <img
-            src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${avatarTimestamp}`}
+            src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${user.avatarTimestamp || avatarTimestamp}`}
             alt={user.username}
             className="user-avatar-img"
           />
@@ -294,7 +282,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           <div className="user-menu-header">
             {user?.avatar ? (
               <img
-                src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${avatarTimestamp}`}
+                src={`${API_BASE_URL}/api/auth/avatar/${user.id}?t=${user.avatarTimestamp || avatarTimestamp}`}
                 alt={user.username}
                 className="dropdown-avatar-img"
               />
