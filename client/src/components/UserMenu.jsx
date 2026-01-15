@@ -653,8 +653,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         readOnly
                         className="form-input feed-url-input"
                       />
-                      <button className="btn btn-secondary" onClick={handleCopyFeedUrl}>
-                        Kopírovať
+                      <button className="btn btn-primary copy-url-btn" onClick={handleCopyFeedUrl}>
+                        📋 Kopírovať odkaz
                       </button>
                     </div>
                   </div>

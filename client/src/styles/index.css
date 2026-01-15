@@ -6572,6 +6572,7 @@ a.detail-value:hover {
 .feed-url-container {
   display: flex;
   gap: 8px;
+  align-items: stretch;
 }
 
 .feed-url-input {
@@ -6579,6 +6580,12 @@ a.detail-value:hover {
   font-size: 12px;
   font-family: monospace;
   background: var(--bg-secondary);
+}
+
+.copy-url-btn {
+  white-space: nowrap;
+  font-weight: 500;
+  padding: 8px 16px;
 }
 
 .calendar-instructions {
