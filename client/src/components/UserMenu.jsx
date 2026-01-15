@@ -663,33 +663,89 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     <h4>Ako pridať do kalendára:</h4>
                     <div className="instructions-tabs">
                       <details>
-                        <summary>Google Calendar</summary>
+                        <summary>Google Calendar (Web)</summary>
                         <ol>
-                          <li>Otvorte Google Calendar</li>
-                          <li>Kliknite na "+" vedľa "Ďalšie kalendáre"</li>
-                          <li>Vyberte "Z webovej adresy"</li>
-                          <li>Vložte skopírovaný odkaz</li>
-                          <li>Kliknite "Pridať kalendár"</li>
+                          <li>Otvorte <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer">calendar.google.com</a></li>
+                          <li>V ľavom paneli nájdite "Ďalšie kalendáre"</li>
+                          <li>Kliknite na <strong>+</strong> a vyberte <strong>"Z webovej adresy"</strong></li>
+                          <li>Vložte skopírovaný odkaz do poľa "URL kalendára"</li>
+                          <li>Kliknite <strong>"Pridať kalendár"</strong></li>
+                        </ol>
+                        <p className="instruction-note">Kalendár sa aktualizuje automaticky každých 15-30 minút.</p>
+                      </details>
+                      <details>
+                        <summary>Google Calendar (Android)</summary>
+                        <ol>
+                          <li>Na Androide nie je možné pridať priamo - použite webovú verziu</li>
+                          <li>Otvorte <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer">calendar.google.com</a> v prehliadači</li>
+                          <li>Postupujte podľa návodu pre Web vyššie</li>
+                          <li>Kalendár sa automaticky zobrazí v Android aplikácii</li>
                         </ol>
                       </details>
                       <details>
-                        <summary>Apple Calendar (iPhone/Mac)</summary>
+                        <summary>Apple Calendar (iPhone)</summary>
                         <ol>
-                          <li>Otvorte Nastavenia → Kalendár → Účty</li>
-                          <li>Pridať účet → Iné → Pridať predplatený kalendár</li>
+                          <li>Otvorte <strong>Nastavenia</strong> na iPhone</li>
+                          <li>Prejdite na <strong>Kalendár → Účty</strong></li>
+                          <li>Kliknite <strong>"Pridať účet"</strong></li>
+                          <li>Vyberte <strong>"Iné"</strong></li>
+                          <li>Kliknite <strong>"Pridať odber kalendára"</strong></li>
+                          <li>Vložte skopírovaný odkaz do poľa "Server"</li>
+                          <li>Kliknite <strong>"Ďalej"</strong> a potom <strong>"Uložiť"</strong></li>
+                        </ol>
+                        <p className="instruction-note">Kalendár sa aktualizuje automaticky každých 15-60 minút.</p>
+                      </details>
+                      <details>
+                        <summary>Apple Calendar (Mac)</summary>
+                        <ol>
+                          <li>Otvorte aplikáciu <strong>Kalendár</strong></li>
+                          <li>V menu kliknite <strong>Súbor → Nový odber kalendára...</strong></li>
                           <li>Vložte skopírovaný odkaz</li>
-                          <li>Kliknite Ďalej a Uložiť</li>
+                          <li>Kliknite <strong>"Prihlásiť sa"</strong></li>
+                          <li>Nastavte automatickú aktualizáciu a kliknite <strong>"OK"</strong></li>
                         </ol>
                       </details>
                       <details>
-                        <summary>Outlook</summary>
+                        <summary>Outlook (Web - outlook.com)</summary>
                         <ol>
-                          <li>Otvorte Outlook Calendar</li>
-                          <li>Kliknite "Pridať kalendár" → "Z internetu"</li>
+                          <li>Otvorte <a href="https://outlook.live.com/calendar" target="_blank" rel="noopener noreferrer">outlook.live.com/calendar</a></li>
+                          <li>Kliknite na <strong>"Pridať kalendár"</strong> v ľavom paneli</li>
+                          <li>Vyberte <strong>"Prihlásiť sa na odber z webu"</strong></li>
                           <li>Vložte skopírovaný odkaz</li>
-                          <li>Kliknite "Importovať"</li>
+                          <li>Zadajte názov kalendára (napr. "Perun CRM")</li>
+                          <li>Kliknite <strong>"Importovať"</strong></li>
+                        </ol>
+                        <p className="instruction-note">Kalendár sa aktualizuje automaticky každých 30-60 minút.</p>
+                      </details>
+                      <details>
+                        <summary>Outlook (Desktop aplikácia)</summary>
+                        <ol>
+                          <li>Otvorte Outlook a prejdite do <strong>Kalendára</strong></li>
+                          <li>Kliknite pravým na <strong>"Moje kalendáre"</strong></li>
+                          <li>Vyberte <strong>"Pridať kalendár" → "Z Internetu..."</strong></li>
+                          <li>Vložte skopírovaný odkaz</li>
+                          <li>Kliknite <strong>"OK"</strong></li>
                         </ol>
                       </details>
+                      <details>
+                        <summary>Iné kalendáre (CalDAV)</summary>
+                        <ol>
+                          <li>Väčšina kalendárových aplikácií podporuje ICS/iCalendar formát</li>
+                          <li>Hľadajte možnosť "Pridať kalendár z URL" alebo "Subscribe"</li>
+                          <li>Vložte skopírovaný odkaz</li>
+                          <li>Kalendár sa bude automaticky aktualizovať</li>
+                        </ol>
+                        <p className="instruction-note">Podporované: Thunderbird, Nextcloud, Synology Calendar, Fastmail a ďalšie.</p>
+                      </details>
+                    </div>
+                    <div className="calendar-sync-info">
+                      <strong>Čo sa synchronizuje:</strong>
+                      <ul>
+                        <li>Všetky úlohy s termínom (vrátane podúloh)</li>
+                        <li>Dokončené úlohy sú označené ✓</li>
+                        <li>Priorita a popis úlohy</li>
+                        <li>Prepojený kontakt</li>
+                      </ul>
                     </div>
                   </div>
 
