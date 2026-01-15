@@ -8,6 +8,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [isOpen, setIsOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [showCalendarSettings, setShowCalendarSettings] = useState(false);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -19,6 +20,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
+  });
+  const [calendarFeed, setCalendarFeed] = useState({
+    enabled: false,
+    feedUrl: null,
+    loading: false
   });
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
@@ -105,6 +111,108 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     setShowPasswordChange(false);
     setErrors({});
     setMessage('');
+  };
+
+  const handleOpenCalendarSettings = async () => {
+    setShowCalendarSettings(true);
+    setIsOpen(false);
+    setMessage('');
+    setErrors({});
+    await fetchCalendarFeedStatus();
+  };
+
+  const handleCloseCalendarSettings = () => {
+    setShowCalendarSettings(false);
+    setErrors({});
+    setMessage('');
+  };
+
+  const fetchCalendarFeedStatus = async () => {
+    try {
+      setCalendarFeed(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/tasks/calendar/feed/status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCalendarFeed({
+        enabled: response.data.enabled,
+        feedUrl: response.data.feedUrl,
+        loading: false
+      });
+    } catch (error) {
+      console.error('Error fetching calendar feed status:', error);
+      setCalendarFeed(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleEnableCalendarFeed = async () => {
+    try {
+      setCalendarFeed(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/tasks/calendar/feed/generate`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCalendarFeed({
+        enabled: true,
+        feedUrl: response.data.feedUrl,
+        loading: false
+      });
+      setMessage('Kalendár feed bol aktivovaný');
+    } catch (error) {
+      console.error('Error enabling calendar feed:', error);
+      setErrors({ general: 'Chyba pri aktivácii kalendár feedu' });
+      setCalendarFeed(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleDisableCalendarFeed = async () => {
+    try {
+      setCalendarFeed(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_URL}/tasks/calendar/feed/disable`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCalendarFeed({
+        enabled: false,
+        feedUrl: null,
+        loading: false
+      });
+      setMessage('Kalendár feed bol deaktivovaný');
+    } catch (error) {
+      console.error('Error disabling calendar feed:', error);
+      setErrors({ general: 'Chyba pri deaktivácii kalendár feedu' });
+      setCalendarFeed(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleRegenerateCalendarFeed = async () => {
+    if (!confirm('Naozaj chcete vygenerovať nový odkaz? Starý odkaz prestane fungovať.')) {
+      return;
+    }
+    try {
+      setCalendarFeed(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/tasks/calendar/feed/regenerate`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCalendarFeed({
+        enabled: true,
+        feedUrl: response.data.feedUrl,
+        loading: false
+      });
+      setMessage('Nový kalendár feed bol vygenerovaný');
+    } catch (error) {
+      console.error('Error regenerating calendar feed:', error);
+      setErrors({ general: 'Chyba pri generovaní nového odkazu' });
+      setCalendarFeed(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleCopyFeedUrl = () => {
+    if (calendarFeed.feedUrl) {
+      navigator.clipboard.writeText(calendarFeed.feedUrl);
+      setMessage('Odkaz bol skopírovaný do schránky');
+    }
   };
 
   const handleProfileChange = (e) => {
@@ -308,6 +416,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">🔒</span>
             Zmeniť heslo
           </button>
+          <button className="user-menu-item" onClick={handleOpenCalendarSettings}>
+            <span className="menu-icon">📅</span>
+            Synchronizácia kalendára
+          </button>
           {user?.role === 'admin' && (
             <>
               <div className="user-menu-divider"></div>
@@ -501,6 +613,124 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                   Zavrieť
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar Settings Modal */}
+      {showCalendarSettings && (
+        <div className="modal-overlay" onClick={handleCloseCalendarSettings}>
+          <div className="modal-content calendar-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Synchronizácia kalendára</h2>
+              <button className="modal-close" onClick={handleCloseCalendarSettings}>×</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="calendar-info">
+                <p>
+                  Prepojte svoje úlohy s externým kalendárom (Google Calendar, Apple Calendar, Outlook a ďalšie).
+                  Všetky zmeny v CRM sa automaticky premietnu do vášho kalendára.
+                </p>
+              </div>
+
+              {calendarFeed.loading ? (
+                <div className="calendar-loading">Načítavam...</div>
+              ) : calendarFeed.enabled ? (
+                <div className="calendar-enabled">
+                  <div className="calendar-status">
+                    <span className="status-indicator active"></span>
+                    <span>Synchronizácia je aktívna</span>
+                  </div>
+
+                  <div className="calendar-feed-url">
+                    <label>Odkaz pre kalendár:</label>
+                    <div className="feed-url-container">
+                      <input
+                        type="text"
+                        value={calendarFeed.feedUrl}
+                        readOnly
+                        className="form-input feed-url-input"
+                      />
+                      <button className="btn btn-secondary" onClick={handleCopyFeedUrl}>
+                        Kopírovať
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="calendar-instructions">
+                    <h4>Ako pridať do kalendára:</h4>
+                    <div className="instructions-tabs">
+                      <details>
+                        <summary>Google Calendar</summary>
+                        <ol>
+                          <li>Otvorte Google Calendar</li>
+                          <li>Kliknite na "+" vedľa "Ďalšie kalendáre"</li>
+                          <li>Vyberte "Z webovej adresy"</li>
+                          <li>Vložte skopírovaný odkaz</li>
+                          <li>Kliknite "Pridať kalendár"</li>
+                        </ol>
+                      </details>
+                      <details>
+                        <summary>Apple Calendar (iPhone/Mac)</summary>
+                        <ol>
+                          <li>Otvorte Nastavenia → Kalendár → Účty</li>
+                          <li>Pridať účet → Iné → Pridať predplatený kalendár</li>
+                          <li>Vložte skopírovaný odkaz</li>
+                          <li>Kliknite Ďalej a Uložiť</li>
+                        </ol>
+                      </details>
+                      <details>
+                        <summary>Outlook</summary>
+                        <ol>
+                          <li>Otvorte Outlook Calendar</li>
+                          <li>Kliknite "Pridať kalendár" → "Z internetu"</li>
+                          <li>Vložte skopírovaný odkaz</li>
+                          <li>Kliknite "Importovať"</li>
+                        </ol>
+                      </details>
+                    </div>
+                  </div>
+
+                  {message && <div className="form-success">{message}</div>}
+                  {errors.general && <div className="form-error">{errors.general}</div>}
+
+                  <div className="calendar-actions">
+                    <button className="btn btn-secondary" onClick={handleRegenerateCalendarFeed}>
+                      Vygenerovať nový odkaz
+                    </button>
+                    <button className="btn btn-danger" onClick={handleDisableCalendarFeed}>
+                      Deaktivovať
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="calendar-disabled">
+                  <div className="calendar-status">
+                    <span className="status-indicator inactive"></span>
+                    <span>Synchronizácia nie je aktívna</span>
+                  </div>
+
+                  <p className="calendar-description">
+                    Po aktivácii získate unikátny odkaz, ktorý môžete pridať do svojho kalendára.
+                    Kalendár sa bude automaticky aktualizovať pri každej zmene úloh.
+                  </p>
+
+                  {message && <div className="form-success">{message}</div>}
+                  {errors.general && <div className="form-error">{errors.general}</div>}
+
+                  <button className="btn btn-primary" onClick={handleEnableCalendarFeed}>
+                    Aktivovať synchronizáciu
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={handleCloseCalendarSettings}>
+                Zavrieť
+              </button>
             </div>
           </div>
         </div>

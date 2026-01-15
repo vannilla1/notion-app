@@ -46,6 +46,20 @@ const userSchema = new mongoose.Schema({
   exportedTaskIds: {
     type: [String],
     default: []
+  },
+  calendarFeedToken: {
+    type: String,
+    default: null,
+    unique: true,
+    sparse: true
+  },
+  calendarFeedEnabled: {
+    type: Boolean,
+    default: false
+  },
+  calendarFeedCreatedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,

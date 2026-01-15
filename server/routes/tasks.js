@@ -284,6 +284,319 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
   }
 });
 
+// Generate or get calendar feed URL for user
+router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
+    }
+
+    // Generate new token if doesn't exist
+    let token = user.calendarFeedToken;
+    if (!token) {
+      token = uuidv4() + '-' + uuidv4(); // Extra long for security
+      await User.findByIdAndUpdate(userId, {
+        calendarFeedToken: token,
+        calendarFeedEnabled: true,
+        calendarFeedCreatedAt: new Date()
+      });
+    } else {
+      // Just enable if exists
+      await User.findByIdAndUpdate(userId, {
+        calendarFeedEnabled: true
+      });
+    }
+
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${token}`;
+
+    res.json({
+      feedUrl,
+      enabled: true,
+      message: 'Kalendár feed bol aktivovaný'
+    });
+  } catch (error) {
+    console.error('Calendar feed generate error:', error);
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Get calendar feed status
+router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
+    }
+
+    if (!user.calendarFeedToken) {
+      return res.json({
+        enabled: false,
+        feedUrl: null
+      });
+    }
+
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${user.calendarFeedToken}`;
+
+    res.json({
+      enabled: user.calendarFeedEnabled,
+      feedUrl: user.calendarFeedEnabled ? feedUrl : null,
+      createdAt: user.calendarFeedCreatedAt
+    });
+  } catch (error) {
+    console.error('Calendar feed status error:', error);
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Disable calendar feed
+router.post('/calendar/feed/disable', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    await User.findByIdAndUpdate(userId, {
+      calendarFeedEnabled: false
+    });
+
+    res.json({
+      enabled: false,
+      message: 'Kalendár feed bol deaktivovaný'
+    });
+  } catch (error) {
+    console.error('Calendar feed disable error:', error);
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Regenerate calendar feed token (invalidates old URL)
+router.post('/calendar/feed/regenerate', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const newToken = uuidv4() + '-' + uuidv4();
+
+    await User.findByIdAndUpdate(userId, {
+      calendarFeedToken: newToken,
+      calendarFeedEnabled: true,
+      calendarFeedCreatedAt: new Date()
+    });
+
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${newToken}`;
+
+    res.json({
+      feedUrl,
+      enabled: true,
+      message: 'Nový kalendár feed bol vygenerovaný'
+    });
+  } catch (error) {
+    console.error('Calendar feed regenerate error:', error);
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Public calendar feed endpoint (no auth required, uses token)
+router.get('/calendar/feed/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Find user by feed token
+    const user = await User.findOne({ calendarFeedToken: token, calendarFeedEnabled: true });
+
+    if (!user) {
+      return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
+    }
+
+    // Get all tasks for this user
+    const globalTasks = await Task.find({});
+    const contacts = await Contact.find({});
+
+    const events = [];
+
+    const formatICalDate = (dateString) => {
+      const date = new Date(dateString);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}${month}${day}`;
+    };
+
+    const formatICalDateTime = (dateString) => {
+      const date = new Date(dateString);
+      return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    };
+
+    const createUID = (id) => `${id}@peruncrm`;
+
+    const getPriorityValue = (priority) => {
+      // iCal priority: 1-4 high, 5 medium, 6-9 low
+      switch (priority) {
+        case 'high': return 1;
+        case 'medium': return 5;
+        case 'low': return 9;
+        default: return 5;
+      }
+    };
+
+    const collectSubtasks = (subtasks, parentTitle, contactName, parentPriority) => {
+      if (!subtasks) return;
+      for (const subtask of subtasks) {
+        if (subtask.dueDate) {
+          events.push({
+            uid: createUID(subtask.id),
+            title: `${subtask.title} (${parentTitle})`,
+            dueDate: subtask.dueDate,
+            description: subtask.notes || '',
+            contact: contactName,
+            completed: subtask.completed,
+            priority: parentPriority,
+            createdAt: subtask.createdAt,
+            updatedAt: subtask.updatedAt
+          });
+        }
+        if (subtask.subtasks && subtask.subtasks.length > 0) {
+          collectSubtasks(subtask.subtasks, parentTitle, contactName, parentPriority);
+        }
+      }
+    };
+
+    // Collect from global tasks
+    for (const task of globalTasks) {
+      const taskId = task._id.toString();
+      if (task.dueDate) {
+        events.push({
+          uid: createUID(taskId),
+          title: task.title,
+          dueDate: task.dueDate,
+          description: task.description || '',
+          contact: null,
+          completed: task.completed,
+          priority: task.priority || 'medium',
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt
+        });
+      }
+      collectSubtasks(task.subtasks, task.title, null, task.priority || 'medium');
+    }
+
+    // Collect from contact tasks
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        for (const task of contact.tasks) {
+          if (task.dueDate) {
+            events.push({
+              uid: createUID(task.id),
+              title: task.title,
+              dueDate: task.dueDate,
+              description: task.description || '',
+              contact: contact.name,
+              completed: task.completed,
+              priority: task.priority || 'medium',
+              createdAt: task.createdAt,
+              updatedAt: task.updatedAt
+            });
+          }
+          collectSubtasks(task.subtasks, task.title, contact.name, task.priority || 'medium');
+        }
+      }
+    }
+
+    // Build iCal feed
+    let ical = 'BEGIN:VCALENDAR\r\n';
+    ical += 'VERSION:2.0\r\n';
+    ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
+    ical += 'CALSCALE:GREGORIAN\r\n';
+    ical += 'METHOD:PUBLISH\r\n';
+    ical += 'X-WR-CALNAME:Perun CRM - Úlohy\r\n';
+    ical += 'X-WR-TIMEZONE:Europe/Bratislava\r\n';
+    ical += 'REFRESH-INTERVAL;VALUE=DURATION:PT15M\r\n'; // Suggest 15 min refresh
+    ical += 'X-PUBLISHED-TTL:PT15M\r\n';
+
+    const now = new Date();
+    const dtstamp = formatICalDateTime(now.toISOString());
+
+    for (const event of events) {
+      const dateStr = formatICalDate(event.dueDate);
+      const nextDay = new Date(event.dueDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const nextDayStr = formatICalDate(nextDay.toISOString());
+
+      // Escape special characters
+      const escapeText = (text) => {
+        if (!text) return '';
+        return text
+          .replace(/\\/g, '\\\\')
+          .replace(/;/g, '\\;')
+          .replace(/,/g, '\\,')
+          .replace(/\n/g, '\\n');
+      };
+
+      // Build description with metadata
+      let description = '';
+      if (event.description) {
+        description += event.description;
+      }
+      if (event.contact) {
+        description += description ? '\\n\\n' : '';
+        description += `Kontakt: ${event.contact}`;
+      }
+      if (event.completed) {
+        description += description ? '\\n' : '';
+        description += '✓ DOKONČENÉ';
+      }
+
+      // Status prefix for completed tasks
+      const titlePrefix = event.completed ? '✓ ' : '';
+
+      ical += 'BEGIN:VEVENT\r\n';
+      ical += `UID:${event.uid}\r\n`;
+      ical += `DTSTAMP:${dtstamp}\r\n`;
+      ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
+      ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
+      ical += `SUMMARY:${escapeText(titlePrefix + event.title)}\r\n`;
+      if (description) {
+        ical += `DESCRIPTION:${escapeText(description)}\r\n`;
+      }
+      if (event.contact) {
+        ical += `LOCATION:${escapeText(event.contact)}\r\n`;
+      }
+      ical += `PRIORITY:${getPriorityValue(event.priority)}\r\n`;
+      if (event.completed) {
+        ical += 'STATUS:COMPLETED\r\n';
+        ical += 'TRANSP:TRANSPARENT\r\n';
+      } else {
+        ical += 'STATUS:CONFIRMED\r\n';
+        ical += 'TRANSP:TRANSPARENT\r\n';
+      }
+      if (event.createdAt) {
+        ical += `CREATED:${formatICalDateTime(event.createdAt)}\r\n`;
+      }
+      if (event.updatedAt) {
+        ical += `LAST-MODIFIED:${formatICalDateTime(event.updatedAt)}\r\n`;
+      }
+      ical += 'END:VEVENT\r\n';
+    }
+
+    ical += 'END:VCALENDAR\r\n';
+
+    // Set headers for calendar subscription
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="perun-crm-tasks.ics"');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.send(ical);
+  } catch (error) {
+    console.error('Calendar feed error:', error);
+    res.status(500).send('Chyba pri generovaní kalendára');
+  }
+});
+
 // Get single task (from global tasks or contacts)
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
