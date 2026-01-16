@@ -646,18 +646,17 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
                   <div className="calendar-feed-url">
                     <label>Odkaz pre kalendár:</label>
-                    <div className="feed-url-container" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        value={calendarFeed.feedUrl || ''}
-                        readOnly
-                        className="form-input feed-url-input"
-                        style={{ flex: '1 1 auto', width: 'auto', minWidth: '200px' }}
-                      />
-                      <button className="btn btn-primary copy-url-btn" onClick={handleCopyFeedUrl} style={{ flexShrink: 0 }}>
-                        📋 Kopírovať odkaz
-                      </button>
-                    </div>
+                    <input
+                      type="text"
+                      value={calendarFeed.feedUrl || ''}
+                      readOnly
+                      className="form-input"
+                      style={{ width: '100%', fontFamily: 'monospace', fontSize: '12px', marginBottom: '8px' }}
+                      onClick={(e) => e.target.select()}
+                    />
+                    <button className="btn btn-primary" onClick={handleCopyFeedUrl} style={{ width: '100%' }}>
+                      📋 Kopírovať odkaz
+                    </button>
                   </div>
 
                   <div className="calendar-instructions">
