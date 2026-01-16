@@ -466,8 +466,10 @@ router.get('/calendar/feed/:token', async (req, res) => {
     };
 
     // Collect from global tasks
+    console.log('Calendar feed - Global tasks count:', globalTasks.length);
     for (const task of globalTasks) {
       const taskId = task._id.toString();
+      console.log('Calendar feed - Task:', task.title, 'dueDate:', task.dueDate);
       if (task.dueDate) {
         events.push({
           uid: createUID(taskId),
@@ -485,9 +487,12 @@ router.get('/calendar/feed/:token', async (req, res) => {
     }
 
     // Collect from contact tasks
+    console.log('Calendar feed - Contacts count:', contacts.length);
     for (const contact of contacts) {
       if (contact.tasks) {
+        console.log('Calendar feed - Contact:', contact.name, 'tasks:', contact.tasks.length);
         for (const task of contact.tasks) {
+          console.log('Calendar feed - Contact task:', task.title, 'dueDate:', task.dueDate);
           if (task.dueDate) {
             events.push({
               uid: createUID(task.id),
@@ -505,6 +510,8 @@ router.get('/calendar/feed/:token', async (req, res) => {
         }
       }
     }
+
+    console.log('Calendar feed - Total events:', events.length);
 
     // Build iCal feed
     let ical = 'BEGIN:VCALENDAR\r\n';
