@@ -49,12 +49,18 @@ const getCalendarClient = async (user) => {
 router.get('/auth-url', authenticateToken, (req, res) => {
   try {
     const state = req.user.userId; // Pass user ID in state for callback
+    console.log('Generating auth URL for user:', state);
+    console.log('GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID ? 'set' : 'NOT SET');
+    console.log('GOOGLE_REDIRECT_URI:', GOOGLE_REDIRECT_URI);
+
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
       state: state,
       prompt: 'consent' // Force consent to get refresh token
     });
+
+    console.log('Generated auth URL:', authUrl);
     res.json({ authUrl });
   } catch (error) {
     console.error('Error generating auth URL:', error);
