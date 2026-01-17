@@ -64,20 +64,28 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 
 // OAuth callback - handle Google's response
 router.get('/callback', async (req, res) => {
+  const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
+
   try {
     const { code, state: userId } = req.query;
 
+    console.log('Google Calendar callback received:', { code: !!code, userId });
+
     if (!code || !userId) {
-      return res.redirect('/tasks?google_calendar=error&message=missing_params');
+      console.log('Missing params in callback');
+      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=missing_params`);
     }
 
     // Exchange code for tokens
+    console.log('Exchanging code for tokens...');
     const { tokens } = await oauth2Client.getToken(code);
+    console.log('Tokens received:', { hasAccessToken: !!tokens.access_token, hasRefreshToken: !!tokens.refresh_token });
 
     // Update user with Google Calendar credentials
     const user = await User.findById(userId);
     if (!user) {
-      return res.redirect('/tasks?google_calendar=error&message=user_not_found');
+      console.log('User not found:', userId);
+      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=user_not_found`);
     }
 
     user.googleCalendar = {
@@ -91,12 +99,13 @@ router.get('/callback', async (req, res) => {
     };
 
     await user.save();
+    console.log('User updated with Google Calendar credentials');
 
     // Redirect back to app with success
-    res.redirect('/tasks?google_calendar=connected');
+    res.redirect(`${baseUrl}/tasks?google_calendar=connected`);
   } catch (error) {
     console.error('Error in Google Calendar callback:', error);
-    res.redirect('/tasks?google_calendar=error&message=' + encodeURIComponent(error.message));
+    res.redirect(`${baseUrl}/tasks?google_calendar=error&message=` + encodeURIComponent(error.message));
   }
 });
 
