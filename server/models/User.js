@@ -60,6 +60,16 @@ const userSchema = new mongoose.Schema({
   calendarFeedCreatedAt: {
     type: Date,
     default: null
+  },
+  // Google Calendar integration
+  googleCalendar: {
+    accessToken: { type: String, default: null },
+    refreshToken: { type: String, default: null },
+    tokenExpiry: { type: Date, default: null },
+    calendarId: { type: String, default: 'primary' },
+    enabled: { type: Boolean, default: false },
+    connectedAt: { type: Date, default: null },
+    syncedTaskIds: { type: Map, of: String, default: new Map() } // taskId -> googleEventId
   }
 }, {
   timestamps: true,

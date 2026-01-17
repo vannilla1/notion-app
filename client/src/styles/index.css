@@ -6706,6 +6706,75 @@ a.detail-value:hover {
   line-height: 1.5;
 }
 
+/* Calendar sections */
+.calendar-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.calendar-section h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.calendar-section .section-description {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+
+.calendar-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.calendar-divider::before,
+.calendar-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.calendar-divider span {
+  padding: 0 16px;
+}
+
+.connected-info {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 8px 0 0 0;
+}
+
+/* Google button */
+.btn-google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  color: #444;
+  border: 1px solid #ddd;
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  width: 100%;
+}
+
+.btn-google:hover {
+  background: #f8f8f8;
+  border-color: #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
 /* Mobile responsive */
 @media (max-width: 599px) {
   .calendar-modal {
