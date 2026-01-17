@@ -59,11 +59,43 @@ function Tasks() {
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
   const calendarMenuRef = useRef(null);
 
+  // Google Calendar notification
+  const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
+
   useEffect(() => {
     fetchTasks();
     fetchContacts();
     fetchUsers();
   }, []);
+
+  // Handle Google Calendar OAuth callback parameters
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const googleCalendarStatus = params.get('google_calendar');
+    const errorMessage = params.get('message');
+
+    if (googleCalendarStatus) {
+      if (googleCalendarStatus === 'connected') {
+        setGoogleCalendarNotification({
+          type: 'success',
+          message: 'Google Calendar bol úspešne pripojený!'
+        });
+      } else if (googleCalendarStatus === 'error') {
+        setGoogleCalendarNotification({
+          type: 'error',
+          message: `Chyba pri pripájaní Google Calendar: ${errorMessage || 'Neznáma chyba'}`
+        });
+      }
+
+      // Clear URL parameters
+      navigate('/tasks', { replace: true });
+
+      // Auto-hide notification after 5 seconds
+      setTimeout(() => {
+        setGoogleCalendarNotification(null);
+      }, 5000);
+    }
+  }, [location.search, navigate]);
 
   const fetchUsers = async () => {
     try {
@@ -1263,6 +1295,19 @@ function Tasks() {
           />
         </div>
       </header>
+
+      {/* Google Calendar notification */}
+      {googleCalendarNotification && (
+        <div className={`notification notification-${googleCalendarNotification.type}`}>
+          {googleCalendarNotification.message}
+          <button
+            className="notification-close"
+            onClick={() => setGoogleCalendarNotification(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="crm-content">
         <div

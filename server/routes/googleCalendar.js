@@ -66,14 +66,20 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 router.get('/callback', async (req, res) => {
   const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
 
+  // Log all query parameters for debugging
+  console.log('Google Calendar callback - full query:', req.query);
+  console.log('Google Calendar callback - baseUrl:', baseUrl);
+
   try {
     const { code, state: userId } = req.query;
 
-    console.log('Google Calendar callback received:', { code: !!code, userId });
+    console.log('Google Calendar callback received:', { code: !!code, userId, codeLength: code?.length });
 
     if (!code || !userId) {
-      console.log('Missing params in callback');
-      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=missing_params`);
+      console.log('Missing params in callback - redirecting to error page');
+      const redirectUrl = `${baseUrl}/tasks?google_calendar=error&message=missing_params`;
+      console.log('Redirect URL:', redirectUrl);
+      return res.redirect(redirectUrl);
     }
 
     // Exchange code for tokens
