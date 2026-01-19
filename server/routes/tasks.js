@@ -240,26 +240,23 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
 
     for (const event of events) {
       const dateStr = formatICalDate(event.dueDate);
-      const nextDay = new Date(event.dueDate);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const nextDayStr = formatICalDate(nextDay.toISOString());
 
-      ical += 'BEGIN:VEVENT\r\n';
+      // Use VTODO instead of VEVENT for tasks
+      ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
-      ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
+      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
       ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
       if (event.description) {
         ical += `DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, '\\$&')}\r\n`;
       }
       if (event.contact) {
-        ical += `LOCATION:Kontakt: ${event.contact.replace(/[,;\\]/g, '\\$&')}\r\n`;
+        ical += `CATEGORIES:${event.contact.replace(/[,;\\]/g, '\\$&')}\r\n`;
       }
       ical += `CREATED:${dtstamp}\r\n`;
       ical += `LAST-MODIFIED:${dtstamp}\r\n`;
-      ical += 'TRANSP:TRANSPARENT\r\n';
-      ical += 'END:VEVENT\r\n';
+      ical += 'STATUS:NEEDS-ACTION\r\n';
+      ical += 'END:VTODO\r\n';
     }
 
     ical += 'END:VCALENDAR\r\n';
@@ -514,7 +511,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     console.log('Calendar feed - Total events:', events.length);
 
-    // Build iCal feed
+    // Build iCal feed with VTODO (tasks) instead of VEVENT (events)
     let ical = 'BEGIN:VCALENDAR\r\n';
     ical += 'VERSION:2.0\r\n';
     ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
@@ -530,9 +527,6 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     for (const event of events) {
       const dateStr = formatICalDate(event.dueDate);
-      const nextDay = new Date(event.dueDate);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const nextDayStr = formatICalDate(nextDay.toISOString());
 
       // Escape special characters
       const escapeText = (text) => {
@@ -553,33 +547,26 @@ router.get('/calendar/feed/:token', async (req, res) => {
         description += description ? '\\n\\n' : '';
         description += `Kontakt: ${event.contact}`;
       }
-      if (event.completed) {
-        description += description ? '\\n' : '';
-        description += '✓ DOKONČENÉ';
-      }
 
-      // Status prefix for completed tasks
-      const titlePrefix = event.completed ? '✓ ' : '';
-
-      ical += 'BEGIN:VEVENT\r\n';
+      // Use VTODO instead of VEVENT for tasks
+      ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DTSTART;VALUE=DATE:${dateStr}\r\n`;
-      ical += `DTEND;VALUE=DATE:${nextDayStr}\r\n`;
-      ical += `SUMMARY:${escapeText(titlePrefix + event.title)}\r\n`;
+      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
+      ical += `SUMMARY:${escapeText(event.title)}\r\n`;
       if (description) {
         ical += `DESCRIPTION:${escapeText(description)}\r\n`;
       }
       if (event.contact) {
-        ical += `LOCATION:${escapeText(event.contact)}\r\n`;
+        ical += `CATEGORIES:${escapeText(event.contact)}\r\n`;
       }
       ical += `PRIORITY:${getPriorityValue(event.priority)}\r\n`;
       if (event.completed) {
         ical += 'STATUS:COMPLETED\r\n';
-        ical += 'TRANSP:TRANSPARENT\r\n';
+        ical += 'PERCENT-COMPLETE:100\r\n';
       } else {
-        ical += 'STATUS:CONFIRMED\r\n';
-        ical += 'TRANSP:TRANSPARENT\r\n';
+        ical += 'STATUS:NEEDS-ACTION\r\n';
+        ical += 'PERCENT-COMPLETE:0\r\n';
       }
       if (event.createdAt) {
         ical += `CREATED:${formatICalDateTime(event.createdAt)}\r\n`;
@@ -587,7 +574,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
       if (event.updatedAt) {
         ical += `LAST-MODIFIED:${formatICalDateTime(event.updatedAt)}\r\n`;
       }
-      ical += 'END:VEVENT\r\n';
+      ical += 'END:VTODO\r\n';
     }
 
     ical += 'END:VCALENDAR\r\n';

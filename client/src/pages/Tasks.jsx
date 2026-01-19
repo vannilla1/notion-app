@@ -368,8 +368,17 @@ function Tasks() {
     };
   }, [socket, isConnected]);
 
+  // Track if filter just changed (to trigger auto-expand only on filter change, not on task updates)
+  const prevFilterRef = useRef(filter);
+
   // Auto-expand tasks and subtasks when due date filter, 'new' filter, or 'assigned-to-me' filter is active
+  // Only triggers on filter CHANGE, not on tasks update
   useEffect(() => {
+    // Only run if filter actually changed
+    const filterChanged = prevFilterRef.current !== filter;
+    prevFilterRef.current = filter;
+
+    if (!filterChanged) return;
     if ((!isDueDateFilter(filter) && filter !== 'new' && !isAssignedFilter(filter)) || tasks.length === 0) return;
 
     const tasksToExpand = new Set();
