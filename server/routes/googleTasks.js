@@ -247,10 +247,30 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let synced = 0;
     let updated = 0;
     let errors = 0;
+    let skipped = 0;
 
     console.log('Tasks to sync:', tasksToSync.length);
 
-    for (const task of tasksToSync) {
+    // Helper function to add delay between API calls to avoid rate limiting
+    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    for (let i = 0; i < tasksToSync.length; i++) {
+      const task = tasksToSync[i];
+
+      // Skip tasks without valid ID
+      if (!task.id) {
+        console.log('Skipping task without ID:', task.title);
+        skipped++;
+        continue;
+      }
+
+      // Skip tasks with invalid due date
+      if (!task.dueDate || isNaN(new Date(task.dueDate).getTime())) {
+        console.log('Skipping task with invalid date:', task.title, task.dueDate);
+        skipped++;
+        continue;
+      }
+
       try {
         const existingTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
         const taskData = createGoogleTaskData(task);
@@ -286,19 +306,35 @@ router.post('/sync', authenticateToken, async (req, res) => {
           user.googleTasks.syncedTaskIds.set(task.id, newTask.data.id);
           synced++;
         }
+
+        // Add small delay every 10 tasks to avoid rate limiting
+        if ((i + 1) % 10 === 0) {
+          await delay(100);
+        }
       } catch (error) {
-        console.error(`Error syncing task ${task.id}:`, error.message);
+        console.error(`Error syncing task ${task.id} (${task.title}):`, error.message, error.code || '');
         errors++;
+
+        // If rate limited, wait longer and continue
+        if (error.code === 429 || error.message?.includes('Rate Limit')) {
+          console.log('Rate limited, waiting 2 seconds...');
+          await delay(2000);
+        }
       }
     }
 
     await user.save();
 
+    let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných`;
+    if (skipped > 0) message += `, ${skipped} preskočených`;
+    if (errors > 0) message += `, ${errors} chýb`;
+
     res.json({
       success: true,
-      message: `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${errors} chýb`,
+      message,
       synced,
       updated,
+      skipped,
       errors
     });
   } catch (error) {
