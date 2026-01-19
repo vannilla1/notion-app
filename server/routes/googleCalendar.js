@@ -405,6 +405,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
 });
 
 // Clean up orphaned events (events in Google Calendar that no longer have corresponding tasks)
+// Also cleans up old events from the past
 router.post('/cleanup', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -437,9 +438,10 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
     let deleted = 0;
     let errors = 0;
 
-    // Check all synced task IDs and remove orphaned ones
+    // First, clean up from syncedTaskIds map
     if (user.googleCalendar.syncedTaskIds) {
       const syncedTaskIds = Array.from(user.googleCalendar.syncedTaskIds.entries());
+      console.log('Synced task IDs in database:', syncedTaskIds.length);
 
       for (const [taskId, eventId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
@@ -449,17 +451,54 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
               calendarId: user.googleCalendar.calendarId,
               eventId: eventId
             });
-            user.googleCalendar.syncedTaskIds.delete(taskId);
             deleted++;
             console.log(`Deleted orphaned event: ${eventId} (task: ${taskId})`);
           } catch (e) {
             console.log(`Failed to delete event ${eventId}:`, e.message);
-            // Still remove from map even if Google delete fails
-            user.googleCalendar.syncedTaskIds.delete(taskId);
+            errors++;
+          }
+          user.googleCalendar.syncedTaskIds.delete(taskId);
+        }
+      }
+    }
+
+    // Second, search for and delete old events directly from Google Calendar
+    // Look for events with "test" in name or events in the past
+    try {
+      const now = new Date();
+      const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+      const eventsResponse = await calendar.events.list({
+        calendarId: user.googleCalendar.calendarId,
+        timeMin: oneYearAgo.toISOString(),
+        timeMax: now.toISOString(),
+        maxResults: 500,
+        singleEvents: true,
+        orderBy: 'startTime'
+      });
+
+      const events = eventsResponse.data.items || [];
+      console.log(`Found ${events.length} past events in calendar`);
+
+      for (const event of events) {
+        // Delete events with "test" in the title (case insensitive)
+        const title = (event.summary || '').toLowerCase();
+        if (title.includes('test')) {
+          try {
+            await calendar.events.delete({
+              calendarId: user.googleCalendar.calendarId,
+              eventId: event.id
+            });
+            deleted++;
+            console.log(`Deleted test event: ${event.summary} (${event.id})`);
+          } catch (e) {
+            console.log(`Failed to delete event ${event.id}:`, e.message);
             errors++;
           }
         }
       }
+    } catch (e) {
+      console.log('Error listing events:', e.message);
     }
 
     await user.save();
