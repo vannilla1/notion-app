@@ -312,11 +312,19 @@ router.post('/sync', authenticateToken, async (req, res) => {
           await delay(100);
         }
       } catch (error) {
-        console.error(`Error syncing task ${task.id} (${task.title}):`, error.message, error.code || '');
+        const errorDetails = {
+          taskId: task.id,
+          taskTitle: task.title,
+          message: error.message,
+          code: error.code,
+          status: error.response?.status,
+          data: error.response?.data
+        };
+        console.error('Error syncing task:', JSON.stringify(errorDetails));
         errors++;
 
         // If rate limited, wait longer and continue
-        if (error.code === 429 || error.message?.includes('Rate Limit')) {
+        if (error.code === 429 || error.response?.status === 429 || error.message?.includes('Rate Limit') || error.message?.includes('quota')) {
           console.log('Rate limited, waiting 2 seconds...');
           await delay(2000);
         }
