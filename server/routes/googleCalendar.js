@@ -594,4 +594,117 @@ function createEventData(task) {
   };
 }
 
+// ==================== AUTO-SYNC HELPER FUNCTIONS ====================
+
+/**
+ * Automatically sync a task to Google Calendar for all users who have Google Calendar connected
+ * @param {Object} taskData - Task data including id, title, description, dueDate, completed, priority, contact
+ * @param {string} action - 'create', 'update', or 'delete'
+ */
+const autoSyncTaskToCalendar = async (taskData, action) => {
+  try {
+    // Skip if task has no due date (for create/update)
+    if (action !== 'delete' && !taskData.dueDate) {
+      console.log('Auto-sync: Task has no due date, skipping sync');
+      return;
+    }
+
+    // Find all users with Google Calendar enabled
+    const users = await User.find({ 'googleCalendar.enabled': true });
+
+    if (users.length === 0) {
+      console.log('Auto-sync: No users with Google Calendar connected');
+      return;
+    }
+
+    console.log(`Auto-sync: Found ${users.length} users with Google Calendar connected`);
+
+    for (const user of users) {
+      try {
+        const calendar = await getCalendarClient(user);
+        const taskId = taskData.id || taskData._id?.toString();
+
+        if (action === 'delete') {
+          // Delete event from calendar
+          const eventId = user.googleCalendar.syncedTaskIds?.get(taskId);
+          if (eventId) {
+            try {
+              await calendar.events.delete({
+                calendarId: user.googleCalendar.calendarId,
+                eventId: eventId
+              });
+              console.log(`Auto-sync: Deleted event ${eventId} for user ${user.username}`);
+            } catch (e) {
+              console.log(`Auto-sync: Event deletion failed (may already be deleted):`, e.message);
+            }
+            user.googleCalendar.syncedTaskIds.delete(taskId);
+            await user.save();
+          }
+        } else {
+          // Create or update event
+          const eventData = createEventData({
+            id: taskId,
+            title: taskData.title,
+            description: taskData.description || '',
+            dueDate: taskData.dueDate,
+            completed: taskData.completed,
+            priority: taskData.priority,
+            contact: taskData.contactName || taskData.contact || null
+          });
+
+          const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskId);
+
+          if (existingEventId) {
+            // Update existing event
+            try {
+              await calendar.events.update({
+                calendarId: user.googleCalendar.calendarId,
+                eventId: existingEventId,
+                resource: eventData
+              });
+              console.log(`Auto-sync: Updated event ${existingEventId} for user ${user.username}`);
+            } catch (e) {
+              // If event doesn't exist, create new one
+              if (e.code === 404) {
+                const event = await calendar.events.insert({
+                  calendarId: user.googleCalendar.calendarId,
+                  resource: eventData
+                });
+                user.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
+                await user.save();
+                console.log(`Auto-sync: Created new event (old was deleted) for user ${user.username}`);
+              } else {
+                throw e;
+              }
+            }
+          } else {
+            // Create new event
+            const event = await calendar.events.insert({
+              calendarId: user.googleCalendar.calendarId,
+              resource: eventData
+            });
+            user.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
+            await user.save();
+            console.log(`Auto-sync: Created event ${event.data.id} for user ${user.username}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Auto-sync: Error syncing for user ${user.username}:`, error.message);
+      }
+    }
+  } catch (error) {
+    console.error('Auto-sync: Error in autoSyncTaskToCalendar:', error.message);
+  }
+};
+
+/**
+ * Delete event from Google Calendar when task is removed
+ * @param {string} taskId - ID of the task being deleted
+ */
+const autoDeleteTaskFromCalendar = async (taskId) => {
+  await autoSyncTaskToCalendar({ id: taskId }, 'delete');
+};
+
 module.exports = router;
+module.exports.autoSyncTaskToCalendar = autoSyncTaskToCalendar;
+module.exports.autoDeleteTaskFromCalendar = autoDeleteTaskFromCalendar;
