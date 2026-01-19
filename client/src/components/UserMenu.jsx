@@ -766,6 +766,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         Odpojiť
                       </button>
                     </div>
+                    {message && (
+                      <div className="form-success" style={{ marginTop: '12px' }}>
+                        {message}
+                      </div>
+                    )}
+                    {errors.general && (
+                      <div className="form-error" style={{ marginTop: '12px' }}>
+                        {errors.general}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="calendar-disabled">
