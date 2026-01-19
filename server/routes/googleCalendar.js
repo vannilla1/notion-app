@@ -190,8 +190,12 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     const tasksToSync = [];
 
+    console.log('Found global tasks:', globalTasks.length);
+    console.log('Found contacts:', contacts.length);
+
     // Collect global tasks
     for (const task of globalTasks) {
+      console.log('Task:', task.title, 'dueDate:', task.dueDate);
       if (task.dueDate) {
         tasksToSync.push({
           id: task._id.toString(),
@@ -230,6 +234,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let synced = 0;
     let updated = 0;
     let errors = 0;
+
+    console.log('Tasks to sync (with dueDate):', tasksToSync.length);
+    console.log('Tasks details:', tasksToSync.map(t => ({ title: t.title, dueDate: t.dueDate })));
 
     for (const task of tasksToSync) {
       try {
