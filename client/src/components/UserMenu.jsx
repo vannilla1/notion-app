@@ -40,6 +40,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   });
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
+  const [googleTasksMessage, setGoogleTasksMessage] = useState('');
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -379,15 +380,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleSyncGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setMessage(response.data.message);
+      setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     } catch (error) {
       console.error('Error syncing Google Tasks:', error);
-      setErrors({ general: error.response?.data?.message || 'Chyba pri synchronizácii' });
+      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri synchronizácii');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -395,15 +397,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleCleanupGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setMessage(response.data.message);
+      setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     } catch (error) {
       console.error('Error cleaning up Google Tasks:', error);
-      setErrors({ general: error.response?.data?.message || 'Chyba pri čistení' });
+      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri čistení');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -927,6 +930,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         Odpojiť
                       </button>
                     </div>
+                    {googleTasksMessage && (
+                      <div className="form-success" style={{ marginTop: '12px' }}>
+                        {googleTasksMessage}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="calendar-disabled">
@@ -1104,9 +1112,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 </div>
               )}
               </div>
-
-              {message && <div className="form-success" style={{ marginTop: '16px' }}>{message}</div>}
-              {errors.general && <div className="form-error" style={{ marginTop: '16px' }}>{errors.general}</div>}
             </div>
 
             <div className="modal-footer">
