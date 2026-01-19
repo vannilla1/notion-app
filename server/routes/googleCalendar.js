@@ -48,7 +48,7 @@ const getCalendarClient = async (user) => {
 // Get Google Calendar authorization URL
 router.get('/auth-url', authenticateToken, (req, res) => {
   try {
-    const state = req.user.userId; // Pass user ID in state for callback
+    const state = req.user.id; // Pass user ID in state for callback
     console.log('Generating auth URL for user:', state);
     console.log('GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID ? 'set' : 'NOT SET');
     console.log('GOOGLE_REDIRECT_URI:', GOOGLE_REDIRECT_URI);
@@ -124,7 +124,7 @@ router.get('/callback', async (req, res) => {
 // Get connection status
 router.get('/status', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
@@ -143,7 +143,7 @@ router.get('/status', authenticateToken, async (req, res) => {
 // Disconnect Google Calendar
 router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
 
     // Revoke token if possible
     if (user.googleCalendar?.accessToken) {
@@ -176,7 +176,7 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 // Sync all tasks to Google Calendar
 router.post('/sync', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -279,7 +279,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
 router.post('/sync-task/:taskId', authenticateToken, async (req, res) => {
   try {
     const { taskId } = req.params;
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -358,7 +358,7 @@ router.post('/sync-task/:taskId', authenticateToken, async (req, res) => {
 router.delete('/event/:taskId', authenticateToken, async (req, res) => {
   try {
     const { taskId } = req.params;
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
 
     if (!user.googleCalendar?.enabled) {
       return res.json({ success: true, message: 'Google Calendar nie je pripojený' });
