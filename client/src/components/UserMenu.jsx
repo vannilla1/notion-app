@@ -297,6 +297,22 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  const handleCleanupGoogleCalendar = async () => {
+    try {
+      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/google-calendar/cleanup`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    } catch (error) {
+      console.error('Error cleaning up Google Calendar:', error);
+      setErrors({ general: error.response?.data?.message || 'Chyba pri čistení' });
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
   const handleProfileChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
@@ -737,6 +753,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         disabled={googleCalendar.syncing}
                       >
                         {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať teraz'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleCleanupGoogleCalendar}
+                        disabled={googleCalendar.syncing}
+                        title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúcu úlohu"
+                      >
+                        🧹 Vyčistiť staré
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar}>
                         Odpojiť

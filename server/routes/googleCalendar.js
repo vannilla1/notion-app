@@ -404,6 +404,78 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
   }
 });
 
+// Clean up orphaned events (events in Google Calendar that no longer have corresponding tasks)
+router.post('/cleanup', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user.googleCalendar?.enabled) {
+      return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
+    }
+
+    const calendar = await getCalendarClient(user);
+
+    // Get all current task IDs
+    const globalTasks = await Task.find({});
+    const contacts = await Contact.find({});
+
+    const currentTaskIds = new Set();
+
+    // Collect all current task IDs
+    for (const task of globalTasks) {
+      currentTaskIds.add(task._id.toString());
+    }
+
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        for (const task of contact.tasks) {
+          currentTaskIds.add(task.id);
+        }
+      }
+    }
+
+    let deleted = 0;
+    let errors = 0;
+
+    // Check all synced task IDs and remove orphaned ones
+    if (user.googleCalendar.syncedTaskIds) {
+      const syncedTaskIds = Array.from(user.googleCalendar.syncedTaskIds.entries());
+
+      for (const [taskId, eventId] of syncedTaskIds) {
+        if (!currentTaskIds.has(taskId)) {
+          // Task no longer exists, delete the calendar event
+          try {
+            await calendar.events.delete({
+              calendarId: user.googleCalendar.calendarId,
+              eventId: eventId
+            });
+            user.googleCalendar.syncedTaskIds.delete(taskId);
+            deleted++;
+            console.log(`Deleted orphaned event: ${eventId} (task: ${taskId})`);
+          } catch (e) {
+            console.log(`Failed to delete event ${eventId}:`, e.message);
+            // Still remove from map even if Google delete fails
+            user.googleCalendar.syncedTaskIds.delete(taskId);
+            errors++;
+          }
+        }
+      }
+    }
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `Vyčistené: ${deleted} udalostí odstránených, ${errors} chýb`,
+      deleted,
+      errors
+    });
+  } catch (error) {
+    console.error('Error cleaning up calendar:', error);
+    res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+  }
+});
+
 // Helper functions
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;
