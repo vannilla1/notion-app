@@ -6691,6 +6691,16 @@ a.detail-value:hover {
   margin-top: 20px;
 }
 
+.calendar-actions .btn-secondary {
+  background-color: #6b7280;
+  color: white;
+  border: none;
+}
+
+.calendar-actions .btn-secondary:hover {
+  background-color: #4b5563;
+}
+
 .calendar-disabled {
   text-align: center;
 }
