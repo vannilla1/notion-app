@@ -459,7 +459,7 @@ function Dashboard() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link active" onClick={closeDetailView}>Perun CRM</h1>
+          <h1 className="header-title-link active" onClick={closeDetailView}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
           <button

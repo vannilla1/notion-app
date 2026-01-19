@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '@/api/api';
+import api, { API_BASE_URL } from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import UserMenu from '../components/UserMenu';
 
@@ -81,7 +81,7 @@ function AdminPanel() {
           >
             ← Späť
           </button>
-          <h1 className="header-title-link" onClick={() => navigate('/')}>Perun CRM</h1>
+          <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
           <UserMenu
@@ -119,7 +119,7 @@ function AdminPanel() {
                         <div className="user-cell">
                           {u.avatar ? (
                             <img
-                              src={`${api.defaults.baseURL}/auth/avatar/${u.id}`}
+                              src={`${API_BASE_URL}/api/auth/avatar/${u.id}`}
                               alt={u.username}
                               className="table-avatar-img"
                             />

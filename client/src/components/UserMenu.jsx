@@ -880,7 +880,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           <li>Kliknite na <strong>"Pridať kalendár"</strong> v ľavom paneli</li>
                           <li>Vyberte <strong>"Prihlásiť sa na odber z webu"</strong></li>
                           <li>Vložte skopírovaný odkaz</li>
-                          <li>Zadajte názov kalendára (napr. "Perun CRM")</li>
+                          <li>Zadajte názov kalendára (napr. "Purple CRM")</li>
                           <li>Kliknite <strong>"Importovať"</strong></li>
                         </ol>
                         <p className="instruction-note">Kalendár sa aktualizuje automaticky každých 30-60 minút.</p>
