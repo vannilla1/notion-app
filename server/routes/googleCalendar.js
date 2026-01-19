@@ -609,6 +609,14 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       return;
     }
 
+    // Normalize taskId - handle various formats (ObjectId, string, nested object)
+    let taskId = taskData.id || taskData._id;
+    if (taskId && typeof taskId === 'object' && taskId.toString) {
+      taskId = taskId.toString();
+    }
+
+    console.log(`Auto-sync: Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action})`);
+
     // Find all users with Google Calendar enabled
     const users = await User.find({ 'googleCalendar.enabled': true });
 
@@ -622,7 +630,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
     for (const user of users) {
       try {
         const calendar = await getCalendarClient(user);
-        const taskId = taskData.id || taskData._id?.toString();
+        console.log(`Auto-sync: Processing for user ${user.username}, syncedTaskIds has ${user.googleCalendar.syncedTaskIds?.size || 0} entries`);
 
         if (action === 'delete') {
           // Delete event from calendar
