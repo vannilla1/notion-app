@@ -32,6 +32,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     loading: false,
     syncing: false
   });
+  const [googleTasks, setGoogleTasks] = useState({
+    connected: false,
+    connectedAt: null,
+    loading: false,
+    syncing: false
+  });
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
@@ -126,7 +132,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     setErrors({});
     await Promise.all([
       fetchCalendarFeedStatus(),
-      fetchGoogleCalendarStatus()
+      fetchGoogleCalendarStatus(),
+      fetchGoogleTasksStatus()
     ]);
   };
 
@@ -310,6 +317,94 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       console.error('Error cleaning up Google Calendar:', error);
       setErrors({ general: error.response?.data?.message || 'Chyba pri čistení' });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  // Google Tasks functions
+  const fetchGoogleTasksStatus = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/google-tasks/status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setGoogleTasks({
+        connected: response.data.connected,
+        connectedAt: response.data.connectedAt,
+        loading: false,
+        syncing: false
+      });
+    } catch (error) {
+      console.error('Error fetching Google Tasks status:', error);
+      setGoogleTasks(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleConnectGoogleTasks = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      window.location.href = response.data.authUrl;
+    } catch (error) {
+      console.error('Error connecting Google Tasks:', error);
+      setErrors({ general: 'Chyba pri pripájaní Google Tasks' });
+      setGoogleTasks(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleDisconnectGoogleTasks = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_URL}/google-tasks/disconnect`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setGoogleTasks({
+        connected: false,
+        connectedAt: null,
+        loading: false,
+        syncing: false
+      });
+      setMessage('Google Tasks bol odpojený');
+    } catch (error) {
+      console.error('Error disconnecting Google Tasks:', error);
+      setErrors({ general: 'Chyba pri odpájaní' });
+      setGoogleTasks(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleSyncGoogleTasks = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    } catch (error) {
+      console.error('Error syncing Google Tasks:', error);
+      setErrors({ general: error.response?.data?.message || 'Chyba pri synchronizácii' });
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  const handleCleanupGoogleTasks = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    } catch (error) {
+      console.error('Error cleaning up Google Tasks:', error);
+      setErrors({ general: error.response?.data?.message || 'Chyba pri čistení' });
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
 
@@ -788,6 +883,65 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </svg>
                       Pripojiť Google Calendar
                     </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Google Tasks - Úlohy s odškrtávaním */}
+              <div className="calendar-section google-tasks-section" style={{ marginTop: '24px' }}>
+                <h3>✅ Google Tasks (Úlohy s odškrtávaním)</h3>
+                <p className="section-description">
+                  Synchronizácia do Google Tasks. Úlohy sa dajú <strong>odškrtnúť</strong> priamo v kalendári.
+                </p>
+
+                {googleTasks.loading ? (
+                  <div className="calendar-loading">Načítavam...</div>
+                ) : googleTasks.connected ? (
+                  <div className="calendar-enabled">
+                    <div className="calendar-status">
+                      <span className="status-indicator active"></span>
+                      <span>Google Tasks je pripojený</span>
+                    </div>
+                    {googleTasks.connectedAt && (
+                      <p className="connected-info">
+                        Pripojený od: {new Date(googleTasks.connectedAt).toLocaleDateString('sk-SK')}
+                      </p>
+                    )}
+                    <div className="calendar-actions" style={{ marginTop: '12px' }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSyncGoogleTasks}
+                        disabled={googleTasks.syncing}
+                      >
+                        {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať teraz'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleCleanupGoogleTasks}
+                        disabled={googleTasks.syncing}
+                        title="Odstráni úlohy, ktoré už nemajú zodpovedajúcu úlohu v CRM"
+                      >
+                        Vyčistiť staré
+                      </button>
+                      <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks}>
+                        Odpojiť
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="calendar-disabled">
+                    <button className="btn btn-google" onClick={handleConnectGoogleTasks}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" style={{ marginRight: '8px' }}>
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                      </svg>
+                      Pripojiť Google Tasks
+                    </button>
+                    <p className="calendar-note" style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                      Úlohy sa zobrazia v Google Tasks a na bočnom paneli Google Calendar.
+                    </p>
                   </div>
                 )}
               </div>

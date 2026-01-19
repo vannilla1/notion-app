@@ -68,10 +68,11 @@ function Tasks() {
     fetchUsers();
   }, []);
 
-  // Handle Google Calendar OAuth callback parameters
+  // Handle Google Calendar and Google Tasks OAuth callback parameters
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const googleCalendarStatus = params.get('google_calendar');
+    const googleTasksStatus = params.get('google_tasks');
     const errorMessage = params.get('message');
 
     if (googleCalendarStatus) {
@@ -84,6 +85,28 @@ function Tasks() {
         setGoogleCalendarNotification({
           type: 'error',
           message: `Chyba pri pripájaní Google Calendar: ${errorMessage || 'Neznáma chyba'}`
+        });
+      }
+
+      // Clear URL parameters
+      navigate('/tasks', { replace: true });
+
+      // Auto-hide notification after 5 seconds
+      setTimeout(() => {
+        setGoogleCalendarNotification(null);
+      }, 5000);
+    }
+
+    if (googleTasksStatus) {
+      if (googleTasksStatus === 'connected') {
+        setGoogleCalendarNotification({
+          type: 'success',
+          message: 'Google Tasks bol úspešne pripojený! Úlohy sa budú automaticky synchronizovať.'
+        });
+      } else if (googleTasksStatus === 'error') {
+        setGoogleCalendarNotification({
+          type: 'error',
+          message: `Chyba pri pripájaní Google Tasks: ${errorMessage || 'Neznáma chyba'}`
         });
       }
 

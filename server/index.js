@@ -13,6 +13,7 @@ const pageRoutes = require('./routes/pages');
 const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
 const googleCalendarRoutes = require('./routes/googleCalendar');
+const googleTasksRoutes = require('./routes/googleTasks');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const logger = require('./utils/logger');
@@ -71,6 +72,7 @@ app.use('/api/pages', pageRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/google-calendar', googleCalendarRoutes);
+app.use('/api/google-tasks', googleTasksRoutes);
 
 // Sentry error handler (must be before other error handlers)
 app.use(sentry.errorHandler);

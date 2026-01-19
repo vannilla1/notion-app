@@ -5,8 +5,32 @@ const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
+const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 
 const router = express.Router();
+
+// Helper to sync to both Google Calendar and Google Tasks
+const autoSyncToGoogle = async (taskData, action) => {
+  await Promise.all([
+    autoSyncTaskToCalendar(taskData, action).catch(err =>
+      console.error('Auto-sync Calendar error:', err.message)
+    ),
+    autoSyncTaskToGoogleTasks(taskData, action).catch(err =>
+      console.error('Auto-sync Tasks error:', err.message)
+    )
+  ]);
+};
+
+const autoDeleteFromGoogle = async (taskId) => {
+  await Promise.all([
+    autoDeleteTaskFromCalendar(taskId).catch(err =>
+      console.error('Auto-delete Calendar error:', err.message)
+    ),
+    autoDeleteTaskFromGoogleTasks(taskId).catch(err =>
+      console.error('Auto-delete Tasks error:', err.message)
+    )
+  ]);
+};
 
 // Helper function to convert contact to plain object with deep copy of nested subtasks
 const contactToPlainObject = (contact) => {
@@ -695,9 +719,7 @@ router.post('/', authenticateToken, async (req, res) => {
       io.emit('task-created', taskObj);
 
       // Auto-sync to Google Calendar
-      autoSyncTaskToCalendar(taskObj, 'create').catch(err =>
-        console.error('Auto-sync error on task create:', err.message)
-      );
+      autoSyncToGoogle(taskObj, 'create');
 
       return res.status(201).json(taskObj);
     }
@@ -747,9 +769,7 @@ router.post('/', authenticateToken, async (req, res) => {
     for (const task of createdTasks) {
       io.emit('task-created', task);
       // Auto-sync to Google Calendar
-      autoSyncTaskToCalendar(task, 'create').catch(err =>
-        console.error('Auto-sync error on contact task create:', err.message)
-      );
+      autoSyncToGoogle(task, 'create');
     }
 
     // Return first task for compatibility (or all tasks info)
@@ -767,14 +787,14 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Helper function to sync all subtasks to calendar when parent title changes
-const syncSubtasksToCalendar = async (subtasks, parentTitle, contactName) => {
+// Helper function to sync all subtasks to Google when parent title changes
+const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
   if (!subtasks || subtasks.length === 0) return;
 
   for (const subtask of subtasks) {
     // Only sync subtasks that have a due date
     if (subtask.dueDate) {
-      autoSyncTaskToCalendar({
+      autoSyncToGoogle({
         id: subtask.id,
         title: `${subtask.title} (${parentTitle})`,
         description: subtask.notes || '',
@@ -782,14 +802,12 @@ const syncSubtasksToCalendar = async (subtasks, parentTitle, contactName) => {
         completed: subtask.completed,
         priority: subtask.priority,
         contactName: contactName
-      }, 'update').catch(err =>
-        console.error('Auto-sync error on subtask calendar update (parent title change):', err.message)
-      );
+      }, 'update');
     }
 
     // Recursively sync nested subtasks
     if (subtask.subtasks && subtask.subtasks.length > 0) {
-      await syncSubtasksToCalendar(subtask.subtasks, parentTitle, contactName);
+      await syncSubtasksToGoogle(subtask.subtasks, parentTitle, contactName);
     }
   }
 };
@@ -835,9 +853,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             io.emit('task-updated', taskData);
 
             // Auto-sync to Google Calendar
-            autoSyncTaskToCalendar(taskData, 'update').catch(err =>
-              console.error('Auto-sync error on contact task update:', err.message)
-            );
+            autoSyncToGoogle(taskData, 'update');
 
             // If title changed, also update all subtasks in calendar (they have parent title in their name)
             // Note: 'task' is the original task before update, so we compare new title with original
@@ -846,7 +862,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
               const newTitle = title;
               const subtasks = contact.tasks[taskIndex].subtasks;
               console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
-              syncSubtasksToCalendar(subtasks, newTitle, contact.name).catch(err =>
+              syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
                 console.error('Auto-sync error updating subtasks after parent title change (contact):', err.message)
               );
             }
@@ -920,16 +936,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
       io.emit('task-updated', taskData);
 
       // Auto-sync to Google Calendar
-      autoSyncTaskToCalendar(taskData, 'update').catch(err =>
-        console.error('Auto-sync error on global task update:', err.message)
-      );
+      autoSyncToGoogle(taskData, 'update');
 
       // If title changed, also update all subtasks in calendar (they have parent title in their name)
       if (title !== undefined && title !== originalTitle) {
         const newTitle = title;
         const subtasks = task.subtasks;
         console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
-        syncSubtasksToCalendar(subtasks, newTitle, null).catch(err =>
+        syncSubtasksToGoogle(subtasks, newTitle, null).catch(err =>
           console.error('Auto-sync error updating subtasks after parent title change (global):', err.message)
         );
       }
@@ -969,16 +983,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
           io.emit('task-updated', taskData);
 
           // Auto-sync to Google Calendar
-          autoSyncTaskToCalendar(taskData, 'update').catch(err =>
-            console.error('Auto-sync error on contact task update (fallback):', err.message)
-          );
+          autoSyncToGoogle(taskData, 'update');
 
           // If title changed, also update all subtasks in calendar (they have parent title in their name)
           if (title !== undefined && title !== originalCtaskTitle) {
             const newTitle = title;
             const subtasks = contact.tasks[taskIndex].subtasks;
             console.log(`Auto-sync: Parent task title changed from "${originalCtaskTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar (fallback)`);
-            syncSubtasksToCalendar(subtasks, newTitle, contact.name).catch(err =>
+            syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
               console.error('Auto-sync error updating subtasks after parent title change (contact fallback):', err.message)
             );
           }
@@ -1015,9 +1027,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
             // Auto-delete from Google Calendar
-            autoDeleteTaskFromCalendar(req.params.id).catch(err =>
-              console.error('Auto-sync error on contact task delete:', err.message)
-            );
+            autoDeleteFromGoogle(req.params.id);
 
             return res.json({ message: 'Task deleted' });
           }
@@ -1032,9 +1042,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       io.emit('task-deleted', { id: req.params.id, source: 'global' });
 
       // Auto-delete from Google Calendar
-      autoDeleteTaskFromCalendar(req.params.id).catch(err =>
-        console.error('Auto-sync error on global task delete:', err.message)
-      );
+      autoDeleteFromGoogle(req.params.id);
 
       return res.json({ message: 'Task deleted' });
     }
@@ -1053,9 +1061,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
           io.emit('task-deleted', { id: req.params.id, source: 'contact' });
 
           // Auto-delete from Google Calendar
-          autoDeleteTaskFromCalendar(req.params.id).catch(err =>
-            console.error('Auto-sync error on contact task delete (fallback):', err.message)
-          );
+          autoDeleteFromGoogle(req.params.id);
 
           return res.json({ message: 'Task deleted' });
         }
@@ -1287,9 +1293,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
                 source: 'contact'
               }));
 
-              // Auto-sync subtask to Google Calendar
+              // Auto-sync subtask to Google
               if (subtask.dueDate) {
-                autoSyncTaskToCalendar({
+                autoSyncToGoogle({
                   id: subtask.id,
                   title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
                   description: subtask.notes || '',
@@ -1297,9 +1303,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
                   completed: subtask.completed,
                   priority: subtask.priority,
                   contactName: contact.name
-                }, 'create').catch(err =>
-                  console.error('Auto-sync error on contact subtask create:', err.message)
-                );
+                }, 'create');
               }
 
               return res.status(201).json(subtask);
@@ -1320,9 +1324,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
-        // Auto-sync subtask to Google Calendar
+        // Auto-sync subtask to Google
         if (subtask.dueDate) {
-          autoSyncTaskToCalendar({
+          autoSyncToGoogle({
             id: subtask.id,
             title: `${subtask.title} (${task.title})`,
             description: subtask.notes || '',
@@ -1330,9 +1334,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             completed: subtask.completed,
             priority: subtask.priority,
             contactName: null
-          }, 'create').catch(err =>
-            console.error('Auto-sync error on global subtask create:', err.message)
-          );
+          }, 'create');
         }
 
         return res.status(201).json(subtask);
@@ -1359,9 +1361,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
               source: 'contact'
             }));
 
-            // Auto-sync subtask to Google Calendar
+            // Auto-sync subtask to Google
             if (subtask.dueDate) {
-              autoSyncTaskToCalendar({
+              autoSyncToGoogle({
                 id: subtask.id,
                 title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
                 description: subtask.notes || '',
@@ -1369,9 +1371,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
                 completed: subtask.completed,
                 priority: subtask.priority,
                 contactName: contact.name
-              }, 'create').catch(err =>
-                console.error('Auto-sync error on contact subtask create (fallback):', err.message)
-              );
+              }, 'create');
             }
 
             return res.status(201).json(subtask);
@@ -1435,8 +1435,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
                 source: 'contact'
               }));
 
-              // Auto-sync subtask to Google Calendar
-              autoSyncTaskToCalendar({
+              // Auto-sync subtask to Google
+              autoSyncToGoogle({
                 id: updated.id,
                 title: `${updated.title} (${contact.tasks[taskIndex].title})`,
                 description: updated.notes || '',
@@ -1444,9 +1444,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
                 completed: updated.completed,
                 priority: updated.priority,
                 contactName: contact.name
-              }, 'update').catch(err =>
-                console.error('Auto-sync error on contact subtask update:', err.message)
-              );
+              }, 'update');
 
               return res.json(updated);
             }
@@ -1465,8 +1463,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
-        // Auto-sync subtask to Google Calendar
-        autoSyncTaskToCalendar({
+        // Auto-sync subtask to Google
+        autoSyncToGoogle({
           id: updated.id,
           title: `${updated.title} (${task.title})`,
           description: updated.notes || '',
@@ -1474,9 +1472,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           completed: updated.completed,
           priority: updated.priority,
           contactName: null
-        }, 'update').catch(err =>
-          console.error('Auto-sync error on global subtask update:', err.message)
-        );
+        }, 'update');
 
         return res.json(updated);
       }
@@ -1500,8 +1496,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               source: 'contact'
             }));
 
-            // Auto-sync subtask to Google Calendar
-            autoSyncTaskToCalendar({
+            // Auto-sync subtask to Google
+            autoSyncToGoogle({
               id: updated.id,
               title: `${updated.title} (${contact.tasks[taskIndex].title})`,
               description: updated.notes || '',
@@ -1509,9 +1505,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               completed: updated.completed,
               priority: updated.priority,
               contactName: contact.name
-            }, 'update').catch(err =>
-              console.error('Auto-sync error on contact subtask update (fallback):', err.message)
-            );
+            }, 'update');
 
             return res.json(updated);
           }
@@ -1559,10 +1553,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
                 source: 'contact'
               }));
 
-              // Auto-delete subtask from Google Calendar
-              autoDeleteTaskFromCalendar(req.params.subtaskId).catch(err =>
-                console.error('Auto-sync error on contact subtask delete:', err.message)
-              );
+              // Auto-delete subtask from Google
+              autoDeleteFromGoogle(req.params.subtaskId);
 
               return res.json({ message: 'Subtask deleted' });
             }
@@ -1580,10 +1572,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
 
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
-        // Auto-delete subtask from Google Calendar
-        autoDeleteTaskFromCalendar(req.params.subtaskId).catch(err =>
-          console.error('Auto-sync error on global subtask delete:', err.message)
-        );
+        // Auto-delete subtask from Google
+        autoDeleteFromGoogle(req.params.subtaskId);
 
         return res.json({ message: 'Subtask deleted' });
       }
@@ -1606,10 +1596,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               source: 'contact'
             }));
 
-            // Auto-delete subtask from Google Calendar
-            autoDeleteTaskFromCalendar(req.params.subtaskId).catch(err =>
-              console.error('Auto-sync error on contact subtask delete (fallback):', err.message)
-            );
+            // Auto-delete subtask from Google
+            autoDeleteFromGoogle(req.params.subtaskId);
 
             return res.json({ message: 'Subtask deleted' });
           }

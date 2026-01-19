@@ -70,6 +70,16 @@ const userSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
     connectedAt: { type: Date, default: null },
     syncedTaskIds: { type: Map, of: String, default: new Map() } // taskId -> googleEventId
+  },
+  // Google Tasks integration
+  googleTasks: {
+    accessToken: { type: String, default: null },
+    refreshToken: { type: String, default: null },
+    tokenExpiry: { type: Date, default: null },
+    taskListId: { type: String, default: null }, // Google Tasks list ID
+    enabled: { type: Boolean, default: false },
+    connectedAt: { type: Date, default: null },
+    syncedTaskIds: { type: Map, of: String, default: new Map() } // crmTaskId -> googleTaskId
   }
 }, {
   timestamps: true,
