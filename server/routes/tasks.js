@@ -780,6 +780,33 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Helper function to sync all subtasks to calendar when parent title changes
+const syncSubtasksToCalendar = async (subtasks, parentTitle, contactName) => {
+  if (!subtasks || subtasks.length === 0) return;
+
+  for (const subtask of subtasks) {
+    // Only sync subtasks that have a due date
+    if (subtask.dueDate) {
+      autoSyncTaskToCalendar({
+        id: subtask.id,
+        title: `${subtask.title} (${parentTitle})`,
+        description: subtask.notes || '',
+        dueDate: subtask.dueDate,
+        completed: subtask.completed,
+        priority: subtask.priority,
+        contactName: contactName
+      }, 'update').catch(err =>
+        console.error('Auto-sync error on subtask calendar update (parent title change):', err.message)
+      );
+    }
+
+    // Recursively sync nested subtasks
+    if (subtask.subtasks && subtask.subtasks.length > 0) {
+      await syncSubtasksToCalendar(subtask.subtasks, parentTitle, contactName);
+    }
+  }
+};
+
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
@@ -825,6 +852,18 @@ router.put('/:id', authenticateToken, async (req, res) => {
               console.error('Auto-sync error on contact task update:', err.message)
             );
 
+            // If title changed, also update all subtasks in calendar (they have parent title in their name)
+            // Note: 'task' is the original task before update, so we compare new title with original
+            const originalTitle = task.title;
+            if (title !== undefined && title !== originalTitle) {
+              const newTitle = title;
+              const subtasks = contact.tasks[taskIndex].subtasks;
+              console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
+              syncSubtasksToCalendar(subtasks, newTitle, contact.name).catch(err =>
+                console.error('Auto-sync error updating subtasks after parent title change (contact):', err.message)
+              );
+            }
+
             return res.json(taskData);
           }
         }
@@ -862,6 +901,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
         }
       }
 
+      // Save original title before update to detect title change
+      const originalTitle = task.title;
+
       task.title = title !== undefined ? title : task.title;
       task.description = description !== undefined ? description : task.description;
       task.dueDate = dueDate !== undefined ? dueDate : task.dueDate;
@@ -895,6 +937,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
         console.error('Auto-sync error on global task update:', err.message)
       );
 
+      // If title changed, also update all subtasks in calendar (they have parent title in their name)
+      if (title !== undefined && title !== originalTitle) {
+        const newTitle = title;
+        const subtasks = task.subtasks;
+        console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
+        syncSubtasksToCalendar(subtasks, newTitle, null).catch(err =>
+          console.error('Auto-sync error updating subtasks after parent title change (global):', err.message)
+        );
+      }
+
       return res.json(taskData);
     }
 
@@ -905,6 +957,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
         if (taskIndex !== -1) {
           const ctask = contact.tasks[taskIndex];
+          // Save original title before update to detect title change
+          const originalCtaskTitle = ctask.title;
           contact.tasks[taskIndex] = {
             ...ctask,
             id: ctask.id,
@@ -931,6 +985,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
           autoSyncTaskToCalendar(taskData, 'update').catch(err =>
             console.error('Auto-sync error on contact task update (fallback):', err.message)
           );
+
+          // If title changed, also update all subtasks in calendar (they have parent title in their name)
+          if (title !== undefined && title !== originalCtaskTitle) {
+            const newTitle = title;
+            const subtasks = contact.tasks[taskIndex].subtasks;
+            console.log(`Auto-sync: Parent task title changed from "${originalCtaskTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar (fallback)`);
+            syncSubtasksToCalendar(subtasks, newTitle, contact.name).catch(err =>
+              console.error('Auto-sync error updating subtasks after parent title change (contact fallback):', err.message)
+            );
+          }
 
           return res.json(taskData);
         }
