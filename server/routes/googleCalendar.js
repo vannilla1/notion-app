@@ -462,27 +462,21 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
       }
     }
 
-    // Second, search for and delete events with "test" in name (past and future)
+    // Second, search for and delete events with "test" in name using query search
     try {
-      const now = new Date();
-      const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-      const oneYearAhead = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
-
-      // Search both past and future events
+      // Use query search to find events with "test" in the title
       const eventsResponse = await calendar.events.list({
         calendarId: user.googleCalendar.calendarId,
-        timeMin: oneYearAgo.toISOString(),
-        timeMax: oneYearAhead.toISOString(),
+        q: 'test',
         maxResults: 500,
-        singleEvents: true,
-        orderBy: 'startTime'
+        singleEvents: true
       });
 
       const events = eventsResponse.data.items || [];
-      console.log(`Found ${events.length} events in calendar (past and future)`);
+      console.log(`Found ${events.length} events matching 'test' query`);
 
       for (const event of events) {
-        // Delete events with "test" in the title (case insensitive)
+        // Double check the title contains "test"
         const title = (event.summary || '').toLowerCase();
         if (title.includes('test')) {
           try {
