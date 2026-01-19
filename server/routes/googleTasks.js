@@ -248,15 +248,16 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let updated = 0;
     let errors = 0;
     let skipped = 0;
+    let quotaExceeded = false;
 
     console.log('Tasks to sync:', tasksToSync.length);
 
     // Helper function to add delay between API calls to avoid rate limiting
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    for (let i = 0; i < tasksToSync.length; i++) {
-      const task = tasksToSync[i];
-
+    // Filter out tasks that are already synced and haven't changed
+    const tasksNeedingSync = [];
+    for (const task of tasksToSync) {
       // Skip tasks without valid ID
       if (!task.id) {
         console.log('Skipping task without ID:', task.title);
@@ -271,71 +272,69 @@ router.post('/sync', authenticateToken, async (req, res) => {
         continue;
       }
 
+      const existingTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
+      if (existingTaskId) {
+        // Already synced - mark as updated without API call
+        updated++;
+      } else {
+        // Needs to be created
+        tasksNeedingSync.push(task);
+      }
+    }
+
+    console.log('Tasks needing sync (new only):', tasksNeedingSync.length);
+
+    // Sync only new tasks to avoid quota issues
+    for (let i = 0; i < tasksNeedingSync.length; i++) {
+      // Stop if quota exceeded
+      if (quotaExceeded) {
+        skipped += (tasksNeedingSync.length - i);
+        break;
+      }
+
+      const task = tasksNeedingSync[i];
+
       try {
-        const existingTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
         const taskData = createGoogleTaskData(task);
 
-        if (existingTaskId) {
-          // Update existing task
-          try {
-            await tasksApi.tasks.update({
-              tasklist: user.googleTasks.taskListId,
-              task: existingTaskId,
-              resource: taskData
-            });
-            updated++;
-          } catch (e) {
-            if (e.code === 404) {
-              // Task was deleted, create new one
-              const newTask = await tasksApi.tasks.insert({
-                tasklist: user.googleTasks.taskListId,
-                resource: taskData
-              });
-              user.googleTasks.syncedTaskIds.set(task.id, newTask.data.id);
-              synced++;
-            } else {
-              throw e;
-            }
-          }
-        } else {
-          // Create new task
-          const newTask = await tasksApi.tasks.insert({
-            tasklist: user.googleTasks.taskListId,
-            resource: taskData
-          });
-          user.googleTasks.syncedTaskIds.set(task.id, newTask.data.id);
-          synced++;
-        }
+        // Create new task
+        const newTask = await tasksApi.tasks.insert({
+          tasklist: user.googleTasks.taskListId,
+          resource: taskData
+        });
+        user.googleTasks.syncedTaskIds.set(task.id, newTask.data.id);
+        synced++;
 
-        // Add small delay every 10 tasks to avoid rate limiting
-        if ((i + 1) % 10 === 0) {
-          await delay(100);
+        // Add delay every 5 tasks to avoid rate limiting
+        if ((i + 1) % 5 === 0) {
+          await delay(200);
         }
       } catch (error) {
-        const errorDetails = {
-          taskId: task.id,
-          taskTitle: task.title,
-          message: error.message,
-          code: error.code,
-          status: error.response?.status,
-          data: error.response?.data
-        };
-        console.error('Error syncing task:', JSON.stringify(errorDetails));
+        // Check for quota exceeded
+        if (error.code === 403 || error.message?.includes('Quota') || error.message?.includes('quota')) {
+          console.log('Quota exceeded, stopping sync. Completed:', synced, 'of', tasksNeedingSync.length);
+          quotaExceeded = true;
+          skipped += (tasksNeedingSync.length - i);
+          break;
+        }
+
+        console.error(`Error syncing task ${task.id} (${task.title}):`, error.message);
         errors++;
 
-        // If rate limited, wait longer and continue
-        if (error.code === 429 || error.response?.status === 429 || error.message?.includes('Rate Limit') || error.message?.includes('quota')) {
-          console.log('Rate limited, waiting 2 seconds...');
-          await delay(2000);
+        // If rate limited, wait longer
+        if (error.code === 429 || error.response?.status === 429) {
+          console.log('Rate limited, waiting 5 seconds...');
+          await delay(5000);
         }
       }
     }
 
     await user.save();
 
-    let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných`;
+    let message = `Synchronizované: ${synced} nových, ${updated} už existujúcich`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
+    if (quotaExceeded) message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
 
     res.json({
       success: true,
@@ -343,7 +342,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
       synced,
       updated,
       skipped,
-      errors
+      errors,
+      quotaExceeded
     });
   } catch (error) {
     console.error('Error syncing to Google Tasks:', error);
