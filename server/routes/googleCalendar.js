@@ -462,23 +462,24 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
       }
     }
 
-    // Second, search for and delete old events directly from Google Calendar
-    // Look for events with "test" in name or events in the past
+    // Second, search for and delete events with "test" in name (past and future)
     try {
       const now = new Date();
       const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      const oneYearAhead = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
 
+      // Search both past and future events
       const eventsResponse = await calendar.events.list({
         calendarId: user.googleCalendar.calendarId,
         timeMin: oneYearAgo.toISOString(),
-        timeMax: now.toISOString(),
+        timeMax: oneYearAhead.toISOString(),
         maxResults: 500,
         singleEvents: true,
         orderBy: 'startTime'
       });
 
       const events = eventsResponse.data.items || [];
-      console.log(`Found ${events.length} past events in calendar`);
+      console.log(`Found ${events.length} events in calendar (past and future)`);
 
       for (const event of events) {
         // Delete events with "test" in the title (case insensitive)
