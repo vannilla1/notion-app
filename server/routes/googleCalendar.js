@@ -48,7 +48,7 @@ const getCalendarClient = async (user) => {
 // Get Google Calendar authorization URL
 router.get('/auth-url', authenticateToken, (req, res) => {
   try {
-    const state = req.user.id; // Pass user ID in state for callback
+    const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
     console.log('Generating auth URL for user:', state);
     console.log('GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID ? 'set' : 'NOT SET');
     console.log('GOOGLE_REDIRECT_URI:', GOOGLE_REDIRECT_URI);
