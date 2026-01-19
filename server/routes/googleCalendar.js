@@ -240,29 +240,36 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     for (const task of tasksToSync) {
       try {
+        console.log(`Syncing task: ${task.title} (${task.id})`);
         const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
 
         const eventData = createEventData(task);
+        console.log('Event data:', JSON.stringify(eventData));
 
         if (existingEventId) {
           // Update existing event
+          console.log(`Updating existing event: ${existingEventId}`);
           await calendar.events.update({
             calendarId: user.googleCalendar.calendarId,
             eventId: existingEventId,
             resource: eventData
           });
           updated++;
+          console.log('Event updated successfully');
         } else {
           // Create new event
+          console.log('Creating new event...');
           const event = await calendar.events.insert({
             calendarId: user.googleCalendar.calendarId,
             resource: eventData
           });
+          console.log('Event created:', event.data.id);
           user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
           synced++;
         }
       } catch (error) {
         console.error(`Error syncing task ${task.id}:`, error.message);
+        console.error('Full error:', error);
         errors++;
       }
     }
