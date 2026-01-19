@@ -760,7 +760,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         disabled={googleCalendar.syncing}
                         title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúcu úlohu"
                       >
-                        🧹 Vyčistiť staré
+                        Vycistit stare
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar}>
                         Odpojiť
