@@ -264,10 +264,19 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 router.post('/sync', authenticateToken, async (req, res) => {
   console.log('=== SYNC STARTED ===');
   console.log('User ID:', req.user.id);
+  const forceSync = req.body.force === true;
+  console.log('Force sync:', forceSync);
 
   try {
     const user = await User.findById(req.user.id);
     console.log('User found:', !!user);
+
+    // If force sync, reset all tracking maps
+    if (forceSync) {
+      console.log('Force sync - resetting all tracking maps');
+      user.googleTasks.syncedTaskIds = new Map();
+      user.googleTasks.syncedTaskHashes = new Map();
+    }
 
     if (!user.googleTasks?.enabled) {
       console.log('Google Tasks not enabled');
@@ -418,7 +427,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
       const currentHash = createTaskHash(task);
       const storedHash = user.googleTasks.syncedTaskHashes?.get(task.id);
 
-      if (existingGoogleTaskId) {
+      // Validate that existingGoogleTaskId is a non-empty string
+      const hasValidGoogleTaskId = existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0;
+
+      if (hasValidGoogleTaskId) {
         // Task exists in Google - check if it changed
         if (storedHash !== currentHash) {
           // Task changed - needs update
@@ -428,7 +440,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
           unchanged++;
         }
       } else {
-        // New task - needs to be created
+        // New task or invalid Google Task ID - needs to be created
         tasksToCreate.push({ ...task, hash: currentHash });
       }
     }
@@ -644,6 +656,32 @@ router.post('/sync', authenticateToken, async (req, res) => {
     console.error('Error syncing to Google Tasks:', error);
     console.error('Stack:', error.stack);
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+  }
+});
+
+// Reset sync state - clears all tracking maps to force full re-sync
+router.post('/reset-sync', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user.googleTasks?.enabled) {
+      return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    console.log('Resetting sync state for user:', user.username);
+
+    user.googleTasks.syncedTaskIds = new Map();
+    user.googleTasks.syncedTaskHashes = new Map();
+    user.googleTasks.quotaUsedToday = 0;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Synchronizačný stav bol resetovaný. Teraz môžete spustiť novú synchronizáciu.'
+    });
+  } catch (error) {
+    console.error('Error resetting sync state:', error);
+    res.status(500).json({ message: 'Chyba pri resetovaní: ' + error.message });
   }
 });
 
