@@ -561,8 +561,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     // Process tasks in batches with exponential backoff
-    const BATCH_SIZE = 10;
-    let currentBackoff = 500;
+    // Google Tasks API has rate limits - keep batch size small and add delays
+    const BATCH_SIZE = 5;  // Reduced from 10 to avoid rate limits
+    let currentBackoff = 1000;  // Start with 1 second delay between batches
     const MAX_BACKOFF = 32000;
     const MAX_RETRIES = 3;
 
@@ -633,8 +634,16 @@ router.post('/sync', authenticateToken, async (req, res) => {
             lastError = error;
             console.log(`Error for task ${task.id}: code=${error.code}, message=${error.message}`);
 
-            // Check for quota exceeded - don't retry
+            // Check for quota/rate limit exceeded - retry with longer delay
             if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('Rate Limit'))) {
+              retries++;
+              if (retries < MAX_RETRIES) {
+                // Wait longer for rate limit errors (5-20 seconds)
+                const waitTime = 5000 * Math.pow(2, retries);
+                console.log(`Rate limit hit for task ${task.id}, waiting ${waitTime}ms before retry ${retries}/${MAX_RETRIES}`);
+                await delay(waitTime);
+                continue;
+              }
               return { success: false, taskId: task.id, error: 'quota', message: error.message };
             }
 
@@ -696,12 +705,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
       // Track quota usage
       incrementQuota(user, batchApiCalls);
 
-      // Add delay between batches
+      // Add delay between batches - important to avoid rate limits
       if (batchIndex < batches.length - 1 && !quotaExceeded) {
-        await delay(currentBackoff);
+        // If any errors, increase backoff significantly
         if (results.some(r => !r.success)) {
-          currentBackoff = Math.min(currentBackoff * 1.5, MAX_BACKOFF);
+          currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
+          console.log(`Increased backoff to ${currentBackoff}ms due to errors`);
         }
+        console.log(`Waiting ${currentBackoff}ms before next batch...`);
+        await delay(currentBackoff);
       }
     }
 
