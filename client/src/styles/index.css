@@ -6867,3 +6867,97 @@ a.detail-value:hover {
 .notification-close:hover {
   opacity: 1;
 }
+
+/* Search Box */
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 36px 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-hover);
+  border: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background var(--transition), color var(--transition);
+}
+
+.search-clear:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+/* Update headers to accommodate search */
+.contacts-header,
+.tasks-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.contacts-header h2,
+.tasks-header h2 {
+  margin: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .search-box {
+    max-width: 100%;
+    order: 3;
+    width: 100%;
+  }
+
+  .contacts-header,
+  .tasks-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .contacts-header h2,
+  .tasks-header h2 {
+    text-align: center;
+  }
+
+  .due-date-legend {
+    justify-content: center;
+  }
+}

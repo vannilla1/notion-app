@@ -13,6 +13,7 @@ function CRM() {
   const [globalTasks, setGlobalTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [expandedContact, setExpandedContact] = useState(null);
@@ -986,8 +987,22 @@ function CRM() {
   };
 
   const filteredContacts = contacts.filter(c => {
-    if (filter === 'all') return true;
-    return c.status === filter;
+    // First apply status filter
+    if (filter !== 'all' && c.status !== filter) return false;
+
+    // Then apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      const nameMatch = c.name?.toLowerCase().includes(query);
+      const emailMatch = c.email?.toLowerCase().includes(query);
+      const phoneMatch = c.phone?.toLowerCase().includes(query);
+      const companyMatch = c.company?.toLowerCase().includes(query);
+      const notesMatch = c.notes?.toLowerCase().includes(query);
+      // Search in task titles too
+      const taskMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
+      return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || taskMatch;
+    }
+    return true;
   });
 
   const statusCounts = {
@@ -1194,6 +1209,24 @@ function CRM() {
             <div className="contacts-page">
               <div className="contacts-header">
                 <h2>Zoznam kontaktov ({filteredContacts.length})</h2>
+                <div className="search-box">
+                  <input
+                    type="text"
+                    placeholder="Hľadať kontakt..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="search-input"
+                  />
+                  {searchQuery && (
+                    <button
+                      className="search-clear"
+                      onClick={() => setSearchQuery('')}
+                      title="Vymazať"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               </div>
 
               {loading ? (

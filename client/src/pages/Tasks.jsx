@@ -14,6 +14,7 @@ function Tasks() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -1198,7 +1199,29 @@ function Tasks() {
     return checkSubtasks(task.subtasks);
   };
 
+  // Helper to search in subtasks recursively
+  const searchInSubtasks = (subtasks, query) => {
+    if (!subtasks || !Array.isArray(subtasks)) return false;
+    return subtasks.some(st => {
+      const titleMatch = st.title?.toLowerCase().includes(query);
+      const notesMatch = st.notes?.toLowerCase().includes(query);
+      if (titleMatch || notesMatch) return true;
+      return searchInSubtasks(st.subtasks, query);
+    });
+  };
+
   const filteredTasks = tasks.filter(t => {
+    // First apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      const titleMatch = t.title?.toLowerCase().includes(query);
+      const descMatch = t.description?.toLowerCase().includes(query);
+      const contactMatch = t.contactName?.toLowerCase().includes(query);
+      const subtaskMatch = searchInSubtasks(t.subtasks, query);
+      if (!titleMatch && !descMatch && !contactMatch && !subtaskMatch) return false;
+    }
+
+    // Then apply status/priority filter
     if (filter === 'all') return true;
     if (filter === 'completed') return t.completed;
     if (filter === 'active') return !t.completed;
@@ -1611,6 +1634,24 @@ function Tasks() {
             <div className="tasks-page">
               <div className="tasks-header">
                 <h2>Zoznam úloh ({filteredTasks.length})</h2>
+                <div className="search-box">
+                  <input
+                    type="text"
+                    placeholder="Hľadať úlohu..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="search-input"
+                  />
+                  {searchQuery && (
+                    <button
+                      className="search-clear"
+                      onClick={() => setSearchQuery('')}
+                      title="Vymazať"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
                 <div className="due-date-legend">
                   <span className="legend-item">
                     <span className="legend-color due-success-color"></span>
