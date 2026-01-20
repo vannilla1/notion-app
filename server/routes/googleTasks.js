@@ -21,6 +21,9 @@ const oauth2Client = new google.auth.OAuth2(
 // Scopes required for Google Tasks
 const SCOPES = ['https://www.googleapis.com/auth/tasks'];
 
+// Helper function for delays (used for rate limiting)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper to get authenticated tasks client for user
 const getTasksClient = async (user) => {
   if (!user.googleTasks?.accessToken) {
@@ -252,9 +255,6 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     console.log('Tasks to sync:', tasksToSync.length);
 
-    // Helper function to add delay between API calls to avoid rate limiting
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
     // Filter out tasks that are already synced and haven't changed
     const tasksNeedingSync = [];
     for (const task of tasksToSync) {
@@ -284,47 +284,96 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     console.log('Tasks needing sync (new only):', tasksNeedingSync.length);
 
-    // Sync only new tasks to avoid quota issues
-    for (let i = 0; i < tasksNeedingSync.length; i++) {
+    // Process tasks in batches with exponential backoff
+    const BATCH_SIZE = 10; // Process 10 tasks at a time
+    const batches = [];
+    for (let i = 0; i < tasksNeedingSync.length; i += BATCH_SIZE) {
+      batches.push(tasksNeedingSync.slice(i, i + BATCH_SIZE));
+    }
+
+    console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} tasks each`);
+
+    let currentBackoff = 500; // Start with 500ms delay
+    const MAX_BACKOFF = 32000; // Max 32 seconds
+    const MAX_RETRIES = 3;
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       // Stop if quota exceeded
       if (quotaExceeded) {
-        skipped += (tasksNeedingSync.length - i);
+        // Count remaining tasks as skipped
+        for (let i = batchIndex; i < batches.length; i++) {
+          skipped += batches[i].length;
+        }
         break;
       }
 
-      const task = tasksNeedingSync[i];
+      const batch = batches[batchIndex];
+      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tasks)`);
 
-      try {
-        const taskData = createGoogleTaskData(task);
+      // Process batch with concurrent requests (but limited)
+      const batchPromises = batch.map(async (task) => {
+        let retries = 0;
+        let lastError = null;
 
-        // Create new task
-        const newTask = await tasksApi.tasks.insert({
-          tasklist: user.googleTasks.taskListId,
-          resource: taskData
-        });
-        user.googleTasks.syncedTaskIds.set(task.id, newTask.data.id);
-        synced++;
+        while (retries < MAX_RETRIES) {
+          try {
+            const taskData = createGoogleTaskData(task);
+            const newTask = await tasksApi.tasks.insert({
+              tasklist: user.googleTasks.taskListId,
+              resource: taskData
+            });
+            return { success: true, taskId: task.id, googleTaskId: newTask.data.id };
+          } catch (error) {
+            lastError = error;
 
-        // Add delay every 5 tasks to avoid rate limiting
-        if ((i + 1) % 5 === 0) {
-          await delay(200);
+            // Check for quota exceeded - don't retry
+            if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('Rate Limit'))) {
+              return { success: false, taskId: task.id, error: 'quota', message: error.message };
+            }
+
+            // Rate limited - retry with backoff
+            if (error.code === 429 || error.response?.status === 429) {
+              retries++;
+              const waitTime = currentBackoff * Math.pow(2, retries);
+              console.log(`Rate limited on task ${task.id}, retry ${retries}/${MAX_RETRIES} after ${waitTime}ms`);
+              await delay(Math.min(waitTime, MAX_BACKOFF));
+              continue;
+            }
+
+            // Other errors - log and don't retry
+            console.error(`Error syncing task ${task.id}:`, error.message);
+            return { success: false, taskId: task.id, error: 'other', message: error.message };
+          }
         }
-      } catch (error) {
-        // Check for quota exceeded
-        if (error.code === 403 || error.message?.includes('Quota') || error.message?.includes('quota')) {
-          console.log('Quota exceeded, stopping sync. Completed:', synced, 'of', tasksNeedingSync.length);
+
+        // Max retries reached
+        return { success: false, taskId: task.id, error: 'max_retries', message: lastError?.message };
+      });
+
+      // Wait for all tasks in batch to complete
+      const results = await Promise.all(batchPromises);
+
+      // Process results
+      for (const result of results) {
+        if (result.success) {
+          user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
+          synced++;
+          // Reset backoff on success
+          currentBackoff = 500;
+        } else if (result.error === 'quota') {
           quotaExceeded = true;
-          skipped += (tasksNeedingSync.length - i);
-          break;
+          skipped++;
+        } else {
+          errors++;
         }
+      }
 
-        console.error(`Error syncing task ${task.id} (${task.title}):`, error.message);
-        errors++;
-
-        // If rate limited, wait longer
-        if (error.code === 429 || error.response?.status === 429) {
-          console.log('Rate limited, waiting 5 seconds...');
-          await delay(5000);
+      // Add delay between batches to avoid rate limiting
+      if (batchIndex < batches.length - 1 && !quotaExceeded) {
+        await delay(currentBackoff);
+        // Gradually increase backoff if we had errors
+        if (results.some(r => !r.success)) {
+          currentBackoff = Math.min(currentBackoff * 1.5, MAX_BACKOFF);
         }
       }
     }
@@ -461,6 +510,7 @@ function createGoogleTaskData(task) {
 
 /**
  * Automatically sync a task to Google Tasks for all users who have Google Tasks connected
+ * Uses exponential backoff for rate limiting
  */
 const autoSyncTaskToGoogleTasks = async (taskData, action) => {
   try {
@@ -487,6 +537,32 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
 
     console.log(`Auto-sync Tasks: Found ${users.length} users with Google Tasks connected`);
 
+    // Helper for retrying with exponential backoff
+    const retryWithBackoff = async (fn, maxRetries = 3) => {
+      let lastError;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error) {
+          lastError = error;
+          // Don't retry on quota exceeded
+          if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota'))) {
+            throw error;
+          }
+          // Retry on rate limit with exponential backoff
+          if (error.code === 429 || error.response?.status === 429) {
+            const waitTime = Math.min(1000 * Math.pow(2, attempt), 16000);
+            console.log(`Auto-sync Tasks: Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`);
+            await delay(waitTime);
+            continue;
+          }
+          // Don't retry other errors
+          throw error;
+        }
+      }
+      throw lastError;
+    };
+
     for (const user of users) {
       try {
         const tasksApi = await getTasksClient(user);
@@ -495,10 +571,10 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
           const googleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
           if (googleTaskId) {
             try {
-              await tasksApi.tasks.delete({
+              await retryWithBackoff(() => tasksApi.tasks.delete({
                 tasklist: user.googleTasks.taskListId,
                 task: googleTaskId
-              });
+              }));
               console.log(`Auto-sync Tasks: Deleted task ${googleTaskId} for user ${user.username}`);
             } catch (e) {
               console.log(`Auto-sync Tasks: Task deletion failed:`, e.message);
@@ -520,18 +596,18 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
 
           if (existingTaskId) {
             try {
-              await tasksApi.tasks.update({
+              await retryWithBackoff(() => tasksApi.tasks.update({
                 tasklist: user.googleTasks.taskListId,
                 task: existingTaskId,
                 resource: googleTaskData
-              });
+              }));
               console.log(`Auto-sync Tasks: Updated task ${existingTaskId} for user ${user.username}`);
             } catch (e) {
               if (e.code === 404) {
-                const newTask = await tasksApi.tasks.insert({
+                const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
                   tasklist: user.googleTasks.taskListId,
                   resource: googleTaskData
-                });
+                }));
                 user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
                 await user.save();
                 console.log(`Auto-sync Tasks: Created new task for user ${user.username}`);
@@ -540,10 +616,10 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
               }
             }
           } else {
-            const newTask = await tasksApi.tasks.insert({
+            const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
               tasklist: user.googleTasks.taskListId,
               resource: googleTaskData
-            });
+            }));
             user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
             await user.save();
             console.log(`Auto-sync Tasks: Created task ${newTask.data.id} for user ${user.username}`);
