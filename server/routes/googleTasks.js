@@ -24,6 +24,48 @@ const SCOPES = ['https://www.googleapis.com/auth/tasks'];
 // Helper function for delays (used for rate limiting)
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Daily quota limit (conservative estimate - actual limit is ~50,000)
+const DAILY_QUOTA_LIMIT = 40000;
+
+// Create a simple hash of task data to detect changes
+const createTaskHash = (task) => {
+  const data = `${task.title}|${task.dueDate}|${task.completed}|${task.notes || ''}|${task.contact || ''}`;
+  // Simple hash function
+  let hash = 0;
+  for (let i = 0; i < data.length; i++) {
+    const char = data.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(16);
+};
+
+// Check and reset daily quota if needed
+const checkAndResetQuota = (user) => {
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  if (!user.googleTasks.quotaResetDate || new Date(user.googleTasks.quotaResetDate) < today) {
+    // Reset quota for new day
+    user.googleTasks.quotaUsedToday = 0;
+    user.googleTasks.quotaResetDate = today;
+    return true;
+  }
+  return false;
+};
+
+// Get remaining quota for today
+const getRemainingQuota = (user) => {
+  checkAndResetQuota(user);
+  return DAILY_QUOTA_LIMIT - (user.googleTasks.quotaUsedToday || 0);
+};
+
+// Increment quota usage
+const incrementQuota = (user, count = 1) => {
+  checkAndResetQuota(user);
+  user.googleTasks.quotaUsedToday = (user.googleTasks.quotaUsedToday || 0) + count;
+};
+
 // Helper to get authenticated tasks client for user
 const getTasksClient = async (user) => {
   if (!user.googleTasks?.accessToken) {
@@ -145,7 +187,7 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-// Get connection status
+// Get connection status with quota info
 router.get('/status', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -154,15 +196,37 @@ router.get('/status', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
+    // Check and reset quota if needed
+    checkAndResetQuota(user);
+    await user.save();
+
+    const remainingQuota = getRemainingQuota(user);
+    const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
+
     res.json({
       connected: user.googleTasks?.enabled || false,
-      connectedAt: user.googleTasks?.connectedAt || null
+      connectedAt: user.googleTasks?.connectedAt || null,
+      lastSyncAt: user.googleTasks?.lastSyncAt || null,
+      quota: {
+        used: user.googleTasks?.quotaUsedToday || 0,
+        limit: DAILY_QUOTA_LIMIT,
+        remaining: remainingQuota,
+        percentUsed: quotaPercentUsed,
+        resetsAt: getNextQuotaReset()
+      }
     });
   } catch (error) {
     console.error('Error getting Google Tasks status:', error);
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
   }
 });
+
+// Helper to get next quota reset time
+function getNextQuotaReset() {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return tomorrow.toISOString();
+}
 
 // Disconnect Google Tasks
 router.post('/disconnect', authenticateToken, async (req, res) => {
@@ -196,13 +260,30 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
   }
 });
 
-// Sync all tasks to Google Tasks
+// Sync all tasks to Google Tasks (with incremental sync and quota checking)
 router.post('/sync', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
     if (!user.googleTasks?.enabled) {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    // Check quota before starting
+    checkAndResetQuota(user);
+    const remainingQuota = getRemainingQuota(user);
+
+    if (remainingQuota < 10) {
+      return res.status(429).json({
+        message: 'Denný limit API bol dosiahnutý. Skúste zajtra.',
+        quotaExceeded: true,
+        quota: {
+          used: user.googleTasks.quotaUsedToday,
+          limit: DAILY_QUOTA_LIMIT,
+          remaining: remainingQuota,
+          resetsAt: getNextQuotaReset()
+        }
+      });
     }
 
     const tasksApi = await getTasksClient(user);
@@ -222,7 +303,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
           notes: task.description || '',
           dueDate: task.dueDate,
           completed: task.completed,
-          contact: null
+          contact: null,
+          modifiedAt: task.modifiedAt || task.updatedAt
         });
       }
       collectSubtasksForSync(task.subtasks, task.title, null, tasksToSync);
@@ -239,7 +321,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
               notes: task.description || '',
               dueDate: task.dueDate,
               completed: task.completed,
-              contact: contact.name
+              contact: contact.name,
+              modifiedAt: task.modifiedAt
             });
           }
           collectSubtasksForSync(task.subtasks, task.title, contact.name, tasksToSync);
@@ -249,14 +332,23 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     let synced = 0;
     let updated = 0;
+    let unchanged = 0;
     let errors = 0;
     let skipped = 0;
     let quotaExceeded = false;
 
     console.log('Tasks to sync:', tasksToSync.length);
+    console.log('Remaining quota:', remainingQuota);
 
-    // Filter out tasks that are already synced and haven't changed
-    const tasksNeedingSync = [];
+    // Initialize hash map if not exists
+    if (!user.googleTasks.syncedTaskHashes) {
+      user.googleTasks.syncedTaskHashes = new Map();
+    }
+
+    // Filter tasks: new tasks to create, changed tasks to update
+    const tasksToCreate = [];
+    const tasksToUpdate = [];
+
     for (const task of tasksToSync) {
       // Skip tasks without valid ID
       if (!task.id) {
@@ -272,35 +364,64 @@ router.post('/sync', authenticateToken, async (req, res) => {
         continue;
       }
 
-      const existingTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
-      if (existingTaskId) {
-        // Already synced - mark as updated without API call
-        updated++;
+      const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
+      const currentHash = createTaskHash(task);
+      const storedHash = user.googleTasks.syncedTaskHashes?.get(task.id);
+
+      if (existingGoogleTaskId) {
+        // Task exists in Google - check if it changed
+        if (storedHash !== currentHash) {
+          // Task changed - needs update
+          tasksToUpdate.push({ ...task, googleTaskId: existingGoogleTaskId, hash: currentHash });
+        } else {
+          // Task unchanged - skip
+          unchanged++;
+        }
       } else {
-        // Needs to be created
-        tasksNeedingSync.push(task);
+        // New task - needs to be created
+        tasksToCreate.push({ ...task, hash: currentHash });
       }
     }
 
-    console.log('Tasks needing sync (new only):', tasksNeedingSync.length);
+    console.log(`Incremental sync: ${tasksToCreate.length} new, ${tasksToUpdate.length} changed, ${unchanged} unchanged`);
+
+    // Check if we have enough quota for all tasks
+    const totalTasksToProcess = tasksToCreate.length + tasksToUpdate.length;
+    const availableForSync = Math.min(totalTasksToProcess, remainingQuota);
+
+    if (totalTasksToProcess > remainingQuota) {
+      console.log(`Quota warning: Need ${totalTasksToProcess} API calls, only ${remainingQuota} remaining`);
+    }
 
     // Process tasks in batches with exponential backoff
-    const BATCH_SIZE = 10; // Process 10 tasks at a time
+    const BATCH_SIZE = 10;
+    let currentBackoff = 500;
+    const MAX_BACKOFF = 32000;
+    const MAX_RETRIES = 3;
+
+    // Combine tasks to create and update, prioritizing updates (they're more important)
+    const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
+
     const batches = [];
-    for (let i = 0; i < tasksNeedingSync.length; i += BATCH_SIZE) {
-      batches.push(tasksNeedingSync.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < allTasksToProcess.length; i += BATCH_SIZE) {
+      batches.push(allTasksToProcess.slice(i, i + BATCH_SIZE));
     }
 
     console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} tasks each`);
 
-    let currentBackoff = 500; // Start with 500ms delay
-    const MAX_BACKOFF = 32000; // Max 32 seconds
-    const MAX_RETRIES = 3;
-
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       // Stop if quota exceeded
       if (quotaExceeded) {
-        // Count remaining tasks as skipped
+        for (let i = batchIndex; i < batches.length; i++) {
+          skipped += batches[i].length;
+        }
+        break;
+      }
+
+      // Check remaining quota before each batch
+      if (getRemainingQuota(user) < BATCH_SIZE) {
+        console.log('Quota running low, stopping sync');
+        quotaExceeded = true;
         for (let i = batchIndex; i < batches.length; i++) {
           skipped += batches[i].length;
         }
@@ -310,25 +431,51 @@ router.post('/sync', authenticateToken, async (req, res) => {
       const batch = batches[batchIndex];
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tasks)`);
 
-      // Process batch with concurrent requests (but limited)
+      // Process batch with concurrent requests
       const batchPromises = batch.map(async (task) => {
         let retries = 0;
         let lastError = null;
+        const isUpdate = !!task.googleTaskId;
 
         while (retries < MAX_RETRIES) {
           try {
             const taskData = createGoogleTaskData(task);
-            const newTask = await tasksApi.tasks.insert({
-              tasklist: user.googleTasks.taskListId,
-              resource: taskData
-            });
-            return { success: true, taskId: task.id, googleTaskId: newTask.data.id };
+
+            if (isUpdate) {
+              // Update existing task
+              await tasksApi.tasks.update({
+                tasklist: user.googleTasks.taskListId,
+                task: task.googleTaskId,
+                resource: taskData
+              });
+              return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
+            } else {
+              // Create new task
+              const newTask = await tasksApi.tasks.insert({
+                tasklist: user.googleTasks.taskListId,
+                resource: taskData
+              });
+              return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
+            }
           } catch (error) {
             lastError = error;
 
             // Check for quota exceeded - don't retry
             if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('Rate Limit'))) {
               return { success: false, taskId: task.id, error: 'quota', message: error.message };
+            }
+
+            // Handle 404 for updates - task was deleted from Google, recreate it
+            if (isUpdate && error.code === 404) {
+              try {
+                const newTask = await tasksApi.tasks.insert({
+                  tasklist: user.googleTasks.taskListId,
+                  resource: createGoogleTaskData(task)
+                });
+                return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
+              } catch (insertError) {
+                return { success: false, taskId: task.id, error: 'other', message: insertError.message };
+              }
             }
 
             // Rate limited - retry with backoff
@@ -346,19 +493,24 @@ router.post('/sync', authenticateToken, async (req, res) => {
           }
         }
 
-        // Max retries reached
         return { success: false, taskId: task.id, error: 'max_retries', message: lastError?.message };
       });
 
-      // Wait for all tasks in batch to complete
       const results = await Promise.all(batchPromises);
 
-      // Process results
+      // Process results and track quota
+      let batchApiCalls = 0;
       for (const result of results) {
+        batchApiCalls++;
         if (result.success) {
           user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
-          synced++;
-          // Reset backoff on success
+          user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
+
+          if (result.action === 'created' || result.action === 'recreated') {
+            synced++;
+          } else {
+            updated++;
+          }
           currentBackoff = 500;
         } else if (result.error === 'quota') {
           quotaExceeded = true;
@@ -368,19 +520,23 @@ router.post('/sync', authenticateToken, async (req, res) => {
         }
       }
 
-      // Add delay between batches to avoid rate limiting
+      // Track quota usage
+      incrementQuota(user, batchApiCalls);
+
+      // Add delay between batches
       if (batchIndex < batches.length - 1 && !quotaExceeded) {
         await delay(currentBackoff);
-        // Gradually increase backoff if we had errors
         if (results.some(r => !r.success)) {
           currentBackoff = Math.min(currentBackoff * 1.5, MAX_BACKOFF);
         }
       }
     }
 
+    // Update last sync time
+    user.googleTasks.lastSyncAt = new Date();
     await user.save();
 
-    let message = `Synchronizované: ${synced} nových, ${updated} už existujúcich`;
+    let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
     if (quotaExceeded) message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
@@ -390,9 +546,16 @@ router.post('/sync', authenticateToken, async (req, res) => {
       message,
       synced,
       updated,
+      unchanged,
       skipped,
       errors,
-      quotaExceeded
+      quotaExceeded,
+      quota: {
+        used: user.googleTasks.quotaUsedToday,
+        limit: DAILY_QUOTA_LIMIT,
+        remaining: getRemainingQuota(user),
+        resetsAt: getNextQuotaReset()
+      }
     });
   } catch (error) {
     console.error('Error syncing to Google Tasks:', error);

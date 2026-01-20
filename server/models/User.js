@@ -79,7 +79,13 @@ const userSchema = new mongoose.Schema({
     taskListId: { type: String, default: null }, // Google Tasks list ID
     enabled: { type: Boolean, default: false },
     connectedAt: { type: Date, default: null },
-    syncedTaskIds: { type: Map, of: String, default: new Map() } // crmTaskId -> googleTaskId
+    syncedTaskIds: { type: Map, of: String, default: new Map() }, // crmTaskId -> googleTaskId
+    // Track sync metadata for incremental sync
+    syncedTaskHashes: { type: Map, of: String, default: new Map() }, // crmTaskId -> hash of task data
+    lastSyncAt: { type: Date, default: null },
+    // Daily quota tracking (resets at midnight UTC)
+    quotaUsedToday: { type: Number, default: 0 },
+    quotaResetDate: { type: Date, default: null }
   }
 }, {
   timestamps: true,
