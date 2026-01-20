@@ -938,13 +938,46 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                             ✅ Všetky úlohy sú synchronizované
                           </div>
                         )}
-                        {googleTasks.quota && googleTasks.quota.remaining < 1000 && (
-                          <div style={{ marginTop: '8px', color: '#DC2626', fontSize: '12px' }}>
-                            ⚠️ Zostávajúca kvóta: {googleTasks.quota.remaining.toLocaleString()} volaní
-                            <br />
-                            <span style={{ color: '#6B7280' }}>
-                              Reset: {new Date(googleTasks.quota.resetsAt).toLocaleString('sk-SK')}
-                            </span>
+                      </div>
+                    )}
+
+                    {/* Quota info */}
+                    {googleTasks.quota && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        backgroundColor: googleTasks.quota.remaining < 1000 ? '#FEE2E2' : '#F3F4F6',
+                        borderRadius: '8px',
+                        fontSize: '13px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Denná kvóta API:</span>
+                          <strong>{googleTasks.quota.used.toLocaleString()} / {googleTasks.quota.limit.toLocaleString()}</strong>
+                        </div>
+                        <div style={{
+                          width: '100%',
+                          height: '6px',
+                          backgroundColor: '#E5E7EB',
+                          borderRadius: '3px',
+                          marginBottom: '6px'
+                        }}>
+                          <div style={{
+                            width: `${Math.min(googleTasks.quota.percentUsed, 100)}%`,
+                            height: '100%',
+                            backgroundColor: googleTasks.quota.percentUsed > 80 ? '#EF4444' : googleTasks.quota.percentUsed > 50 ? '#F59E0B' : '#10B981',
+                            borderRadius: '3px',
+                            transition: 'width 0.3s ease'
+                          }} />
+                        </div>
+                        <div style={{ color: '#6B7280', fontSize: '12px' }}>
+                          Zostáva: {googleTasks.quota.remaining.toLocaleString()} volaní
+                          <span style={{ float: 'right' }}>
+                            Reset: {new Date(googleTasks.quota.resetsAt).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' })} UTC
+                          </span>
+                        </div>
+                        {googleTasks.pendingTasks && googleTasks.pendingTasks.pending > 0 && (
+                          <div style={{ marginTop: '8px', color: '#6B7280', fontSize: '12px', fontStyle: 'italic' }}>
+                            Tip: Ak kvóta nestačí, zvyšné úlohy sa dosyncujú zajtra automaticky pri ďalšej synchronizácii.
                           </div>
                         )}
                       </div>
