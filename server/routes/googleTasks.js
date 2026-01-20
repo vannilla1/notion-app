@@ -634,13 +634,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
             return { success: false, taskId: task.id, error: 'quota', message: error.message };
           }
 
-          // Handle 404 for updates - task was deleted from Google, recreate it
-          if (isUpdate && error.code === 404) {
+          // Handle 404 or 400 "Missing task ID" for updates - task was deleted from Google, recreate it
+          if (isUpdate && (error.code === 404 || (error.code === 400 && error.message?.includes('Missing task ID')))) {
+            console.log(`Task ${task.id} not found in Google (${error.code}), recreating...`);
             try {
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,
                 resource: createGoogleTaskData(task)
               });
+              console.log(`Recreated task ${task.id} as Google task ${newTask.data.id}`);
               return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
             } catch (insertError) {
               if (insertError.code === 403 || insertError.code === 429) {
