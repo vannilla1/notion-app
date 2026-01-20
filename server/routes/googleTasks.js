@@ -560,12 +560,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
       console.log(`Quota warning: Need ${totalTasksToProcess} API calls, only ${remainingQuota} remaining`);
     }
 
-    // Process tasks in batches with exponential backoff
-    // Google Tasks API has rate limits - keep batch size small and add delays
-    const BATCH_SIZE = 5;  // Reduced from 10 to avoid rate limits
-    let currentBackoff = 1000;  // Start with 1 second delay between batches
+    // Process tasks in batches - stop immediately on any rate limit error
+    const BATCH_SIZE = 5;
+    let currentBackoff = 1000;  // Delay between batches
     const MAX_BACKOFF = 32000;
-    const MAX_RETRIES = 3;
 
     // Combine tasks to create and update, prioritizing updates (they're more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -601,87 +599,68 @@ router.post('/sync', authenticateToken, async (req, res) => {
       const batch = batches[batchIndex];
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tasks)`);
 
-      // Process batch with concurrent requests
+      // Process batch - no retries, fail fast on any limit error
       const batchPromises = batch.map(async (task) => {
-        let retries = 0;
-        let lastError = null;
         const isUpdate = !!task.googleTaskId;
 
-        while (retries < MAX_RETRIES) {
-          try {
-            const taskData = createGoogleTaskData(task);
+        try {
+          const taskData = createGoogleTaskData(task);
 
-            if (isUpdate) {
-              // Update existing task
-              console.log(`Updating task ${task.id} -> Google ${task.googleTaskId}`);
-              await tasksApi.tasks.update({
-                tasklist: user.googleTasks.taskListId,
-                task: task.googleTaskId,
-                resource: taskData
-              });
-              return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
-            } else {
-              // Create new task
-              console.log(`Creating task ${task.id}: "${task.title.substring(0, 30)}..."`);
+          if (isUpdate) {
+            // Update existing task
+            console.log(`Updating task ${task.id} -> Google ${task.googleTaskId}`);
+            await tasksApi.tasks.update({
+              tasklist: user.googleTasks.taskListId,
+              task: task.googleTaskId,
+              resource: taskData
+            });
+            return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
+          } else {
+            // Create new task
+            console.log(`Creating task ${task.id}: "${task.title.substring(0, 30)}..."`);
+            const newTask = await tasksApi.tasks.insert({
+              tasklist: user.googleTasks.taskListId,
+              resource: taskData
+            });
+            console.log(`Created Google task: ${newTask.data.id}`);
+            return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
+          }
+        } catch (error) {
+          console.log(`Error for task ${task.id}: code=${error.code}, message=${error.message}`);
+
+          // Any 403 or 429 error - stop immediately (quota or rate limit)
+          if (error.code === 403 || error.code === 429 || error.response?.status === 429) {
+            console.log(`API limit error for task ${task.id} - stopping sync`);
+            return { success: false, taskId: task.id, error: 'quota', message: error.message };
+          }
+
+          // Handle 404 for updates - task was deleted from Google, recreate it
+          if (isUpdate && error.code === 404) {
+            try {
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,
-                resource: taskData
+                resource: createGoogleTaskData(task)
               });
-              console.log(`Created Google task: ${newTask.data.id}`);
-              return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
-            }
-          } catch (error) {
-            lastError = error;
-            console.log(`Error for task ${task.id}: code=${error.code}, message=${error.message}`);
-
-            // Check for quota/rate limit exceeded - retry with longer delay
-            if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('Rate Limit'))) {
-              retries++;
-              if (retries < MAX_RETRIES) {
-                // Wait longer for rate limit errors (5-20 seconds)
-                const waitTime = 5000 * Math.pow(2, retries);
-                console.log(`Rate limit hit for task ${task.id}, waiting ${waitTime}ms before retry ${retries}/${MAX_RETRIES}`);
-                await delay(waitTime);
-                continue;
+              return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
+            } catch (insertError) {
+              if (insertError.code === 403 || insertError.code === 429) {
+                return { success: false, taskId: task.id, error: 'quota', message: insertError.message };
               }
-              return { success: false, taskId: task.id, error: 'quota', message: error.message };
+              return { success: false, taskId: task.id, error: 'other', message: insertError.message };
             }
-
-            // Handle 404 for updates - task was deleted from Google, recreate it
-            if (isUpdate && error.code === 404) {
-              try {
-                const newTask = await tasksApi.tasks.insert({
-                  tasklist: user.googleTasks.taskListId,
-                  resource: createGoogleTaskData(task)
-                });
-                return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
-              } catch (insertError) {
-                return { success: false, taskId: task.id, error: 'other', message: insertError.message };
-              }
-            }
-
-            // Rate limited - retry with backoff
-            if (error.code === 429 || error.response?.status === 429) {
-              retries++;
-              const waitTime = currentBackoff * Math.pow(2, retries);
-              console.log(`Rate limited on task ${task.id}, retry ${retries}/${MAX_RETRIES} after ${waitTime}ms`);
-              await delay(Math.min(waitTime, MAX_BACKOFF));
-              continue;
-            }
-
-            // Other errors - log and don't retry
-            console.error(`Error syncing task ${task.id}:`, error.message);
-            return { success: false, taskId: task.id, error: 'other', message: error.message };
           }
-        }
 
-        return { success: false, taskId: task.id, error: 'max_retries', message: lastError?.message };
+          // Other errors
+          console.error(`Error syncing task ${task.id}:`, error.message);
+          return { success: false, taskId: task.id, error: 'other', message: error.message };
+        }
       });
 
       const results = await Promise.all(batchPromises);
 
       // Process results and track quota
       let batchApiCalls = 0;
+      let quotaErrorsInBatch = 0;
       for (const result of results) {
         batchApiCalls++;
         if (result.success) {
@@ -693,13 +672,25 @@ router.post('/sync', authenticateToken, async (req, res) => {
           } else {
             updated++;
           }
-          currentBackoff = 500;
         } else if (result.error === 'quota') {
+          // Quota exceeded - stop immediately, don't retry
+          quotaErrorsInBatch++;
           quotaExceeded = true;
           skipped++;
+          console.log(`Quota error detected for task ${result.taskId}, stopping sync`);
         } else {
           errors++;
         }
+      }
+
+      // If any quota errors in this batch, stop processing further batches
+      if (quotaErrorsInBatch > 0) {
+        console.log(`${quotaErrorsInBatch} quota errors in batch, stopping sync immediately`);
+        // Count remaining tasks as skipped
+        for (let i = batchIndex + 1; i < batches.length; i++) {
+          skipped += batches[i].length;
+        }
+        break; // Exit batch processing loop
       }
 
       // Track quota usage
