@@ -262,16 +262,24 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
 router.post('/sync', authenticateToken, async (req, res) => {
+  console.log('=== SYNC STARTED ===');
+  console.log('User ID:', req.user.id);
+
   try {
     const user = await User.findById(req.user.id);
+    console.log('User found:', !!user);
 
     if (!user.googleTasks?.enabled) {
+      console.log('Google Tasks not enabled');
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
+
+    console.log('Google Tasks enabled, checking quota...');
 
     // Check quota before starting
     checkAndResetQuota(user);
     const remainingQuota = getRemainingQuota(user);
+    console.log('Remaining quota:', remainingQuota);
 
     if (remainingQuota < 10) {
       return res.status(429).json({
@@ -286,11 +294,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
+    console.log('Getting tasks client...');
     const tasksApi = await getTasksClient(user);
+    console.log('Tasks client obtained');
 
     // Get all tasks with due dates
+    console.log('Fetching tasks from database...');
     const globalTasks = await Task.find({});
     const contacts = await Contact.find({});
+    console.log(`Found ${globalTasks.length} global tasks, ${contacts.length} contacts`);
 
     const tasksToSync = [];
 
@@ -342,8 +354,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     // Initialize hash map if not exists
     if (!user.googleTasks.syncedTaskHashes) {
+      console.log('Initializing syncedTaskHashes map');
       user.googleTasks.syncedTaskHashes = new Map();
     }
+    if (!user.googleTasks.syncedTaskIds) {
+      console.log('Initializing syncedTaskIds map');
+      user.googleTasks.syncedTaskIds = new Map();
+    }
+
+    console.log('Starting incremental sync analysis...');
 
     // Filter tasks: new tasks to create, changed tasks to update
     const tasksToCreate = [];
@@ -383,7 +402,30 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    console.log(`Incremental sync: ${tasksToCreate.length} new, ${tasksToUpdate.length} changed, ${unchanged} unchanged`);
+    console.log(`Incremental sync analysis complete: ${tasksToCreate.length} new, ${tasksToUpdate.length} changed, ${unchanged} unchanged`);
+
+    // If nothing to do, return early
+    if (tasksToCreate.length === 0 && tasksToUpdate.length === 0) {
+      console.log('No tasks to sync, returning early');
+      user.googleTasks.lastSyncAt = new Date();
+      await user.save();
+      return res.json({
+        success: true,
+        message: `Všetky úlohy sú aktuálne (${unchanged} nezmenených)`,
+        synced: 0,
+        updated: 0,
+        unchanged,
+        skipped,
+        errors: 0,
+        quotaExceeded: false,
+        quota: {
+          used: user.googleTasks.quotaUsedToday || 0,
+          limit: DAILY_QUOTA_LIMIT,
+          remaining: getRemainingQuota(user),
+          resetsAt: getNextQuotaReset()
+        }
+      });
+    }
 
     // Check if we have enough quota for all tasks
     const totalTasksToProcess = tasksToCreate.length + tasksToUpdate.length;
@@ -408,8 +450,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} tasks each`);
+    console.log('Starting batch processing loop...');
 
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      console.log(`\n--- Starting batch ${batchIndex + 1}/${batches.length} ---`);
       // Stop if quota exceeded
       if (quotaExceeded) {
         for (let i = batchIndex; i < batches.length; i++) {
@@ -533,8 +577,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     // Update last sync time
+    console.log('=== SYNC COMPLETE ===');
+    console.log(`Results: ${synced} new, ${updated} updated, ${unchanged} unchanged, ${skipped} skipped, ${errors} errors`);
     user.googleTasks.lastSyncAt = new Date();
     await user.save();
+    console.log('User saved successfully');
 
     let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
@@ -558,7 +605,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('=== SYNC ERROR ===');
     console.error('Error syncing to Google Tasks:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
   }
 });
