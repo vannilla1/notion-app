@@ -36,7 +36,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     connected: false,
     connectedAt: null,
     loading: false,
-    syncing: false
+    syncing: false,
+    pendingTasks: null,
+    quota: null
   });
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
@@ -333,7 +335,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         connected: response.data.connected,
         connectedAt: response.data.connectedAt,
         loading: false,
-        syncing: false
+        syncing: false,
+        pendingTasks: response.data.pendingTasks || null,
+        quota: response.data.quota || null
       });
     } catch (error) {
       console.error('Error fetching Google Tasks status:', error);
@@ -910,6 +914,42 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         Pripojený od: {new Date(googleTasks.connectedAt).toLocaleDateString('sk-SK')}
                       </p>
                     )}
+
+                    {/* Pending tasks info */}
+                    {googleTasks.pendingTasks && (
+                      <div className="sync-status-info" style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        backgroundColor: googleTasks.pendingTasks.pending > 0 ? '#FEF3C7' : '#D1FAE5',
+                        borderRadius: '8px',
+                        fontSize: '14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Synchronizované:</span>
+                          <strong>{googleTasks.pendingTasks.synced} / {googleTasks.pendingTasks.total}</strong>
+                        </div>
+                        {googleTasks.pendingTasks.pending > 0 && (
+                          <div style={{ color: '#B45309', fontWeight: '500' }}>
+                            ⏳ Čaká na synchronizáciu: {googleTasks.pendingTasks.pending} úloh
+                          </div>
+                        )}
+                        {googleTasks.pendingTasks.pending === 0 && (
+                          <div style={{ color: '#059669', fontWeight: '500' }}>
+                            ✅ Všetky úlohy sú synchronizované
+                          </div>
+                        )}
+                        {googleTasks.quota && googleTasks.quota.remaining < 1000 && (
+                          <div style={{ marginTop: '8px', color: '#DC2626', fontSize: '12px' }}>
+                            ⚠️ Zostávajúca kvóta: {googleTasks.quota.remaining.toLocaleString()} volaní
+                            <br />
+                            <span style={{ color: '#6B7280' }}>
+                              Reset: {new Date(googleTasks.quota.resetsAt).toLocaleString('sk-SK')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="calendar-actions" style={{ marginTop: '12px' }}>
                       <button
                         className="btn btn-primary"

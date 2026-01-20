@@ -187,7 +187,7 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-// Get connection status with quota info
+// Get connection status with quota info and pending tasks count
 router.get('/status', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -203,10 +203,68 @@ router.get('/status', authenticateToken, async (req, res) => {
     const remainingQuota = getRemainingQuota(user);
     const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
 
+    // Count pending tasks (tasks with due date that are not yet synced)
+    let pendingCount = 0;
+    let totalTasksWithDueDate = 0;
+    let syncedCount = 0;
+
+    if (user.googleTasks?.enabled) {
+      const globalTasks = await Task.find({});
+      const contacts = await Contact.find({});
+
+      // Count global tasks with due dates
+      for (const task of globalTasks) {
+        if (task.dueDate && !task.completed) {
+          totalTasksWithDueDate++;
+          const taskId = task._id.toString();
+          const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
+          if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+            syncedCount++;
+          }
+        }
+        // Count subtasks
+        if (task.subtasks) {
+          countSubtasksPending(task.subtasks, user, (total, synced) => {
+            totalTasksWithDueDate += total;
+            syncedCount += synced;
+          });
+        }
+      }
+
+      // Count contact tasks with due dates
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          for (const task of contact.tasks) {
+            if (task.dueDate && !task.completed) {
+              totalTasksWithDueDate++;
+              const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
+              if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+                syncedCount++;
+              }
+            }
+            // Count subtasks
+            if (task.subtasks) {
+              countSubtasksPending(task.subtasks, user, (total, synced) => {
+                totalTasksWithDueDate += total;
+                syncedCount += synced;
+              });
+            }
+          }
+        }
+      }
+
+      pendingCount = totalTasksWithDueDate - syncedCount;
+    }
+
     res.json({
       connected: user.googleTasks?.enabled || false,
       connectedAt: user.googleTasks?.connectedAt || null,
       lastSyncAt: user.googleTasks?.lastSyncAt || null,
+      pendingTasks: {
+        total: totalTasksWithDueDate,
+        synced: syncedCount,
+        pending: pendingCount
+      },
       quota: {
         used: user.googleTasks?.quotaUsedToday || 0,
         limit: DAILY_QUOTA_LIMIT,
@@ -220,6 +278,30 @@ router.get('/status', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
   }
 });
+
+// Helper function to count subtasks pending sync
+function countSubtasksPending(subtasks, user, callback) {
+  let total = 0;
+  let synced = 0;
+  if (!subtasks) return callback(total, synced);
+
+  for (const subtask of subtasks) {
+    if (subtask.dueDate && !subtask.completed) {
+      total++;
+      const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(subtask.id);
+      if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+        synced++;
+      }
+    }
+    if (subtask.subtasks) {
+      countSubtasksPending(subtask.subtasks, user, (subTotal, subSynced) => {
+        total += subTotal;
+        synced += subSynced;
+      });
+    }
+  }
+  callback(total, synced);
+}
 
 // Helper to get next quota reset time
 function getNextQuotaReset() {
