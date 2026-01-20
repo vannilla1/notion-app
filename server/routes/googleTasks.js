@@ -295,8 +295,39 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     console.log('Getting tasks client...');
+    console.log('Task list ID:', user.googleTasks.taskListId);
+
+    // Verify task list ID exists
+    if (!user.googleTasks.taskListId) {
+      console.log('ERROR: No task list ID configured!');
+      return res.status(400).json({ message: 'Google Tasks task list nie je nakonfigurovaný. Skúste sa odpojiť a znova pripojiť.' });
+    }
+
     const tasksApi = await getTasksClient(user);
     console.log('Tasks client obtained');
+
+    // Verify task list exists - if not, recreate it
+    try {
+      console.log('Verifying task list exists...');
+      await tasksApi.tasklists.get({ tasklist: user.googleTasks.taskListId });
+      console.log('Task list verified');
+    } catch (listError) {
+      console.log('Task list not found, creating new one...', listError.message);
+      // Task list doesn't exist, create a new one
+      try {
+        const newList = await tasksApi.tasklists.insert({
+          resource: { title: 'Perun CRM' }
+        });
+        user.googleTasks.taskListId = newList.data.id;
+        user.googleTasks.syncedTaskIds = new Map(); // Reset synced tasks
+        user.googleTasks.syncedTaskHashes = new Map();
+        await user.save();
+        console.log('Created new task list:', newList.data.id);
+      } catch (createError) {
+        console.error('Failed to create task list:', createError.message);
+        return res.status(500).json({ message: 'Nepodarilo sa vytvoriť task list v Google Tasks' });
+      }
+    }
 
     // Get all tasks with due dates
     console.log('Fetching tasks from database...');
@@ -487,6 +518,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
             if (isUpdate) {
               // Update existing task
+              console.log(`Updating task ${task.id} -> Google ${task.googleTaskId}`);
               await tasksApi.tasks.update({
                 tasklist: user.googleTasks.taskListId,
                 task: task.googleTaskId,
@@ -495,14 +527,17 @@ router.post('/sync', authenticateToken, async (req, res) => {
               return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
             } else {
               // Create new task
+              console.log(`Creating task ${task.id}: "${task.title.substring(0, 30)}..."`);
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,
                 resource: taskData
               });
+              console.log(`Created Google task: ${newTask.data.id}`);
               return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
             }
           } catch (error) {
             lastError = error;
+            console.log(`Error for task ${task.id}: code=${error.code}, message=${error.message}`);
 
             // Check for quota exceeded - don't retry
             if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('Rate Limit'))) {
