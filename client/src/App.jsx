@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
 import AdminPanel from './pages/AdminPanel';
+import NotificationToast from './components/NotificationToast';
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
@@ -23,28 +24,31 @@ function App() {
   }
 
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/" /> : <Login />}
-      />
-      <Route
-        path="/"
-        element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
-      />
-      <Route
-        path="/crm"
-        element={isAuthenticated ? <CRM /> : <Navigate to="/login" />}
-      />
-      <Route
-        path="/tasks"
-        element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
-      />
-      <Route
-        path="/admin"
-        element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
-      />
-    </Routes>
+    <>
+      {isAuthenticated && <NotificationToast />}
+      <Routes>
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate to="/" /> : <Login />}
+        />
+        <Route
+          path="/"
+          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/crm"
+          element={isAuthenticated ? <CRM /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/tasks"
+          element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/admin"
+          element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
+        />
+      </Routes>
+    </>
   );
 }
 

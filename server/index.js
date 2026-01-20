@@ -14,6 +14,8 @@ const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
 const googleCalendarRoutes = require('./routes/googleCalendar');
 const googleTasksRoutes = require('./routes/googleTasks');
+const notificationRoutes = require('./routes/notifications');
+const notificationService = require('./services/notificationService');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const logger = require('./utils/logger');
@@ -73,6 +75,10 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/google-calendar', googleCalendarRoutes);
 app.use('/api/google-tasks', googleTasksRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// Initialize notification service with Socket.IO
+notificationService.initialize(io);
 
 // Sentry error handler (must be before other error handlers)
 app.use(sentry.errorHandler);

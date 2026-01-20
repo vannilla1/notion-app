@@ -3,6 +3,7 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const Contact = require('../models/Contact');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -159,6 +160,9 @@ router.post('/', authenticateToken, async (req, res) => {
     const contactData = contactToPlainObject(contact);
     io.emit('contact-created', contactData);
 
+    // Send notification to all users except creator
+    notificationService.notifyContactChange('contact.created', contact, req.user);
+
     res.status(201).json(contactData);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -194,6 +198,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const contactData = contactToPlainObject(contact);
     io.emit('contact-updated', contactData);
 
+    // Send notification to all users except updater
+    notificationService.notifyContactChange('contact.updated', contact, req.user);
+
     res.json(contactData);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -219,10 +226,16 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       });
     }
 
+    // Store contact data for notification before deletion
+    const contactData = { _id: contact._id, name: contact.name };
+
     await Contact.findByIdAndDelete(req.params.id);
 
     const io = req.app.get('io');
     io.emit('contact-deleted', { id: req.params.id });
+
+    // Send notification to all users except deleter
+    notificationService.notifyContactChange('contact.deleted', contactData, req.user);
 
     res.json({ message: 'Contact deleted' });
   } catch (error) {

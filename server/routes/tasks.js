@@ -6,6 +6,7 @@ const Contact = require('../models/Contact');
 const User = require('../models/User');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
+const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -736,6 +737,14 @@ router.post('/', authenticateToken, async (req, res) => {
       // Auto-sync to Google Calendar
       autoSyncToGoogle(taskObj, 'create');
 
+      // Send notification about new task
+      notificationService.notifyTaskChange('task.created', taskObj, req.user);
+
+      // Notify assigned users
+      if (assignedTo && assignedTo.length > 0) {
+        notificationService.notifyTaskAssignment(taskObj, assignedTo, req.user);
+      }
+
       return res.status(201).json(taskObj);
     }
 
@@ -785,6 +794,14 @@ router.post('/', authenticateToken, async (req, res) => {
       io.emit('task-created', task);
       // Auto-sync to Google Calendar
       autoSyncToGoogle(task, 'create');
+
+      // Send notification about new task
+      notificationService.notifyTaskChange('task.created', task, req.user);
+
+      // Notify assigned users
+      if (task.assignedTo && task.assignedTo.length > 0) {
+        notificationService.notifyTaskAssignment(task, task.assignedTo, req.user);
+      }
     }
 
     // Return first task for compatibility (or all tasks info)
@@ -882,6 +899,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
               );
             }
 
+            // Send notification about task update
+            const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
+            notificationService.notifyTaskChange(taskType, taskData, req.user);
+
             return res.json(taskData);
           }
         }
@@ -963,6 +984,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
         );
       }
 
+      // Send notification about task update
+      const prevCompleted = task.completed;
+      const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
+      notificationService.notifyTaskChange(taskType, taskData, req.user);
+
       return res.json(taskData);
     }
 
@@ -1010,6 +1036,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
             );
           }
 
+          // Send notification about task update
+          const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
+          notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user);
+
           return res.json(taskData);
         }
       }
@@ -1034,6 +1064,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
           if (taskIndex !== -1) {
+            const deletedTask = contact.tasks[taskIndex];
             contact.tasks.splice(taskIndex, 1);
             contact.markModified('tasks');
             await contact.save();
@@ -1043,6 +1074,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
             // Auto-delete from Google Calendar
             autoDeleteFromGoogle(req.params.id);
+
+            // Send notification about deleted task
+            notificationService.notifyTaskChange('task.deleted', deletedTask, req.user);
 
             return res.json({ message: 'Task deleted' });
           }
@@ -1059,6 +1093,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       // Auto-delete from Google Calendar
       autoDeleteFromGoogle(req.params.id);
 
+      // Send notification about deleted task
+      notificationService.notifyTaskChange('task.deleted', task, req.user);
+
       return res.json({ message: 'Task deleted' });
     }
 
@@ -1068,6 +1105,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
         if (taskIndex !== -1) {
+          const deletedTask = contact.tasks[taskIndex];
           contact.tasks.splice(taskIndex, 1);
           contact.markModified('tasks');
           await contact.save();
@@ -1077,6 +1115,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
           // Auto-delete from Google Calendar
           autoDeleteFromGoogle(req.params.id);
+
+          // Send notification about deleted task
+          notificationService.notifyTaskChange('task.deleted', deletedTask, req.user);
 
           return res.json({ message: 'Task deleted' });
         }
@@ -1321,6 +1362,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
                 }, 'create');
               }
 
+              // Send notification about new subtask
+              notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
+
               return res.status(201).json(subtask);
             }
           }
@@ -1351,6 +1395,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
             contactName: null
           }, 'create');
         }
+
+        // Send notification about new subtask
+        notificationService.notifySubtaskChange('subtask.created', subtask, task, req.user);
 
         return res.status(201).json(subtask);
       }
@@ -1388,6 +1435,9 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
                 contactName: contact.name
               }, 'create');
             }
+
+            // Send notification about new subtask
+            notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
 
             return res.status(201).json(subtask);
           }
@@ -1461,6 +1511,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
                 contactName: contact.name
               }, 'update');
 
+              // Send notification about subtask update
+              const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
+              notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user);
+
               return res.json(updated);
             }
           }
@@ -1488,6 +1542,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           priority: updated.priority,
           contactName: null
         }, 'update');
+
+        // Send notification about subtask update
+        const globalSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
+        notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user);
 
         return res.json(updated);
       }
@@ -1521,6 +1579,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               priority: updated.priority,
               contactName: contact.name
             }, 'update');
+
+            // Send notification about subtask update
+            const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
+            notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user);
 
             return res.json(updated);
           }
