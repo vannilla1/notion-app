@@ -100,9 +100,13 @@ const stripFileData = (contact) => {
 // Get all contacts (shared workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const contacts = await Contact.find({}).sort({ name: 1 }).lean();
-    // Add id field and strip file data from each contact
-    const contactsWithId = contacts.map(stripFileData);
+    // Exclude files.data field from query - it contains large Base64 data
+    const contacts = await Contact.find({}, { 'files.data': 0 }).sort({ name: 1 }).lean();
+    // Add id field to each contact
+    const contactsWithId = contacts.map(contact => ({
+      ...contact,
+      id: contact._id.toString()
+    }));
     res.json(contactsWithId);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -112,11 +116,12 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get single contact
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id).lean();
+    // Exclude files.data field - it contains large Base64 data
+    const contact = await Contact.findById(req.params.id, { 'files.data': 0 }).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
-    res.json(stripFileData(contact));
+    res.json({ ...contact, id: contact._id.toString() });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }

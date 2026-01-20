@@ -77,6 +77,14 @@ const contactSchema = new mongoose.Schema({
   }
 });
 
+// Database indexes for better query performance
+contactSchema.index({ userId: 1 });
+contactSchema.index({ name: 1 });
+contactSchema.index({ status: 1 });
+contactSchema.index({ email: 1 });
+contactSchema.index({ 'tasks.dueDate': 1 });
+contactSchema.index({ 'tasks.id': 1 });
+
 // Pre-save middleware to ensure all tasks and subtasks have IDs
 contactSchema.pre('save', function() {
   const generateIdsRecursive = (subtasks) => {

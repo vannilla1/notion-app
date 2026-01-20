@@ -90,8 +90,12 @@ router.get('/', authenticateToken, async (req, res) => {
       $and: [
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
-    });
-    const contacts = await Contact.find({});
+    }).lean();
+    // Only fetch contacts with tasks, exclude files.data (large Base64)
+    const contacts = await Contact.find(
+      { tasks: { $exists: true, $ne: [] } },
+      { 'files.data': 0 }
+    ).lean();
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
@@ -99,7 +103,7 @@ router.get('/', authenticateToken, async (req, res) => {
     contacts.forEach(c => (c.tasks || []).forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id))));
 
     // Fetch all assigned users at once
-    const assignedUsers = await User.find({ _id: { $in: Array.from(allAssignedIds) } }, 'username color avatar');
+    const assignedUsers = await User.find({ _id: { $in: Array.from(allAssignedIds) } }, 'username color avatar').lean();
     const usersMap = {};
     assignedUsers.forEach(u => {
       usersMap[u._id.toString()] = {
@@ -112,11 +116,11 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Enrich global tasks (these should have no contacts)
     const enrichedGlobalTasks = globalTasks.map(task => {
-      const taskObj = task.toObject();
-      taskObj.id = taskObj._id.toString();
+      const taskId = task._id.toString();
       const assignedUsersList = (task.assignedTo || []).map(id => usersMap[id.toString()]).filter(Boolean);
       return {
-        ...taskObj,
+        ...task,
+        id: taskId,
         contactIds: [],
         contactNames: [],
         contactName: null,
@@ -177,8 +181,12 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
       exportedTaskIds = [];
     }
 
-    const contacts = await Contact.find({});
-    const globalTasks = await Task.find({});
+    // Only fetch contacts with tasks, exclude files.data
+    const contacts = await Contact.find(
+      { tasks: { $exists: true, $ne: [] } },
+      { name: 1, tasks: 1 }
+    ).lean();
+    const globalTasks = await Task.find({}).lean();
     const events = [];
     const newExportedIds = [];
 
@@ -434,9 +442,15 @@ router.get('/calendar/feed/:token', async (req, res) => {
       return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
     }
 
-    // Get all tasks for this user
-    const globalTasks = await Task.find({});
-    const contacts = await Contact.find({});
+    // Get all tasks - only fetch necessary fields, exclude files
+    const globalTasks = await Task.find(
+      { dueDate: { $exists: true, $ne: null } },
+      { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
+    ).lean();
+    const contacts = await Contact.find(
+      { 'tasks.dueDate': { $exists: true } },
+      { name: 1, tasks: 1 }
+    ).lean();
 
     const events = [];
 
@@ -620,24 +634,25 @@ router.get('/calendar/feed/:token', async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     // First check global tasks
-    const task = await Task.findById(req.params.id);
+    const task = await Task.findById(req.params.id).lean();
     if (task) {
-      return res.json(taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+      return res.json({ ...task, source: 'global', id: task._id.toString() });
     }
 
-    // Check tasks in contacts
-    const contacts = await Contact.find({});
-    for (const contact of contacts) {
-      if (contact.tasks) {
-        const foundTask = contact.tasks.find(t => t.id === req.params.id);
-        if (foundTask) {
-          return res.json(taskToPlainObject(foundTask, {
-            contactId: contact._id.toString(),
-            contactName: contact.name,
-            source: 'contact'
-          }));
-        }
-      }
+    // Check tasks in contacts using MongoDB query (much faster than loading all contacts)
+    const contact = await Contact.findOne(
+      { 'tasks.id': req.params.id },
+      { name: 1, 'tasks.$': 1 }
+    ).lean();
+
+    if (contact && contact.tasks && contact.tasks.length > 0) {
+      const foundTask = contact.tasks[0];
+      return res.json({
+        ...foundTask,
+        contactId: contact._id.toString(),
+        contactName: contact.name,
+        source: 'contact'
+      });
     }
 
     return res.status(404).json({ message: 'Task not found' });

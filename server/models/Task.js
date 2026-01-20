@@ -70,6 +70,13 @@ const taskSchema = new mongoose.Schema({
   }
 });
 
+// Database indexes for better query performance
+taskSchema.index({ userId: 1 });
+taskSchema.index({ completed: 1 });
+taskSchema.index({ dueDate: 1 });
+taskSchema.index({ priority: 1 });
+taskSchema.index({ contactIds: 1 });
+
 // Pre-save middleware to ensure all subtasks have IDs
 taskSchema.pre('save', function() {
   const generateIdsRecursive = (subtasks) => {
