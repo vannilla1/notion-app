@@ -24,8 +24,8 @@ const SCOPES = ['https://www.googleapis.com/auth/tasks'];
 // Helper function for delays (used for rate limiting)
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Daily quota limit (conservative estimate - actual limit is ~50,000)
-const DAILY_QUOTA_LIMIT = 40000;
+// Daily quota limit - Google Tasks API allows 50,000 queries per day
+const DAILY_QUOTA_LIMIT = 50000;
 
 // Create a simple hash of task data to detect changes
 const createTaskHash = (task) => {
