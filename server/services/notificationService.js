@@ -201,6 +201,8 @@ const getNotificationTitle = (type, actorName, relatedName) => {
       return `Podúloha dokončená: ${related || 'bez názvu'}`;
     case 'subtask.deleted':
       return `Podúloha vymazaná: ${related || 'bez názvu'}`;
+    case 'subtask.assigned':
+      return `Priradená podúloha: ${related || 'bez názvu'}`;
     default:
       return 'Nová notifikácia';
   }
@@ -257,6 +259,10 @@ const getNotificationMessage = (type, actorName, data = {}) => {
       return taskTitle
         ? `${actor} vymazal podúlohu z úlohy "${taskTitle}"`
         : `${actor} vymazal podúlohu`;
+    case 'subtask.assigned':
+      return taskTitle
+        ? `${actor} vám priradil podúlohu v úlohe "${taskTitle}"`
+        : `${actor} vám priradil túto podúlohu`;
     default:
       return '';
   }
@@ -377,6 +383,41 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
 };
 
 /**
+ * Notify about subtask assignment
+ */
+const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, actor) => {
+  const actorName = actor?.username || 'Systém';
+  const title = getNotificationTitle('subtask.assigned', actorName, subtask.title);
+  const message = getNotificationMessage('subtask.assigned', actorName, { taskTitle: parentTask.title });
+
+  console.log('[Notification] Subtask assignment:', { title, message, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, assignedUserIds, actorName });
+
+  const notificationData = {
+    type: 'subtask.assigned',
+    title,
+    message,
+    actorId: actor?._id || actor?.id,
+    actorName,
+    relatedType: 'subtask',
+    relatedId: subtask.id,
+    relatedName: subtask.title,
+    data: {
+      subtaskId: subtask.id,
+      taskId: parentTask._id?.toString() || parentTask.id,
+      taskTitle: parentTask.title,
+      contactId: parentTask.contactId
+    }
+  };
+
+  // Filter out the actor from recipients
+  const recipients = assignedUserIds.filter(id =>
+    id && id.toString() !== (actor?._id || actor?.id)?.toString()
+  );
+
+  return await notifyUsers(recipients, notificationData);
+};
+
+/**
  * Helper to create subtask notification
  */
 const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
@@ -433,6 +474,7 @@ module.exports = {
   notifyTaskChange,
   notifyTaskAssignment,
   notifySubtaskChange,
+  notifySubtaskAssignment,
   getNotificationTitle,
   getNotificationMessage
 };

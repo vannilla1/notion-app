@@ -1365,6 +1365,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
               // Send notification about new subtask
               notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
 
+              // Send assignment notification if subtask is assigned to someone
+              if (assignedTo && assignedTo.length > 0) {
+                notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+              }
+
               return res.status(201).json(subtask);
             }
           }
@@ -1398,6 +1403,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 
         // Send notification about new subtask
         notificationService.notifySubtaskChange('subtask.created', subtask, task, req.user);
+
+        // Send assignment notification if subtask is assigned to someone
+        if (assignedTo && assignedTo.length > 0) {
+          notificationService.notifySubtaskAssignment(subtask, task, assignedTo, req.user);
+        }
 
         return res.status(201).json(subtask);
       }
@@ -1438,6 +1448,11 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 
             // Send notification about new subtask
             notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
+
+            // Send assignment notification if subtask is assigned to someone
+            if (assignedTo && assignedTo.length > 0) {
+              notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+            }
 
             return res.status(201).json(subtask);
           }
