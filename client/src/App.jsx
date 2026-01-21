@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
@@ -6,9 +7,19 @@ import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
 import AdminPanel from './pages/AdminPanel';
 import NotificationToast from './components/NotificationToast';
+import { initializePush } from './services/pushNotifications';
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
+
+  // Initialize push notifications when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      initializePush().catch(err => {
+        console.log('Push notifications not initialized:', err.message);
+      });
+    }
+  }, [isAuthenticated]);
 
   if (loading) {
     return (

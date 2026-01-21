@@ -18,7 +18,9 @@
     "@vitejs/plugin-react": "^4.2.1",
     "jsdom": "^27.4.0",
     "vite": "^5.0.4",
-    "vitest": "^4.0.17"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.0.17",
+    "workbox-window": "^7.4.0"
   },
   "scripts": {
     "dev": "vite",

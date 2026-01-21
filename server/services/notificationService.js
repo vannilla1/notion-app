@@ -1,5 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const PushSubscription = require('../models/PushSubscription');
+const webpush = require('web-push');
 
 /**
  * Notification Service
@@ -9,11 +11,68 @@ const User = require('../models/User');
 // Store io instance
 let io = null;
 
+// Configure web-push with VAPID keys (if available)
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
+
 /**
  * Initialize the notification service with Socket.IO instance
  */
 const initialize = (socketIo) => {
   io = socketIo;
+};
+
+/**
+ * Send push notification to a user
+ */
+const sendPushNotification = async (userId, payload) => {
+  try {
+    const subscriptions = await PushSubscription.find({ userId });
+
+    if (subscriptions.length === 0) {
+      return;
+    }
+
+    const pushPayload = JSON.stringify({
+      title: payload.title,
+      body: payload.body || payload.message,
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/icon-72x72.png',
+      data: {
+        url: payload.url || '/',
+        ...payload.data
+      },
+      tag: payload.tag || payload.type || 'default'
+    });
+
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification({
+          endpoint: sub.endpoint,
+          keys: sub.keys
+        }, pushPayload);
+
+        // Update last used timestamp
+        sub.lastUsed = new Date();
+        await sub.save();
+      } catch (error) {
+        console.error('Push notification failed for endpoint:', sub.endpoint, error.message);
+
+        // Remove invalid subscriptions (expired or unsubscribed)
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          await PushSubscription.deleteOne({ _id: sub._id });
+          console.log('Removed invalid push subscription:', sub.endpoint);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error sending push notifications:', error);
+  }
 };
 
 /**
@@ -63,6 +122,14 @@ const createNotification = async ({
         createdAt: notification.createdAt
       });
     }
+
+    // Send push notification (for background/closed app)
+    sendPushNotification(userId, {
+      title: notification.title,
+      body: notification.message,
+      type: notification.type,
+      data: notification.data
+    });
 
     return notification;
   } catch (error) {

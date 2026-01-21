@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
+import PushNotificationToggle from './PushNotificationToggle';
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
@@ -828,6 +829,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
+              {/* Push Notifications */}
+              <div className="calendar-section push-notifications-section">
+                <h3>🔔 Push notifikácie</h3>
+                <p className="section-description">
+                  Dostávajte notifikácie aj keď máte aplikáciu zatvorenú.
+                </p>
+                <PushNotificationToggle />
+              </div>
+
               {/* Google Calendar - Okamžitá synchronizácia */}
               <div className="calendar-section google-calendar-section">
                 <h3>🚀 Google Calendar (Okamžitá synchronizácia)</h3>

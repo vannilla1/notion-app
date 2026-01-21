@@ -15,6 +15,7 @@ const taskRoutes = require('./routes/tasks');
 const googleCalendarRoutes = require('./routes/googleCalendar');
 const googleTasksRoutes = require('./routes/googleTasks');
 const notificationRoutes = require('./routes/notifications');
+const pushRoutes = require('./routes/push');
 const notificationService = require('./services/notificationService');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
@@ -76,6 +77,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/google-calendar', googleCalendarRoutes);
 app.use('/api/google-tasks', googleTasksRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/push', pushRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
