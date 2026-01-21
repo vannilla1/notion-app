@@ -129,23 +129,26 @@ router.delete('/', authenticateToken, async (req, res) => {
 router.post('/test', authenticateToken, async (req, res) => {
   try {
     const io = req.app.get('io');
+    const userId = req.user.id.toString();
 
     const notification = new Notification({
-      userId: req.user.id,
+      userId: userId,
       type: 'test',
       title: 'Testovacia notifikácia',
       message: 'Toto je test notifikačného systému',
-      actorId: req.user.id,
+      actorId: userId,
       actorName: req.user.username,
       relatedType: 'test',
       data: { test: true }
     });
 
     await notification.save();
+    console.log(`Test notification saved for user ${userId}`);
 
     // Send real-time notification via Socket.IO
     if (io) {
-      io.to(`user-${req.user.id}`).emit('notification', {
+      const roomName = `user-${userId}`;
+      io.to(roomName).emit('notification', {
         id: notification._id.toString(),
         type: notification.type,
         title: notification.title,
@@ -156,15 +159,15 @@ router.post('/test', authenticateToken, async (req, res) => {
         read: notification.read,
         createdAt: notification.createdAt
       });
-      console.log(`Test notification sent to user-${req.user.id}`);
+      console.log(`Test notification emitted to room: ${roomName}`);
     } else {
       console.log('IO not available for test notification');
     }
 
-    res.json({ success: true, message: 'Test notifikácia odoslaná' });
+    res.json({ success: true, message: 'Test notifikácia odoslaná', notificationId: notification._id.toString() });
   } catch (error) {
-    console.error('Error sending test notification:', error);
-    res.status(500).json({ message: 'Chyba pri odosielaní testovacej notifikácie' });
+    console.error('Error sending test notification:', error.message, error.stack);
+    res.status(500).json({ message: 'Chyba pri odosielaní testovacej notifikácie', error: error.message });
   }
 });
 
