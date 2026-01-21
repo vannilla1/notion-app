@@ -1,4 +1,4 @@
-import api from '../api/axios';
+import api from '../api/api';
 
 const PUSH_SW_PATH = '/sw-push.js';
 
