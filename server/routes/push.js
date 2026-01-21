@@ -4,15 +4,23 @@ const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
 const { authenticateToken } = require('../middleware/auth');
 
-// Configure web-push with VAPID keys
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+// Configure web-push with VAPID keys (if available)
+const vapidConfigured = process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY;
+if (vapidConfigured) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+} else {
+  console.warn('VAPID keys not configured - push notifications will not work');
+}
 
 // Get VAPID public key
 router.get('/vapid-public-key', (req, res) => {
+  if (!vapidConfigured) {
+    return res.status(503).json({ message: 'Push notifications not configured' });
+  }
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
 });
 
@@ -88,6 +96,10 @@ router.get('/subscriptions', authenticateToken, async (req, res) => {
 // Test push notification (for debugging)
 router.post('/test', authenticateToken, async (req, res) => {
   try {
+    if (!vapidConfigured) {
+      return res.status(503).json({ message: 'Push notifications not configured' });
+    }
+
     const userId = req.user.userId;
     const subscriptions = await PushSubscription.find({ userId });
 
