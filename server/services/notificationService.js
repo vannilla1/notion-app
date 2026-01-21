@@ -298,6 +298,8 @@ const notifyTaskChange = async (type, task, actor, additionalRecipients = []) =>
   const title = getNotificationTitle(type, actorName, task.title);
   const message = getNotificationMessage(type, actorName, { contactName: task.contactName });
 
+  console.log('[Notification] Task change:', { type, title, message, taskTitle: task.title, contactName: task.contactName, actorName });
+
   const notificationData = {
     type,
     title,
@@ -381,6 +383,8 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, subtask.title);
   const message = getNotificationMessage(type, actorName, { taskTitle: parentTask.title });
+
+  console.log('[Notification] Subtask change:', { type, title, message, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName });
 
   const notificationData = {
     type,
