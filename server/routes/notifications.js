@@ -125,4 +125,47 @@ router.delete('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Test endpoint - send a test notification to yourself
+router.post('/test', authenticateToken, async (req, res) => {
+  try {
+    const io = req.app.get('io');
+
+    const notification = new Notification({
+      userId: req.user.id,
+      type: 'test',
+      title: 'Testovacia notifikácia',
+      message: 'Toto je test notifikačného systému',
+      actorId: req.user.id,
+      actorName: req.user.username,
+      relatedType: 'test',
+      data: { test: true }
+    });
+
+    await notification.save();
+
+    // Send real-time notification via Socket.IO
+    if (io) {
+      io.to(`user-${req.user.id}`).emit('notification', {
+        id: notification._id.toString(),
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        actorName: notification.actorName,
+        relatedType: notification.relatedType,
+        data: notification.data,
+        read: notification.read,
+        createdAt: notification.createdAt
+      });
+      console.log(`Test notification sent to user-${req.user.id}`);
+    } else {
+      console.log('IO not available for test notification');
+    }
+
+    res.json({ success: true, message: 'Test notifikácia odoslaná' });
+  } catch (error) {
+    console.error('Error sending test notification:', error);
+    res.status(500).json({ message: 'Chyba pri odosielaní testovacej notifikácie' });
+  }
+});
+
 module.exports = router;
