@@ -133,12 +133,12 @@ router.post('/test', authenticateToken, async (req, res) => {
 
     const notification = new Notification({
       userId: userId,
-      type: 'test',
+      type: 'task.created',
       title: 'Testovacia notifikácia',
       message: 'Toto je test notifikačného systému',
       actorId: userId,
       actorName: req.user.username,
-      relatedType: 'test',
+      relatedType: 'task',
       data: { test: true }
     });
 
