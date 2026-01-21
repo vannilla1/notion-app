@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon --ignore data/ index.js"
+    "dev": "nodemon --ignore data/ index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@sentry/node": "^10.32.1",
@@ -23,6 +26,10 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "mongodb-memory-server": "^11.0.1",
+    "nodemon": "^3.0.2",
+    "supertest": "^7.2.2"
   }
 }

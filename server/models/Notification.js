@@ -69,8 +69,7 @@ const notificationSchema = new mongoose.Schema({
   // Auto-expire after 30 days
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    index: true
+    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
   }
 }, {
   timestamps: true
