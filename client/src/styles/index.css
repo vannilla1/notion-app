@@ -358,6 +358,12 @@ body {
   }
 }
 
+.login-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
 .login-title {
   font-size: 28px;
   font-weight: 700;

@@ -36,13 +36,26 @@ function Login() {
   return (
     <div className="login-container">
       <div className="login-card">
+        <div className="login-logo">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="48" height="48" rx="12" fill="url(#gradient)"/>
+            <path d="M14 16C14 14.8954 14.8954 14 16 14H32C33.1046 14 34 14.8954 34 16V32C34 33.1046 33.1046 34 32 34H16C14.8954 34 14 33.1046 14 32V16Z" fill="white" fillOpacity="0.9"/>
+            <path d="M18 20H30M18 24H26M18 28H22" stroke="#6366f1" strokeWidth="2" strokeLinecap="round"/>
+            <defs>
+              <linearGradient id="gradient" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+                <stop stopColor="#6366f1"/>
+                <stop offset="1" stopColor="#8b5cf6"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
         <h1 className="login-title">
-          {isRegister ? 'Vytvoriť účet' : 'Vitajte späť'}
+          {isRegister ? 'Vytvoriť účet' : 'Purple CRM'}
         </h1>
         <p className="login-subtitle">
           {isRegister
-            ? 'Zaregistrujte sa a začnite spolupracovať'
-            : 'Prihláste sa do svojho pracovného priestoru'}
+            ? 'Zaregistrujte sa a začnite spravovať kontakty a úlohy'
+            : 'Spravujte kontakty, úlohy a tímovú spoluprácu na jednom mieste'}
         </p>
 
         {error && <div className="error-message">{error}</div>}
