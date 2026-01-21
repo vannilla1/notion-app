@@ -132,6 +132,8 @@ const getNotificationTitle = (type, actorName, relatedName) => {
       return `${actor} upravil podúlohu${related ? ': ' + related : ''}`;
     case 'subtask.completed':
       return `${actor} dokončil podúlohu${related ? ': ' + related : ''}`;
+    case 'subtask.deleted':
+      return `${actor} vymazal podúlohu${related ? ': ' + related : ''}`;
     default:
       return 'Nová notifikácia';
   }

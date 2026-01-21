@@ -1606,37 +1606,29 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
     const findAndDeleteSubtask = (task) => {
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);
       if (found) {
-        const deletedSubtask = { ...found.subtask };
+        const deletedSubtask = JSON.parse(JSON.stringify(found.subtask));
         found.parent.splice(found.index, 1);
         return deletedSubtask;
       }
       return null;
     };
 
-    // Helper to send notifications for deleted subtask
-    const sendDeleteNotifications = async (deletedSubtask, taskTitle, taskId, contactName = null) => {
-      const allUsers = await User.find({}, '_id');
-      const currentUserId = req.user.userId;
-
-      for (const user of allUsers) {
-        if (user._id.toString() !== currentUserId) {
-          const notification = new Notification({
-            userId: user._id,
-            type: 'subtask.deleted',
-            title: 'Podúloha vymazaná',
-            message: `${req.user.username} vymazal/a podúlohu "${deletedSubtask.title}" z úlohy "${taskTitle}"${contactName ? ` (${contactName})` : ''}`,
-            data: {
-              taskId: taskId,
-              subtaskId: deletedSubtask.id,
-              subtaskTitle: deletedSubtask.title,
-              taskTitle: taskTitle,
-              contactName: contactName,
-              deletedBy: req.user.username
-            }
-          });
-          await notification.save();
-          io.to(`user:${user._id.toString()}`).emit('notification', notification.toObject());
+    // Helper to collect all subtasks recursively (for cascade notifications)
+    const collectAllSubtasks = (subtask) => {
+      const allSubtasks = [subtask];
+      if (subtask.subtasks && subtask.subtasks.length > 0) {
+        for (const child of subtask.subtasks) {
+          allSubtasks.push(...collectAllSubtasks(child));
         }
+      }
+      return allSubtasks;
+    };
+
+    // Helper to send notifications for deleted subtask and all its children
+    const sendDeleteNotifications = async (deletedSubtask, parentTask) => {
+      const allSubtasksToNotify = collectAllSubtasks(deletedSubtask);
+      for (const subtask of allSubtasksToNotify) {
+        await notificationService.notifySubtaskChange('subtask.deleted', subtask, parentTask, req.user);
       }
     };
 
@@ -1659,8 +1651,15 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
                 source: 'contact'
               }));
 
-              // Send notifications
-              await sendDeleteNotifications(deletedSubtask, contact.tasks[taskIndex].title, req.params.taskId, contact.name);
+              // Build parent task object with contact info
+              const parentTask = {
+                ...contact.tasks[taskIndex],
+                contactId: contact._id.toString(),
+                contactName: contact.name
+              };
+
+              // Send notifications for deleted subtask and all nested subtasks
+              await sendDeleteNotifications(deletedSubtask, parentTask);
 
               // Auto-delete subtask from Google
               autoDeleteFromGoogle(req.params.subtaskId);
@@ -1682,8 +1681,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
 
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
-        // Send notifications
-        await sendDeleteNotifications(deletedSubtask, task.title, task._id.toString());
+        // Send notifications for deleted subtask and all nested subtasks
+        await sendDeleteNotifications(deletedSubtask, task);
 
         // Auto-delete subtask from Google
         autoDeleteFromGoogle(req.params.subtaskId);
@@ -1710,8 +1709,15 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               source: 'contact'
             }));
 
-            // Send notifications
-            await sendDeleteNotifications(deletedSubtask, contact.tasks[taskIndex].title, req.params.taskId, contact.name);
+            // Build parent task object with contact info
+            const parentTask = {
+              ...contact.tasks[taskIndex],
+              contactId: contact._id.toString(),
+              contactName: contact.name
+            };
+
+            // Send notifications for deleted subtask and all nested subtasks
+            await sendDeleteNotifications(deletedSubtask, parentTask);
 
             // Auto-delete subtask from Google
             autoDeleteFromGoogle(req.params.subtaskId);
