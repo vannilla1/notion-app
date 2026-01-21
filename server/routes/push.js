@@ -30,7 +30,12 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
     const { endpoint, keys } = req.body;
     const userId = req.user.userId;
 
+    console.log('[Push] Subscribe request from user:', userId);
+    console.log('[Push] Endpoint:', endpoint ? endpoint.substring(0, 80) + '...' : 'missing');
+    console.log('[Push] Keys present:', { p256dh: !!keys?.p256dh, auth: !!keys?.auth });
+
     if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
+      console.log('[Push] Invalid subscription data');
       return res.status(400).json({ message: 'Invalid subscription data' });
     }
 
@@ -39,6 +44,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
 
     if (subscription) {
       // Update existing subscription
+      console.log('[Push] Updating existing subscription');
       subscription.userId = userId;
       subscription.keys = keys;
       subscription.userAgent = req.headers['user-agent'] || '';
@@ -46,6 +52,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
       await subscription.save();
     } else {
       // Create new subscription
+      console.log('[Push] Creating new subscription');
       subscription = new PushSubscription({
         userId,
         endpoint,
@@ -55,9 +62,11 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
       await subscription.save();
     }
 
+    console.log('[Push] Subscription saved:', subscription._id);
     res.json({ message: 'Subscription saved', subscriptionId: subscription._id });
   } catch (error) {
-    console.error('Error saving push subscription:', error);
+    console.error('[Push] Error saving subscription:', error.message);
+    console.error('[Push] Full error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
