@@ -178,31 +178,87 @@ const getNotificationTitle = (type, actorName, relatedName) => {
 
   switch (type) {
     case 'contact.created':
-      return `${actor} vytvoril nový kontakt${related ? ': ' + related : ''}`;
+      return `Nový kontakt: ${related || 'bez názvu'}`;
     case 'contact.updated':
-      return `${actor} upravil kontakt${related ? ': ' + related : ''}`;
+      return `Kontakt upravený: ${related || 'bez názvu'}`;
     case 'contact.deleted':
-      return `${actor} vymazal kontakt${related ? ': ' + related : ''}`;
+      return `Kontakt vymazaný: ${related || 'bez názvu'}`;
     case 'task.created':
-      return `${actor} vytvoril novú úlohu${related ? ': ' + related : ''}`;
+      return `Nová úloha: ${related || 'bez názvu'}`;
     case 'task.updated':
-      return `${actor} upravil úlohu${related ? ': ' + related : ''}`;
+      return `Úloha upravená: ${related || 'bez názvu'}`;
     case 'task.completed':
-      return `${actor} dokončil úlohu${related ? ': ' + related : ''}`;
+      return `Úloha dokončená: ${related || 'bez názvu'}`;
     case 'task.deleted':
-      return `${actor} vymazal úlohu${related ? ': ' + related : ''}`;
+      return `Úloha vymazaná: ${related || 'bez názvu'}`;
     case 'task.assigned':
-      return `${actor} vám priradil úlohu${related ? ': ' + related : ''}`;
+      return `Priradená úloha: ${related || 'bez názvu'}`;
     case 'subtask.created':
-      return `${actor} pridal podúlohu${related ? ': ' + related : ''}`;
+      return `Nová podúloha: ${related || 'bez názvu'}`;
     case 'subtask.updated':
-      return `${actor} upravil podúlohu${related ? ': ' + related : ''}`;
+      return `Podúloha upravená: ${related || 'bez názvu'}`;
     case 'subtask.completed':
-      return `${actor} dokončil podúlohu${related ? ': ' + related : ''}`;
+      return `Podúloha dokončená: ${related || 'bez názvu'}`;
     case 'subtask.deleted':
-      return `${actor} vymazal podúlohu${related ? ': ' + related : ''}`;
+      return `Podúloha vymazaná: ${related || 'bez názvu'}`;
     default:
       return 'Nová notifikácia';
+  }
+};
+
+/**
+ * Get notification message (description) based on type
+ */
+const getNotificationMessage = (type, actorName, data = {}) => {
+  const actor = actorName || 'Niekto';
+  const contactName = data.contactName || '';
+  const taskTitle = data.taskTitle || '';
+
+  switch (type) {
+    case 'contact.created':
+      return `${actor} vytvoril nový kontakt`;
+    case 'contact.updated':
+      return `${actor} upravil tento kontakt`;
+    case 'contact.deleted':
+      return `${actor} vymazal tento kontakt`;
+    case 'task.created':
+      return contactName
+        ? `${actor} vytvoril úlohu pre kontakt "${contactName}"`
+        : `${actor} vytvoril novú úlohu`;
+    case 'task.updated':
+      return contactName
+        ? `${actor} upravil úlohu v kontakte "${contactName}"`
+        : `${actor} upravil túto úlohu`;
+    case 'task.completed':
+      return contactName
+        ? `${actor} dokončil úlohu v kontakte "${contactName}"`
+        : `${actor} dokončil túto úlohu`;
+    case 'task.deleted':
+      return contactName
+        ? `${actor} vymazal úlohu z kontaktu "${contactName}"`
+        : `${actor} vymazal túto úlohu`;
+    case 'task.assigned':
+      return contactName
+        ? `${actor} vám priradil úlohu v kontakte "${contactName}"`
+        : `${actor} vám priradil túto úlohu`;
+    case 'subtask.created':
+      return taskTitle
+        ? `${actor} pridal podúlohu k úlohe "${taskTitle}"`
+        : `${actor} pridal novú podúlohu`;
+    case 'subtask.updated':
+      return taskTitle
+        ? `${actor} upravil podúlohu v úlohe "${taskTitle}"`
+        : `${actor} upravil podúlohu`;
+    case 'subtask.completed':
+      return taskTitle
+        ? `${actor} dokončil podúlohu v úlohe "${taskTitle}"`
+        : `${actor} dokončil podúlohu`;
+    case 'subtask.deleted':
+      return taskTitle
+        ? `${actor} vymazal podúlohu z úlohy "${taskTitle}"`
+        : `${actor} vymazal podúlohu`;
+    default:
+      return '';
   }
 };
 
@@ -212,10 +268,12 @@ const getNotificationTitle = (type, actorName, relatedName) => {
 const notifyContactChange = async (type, contact, actor, excludeActorId = true) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, contact.name);
+  const message = getNotificationMessage(type, actorName, {});
 
   const notificationData = {
     type,
     title,
+    message,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'contact',
@@ -238,10 +296,12 @@ const notifyContactChange = async (type, contact, actor, excludeActorId = true) 
 const notifyTaskChange = async (type, task, actor, additionalRecipients = []) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, task.title);
+  const message = getNotificationMessage(type, actorName, { contactName: task.contactName });
 
   const notificationData = {
     type,
     title,
+    message,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'task',
@@ -288,10 +348,12 @@ const notifyTaskChange = async (type, task, actor, additionalRecipients = []) =>
 const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle('task.assigned', actorName, task.title);
+  const message = getNotificationMessage('task.assigned', actorName, { contactName: task.contactName });
 
   const notificationData = {
     type: 'task.assigned',
     title,
+    message,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'task',
@@ -318,10 +380,12 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
 const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, subtask.title);
+  const message = getNotificationMessage(type, actorName, { taskTitle: parentTask.title });
 
   const notificationData = {
     type,
     title,
+    message,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'subtask',
@@ -365,5 +429,6 @@ module.exports = {
   notifyTaskChange,
   notifyTaskAssignment,
   notifySubtaskChange,
-  getNotificationTitle
+  getNotificationTitle,
+  getNotificationMessage
 };
