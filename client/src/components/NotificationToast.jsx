@@ -2,13 +2,43 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 
+// Check if notifications are enabled in localStorage
+const areNotificationsEnabled = () => {
+  const setting = localStorage.getItem('notificationsEnabled');
+  // Default to true if not set
+  return setting === null ? true : setting === 'true';
+};
+
 function NotificationToast() {
   const [toasts, setToasts] = useState([]);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(areNotificationsEnabled());
   const { socket, isConnected } = useSocket();
   const navigate = useNavigate();
 
+  // Listen for changes to notification settings
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setNotificationsEnabled(areNotificationsEnabled());
+    };
+
+    // Listen for custom event from PushNotificationToggle
+    window.addEventListener('notificationSettingChanged', handleStorageChange);
+    // Also listen for storage changes from other tabs
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('notificationSettingChanged', handleStorageChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
   // Add a new toast
   const addToast = useCallback((notification) => {
+    // Check if notifications are enabled (read fresh value)
+    if (!areNotificationsEnabled()) {
+      return;
+    }
+
     const id = notification.id || Date.now().toString();
     setToasts(prev => {
       // Prevent duplicates

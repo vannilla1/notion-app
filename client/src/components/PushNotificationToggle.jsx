@@ -8,10 +8,25 @@ import {
   sendTestPush
 } from '../services/pushNotifications';
 
+// Check if notifications are enabled in localStorage
+const areNotificationsEnabled = () => {
+  const setting = localStorage.getItem('notificationsEnabled');
+  // Default to true if not set
+  return setting === null ? true : setting === 'true';
+};
+
+// Set notification enabled state
+const setNotificationsEnabled = (enabled) => {
+  localStorage.setItem('notificationsEnabled', enabled.toString());
+  // Dispatch custom event for NotificationToast to listen
+  window.dispatchEvent(new Event('notificationSettingChanged'));
+};
+
 const PushNotificationToggle = () => {
-  const [supported, setSupported] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
   const [permission, setPermission] = useState('default');
-  const [subscribed, setSubscribed] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabledState] = useState(areNotificationsEnabled());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [testSent, setTestSent] = useState(false);
@@ -23,13 +38,17 @@ const PushNotificationToggle = () => {
   const checkStatus = async () => {
     setLoading(true);
     try {
+      // Check in-app notification setting
+      setNotificationsEnabledState(areNotificationsEnabled());
+
+      // Check push notification support
       const isSupported = isPushSupported();
-      setSupported(isSupported);
+      setPushSupported(isSupported);
 
       if (isSupported) {
         setPermission(getPermissionStatus());
         const isSub = await isSubscribedToPush();
-        setSubscribed(isSub);
+        setPushSubscribed(isSub);
       }
     } catch (err) {
       console.error('Error checking push status:', err);
@@ -43,18 +62,35 @@ const PushNotificationToggle = () => {
     setError(null);
 
     try {
-      if (subscribed) {
-        await unsubscribeFromPush();
-        setSubscribed(false);
-      } else {
-        await subscribeToPush();
-        setSubscribed(true);
-        setPermission('granted');
+      const newEnabled = !notificationsEnabled;
+
+      // Toggle in-app notifications
+      setNotificationsEnabled(newEnabled);
+      setNotificationsEnabledState(newEnabled);
+
+      // Also toggle push notifications if supported
+      if (pushSupported && permission !== 'denied') {
+        if (newEnabled && !pushSubscribed) {
+          try {
+            await subscribeToPush();
+            setPushSubscribed(true);
+            setPermission('granted');
+          } catch (pushErr) {
+            // Push subscription failed but in-app notifications are still enabled
+            console.log('Push subscription failed:', pushErr.message);
+          }
+        } else if (!newEnabled && pushSubscribed) {
+          try {
+            await unsubscribeFromPush();
+            setPushSubscribed(false);
+          } catch (pushErr) {
+            console.log('Push unsubscription failed:', pushErr.message);
+          }
+        }
       }
     } catch (err) {
-      console.error('Error toggling push notifications:', err);
+      console.error('Error toggling notifications:', err);
       setError(err.message);
-      setPermission(getPermissionStatus());
     } finally {
       setLoading(false);
     }
@@ -74,45 +110,18 @@ const PushNotificationToggle = () => {
     }
   };
 
-  if (!supported) {
-    return (
-      <div className="push-notification-toggle">
-        <div className="push-status unsupported">
-          <span className="icon">&#x26A0;</span>
-          <span>Push notifikácie nie sú podporované na tomto zariadení</span>
-        </div>
-        <style>{styles}</style>
-      </div>
-    );
-  }
-
-  if (permission === 'denied') {
-    return (
-      <div className="push-notification-toggle">
-        <div className="push-status denied">
-          <span className="icon">&#x1F6AB;</span>
-          <div>
-            <strong>Push notifikácie sú zablokované</strong>
-            <p>Povoľte notifikácie v nastaveniach prehliadača</p>
-          </div>
-        </div>
-        <style>{styles}</style>
-      </div>
-    );
-  }
-
   return (
     <div className="push-notification-toggle">
       <div className="push-header">
         <div className="push-info">
-          <span className="icon">{subscribed ? '🔔' : '🔕'}</span>
+          <span className="icon">{notificationsEnabled ? '🔔' : '🔕'}</span>
           <div>
-            <strong>Push notifikácie</strong>
-            <p>{subscribed ? 'Aktívne' : 'Neaktívne'}</p>
+            <strong>Notifikácie</strong>
+            <p>{notificationsEnabled ? 'Aktívne' : 'Neaktívne'}</p>
           </div>
         </div>
         <button
-          className={`toggle-btn ${subscribed ? 'active' : ''}`}
+          className={`toggle-btn ${notificationsEnabled ? 'active' : ''}`}
           onClick={handleToggle}
           disabled={loading}
         >
@@ -120,13 +129,28 @@ const PushNotificationToggle = () => {
         </button>
       </div>
 
+      {/* Show push status info */}
+      {notificationsEnabled && (
+        <div className="push-status-info">
+          {!pushSupported ? (
+            <span className="status-note warning">⚠️ Push notifikácie nie sú podporované v tomto prehliadači</span>
+          ) : permission === 'denied' ? (
+            <span className="status-note warning">⚠️ Push notifikácie sú zablokované v prehliadači</span>
+          ) : pushSubscribed ? (
+            <span className="status-note success">✓ Push notifikácie aktívne (aj pre zatvorenú aplikáciu)</span>
+          ) : (
+            <span className="status-note">In-app notifikácie aktívne</span>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="push-error">
           {error}
         </div>
       )}
 
-      {subscribed && (
+      {notificationsEnabled && pushSubscribed && (
         <button
           className="test-btn"
           onClick={handleTestPush}
@@ -236,6 +260,25 @@ const styles = `
     margin: 4px 0 0 0;
     font-size: 12px;
     opacity: 0.8;
+  }
+
+  .push-status-info {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .status-note {
+    font-size: 12px;
+    color: #888;
+  }
+
+  .status-note.warning {
+    color: #ffa500;
+  }
+
+  .status-note.success {
+    color: #10b981;
   }
 
   .push-error {
