@@ -1602,14 +1602,42 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
     const io = req.app.get('io');
     const source = req.query.source;
 
-    // Helper to delete subtask recursively
-    const deleteSubtaskInTask = (task) => {
+    // Helper to find and delete subtask recursively, returning the deleted subtask info
+    const findAndDeleteSubtask = (task) => {
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);
       if (found) {
+        const deletedSubtask = { ...found.subtask };
         found.parent.splice(found.index, 1);
-        return true;
+        return deletedSubtask;
       }
-      return false;
+      return null;
+    };
+
+    // Helper to send notifications for deleted subtask
+    const sendDeleteNotifications = async (deletedSubtask, taskTitle, taskId, contactName = null) => {
+      const allUsers = await User.find({}, '_id');
+      const currentUserId = req.user.userId;
+
+      for (const user of allUsers) {
+        if (user._id.toString() !== currentUserId) {
+          const notification = new Notification({
+            userId: user._id,
+            type: 'subtask.deleted',
+            title: 'Podúloha vymazaná',
+            message: `${req.user.username} vymazal/a podúlohu "${deletedSubtask.title}" z úlohy "${taskTitle}"${contactName ? ` (${contactName})` : ''}`,
+            data: {
+              taskId: taskId,
+              subtaskId: deletedSubtask.id,
+              subtaskTitle: deletedSubtask.title,
+              taskTitle: taskTitle,
+              contactName: contactName,
+              deletedBy: req.user.username
+            }
+          });
+          await notification.save();
+          io.to(`user:${user._id.toString()}`).emit('notification', notification.toObject());
+        }
+      }
     };
 
     // If source is contact, look in contacts
@@ -1619,7 +1647,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
           if (taskIndex !== -1) {
-            if (deleteSubtaskInTask(contact.tasks[taskIndex])) {
+            const deletedSubtask = findAndDeleteSubtask(contact.tasks[taskIndex]);
+            if (deletedSubtask) {
               contact.markModified('tasks');
               await contact.save();
 
@@ -1629,6 +1658,9 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
                 contactName: contact.name,
                 source: 'contact'
               }));
+
+              // Send notifications
+              await sendDeleteNotifications(deletedSubtask, contact.tasks[taskIndex].title, req.params.taskId, contact.name);
 
               // Auto-delete subtask from Google
               autoDeleteFromGoogle(req.params.subtaskId);
@@ -1643,11 +1675,15 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
     // Try global tasks
     const task = await Task.findById(req.params.taskId);
     if (task) {
-      if (deleteSubtaskInTask(task)) {
+      const deletedSubtask = findAndDeleteSubtask(task);
+      if (deletedSubtask) {
         task.markModified('subtasks');
         await task.save();
 
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+
+        // Send notifications
+        await sendDeleteNotifications(deletedSubtask, task.title, task._id.toString());
 
         // Auto-delete subtask from Google
         autoDeleteFromGoogle(req.params.subtaskId);
@@ -1662,7 +1698,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
-          if (deleteSubtaskInTask(contact.tasks[taskIndex])) {
+          const deletedSubtask = findAndDeleteSubtask(contact.tasks[taskIndex]);
+          if (deletedSubtask) {
             contact.markModified('tasks');
             await contact.save();
 
@@ -1672,6 +1709,9 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               contactName: contact.name,
               source: 'contact'
             }));
+
+            // Send notifications
+            await sendDeleteNotifications(deletedSubtask, contact.tasks[taskIndex].title, req.params.taskId, contact.name);
 
             // Auto-delete subtask from Google
             autoDeleteFromGoogle(req.params.subtaskId);
