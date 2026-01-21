@@ -54,7 +54,7 @@ export const registerPushServiceWorker = async () => {
  * Get VAPID public key from server
  */
 export const getVapidPublicKey = async () => {
-  const response = await api.get('/push/vapid-public-key');
+  const response = await api.get('/api/push/vapid-public-key');
   return response.data.publicKey;
 };
 
@@ -111,7 +111,7 @@ export const subscribeToPush = async () => {
   });
 
   // Send subscription to server
-  const response = await api.post('/push/subscribe', subscription.toJSON());
+  const response = await api.post('/api/push/subscribe', subscription.toJSON());
 
   console.log('Push subscription saved:', response.data);
   return subscription;
@@ -132,7 +132,7 @@ export const unsubscribeFromPush = async () => {
   if (subscription) {
     // Notify server
     try {
-      await api.post('/push/unsubscribe', { endpoint: subscription.endpoint });
+      await api.post('/api/push/unsubscribe', { endpoint: subscription.endpoint });
     } catch (error) {
       console.error('Error notifying server about unsubscribe:', error);
     }
@@ -165,7 +165,7 @@ export const isSubscribedToPush = async () => {
  * Get subscription count from server
  */
 export const getSubscriptionCount = async () => {
-  const response = await api.get('/push/subscriptions');
+  const response = await api.get('/api/push/subscriptions');
   return response.data.count;
 };
 
@@ -173,7 +173,7 @@ export const getSubscriptionCount = async () => {
  * Send test push notification
  */
 export const sendTestPush = async () => {
-  const response = await api.post('/push/test');
+  const response = await api.post('/api/push/test');
   return response.data;
 };
 
