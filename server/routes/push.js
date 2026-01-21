@@ -28,7 +28,7 @@ router.get('/vapid-public-key', (req, res) => {
 router.post('/subscribe', authenticateToken, async (req, res) => {
   try {
     const { endpoint, keys } = req.body;
-    const userId = req.user.userId;
+    const userId = req.user.id;
 
     console.log('[Push] Subscribe request from user:', userId);
     console.log('[Push] Endpoint:', endpoint ? endpoint.substring(0, 80) + '...' : 'missing');
@@ -75,7 +75,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
 router.post('/unsubscribe', authenticateToken, async (req, res) => {
   try {
     const { endpoint } = req.body;
-    const userId = req.user.userId;
+    const userId = req.user.id;
 
     if (!endpoint) {
       return res.status(400).json({ message: 'Endpoint is required' });
@@ -93,7 +93,7 @@ router.post('/unsubscribe', authenticateToken, async (req, res) => {
 // Get user's subscriptions count
 router.get('/subscriptions', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     const count = await PushSubscription.countDocuments({ userId });
     res.json({ count });
   } catch (error) {
@@ -109,7 +109,7 @@ router.post('/test', authenticateToken, async (req, res) => {
       return res.status(503).json({ message: 'Push notifications not configured' });
     }
 
-    const userId = req.user.userId;
+    const userId = req.user.id;
     const subscriptions = await PushSubscription.find({ userId });
 
     if (subscriptions.length === 0) {
