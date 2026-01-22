@@ -106,15 +106,30 @@ router.get('/subscriptions', authenticateToken, async (req, res) => {
 router.post('/test', authenticateToken, async (req, res) => {
   try {
     if (!vapidConfigured) {
+      console.log('[Push Test] VAPID not configured');
       return res.status(503).json({ message: 'Push notifications not configured' });
     }
 
     const userId = req.user.id;
+    console.log('[Push Test] Testing for user:', userId);
+
     const subscriptions = await PushSubscription.find({ userId });
+    console.log('[Push Test] Found subscriptions:', subscriptions.length);
 
     if (subscriptions.length === 0) {
       return res.status(404).json({ message: 'No subscriptions found' });
     }
+
+    // Log subscription details
+    subscriptions.forEach((sub, i) => {
+      console.log(`[Push Test] Subscription ${i + 1}:`, {
+        endpoint: sub.endpoint.substring(0, 80) + '...',
+        hasP256dh: !!sub.keys?.p256dh,
+        hasAuth: !!sub.keys?.auth,
+        userAgent: sub.userAgent?.substring(0, 50) || 'unknown',
+        createdAt: sub.createdAt
+      });
+    });
 
     const payload = JSON.stringify({
       title: 'Test notifikácia',
@@ -122,32 +137,46 @@ router.post('/test', authenticateToken, async (req, res) => {
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
       data: {
-        url: '/'
+        url: '/',
+        type: 'test',
+        timestamp: Date.now()
       }
     });
+
+    console.log('[Push Test] Sending payload:', payload.substring(0, 100) + '...');
 
     const results = [];
     for (const sub of subscriptions) {
       try {
-        await webpush.sendNotification({
+        console.log('[Push Test] Sending to:', sub.endpoint.substring(0, 50) + '...');
+        const sendResult = await webpush.sendNotification({
           endpoint: sub.endpoint,
           keys: sub.keys
         }, payload);
-        results.push({ endpoint: sub.endpoint, success: true });
+        console.log('[Push Test] Success! Status:', sendResult.statusCode);
+        results.push({ endpoint: sub.endpoint.substring(0, 50), success: true });
       } catch (error) {
-        console.error('Push failed for endpoint:', sub.endpoint, error);
-        results.push({ endpoint: sub.endpoint, success: false, error: error.message });
+        console.error('[Push Test] Failed:', error.statusCode, error.message);
+        console.error('[Push Test] Full error:', JSON.stringify(error, null, 2));
+        results.push({
+          endpoint: sub.endpoint.substring(0, 50),
+          success: false,
+          error: error.message,
+          statusCode: error.statusCode
+        });
 
-        // Remove invalid subscriptions
+        // Remove invalid subscriptions (410 Gone or 404 Not Found)
         if (error.statusCode === 410 || error.statusCode === 404) {
+          console.log('[Push Test] Removing invalid subscription');
           await PushSubscription.deleteOne({ _id: sub._id });
         }
       }
     }
 
+    console.log('[Push Test] Results:', JSON.stringify(results));
     res.json({ message: 'Test notifications sent', results });
   } catch (error) {
-    console.error('Error sending test notification:', error);
+    console.error('[Push Test] Error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -1,4 +1,8 @@
 // Push notification service worker
+// Version: 2.0 - Deep linking support
+
+const SW_VERSION = '2.0';
+console.log('[SW] Push service worker loaded, version:', SW_VERSION);
 
 self.addEventListener('push', (event) => {
   console.log('[SW] Push received:', event);
@@ -96,6 +100,19 @@ self.addEventListener('notificationclick', (event) => {
 
 self.addEventListener('notificationclose', (event) => {
   console.log('[SW] Notification closed:', event);
+});
+
+// Force activation of new service worker
+self.addEventListener('install', (event) => {
+  console.log('[SW] Installing new version:', SW_VERSION);
+  // Skip waiting to activate immediately
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activating new version:', SW_VERSION);
+  // Take control of all clients immediately
+  event.waitUntil(clients.claim());
 });
 
 // Handle subscription change
