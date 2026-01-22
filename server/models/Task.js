@@ -12,7 +12,8 @@ const subtaskSchema = new mongoose.Schema({
   subtasks: { type: Array, default: [] },
   assignedTo: { type: [String], default: [] }, // Array of User IDs
   createdAt: { type: String, default: () => new Date().toISOString() },
-  modifiedAt: { type: String, default: null }
+  modifiedAt: { type: String, default: null },
+  lastUrgencyLevel: { type: String, default: null } // For due date urgency tracking
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -51,7 +52,8 @@ const taskSchema = new mongoose.Schema({
   dueDate: String,
   subtasks: { type: [subtaskSchema], default: [] },
   createdBy: String,
-  modifiedAt: { type: String, default: null }
+  modifiedAt: { type: String, default: null },
+  lastUrgencyLevel: { type: String, default: null } // For due date urgency tracking
 }, {
   timestamps: true,
   toJSON: {

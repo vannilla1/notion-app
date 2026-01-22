@@ -17,6 +17,7 @@ const googleTasksRoutes = require('./routes/googleTasks');
 const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
 const notificationService = require('./services/notificationService');
+const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const logger = require('./utils/logger');
@@ -168,6 +169,9 @@ const startServer = async () => {
   const dbConnected = await connectDB();
   if (!dbConnected) {
     logger.warn('MongoDB not connected. Some features may not work.');
+  } else {
+    // Start due date checker scheduler after DB is connected
+    scheduleDueDateChecks();
   }
 
   server.listen(PORT, () => {

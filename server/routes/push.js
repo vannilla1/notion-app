@@ -181,4 +181,25 @@ router.post('/test', authenticateToken, async (req, res) => {
   }
 });
 
+// Manually trigger due date check (admin only)
+router.post('/check-due-dates', authenticateToken, async (req, res) => {
+  try {
+    // Only allow admins to trigger this
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    const { checkDueDates } = require('../services/dueDateChecker');
+    const result = await checkDueDates();
+
+    res.json({
+      message: 'Due date check completed',
+      ...result
+    });
+  } catch (error) {
+    console.error('[Due Date Check] Error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 module.exports = router;
