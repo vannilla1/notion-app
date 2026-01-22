@@ -21,6 +21,7 @@ function Tasks() {
   const [expandedTask, setExpandedTask] = useState(null);
   const { socket, isConnected } = useSocket();
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
+  const [highlightedSubtaskId, setHighlightedSubtaskId] = useState(null);
   const taskRefs = useRef({});
 
   // Form states
@@ -325,12 +326,21 @@ function Tasks() {
     return parentIds;
   };
 
-  // Handle highlight from navigation state
+  // Handle highlight from navigation state (push notification click)
   useEffect(() => {
     if (location.state?.highlightTaskId && tasks.length > 0) {
       const taskId = location.state.highlightTaskId;
+      const subtaskId = location.state.highlightSubtaskId;
+
       setHighlightedTaskId(taskId);
       setExpandedTask(taskId);
+
+      // If subtask is specified, highlight it and expand parent subtasks
+      if (subtaskId) {
+        setHighlightedSubtaskId(subtaskId);
+        // Auto-expand subtasks to show the highlighted one
+        setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
+      }
 
       // Scroll to the task after a short delay
       setTimeout(() => {
@@ -342,6 +352,7 @@ function Tasks() {
       // Remove highlight after 3 seconds
       setTimeout(() => {
         setHighlightedTaskId(null);
+        setHighlightedSubtaskId(null);
       }, 3000);
 
       // Clear the navigation state
@@ -838,7 +849,7 @@ function Tasks() {
 
       return (
         <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
-          <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''}`}>
+          <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}>
             <div
               className="subtask-checkbox-styled"
               onClick={() => !subtask.completed && toggleSubtask(task, subtask)}

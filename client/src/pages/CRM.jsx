@@ -70,16 +70,20 @@ function CRM() {
   const [duplicatingTask, setDuplicatingTask] = useState(null);
   const [duplicateContactIds, setDuplicateContactIds] = useState([]);
 
+  // Highlight state for push notification navigation
+  const [highlightedContactId, setHighlightedContactId] = useState(null);
+
   useEffect(() => {
     fetchContacts();
     fetchGlobalTasks();
   }, []);
 
-  // Handle navigation state to expand contact from Dashboard
+  // Handle navigation state to expand contact from Dashboard or push notification
   useEffect(() => {
     if (location.state?.expandContactId && contacts.length > 0) {
       const contactId = location.state.expandContactId;
       setExpandedContact(contactId);
+      setHighlightedContactId(contactId);
 
       // Clear the navigation state
       navigate(location.pathname, { replace: true, state: {} });
@@ -91,6 +95,11 @@ function CRM() {
           contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }, 100);
+
+      // Remove highlight after 3 seconds
+      setTimeout(() => {
+        setHighlightedContactId(null);
+      }, 3000);
     }
   }, [location.state, contacts, navigate, location.pathname]);
 
@@ -1240,7 +1249,7 @@ function CRM() {
               ) : (
                 <div className="contacts-list">
                   {filteredContacts.map(contact => (
-                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''}`}>
+                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''} ${highlightedContactId === contact.id ? 'highlighted' : ''}`}>
                       <div className="contact-main">
                         <div
                           className="contact-avatar"

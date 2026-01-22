@@ -3063,6 +3063,12 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+.contact-card.highlighted {
+  animation: highlight-pulse 3s ease-out;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
 .contact-main {
   display: flex;
   align-items: center;
@@ -4166,6 +4172,30 @@ a.detail-value:hover {
 @keyframes pulse-highlight {
   0%, 100% { background: var(--accent-light); }
   50% { background: rgba(59, 130, 246, 0.25); }
+}
+
+/* Highlight subtask from push notification */
+.subtask-item.highlighted {
+  background: var(--accent-light);
+  border-left: 3px solid var(--accent-color);
+  padding-left: 9px;
+  border-radius: var(--radius-sm);
+  animation: subtask-highlight-pulse 3s ease-out;
+}
+
+@keyframes subtask-highlight-pulse {
+  0% {
+    background: rgba(99, 102, 241, 0.3);
+    box-shadow: 0 0 0 4px var(--accent-light);
+  }
+  50% {
+    background: var(--accent-light);
+    box-shadow: 0 0 0 2px var(--accent-light);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 .subtask-item.completed .subtask-title {
