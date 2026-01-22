@@ -28,6 +28,28 @@ const initialize = (socketIo) => {
 };
 
 /**
+ * Generate URL for navigation based on notification type and data
+ */
+const generateNotificationUrl = (type, data = {}) => {
+  // Contact notifications -> /crm with contact expansion
+  if (type?.startsWith('contact') && data.contactId) {
+    return `/crm?expandContact=${data.contactId}`;
+  }
+
+  // Task notifications -> /tasks with task highlight
+  if (type?.startsWith('task') && data.taskId) {
+    return `/tasks?highlightTask=${data.taskId}`;
+  }
+
+  // Subtask notifications -> /tasks with parent task highlight
+  if (type?.startsWith('subtask') && data.taskId) {
+    return `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
+  }
+
+  return '/';
+};
+
+/**
  * Send push notification to a user
  */
 const sendPushNotification = async (userId, payload) => {
@@ -38,13 +60,17 @@ const sendPushNotification = async (userId, payload) => {
       return;
     }
 
+    // Generate URL based on notification type
+    const url = generateNotificationUrl(payload.type, payload.data);
+
     const pushPayload = JSON.stringify({
       title: payload.title,
       body: payload.body || payload.message,
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
       data: {
-        url: payload.url || '/',
+        url,
+        type: payload.type,
         ...payload.data
       },
       tag: payload.tag || payload.type || 'default'

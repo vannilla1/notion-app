@@ -38,25 +38,55 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   console.log('[SW] Notification clicked:', event);
+  console.log('[SW] Notification data:', event.notification.data);
 
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || '/';
+  // Get the URL to open - could be relative or absolute
+  let urlToOpen = event.notification.data?.url || '/';
+
+  // Make sure we have a full URL
+  if (urlToOpen.startsWith('/')) {
+    urlToOpen = self.location.origin + urlToOpen;
+  }
+
+  console.log('[SW] Opening URL:', urlToOpen);
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((windowClients) => {
-        // Check if there's already a window open
+        console.log('[SW] Found clients:', windowClients.length);
+
+        // On mobile, we should prefer opening a new window/tab for reliable navigation
+        // Check if there's already a window open with our app
         for (const client of windowClients) {
-          if (client.url.includes(self.location.origin) && 'focus' in client) {
-            client.focus();
-            if (event.notification.data?.url) {
-              client.navigate(urlToOpen);
-            }
-            return;
+          if (client.url.includes(self.location.origin)) {
+            console.log('[SW] Found existing client:', client.url);
+            // Focus the existing window and navigate to the new URL
+            return client.focus().then(() => {
+              // Use postMessage to navigate within the SPA
+              client.postMessage({
+                type: 'NOTIFICATION_CLICK',
+                url: urlToOpen,
+                data: event.notification.data
+              });
+              return client;
+            }).catch(() => {
+              // If focus fails, open new window
+              return clients.openWindow(urlToOpen);
+            });
           }
         }
+
         // If no window is open, open a new one
+        console.log('[SW] No existing client, opening new window');
+        if (clients.openWindow) {
+          return clients.openWindow(urlToOpen);
+        }
+      })
+      .catch((error) => {
+        console.error('[SW] Error handling notification click:', error);
+        // Fallback: try to open new window
         if (clients.openWindow) {
           return clients.openWindow(urlToOpen);
         }
