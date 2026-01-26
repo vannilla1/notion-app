@@ -193,13 +193,23 @@ router.post('/test', authenticateToken, async (req, res) => {
     const results = [];
     for (const sub of subscriptions) {
       try {
+        logger.debug('[Push Test] Sending to endpoint', {
+          endpoint: sub.endpoint.substring(0, 80),
+          userAgent: sub.userAgent?.substring(0, 50)
+        });
         await webpush.sendNotification({
           endpoint: sub.endpoint,
           keys: sub.keys
         }, payload);
-        results.push({ success: true });
+        results.push({ success: true, endpoint: sub.endpoint.substring(0, 50) });
+        logger.debug('[Push Test] Sent successfully', { endpoint: sub.endpoint.substring(0, 50) });
       } catch (error) {
-        results.push({ success: false, statusCode: error.statusCode });
+        logger.warn('[Push Test] Failed', {
+          endpoint: sub.endpoint.substring(0, 50),
+          statusCode: error.statusCode,
+          message: error.message
+        });
+        results.push({ success: false, statusCode: error.statusCode, endpoint: sub.endpoint.substring(0, 50) });
 
         // Remove invalid subscriptions (410 Gone or 404 Not Found)
         if (error.statusCode === 410 || error.statusCode === 404) {
