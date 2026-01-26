@@ -633,11 +633,12 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
-    // Process tasks in batches - stop immediately on any rate limit error
-    // Google Tasks API allows ~10 requests per second, so we use small batches with delays
-    const BATCH_SIZE = 10;
-    let currentBackoff = 2000;  // 2 second delay between batches to avoid rate limits
-    const MAX_BACKOFF = 60000;
+    // Process tasks in batches - Google Tasks API has per-user per-minute limits
+    // Even though daily quota is 50k, there's a per-minute limit (~100-200 requests/minute)
+    // Use small batches with longer delays to stay under the limit
+    const BATCH_SIZE = 5;  // Small batch size
+    let currentBackoff = 3000;  // 3 second delay between batches
+    const MAX_BACKOFF = 120000; // Max 2 minutes
 
     // Combine tasks to create and update, prioritizing updates (they're more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -713,13 +714,14 @@ router.post('/sync', authenticateToken, async (req, res) => {
           // 403 errors - check specific reason
           if (error.code === 403) {
             const msg = (error.message || '').toLowerCase();
-            // Only treat as quota if message explicitly mentions quota/limit exceeded
-            if (msg.includes('quota') || msg.includes('limit exceeded') || msg.includes('daily limit')) {
-              return { success: false, taskId: task.id, error: 'quota', message: error.message };
-            }
-            // Rate limiting from Google (usageLimits)
-            if (msg.includes('rate limit') || msg.includes('usage limit') || msg.includes('too many')) {
+            // "Quota Exceeded" from Google is usually per-minute rate limit, not daily quota
+            // Treat it as rate_limit so we slow down but continue
+            if (msg.includes('quota') || msg.includes('limit exceeded') || msg.includes('rate limit') || msg.includes('usage limit') || msg.includes('too many')) {
               return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
+            }
+            // Only treat as hard quota stop if it explicitly says "daily"
+            if (msg.includes('daily limit') || msg.includes('daily quota')) {
+              return { success: false, taskId: task.id, error: 'quota', message: error.message };
             }
             // Other 403 - permission or unknown, continue with other tasks
             return { success: false, taskId: task.id, error: 'permission', message: error.message };
@@ -848,7 +850,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
     if (quotaExceeded) {
       message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
     } else if (rateLimitCount > 0) {
-      message += ` (${rateLimitCount}x rate limit - skúste znova o chvíľu)`;
+      message += ` (spomalené kvôli Google API limitu - zvyšok sa dosyncuje pri ďalšej sync)`;
     }
 
     res.json({
