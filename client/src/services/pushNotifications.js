@@ -182,15 +182,27 @@ export const sendTestPush = async () => {
  */
 export const initializePush = async () => {
   if (!isPushSupported()) {
-    console.log('Push notifications are not supported on this device');
     return false;
+  }
+
+  // Listen for subscription change messages from service worker
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener('message', async (event) => {
+      if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
+        console.log('Push subscription changed, re-subscribing...');
+        try {
+          await subscribeToPush();
+        } catch (error) {
+          console.error('Failed to re-subscribe after subscription change:', error);
+        }
+      }
+    });
   }
 
   // Check if already subscribed
   const subscribed = await isSubscribedToPush();
 
   if (subscribed) {
-    console.log('Already subscribed to push notifications');
     return true;
   }
 

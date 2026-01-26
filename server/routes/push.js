@@ -3,22 +3,64 @@ const router = express.Router();
 const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
 const { authenticateToken } = require('../middleware/auth');
+const logger = require('../utils/logger');
+const { isVapidConfigured, getMetrics, resetMetrics } = require('../services/notificationService');
+const { getSubscriptionStats, cleanupStaleSubscriptions } = require('../services/subscriptionCleanup');
 
-// Configure web-push with VAPID keys (if available)
-const vapidConfigured = process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY;
-if (vapidConfigured) {
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
-} else {
-  console.warn('VAPID keys not configured - push notifications will not work');
-}
+// Rate limiting for push endpoints (simple in-memory implementation)
+const rateLimiter = {
+  requests: new Map(),
+  limit: 10, // max requests per window
+  windowMs: 60000, // 1 minute window
+
+  check(userId) {
+    const now = Date.now();
+    const userRequests = this.requests.get(userId) || [];
+
+    // Clean old requests
+    const validRequests = userRequests.filter(time => now - time < this.windowMs);
+
+    if (validRequests.length >= this.limit) {
+      return false;
+    }
+
+    validRequests.push(now);
+    this.requests.set(userId, validRequests);
+    return true;
+  },
+
+  // Cleanup old entries periodically
+  cleanup() {
+    const now = Date.now();
+    for (const [userId, requests] of this.requests.entries()) {
+      const validRequests = requests.filter(time => now - time < this.windowMs);
+      if (validRequests.length === 0) {
+        this.requests.delete(userId);
+      } else {
+        this.requests.set(userId, validRequests);
+      }
+    }
+  }
+};
+
+// Cleanup rate limiter every 5 minutes
+setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000);
+
+// Validate endpoint URL
+const isValidEndpoint = (endpoint) => {
+  if (!endpoint || typeof endpoint !== 'string') return false;
+  try {
+    const url = new URL(endpoint);
+    // Only allow HTTPS endpoints (required for web push)
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 // Get VAPID public key
 router.get('/vapid-public-key', (req, res) => {
-  if (!vapidConfigured) {
+  if (!isVapidConfigured()) {
     return res.status(503).json({ message: 'Push notifications not configured' });
   }
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
@@ -30,13 +72,25 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
     const { endpoint, keys } = req.body;
     const userId = req.user.id;
 
-    console.log('[Push] Subscribe request from user:', userId);
-    console.log('[Push] Endpoint:', endpoint ? endpoint.substring(0, 80) + '...' : 'missing');
-    console.log('[Push] Keys present:', { p256dh: !!keys?.p256dh, auth: !!keys?.auth });
+    logger.debug('[Push] Subscribe request', { userId });
 
-    if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
-      console.log('[Push] Invalid subscription data');
-      return res.status(400).json({ message: 'Invalid subscription data' });
+    // Validate endpoint URL
+    if (!isValidEndpoint(endpoint)) {
+      logger.warn('[Push] Invalid endpoint URL', { userId });
+      return res.status(400).json({ message: 'Invalid endpoint URL' });
+    }
+
+    // Validate keys
+    if (!keys || !keys.p256dh || !keys.auth) {
+      logger.warn('[Push] Missing subscription keys', { userId });
+      return res.status(400).json({ message: 'Missing subscription keys' });
+    }
+
+    // Validate key formats (base64url)
+    const base64urlRegex = /^[A-Za-z0-9_-]+$/;
+    if (!base64urlRegex.test(keys.p256dh) || !base64urlRegex.test(keys.auth)) {
+      logger.warn('[Push] Invalid key format', { userId });
+      return res.status(400).json({ message: 'Invalid key format' });
     }
 
     // Check if subscription already exists
@@ -44,30 +98,28 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
 
     if (subscription) {
       // Update existing subscription
-      console.log('[Push] Updating existing subscription');
       subscription.userId = userId;
       subscription.keys = keys;
-      subscription.userAgent = req.headers['user-agent'] || '';
+      subscription.userAgent = (req.headers['user-agent'] || '').substring(0, 500);
       subscription.lastUsed = new Date();
       await subscription.save();
+      logger.info('[Push] Subscription updated', { userId, subscriptionId: subscription._id });
     } else {
       // Create new subscription
-      console.log('[Push] Creating new subscription');
       subscription = new PushSubscription({
         userId,
         endpoint,
         keys,
-        userAgent: req.headers['user-agent'] || ''
+        userAgent: (req.headers['user-agent'] || '').substring(0, 500)
       });
       await subscription.save();
+      logger.info('[Push] Subscription created', { userId, subscriptionId: subscription._id });
     }
 
-    console.log('[Push] Subscription saved:', subscription._id);
     res.json({ message: 'Subscription saved', subscriptionId: subscription._id });
   } catch (error) {
-    console.error('[Push] Error saving subscription:', error.message);
-    console.error('[Push] Full error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('[Push] Error saving subscription', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
@@ -77,16 +129,17 @@ router.post('/unsubscribe', authenticateToken, async (req, res) => {
     const { endpoint } = req.body;
     const userId = req.user.id;
 
-    if (!endpoint) {
+    if (!endpoint || typeof endpoint !== 'string') {
       return res.status(400).json({ message: 'Endpoint is required' });
     }
 
-    await PushSubscription.deleteOne({ endpoint, userId });
+    const result = await PushSubscription.deleteOne({ endpoint, userId });
+    logger.info('[Push] Subscription removed', { userId, deleted: result.deletedCount });
 
     res.json({ message: 'Subscription removed' });
   } catch (error) {
-    console.error('Error removing push subscription:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('[Push] Error removing subscription', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
@@ -97,39 +150,33 @@ router.get('/subscriptions', authenticateToken, async (req, res) => {
     const count = await PushSubscription.countDocuments({ userId });
     res.json({ count });
   } catch (error) {
-    console.error('Error getting subscriptions:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('[Push] Error getting subscriptions', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Test push notification (for debugging)
+// Test push notification (with rate limiting)
 router.post('/test', authenticateToken, async (req, res) => {
   try {
-    if (!vapidConfigured) {
-      console.log('[Push Test] VAPID not configured');
+    const userId = req.user.id;
+
+    // Rate limiting - prevent abuse
+    if (!rateLimiter.check(userId)) {
+      logger.warn('[Push Test] Rate limit exceeded', { userId });
+      return res.status(429).json({ message: 'Too many requests. Please wait a moment.' });
+    }
+
+    if (!isVapidConfigured()) {
       return res.status(503).json({ message: 'Push notifications not configured' });
     }
 
-    const userId = req.user.id;
-    console.log('[Push Test] Testing for user:', userId);
-
     const subscriptions = await PushSubscription.find({ userId });
-    console.log('[Push Test] Found subscriptions:', subscriptions.length);
 
     if (subscriptions.length === 0) {
       return res.status(404).json({ message: 'No subscriptions found' });
     }
 
-    // Log subscription details
-    subscriptions.forEach((sub, i) => {
-      console.log(`[Push Test] Subscription ${i + 1}:`, {
-        endpoint: sub.endpoint.substring(0, 80) + '...',
-        hasP256dh: !!sub.keys?.p256dh,
-        hasAuth: !!sub.keys?.auth,
-        userAgent: sub.userAgent?.substring(0, 50) || 'unknown',
-        createdAt: sub.createdAt
-      });
-    });
+    logger.debug('[Push Test] Testing notifications', { userId, subscriptionCount: subscriptions.length });
 
     const payload = JSON.stringify({
       title: 'Test notifikácia',
@@ -143,41 +190,36 @@ router.post('/test', authenticateToken, async (req, res) => {
       }
     });
 
-    console.log('[Push Test] Sending payload:', payload.substring(0, 100) + '...');
-
     const results = [];
     for (const sub of subscriptions) {
       try {
-        console.log('[Push Test] Sending to:', sub.endpoint.substring(0, 50) + '...');
-        const sendResult = await webpush.sendNotification({
+        await webpush.sendNotification({
           endpoint: sub.endpoint,
           keys: sub.keys
         }, payload);
-        console.log('[Push Test] Success! Status:', sendResult.statusCode);
-        results.push({ endpoint: sub.endpoint.substring(0, 50), success: true });
+        results.push({ success: true });
       } catch (error) {
-        console.error('[Push Test] Failed:', error.statusCode, error.message);
-        console.error('[Push Test] Full error:', JSON.stringify(error, null, 2));
-        results.push({
-          endpoint: sub.endpoint.substring(0, 50),
-          success: false,
-          error: error.message,
-          statusCode: error.statusCode
-        });
+        results.push({ success: false, statusCode: error.statusCode });
 
         // Remove invalid subscriptions (410 Gone or 404 Not Found)
         if (error.statusCode === 410 || error.statusCode === 404) {
-          console.log('[Push Test] Removing invalid subscription');
           await PushSubscription.deleteOne({ _id: sub._id });
+          logger.info('[Push Test] Removed invalid subscription', { userId });
         }
       }
     }
 
-    console.log('[Push Test] Results:', JSON.stringify(results));
-    res.json({ message: 'Test notifications sent', results });
+    const successCount = results.filter(r => r.success).length;
+    logger.info('[Push Test] Test completed', { userId, sent: successCount, failed: results.length - successCount });
+
+    res.json({
+      message: 'Test notifications sent',
+      sent: successCount,
+      failed: results.length - successCount
+    });
   } catch (error) {
-    console.error('[Push Test] Error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('[Push Test] Error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
@@ -186,19 +228,79 @@ router.post('/check-due-dates', authenticateToken, async (req, res) => {
   try {
     // Only allow admins to trigger this
     if (req.user.role !== 'admin') {
+      logger.warn('[Due Date Check] Unauthorized access attempt', { userId: req.user.id });
       return res.status(403).json({ message: 'Admin access required' });
     }
 
     const { checkDueDates } = require('../services/dueDateChecker');
     const result = await checkDueDates();
 
+    logger.info('[Due Date Check] Manual check completed', { userId: req.user.id, ...result });
+
     res.json({
       message: 'Due date check completed',
       ...result
     });
   } catch (error) {
-    console.error('[Due Date Check] Error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('[Due Date Check] Error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get notification metrics (admin only)
+router.get('/metrics', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    const notificationMetrics = getMetrics();
+    const subscriptionStats = await getSubscriptionStats();
+
+    res.json({
+      notifications: notificationMetrics,
+      subscriptions: subscriptionStats
+    });
+  } catch (error) {
+    logger.error('[Metrics] Error getting metrics', { error: error.message });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Reset notification metrics (admin only)
+router.post('/metrics/reset', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    resetMetrics();
+    logger.info('[Metrics] Metrics reset by admin', { userId: req.user.id });
+
+    res.json({ message: 'Metrics reset successfully' });
+  } catch (error) {
+    logger.error('[Metrics] Error resetting metrics', { error: error.message });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Manually trigger subscription cleanup (admin only)
+router.post('/cleanup-subscriptions', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    const result = await cleanupStaleSubscriptions();
+    logger.info('[Cleanup] Manual cleanup completed', { userId: req.user.id, ...result });
+
+    res.json({
+      message: 'Subscription cleanup completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('[Cleanup] Error during manual cleanup', { error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

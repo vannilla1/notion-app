@@ -36,11 +36,11 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
   const messages = {
     'success-warning': {
       title: '⚠️ Blíži sa termín',
-      body: `Úloha "${title}" má termín o menej ako 7 dní (${formattedDate})`
+      body: `Úloha "${title}" má termín do 7 dní (${formattedDate})`
     },
     'warning-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín o menej ako 3 dni (${formattedDate})!`
+      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'danger-overdue': {
       title: '❗ Termín vypršal',
@@ -48,7 +48,7 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
     },
     'success-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín o menej ako 3 dni (${formattedDate})!`
+      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'success-overdue': {
       title: '❗ Termín vypršal',
@@ -60,11 +60,11 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
     },
     'null-warning': {
       title: '⚠️ Blíži sa termín',
-      body: `Úloha "${title}" má termín o menej ako 7 dní (${formattedDate})`
+      body: `Úloha "${title}" má termín do 7 dní (${formattedDate})`
     },
     'null-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín o menej ako 3 dni (${formattedDate})!`
+      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'null-overdue': {
       title: '❗ Termín vypršal',

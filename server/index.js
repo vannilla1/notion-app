@@ -18,6 +18,7 @@ const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
+const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const logger = require('./utils/logger');
@@ -172,6 +173,8 @@ const startServer = async () => {
   } else {
     // Start due date checker scheduler after DB is connected
     scheduleDueDateChecks();
+    // Start subscription cleanup scheduler
+    scheduleSubscriptionCleanup();
   }
 
   server.listen(PORT, () => {

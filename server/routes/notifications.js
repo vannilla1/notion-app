@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const Notification = require('../models/Notification');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -9,6 +10,10 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { limit = 50, offset = 0, unreadOnly = false } = req.query;
 
+    // Validate and sanitize pagination params
+    const parsedLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 100);
+    const parsedOffset = Math.max(parseInt(offset) || 0, 0);
+
     const query = { userId: req.user.id };
     if (unreadOnly === 'true') {
       query.read = false;
@@ -16,8 +21,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const notifications = await Notification.find(query)
       .sort({ createdAt: -1 })
-      .skip(parseInt(offset))
-      .limit(parseInt(limit))
+      .skip(parsedOffset)
+      .limit(parsedLimit)
       .lean();
 
     const total = await Notification.countDocuments(query);
@@ -41,7 +46,7 @@ router.get('/', authenticateToken, async (req, res) => {
       unreadCount
     });
   } catch (error) {
-    console.error('Error fetching notifications:', error);
+    logger.error('[Notifications] Error fetching notifications', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri načítaní notifikácií' });
   }
 });
@@ -55,7 +60,7 @@ router.get('/unread-count', authenticateToken, async (req, res) => {
     });
     res.json({ count });
   } catch (error) {
-    console.error('Error counting unread notifications:', error);
+    logger.error('[Notifications] Error counting unread', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri počítaní notifikácií' });
   }
 });
@@ -63,6 +68,11 @@ router.get('/unread-count', authenticateToken, async (req, res) => {
 // Mark notification as read
 router.put('/:id/read', authenticateToken, async (req, res) => {
   try {
+    // Validate ObjectId format
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: 'Neplatné ID notifikácie' });
+    }
+
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id },
       { read: true },
@@ -75,7 +85,7 @@ router.put('/:id/read', authenticateToken, async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Error marking notification as read:', error);
+    logger.error('[Notifications] Error marking as read', { error: error.message, userId: req.user?.id, notificationId: req.params.id });
     res.status(500).json({ message: 'Chyba pri označovaní notifikácie' });
   }
 });
@@ -83,14 +93,15 @@ router.put('/:id/read', authenticateToken, async (req, res) => {
 // Mark all notifications as read
 router.put('/read-all', authenticateToken, async (req, res) => {
   try {
-    await Notification.updateMany(
+    const result = await Notification.updateMany(
       { userId: req.user.id, read: false },
       { read: true }
     );
 
-    res.json({ success: true });
+    logger.debug('[Notifications] Marked all as read', { userId: req.user.id, modified: result.modifiedCount });
+    res.json({ success: true, modified: result.modifiedCount });
   } catch (error) {
-    console.error('Error marking all notifications as read:', error);
+    logger.error('[Notifications] Error marking all as read', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri označovaní notifikácií' });
   }
 });
@@ -98,6 +109,11 @@ router.put('/read-all', authenticateToken, async (req, res) => {
 // Delete a notification
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
+    // Validate ObjectId format
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: 'Neplatné ID notifikácie' });
+    }
+
     const notification = await Notification.findOneAndDelete({
       _id: req.params.id,
       userId: req.user.id
@@ -109,7 +125,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Error deleting notification:', error);
+    logger.error('[Notifications] Error deleting notification', { error: error.message, userId: req.user?.id, notificationId: req.params.id });
     res.status(500).json({ message: 'Chyba pri mazaní notifikácie' });
   }
 });
@@ -117,15 +133,16 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Delete all notifications
 router.delete('/', authenticateToken, async (req, res) => {
   try {
-    await Notification.deleteMany({ userId: req.user.id });
-    res.json({ success: true });
+    const result = await Notification.deleteMany({ userId: req.user.id });
+    logger.info('[Notifications] Deleted all notifications', { userId: req.user.id, deleted: result.deletedCount });
+    res.json({ success: true, deleted: result.deletedCount });
   } catch (error) {
-    console.error('Error deleting all notifications:', error);
+    logger.error('[Notifications] Error deleting all', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri mazaní notifikácií' });
   }
 });
 
-// Test endpoint - send a test notification to yourself
+// Test endpoint - send a test notification to yourself (development/debugging only)
 router.post('/test', authenticateToken, async (req, res) => {
   try {
     const io = req.app.get('io');
@@ -143,7 +160,6 @@ router.post('/test', authenticateToken, async (req, res) => {
     });
 
     await notification.save();
-    console.log(`Test notification saved for user ${userId}`);
 
     // Send real-time notification via Socket.IO
     if (io) {
@@ -159,15 +175,13 @@ router.post('/test', authenticateToken, async (req, res) => {
         read: notification.read,
         createdAt: notification.createdAt
       });
-      console.log(`Test notification emitted to room: ${roomName}`);
-    } else {
-      console.log('IO not available for test notification');
     }
 
+    logger.debug('[Notifications] Test notification sent', { userId });
     res.json({ success: true, message: 'Test notifikácia odoslaná', notificationId: notification._id.toString() });
   } catch (error) {
-    console.error('Error sending test notification:', error.message, error.stack);
-    res.status(500).json({ message: 'Chyba pri odosielaní testovacej notifikácie', error: error.message });
+    logger.error('[Notifications] Error sending test notification', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri odosielaní testovacej notifikácie' });
   }
 });
 

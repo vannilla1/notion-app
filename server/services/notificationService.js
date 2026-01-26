@@ -2,6 +2,7 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const PushSubscription = require('../models/PushSubscription');
 const webpush = require('web-push');
+const logger = require('../utils/logger');
 
 /**
  * Notification Service
@@ -11,14 +12,51 @@ const webpush = require('web-push');
 // Store io instance
 let io = null;
 
+// VAPID configuration status
+let vapidConfigured = false;
+
+// Metrics for monitoring
+const metrics = {
+  notifications: {
+    created: 0,
+    socketEmitted: 0,
+    pushSent: 0,
+    pushFailed: 0,
+    subscriptionsRemoved: 0
+  },
+  lastReset: new Date(),
+  errors: []
+};
+
+// Keep only last 50 errors
+const MAX_ERRORS = 50;
+
 // Configure web-push with VAPID keys (if available)
-if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
-}
+const initializeVapid = () => {
+  if (vapidConfigured) return true;
+
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    try {
+      webpush.setVapidDetails(
+        process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+      );
+      vapidConfigured = true;
+      logger.info('[NotificationService] VAPID configured successfully');
+    } catch (error) {
+      logger.error('[NotificationService] Failed to configure VAPID', { error: error.message });
+      vapidConfigured = false;
+    }
+  } else {
+    logger.warn('[NotificationService] VAPID keys not configured - push notifications disabled');
+  }
+
+  return vapidConfigured;
+};
+
+// Initialize VAPID on module load
+initializeVapid();
 
 /**
  * Initialize the notification service with Socket.IO instance
@@ -51,21 +89,43 @@ const generateNotificationUrl = (type, data = {}) => {
 
 /**
  * Send push notification to a user
+ * @param {string} userId - User ID to send notification to
+ * @param {Object} payload - Notification payload
+ * @returns {Object} Result with sent/failed counts
  */
 const sendPushNotification = async (userId, payload) => {
+  const result = { sent: 0, failed: 0, removed: 0 };
+
+  // Check VAPID configuration
+  if (!vapidConfigured) {
+    logger.debug('[Push] VAPID not configured, skipping push notification');
+    return result;
+  }
+
+  // Validate payload
+  if (!payload || !payload.title) {
+    logger.warn('[Push] Invalid payload - missing title');
+    return result;
+  }
+
   try {
     const subscriptions = await PushSubscription.find({ userId });
 
     if (subscriptions.length === 0) {
-      return;
+      logger.debug('[Push] No subscriptions found for user', { userId });
+      return result;
     }
 
     // Generate URL based on notification type
     const url = generateNotificationUrl(payload.type, payload.data);
 
+    // Sanitize and limit payload sizes
+    const sanitizedTitle = String(payload.title).slice(0, 100);
+    const sanitizedBody = String(payload.body || payload.message || '').slice(0, 200);
+
     const pushPayload = JSON.stringify({
-      title: payload.title,
-      body: payload.body || payload.message,
+      title: sanitizedTitle,
+      body: sanitizedBody,
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
       data: {
@@ -86,18 +146,34 @@ const sendPushNotification = async (userId, payload) => {
         // Update last used timestamp
         sub.lastUsed = new Date();
         await sub.save();
+        result.sent++;
+        metrics.notifications.pushSent++;
       } catch (error) {
-        console.error('Push notification failed for endpoint:', sub.endpoint, error.message);
+        result.failed++;
+        metrics.notifications.pushFailed++;
+        logger.warn('[Push] Notification failed', {
+          endpoint: sub.endpoint.substring(0, 50) + '...',
+          statusCode: error.statusCode,
+          message: error.message
+        });
 
         // Remove invalid subscriptions (expired or unsubscribed)
         if (error.statusCode === 410 || error.statusCode === 404) {
           await PushSubscription.deleteOne({ _id: sub._id });
-          console.log('Removed invalid push subscription:', sub.endpoint);
+          result.removed++;
+          metrics.notifications.subscriptionsRemoved++;
+          logger.info('[Push] Removed invalid subscription', {
+            endpoint: sub.endpoint.substring(0, 50) + '...'
+          });
         }
       }
     }
+
+    logger.debug('[Push] Notification batch completed', { userId, ...result });
+    return result;
   } catch (error) {
-    console.error('Error sending push notifications:', error);
+    logger.error('[Push] Error sending notifications', { error: error.message, userId });
+    return result;
   }
 };
 
@@ -131,6 +207,7 @@ const createNotification = async ({
     });
 
     await notification.save();
+    metrics.notifications.created++;
 
     // Send real-time notification via Socket.IO
     if (io) {
@@ -147,10 +224,11 @@ const createNotification = async ({
         read: notification.read,
         createdAt: notification.createdAt
       });
+      metrics.notifications.socketEmitted++;
     }
 
     // Send push notification (for background/closed app)
-    sendPushNotification(userId, {
+    await sendPushNotification(userId, {
       title: notification.title,
       body: notification.message,
       type: notification.type,
@@ -159,7 +237,17 @@ const createNotification = async ({
 
     return notification;
   } catch (error) {
-    console.error('Error creating notification:', error);
+    logger.error('[NotificationService] Error creating notification', { error: error.message, userId, type });
+    // Track error
+    metrics.errors.push({
+      timestamp: new Date(),
+      type: 'createNotification',
+      message: error.message,
+      context: { userId, type }
+    });
+    if (metrics.errors.length > MAX_ERRORS) {
+      metrics.errors.shift();
+    }
     return null;
   }
 };
@@ -190,7 +278,7 @@ const notifyAllExcept = async (excludeUserId, notificationData) => {
     const userIds = users.map(u => u._id.toString());
     return await notifyUsers(userIds, notificationData);
   } catch (error) {
-    console.error('Error notifying all users:', error);
+    logger.error('[NotificationService] Error notifying all users', { error: error.message });
     return [];
   }
 };
@@ -330,7 +418,7 @@ const notifyTaskChange = async (type, task, actor, additionalRecipients = []) =>
   const title = getNotificationTitle(type, actorName, task.title);
   const message = getNotificationMessage(type, actorName, { contactName: task.contactName });
 
-  console.log('[Notification] Task change:', { type, title, message, taskTitle: task.title, contactName: task.contactName, actorName });
+  logger.debug('[NotificationService] Task change', { type, taskTitle: task.title, actorName });
 
   const notificationData = {
     type,
@@ -416,7 +504,7 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
   const title = getNotificationTitle('subtask.assigned', actorName, subtask.title);
   const message = getNotificationMessage('subtask.assigned', actorName, { taskTitle: parentTask.title });
 
-  console.log('[Notification] Subtask assignment:', { title, message, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, assignedUserIds, actorName });
+  logger.debug('[NotificationService] Subtask assignment', { subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, assignedUserIds, actorName });
 
   const notificationData = {
     type: 'subtask.assigned',
@@ -451,7 +539,7 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
   const title = getNotificationTitle(type, actorName, subtask.title);
   const message = getNotificationMessage(type, actorName, { taskTitle: parentTask.title });
 
-  console.log('[Notification] Subtask change:', { type, title, message, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName });
+  logger.debug('[NotificationService] Subtask change', { type, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName });
 
   const notificationData = {
     type,
@@ -491,6 +579,34 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
   return await notifyUsers(Array.from(recipientIds), notificationData);
 };
 
+/**
+ * Get notification metrics for monitoring
+ * @returns {Object} Current metrics
+ */
+const getMetrics = () => {
+  return {
+    ...metrics,
+    uptime: Date.now() - metrics.lastReset.getTime(),
+    vapidConfigured
+  };
+};
+
+/**
+ * Reset notification metrics
+ */
+const resetMetrics = () => {
+  metrics.notifications = {
+    created: 0,
+    socketEmitted: 0,
+    pushSent: 0,
+    pushFailed: 0,
+    subscriptionsRemoved: 0
+  };
+  metrics.lastReset = new Date();
+  metrics.errors = [];
+  logger.info('[NotificationService] Metrics reset');
+};
+
 module.exports = {
   initialize,
   createNotification,
@@ -502,5 +618,9 @@ module.exports = {
   notifySubtaskChange,
   notifySubtaskAssignment,
   getNotificationTitle,
-  getNotificationMessage
+  getNotificationMessage,
+  sendPushNotification,
+  isVapidConfigured: () => vapidConfigured,
+  getMetrics,
+  resetMetrics
 };
