@@ -695,21 +695,33 @@ router.post('/sync', authenticateToken, async (req, res) => {
             return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
           }
         } catch (error) {
+          // Log full error details for debugging
+          logger.error('[Google Tasks] API error', {
+            userId: req.user.id,
+            taskId: task.id,
+            code: error.code,
+            status: error.response?.status,
+            message: error.message,
+            errors: error.errors
+          });
+
           // Rate limit error (429) - mark for retry with backoff
           if (error.code === 429 || error.response?.status === 429) {
-            logger.warn('[Google Tasks] Rate limit hit', { userId: req.user.id, taskId: task.id });
             return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
           }
 
-          // Quota exceeded (403 with specific message) - stop immediately
-          if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('rate'))) {
-            logger.warn('[Google Tasks] Quota/rate error', { userId: req.user.id, taskId: task.id, message: error.message });
-            return { success: false, taskId: task.id, error: 'quota', message: error.message };
-          }
-
-          // Other 403 errors (permissions, etc.)
+          // 403 errors - check specific reason
           if (error.code === 403) {
-            logger.error('[Google Tasks] Permission error', { userId: req.user.id, taskId: task.id, message: error.message });
+            const msg = (error.message || '').toLowerCase();
+            // Only treat as quota if message explicitly mentions quota/limit exceeded
+            if (msg.includes('quota') || msg.includes('limit exceeded') || msg.includes('daily limit')) {
+              return { success: false, taskId: task.id, error: 'quota', message: error.message };
+            }
+            // Rate limiting from Google (usageLimits)
+            if (msg.includes('rate limit') || msg.includes('usage limit') || msg.includes('too many')) {
+              return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
+            }
+            // Other 403 - permission or unknown, continue with other tasks
             return { success: false, taskId: task.id, error: 'permission', message: error.message };
           }
 
