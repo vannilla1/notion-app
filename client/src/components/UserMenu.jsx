@@ -392,6 +392,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      // Refresh status to show updated quota and sync counts
+      await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error syncing Google Tasks:', error);
       setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri synchronizácii');
@@ -409,6 +411,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      // Refresh status to show updated counts
+      await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error cleaning up Google Tasks:', error);
       setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri čistení');
