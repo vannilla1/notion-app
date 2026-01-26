@@ -1,22 +1,43 @@
 const express = require('express');
 const { google } = require('googleapis');
+const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
 const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Validate MongoDB ObjectId
+const isValidObjectId = (id) => {
+  return id && mongoose.Types.ObjectId.isValid(id);
+};
 
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-tasks/callback';
 
-const oauth2Client = new google.auth.OAuth2(
-  GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET,
-  GOOGLE_TASKS_REDIRECT_URI
-);
+// Validate OAuth configuration at startup
+const isOAuthConfigured = () => {
+  return GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET;
+};
+
+if (!isOAuthConfigured()) {
+  logger.warn('[Google Tasks] OAuth not configured - integration will be disabled');
+}
+
+let oauth2Client = null;
+try {
+  oauth2Client = new google.auth.OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_TASKS_REDIRECT_URI
+  );
+} catch (error) {
+  logger.error('[Google Tasks] Failed to initialize OAuth client', { error: error.message });
+}
 
 // Scopes required for Google Tasks
 const SCOPES = ['https://www.googleapis.com/auth/tasks'];
@@ -68,6 +89,10 @@ const incrementQuota = (user, count = 1) => {
 
 // Helper to get authenticated tasks client for user
 const getTasksClient = async (user) => {
+  if (!oauth2Client) {
+    throw new Error('Google Tasks OAuth not configured');
+  }
+
   if (!user.googleTasks?.accessToken) {
     throw new Error('Google Tasks not connected');
   }
@@ -78,13 +103,30 @@ const getTasksClient = async (user) => {
     expiry_date: user.googleTasks.tokenExpiry?.getTime()
   });
 
-  // Check if token needs refresh
-  if (user.googleTasks.tokenExpiry && new Date() >= user.googleTasks.tokenExpiry) {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    user.googleTasks.accessToken = credentials.access_token;
-    user.googleTasks.tokenExpiry = new Date(credentials.expiry_date);
-    await user.save();
-    oauth2Client.setCredentials(credentials);
+  // Check if token needs refresh (with 5 min buffer)
+  const now = new Date();
+  const tokenExpiry = user.googleTasks.tokenExpiry;
+  const expiryBuffer = 5 * 60 * 1000; // 5 minutes
+
+  if (tokenExpiry && now.getTime() >= tokenExpiry.getTime() - expiryBuffer) {
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      user.googleTasks.accessToken = credentials.access_token;
+      user.googleTasks.tokenExpiry = new Date(credentials.expiry_date);
+      if (credentials.refresh_token) {
+        user.googleTasks.refreshToken = credentials.refresh_token;
+      }
+      await user.save();
+      oauth2Client.setCredentials(credentials);
+      logger.debug('[Google Tasks] Token refreshed', { userId: user._id });
+    } catch (refreshError) {
+      logger.error('[Google Tasks] Token refresh failed', { userId: user._id, error: refreshError.message });
+      // If refresh fails, try to continue with existing token - it might still work
+      if (refreshError.message?.includes('invalid_grant')) {
+        // Token is completely invalid - user needs to reconnect
+        throw new Error('Google Tasks token expired. Please reconnect your account.');
+      }
+    }
   }
 
   return google.tasks({ version: 'v1', auth: oauth2Client });
@@ -93,8 +135,14 @@ const getTasksClient = async (user) => {
 // Get Google Tasks authorization URL
 router.get('/auth-url', authenticateToken, (req, res) => {
   try {
+    // Validate Google OAuth configuration
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      logger.error('[Google Tasks] OAuth not configured');
+      return res.status(503).json({ message: 'Google Tasks integrácia nie je nakonfigurovaná' });
+    }
+
     const state = req.user.id.toString();
-    console.log('Generating Google Tasks auth URL for user:', state);
+    logger.info('[Google Tasks] Generating auth URL', { userId: state });
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
@@ -103,10 +151,10 @@ router.get('/auth-url', authenticateToken, (req, res) => {
       prompt: 'consent'
     });
 
-    console.log('Generated auth URL:', authUrl);
+    logger.debug('[Google Tasks] Auth URL generated', { userId: state });
     res.json({ authUrl });
   } catch (error) {
-    console.error('Error generating auth URL:', error);
+    logger.error('[Google Tasks] Error generating auth URL', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri generovaní autorizačného linku' });
   }
 });
@@ -115,24 +163,37 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 router.get('/callback', async (req, res) => {
   const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
 
-  console.log('Google Tasks callback - full query:', req.query);
+  logger.debug('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
 
   try {
     const { code, state: userId } = req.query;
 
-    console.log('Google Tasks callback received:', { code: !!code, userId });
-
+    // Validate required parameters
     if (!code || !userId) {
+      logger.warn('[Google Tasks] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=missing_params`);
     }
 
+    // Validate userId format to prevent injection
+    if (!isValidObjectId(userId)) {
+      logger.warn('[Google Tasks] Invalid userId in callback state', { userId });
+      return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=invalid_state`);
+    }
+
+    logger.info('[Google Tasks] Processing callback', { userId });
+
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
-    console.log('Tokens received:', { hasAccessToken: !!tokens.access_token, hasRefreshToken: !!tokens.refresh_token });
+    logger.debug('[Google Tasks] Tokens received', {
+      userId,
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token
+    });
 
     // Update user with Google Tasks credentials
     const user = await User.findById(userId);
     if (!user) {
+      logger.warn('[Google Tasks] User not found in callback', { userId });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=user_not_found`);
     }
 
@@ -151,20 +212,26 @@ router.get('/callback', async (req, res) => {
 
       if (existingList) {
         taskListId = existingList.id;
-        console.log('Found existing Perun CRM task list:', taskListId);
+        logger.info('[Google Tasks] Found existing task list', { userId, taskListId });
       } else {
         // Create new task list
         const newList = await tasksApi.tasklists.insert({
           resource: { title: 'Perun CRM' }
         });
         taskListId = newList.data.id;
-        console.log('Created new Perun CRM task list:', taskListId);
+        logger.info('[Google Tasks] Created new task list', { userId, taskListId });
       }
     } catch (e) {
-      console.error('Error creating task list:', e.message);
+      logger.error('[Google Tasks] Error with task list', { error: e.message, userId });
       // Use default task list as fallback
-      const defaultList = await tasksApi.tasklists.list();
-      taskListId = defaultList.data.items?.[0]?.id || '@default';
+      try {
+        const defaultList = await tasksApi.tasklists.list();
+        taskListId = defaultList.data.items?.[0]?.id || '@default';
+        logger.info('[Google Tasks] Using default task list', { userId, taskListId });
+      } catch (fallbackError) {
+        taskListId = '@default';
+        logger.warn('[Google Tasks] Using @default as fallback', { userId });
+      }
     }
 
     user.googleTasks = {
@@ -178,11 +245,11 @@ router.get('/callback', async (req, res) => {
     };
 
     await user.save();
-    console.log('User updated with Google Tasks credentials');
+    logger.info('[Google Tasks] User connected successfully', { userId, username: user.username });
 
     res.redirect(`${baseUrl}/tasks?google_tasks=connected`);
   } catch (error) {
-    console.error('Error in Google Tasks callback:', error);
+    logger.error('[Google Tasks] Callback error', { error: error.message, stack: error.stack });
     res.redirect(`${baseUrl}/tasks?google_tasks=error&message=` + encodeURIComponent(error.message));
   }
 });
@@ -204,30 +271,33 @@ router.get('/status', authenticateToken, async (req, res) => {
     const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
 
     // Count pending tasks (tasks with due date that are not yet synced)
-    let pendingCount = 0;
     let totalTasksWithDueDate = 0;
     let syncedCount = 0;
 
     if (user.googleTasks?.enabled) {
-      const globalTasks = await Task.find({});
-      const contacts = await Contact.find({});
+      // Only fetch tasks with due dates for efficiency
+      const globalTasks = await Task.find(
+        { dueDate: { $exists: true, $ne: null }, completed: { $ne: true } },
+        { _id: 1, subtasks: 1 }
+      ).lean();
+      const contacts = await Contact.find(
+        { 'tasks.dueDate': { $exists: true } },
+        { 'tasks.id': 1, 'tasks.dueDate': 1, 'tasks.completed': 1, 'tasks.subtasks': 1 }
+      ).lean();
 
       // Count global tasks with due dates
       for (const task of globalTasks) {
-        if (task.dueDate && !task.completed) {
-          totalTasksWithDueDate++;
-          const taskId = task._id.toString();
-          const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
-          if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
-            syncedCount++;
-          }
+        totalTasksWithDueDate++;
+        const taskId = task._id.toString();
+        const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
+        if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+          syncedCount++;
         }
         // Count subtasks
         if (task.subtasks) {
-          countSubtasksPending(task.subtasks, user, (total, synced) => {
-            totalTasksWithDueDate += total;
-            syncedCount += synced;
-          });
+          const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
+          totalTasksWithDueDate += subtaskCounts.total;
+          syncedCount += subtaskCounts.synced;
         }
       }
 
@@ -244,17 +314,16 @@ router.get('/status', authenticateToken, async (req, res) => {
             }
             // Count subtasks
             if (task.subtasks) {
-              countSubtasksPending(task.subtasks, user, (total, synced) => {
-                totalTasksWithDueDate += total;
-                syncedCount += synced;
-              });
+              const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
+              totalTasksWithDueDate += subtaskCounts.total;
+              syncedCount += subtaskCounts.synced;
             }
           }
         }
       }
-
-      pendingCount = totalTasksWithDueDate - syncedCount;
     }
+
+    const pendingCount = totalTasksWithDueDate - syncedCount;
 
     res.json({
       connected: user.googleTasks?.enabled || false,
@@ -274,16 +343,16 @@ router.get('/status', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error getting Google Tasks status:', error);
+    logger.error('[Google Tasks] Error getting status', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
   }
 });
 
-// Helper function to count subtasks pending sync
-function countSubtasksPending(subtasks, user, callback) {
+// Helper function to count subtasks pending sync (returns object instead of callback)
+function countSubtasksPendingSync(subtasks, user) {
   let total = 0;
   let synced = 0;
-  if (!subtasks) return callback(total, synced);
+  if (!subtasks || !Array.isArray(subtasks)) return { total, synced };
 
   for (const subtask of subtasks) {
     if (subtask.dueDate && !subtask.completed) {
@@ -293,14 +362,13 @@ function countSubtasksPending(subtasks, user, callback) {
         synced++;
       }
     }
-    if (subtask.subtasks) {
-      countSubtasksPending(subtask.subtasks, user, (subTotal, subSynced) => {
-        total += subTotal;
-        synced += subSynced;
-      });
+    if (subtask.subtasks && subtask.subtasks.length > 0) {
+      const childCounts = countSubtasksPendingSync(subtask.subtasks, user);
+      total += childCounts.total;
+      synced += childCounts.synced;
     }
   }
-  callback(total, synced);
+  return { total, synced };
 }
 
 // Helper to get next quota reset time
@@ -315,11 +383,17 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
+
     if (user.googleTasks?.accessToken) {
       try {
         await oauth2Client.revokeToken(user.googleTasks.accessToken);
+        logger.info('[Google Tasks] Token revoked', { userId: req.user.id });
       } catch (e) {
-        console.log('Token revocation failed:', e.message);
+        // Token revocation can fail if token is already invalid - that's OK
+        logger.warn('[Google Tasks] Token revocation failed', { error: e.message, userId: req.user.id });
       }
     }
 
@@ -334,45 +408,45 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     };
 
     await user.save();
+    logger.info('[Google Tasks] Disconnected', { userId: req.user.id, username: user.username });
 
     res.json({ success: true, message: 'Google Tasks bol odpojený' });
   } catch (error) {
-    console.error('Error disconnecting Google Tasks:', error);
+    logger.error('[Google Tasks] Disconnect error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri odpájaní' });
   }
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
 router.post('/sync', authenticateToken, async (req, res) => {
-  console.log('=== SYNC STARTED ===');
-  console.log('User ID:', req.user.id);
   const forceSync = req.body.force === true;
-  console.log('Force sync:', forceSync);
+  logger.info('[Google Tasks] Sync started', { userId: req.user.id, forceSync });
 
   try {
     const user = await User.findById(req.user.id);
-    console.log('User found:', !!user);
+
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
 
     // If force sync, reset all tracking maps
     if (forceSync) {
-      console.log('Force sync - resetting all tracking maps');
+      logger.info('[Google Tasks] Force sync - resetting tracking maps', { userId: req.user.id });
       user.googleTasks.syncedTaskIds = new Map();
       user.googleTasks.syncedTaskHashes = new Map();
     }
 
     if (!user.googleTasks?.enabled) {
-      console.log('Google Tasks not enabled');
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
-
-    console.log('Google Tasks enabled, checking quota...');
 
     // Check quota before starting
     checkAndResetQuota(user);
     const remainingQuota = getRemainingQuota(user);
-    console.log('Remaining quota:', remainingQuota);
+    logger.debug('[Google Tasks] Quota check', { userId: req.user.id, remainingQuota });
 
     if (remainingQuota < 10) {
+      logger.warn('[Google Tasks] Quota exceeded', { userId: req.user.id, remainingQuota });
       return res.status(429).json({
         message: 'Denný limit API bol dosiahnutý. Skúste zajtra.',
         quotaExceeded: true,
@@ -385,25 +459,19 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
-    console.log('Getting tasks client...');
-    console.log('Task list ID:', user.googleTasks.taskListId);
-
     // Verify task list ID exists
     if (!user.googleTasks.taskListId) {
-      console.log('ERROR: No task list ID configured!');
+      logger.error('[Google Tasks] No task list configured', { userId: req.user.id });
       return res.status(400).json({ message: 'Google Tasks task list nie je nakonfigurovaný. Skúste sa odpojiť a znova pripojiť.' });
     }
 
     const tasksApi = await getTasksClient(user);
-    console.log('Tasks client obtained');
 
     // Verify task list exists - if not, recreate it
     try {
-      console.log('Verifying task list exists...');
       await tasksApi.tasklists.get({ tasklist: user.googleTasks.taskListId });
-      console.log('Task list verified');
     } catch (listError) {
-      console.log('Task list not found, creating new one...', listError.message);
+      logger.warn('[Google Tasks] Task list not found, recreating', { userId: req.user.id, error: listError.message });
       // Task list doesn't exist, create a new one
       try {
         const newList = await tasksApi.tasklists.insert({
@@ -413,18 +481,23 @@ router.post('/sync', authenticateToken, async (req, res) => {
         user.googleTasks.syncedTaskIds = new Map(); // Reset synced tasks
         user.googleTasks.syncedTaskHashes = new Map();
         await user.save();
-        console.log('Created new task list:', newList.data.id);
+        logger.info('[Google Tasks] Created new task list', { userId: req.user.id, taskListId: newList.data.id });
       } catch (createError) {
-        console.error('Failed to create task list:', createError.message);
+        logger.error('[Google Tasks] Failed to create task list', { userId: req.user.id, error: createError.message });
         return res.status(500).json({ message: 'Nepodarilo sa vytvoriť task list v Google Tasks' });
       }
     }
 
-    // Get all tasks with due dates
-    console.log('Fetching tasks from database...');
-    const globalTasks = await Task.find({});
-    const contacts = await Contact.find({});
-    console.log(`Found ${globalTasks.length} global tasks, ${contacts.length} contacts`);
+    // Get all tasks with due dates - optimize query to only fetch needed fields
+    const globalTasks = await Task.find(
+      {},
+      { _id: 1, title: 1, description: 1, dueDate: 1, completed: 1, modifiedAt: 1, updatedAt: 1, subtasks: 1 }
+    ).lean();
+    const contacts = await Contact.find(
+      {},
+      { name: 1, tasks: 1 }
+    ).lean();
+    logger.debug('[Google Tasks] Fetched tasks', { userId: req.user.id, globalTasks: globalTasks.length, contacts: contacts.length });
 
     const tasksToSync = [];
 
@@ -471,20 +544,13 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let skipped = 0;
     let quotaExceeded = false;
 
-    console.log('Tasks to sync:', tasksToSync.length);
-    console.log('Remaining quota:', remainingQuota);
-
     // Initialize hash map if not exists
     if (!user.googleTasks.syncedTaskHashes) {
-      console.log('Initializing syncedTaskHashes map');
       user.googleTasks.syncedTaskHashes = new Map();
     }
     if (!user.googleTasks.syncedTaskIds) {
-      console.log('Initializing syncedTaskIds map');
       user.googleTasks.syncedTaskIds = new Map();
     }
-
-    console.log('Starting incremental sync analysis...');
 
     // Filter tasks: new tasks to create, changed tasks to update
     const tasksToCreate = [];
@@ -493,14 +559,12 @@ router.post('/sync', authenticateToken, async (req, res) => {
     for (const task of tasksToSync) {
       // Skip tasks without valid ID
       if (!task.id) {
-        console.log('Skipping task without ID:', task.title);
         skipped++;
         continue;
       }
 
       // Skip tasks with invalid due date
       if (!task.dueDate || isNaN(new Date(task.dueDate).getTime())) {
-        console.log('Skipping task with invalid date:', task.title, task.dueDate);
         skipped++;
         continue;
       }
@@ -527,11 +591,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    console.log(`Incremental sync analysis complete: ${tasksToCreate.length} new, ${tasksToUpdate.length} changed, ${unchanged} unchanged`);
+    logger.debug('[Google Tasks] Sync analysis', {
+      userId: req.user.id,
+      toCreate: tasksToCreate.length,
+      toUpdate: tasksToUpdate.length,
+      unchanged
+    });
 
     // If nothing to do, return early
     if (tasksToCreate.length === 0 && tasksToUpdate.length === 0) {
-      console.log('No tasks to sync, returning early');
       user.googleTasks.lastSyncAt = new Date();
       await user.save();
       return res.json({
@@ -554,10 +622,13 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     // Check if we have enough quota for all tasks
     const totalTasksToProcess = tasksToCreate.length + tasksToUpdate.length;
-    const availableForSync = Math.min(totalTasksToProcess, remainingQuota);
 
     if (totalTasksToProcess > remainingQuota) {
-      console.log(`Quota warning: Need ${totalTasksToProcess} API calls, only ${remainingQuota} remaining`);
+      logger.warn('[Google Tasks] Quota may be insufficient', {
+        userId: req.user.id,
+        needed: totalTasksToProcess,
+        remaining: remainingQuota
+      });
     }
 
     // Process tasks in batches - stop immediately on any rate limit error
@@ -573,11 +644,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
       batches.push(allTasksToProcess.slice(i, i + BATCH_SIZE));
     }
 
-    console.log(`Processing ${batches.length} batches of up to ${BATCH_SIZE} tasks each`);
-    console.log('Starting batch processing loop...');
+    logger.debug('[Google Tasks] Processing batches', { userId: req.user.id, batches: batches.length, batchSize: BATCH_SIZE });
 
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      console.log(`\n--- Starting batch ${batchIndex + 1}/${batches.length} ---`);
       // Stop if quota exceeded
       if (quotaExceeded) {
         for (let i = batchIndex; i < batches.length; i++) {
@@ -588,7 +657,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
       // Check remaining quota before each batch
       if (getRemainingQuota(user) < BATCH_SIZE) {
-        console.log('Quota running low, stopping sync');
+        logger.warn('[Google Tasks] Quota running low, stopping', { userId: req.user.id });
         quotaExceeded = true;
         for (let i = batchIndex; i < batches.length; i++) {
           skipped += batches[i].length;
@@ -597,7 +666,6 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
 
       const batch = batches[batchIndex];
-      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tasks)`);
 
       // Process batch - no retries, fail fast on any limit error
       const batchPromises = batch.map(async (task) => {
@@ -608,7 +676,6 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
           if (isUpdate) {
             // Update existing task
-            console.log(`Updating task ${task.id} -> Google ${task.googleTaskId}`);
             await tasksApi.tasks.update({
               tasklist: user.googleTasks.taskListId,
               task: task.googleTaskId,
@@ -617,32 +684,27 @@ router.post('/sync', authenticateToken, async (req, res) => {
             return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
           } else {
             // Create new task
-            console.log(`Creating task ${task.id}: "${task.title.substring(0, 30)}..."`);
             const newTask = await tasksApi.tasks.insert({
               tasklist: user.googleTasks.taskListId,
               resource: taskData
             });
-            console.log(`Created Google task: ${newTask.data.id}`);
             return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
           }
         } catch (error) {
-          console.log(`Error for task ${task.id}: code=${error.code}, message=${error.message}`);
-
           // Any 403 or 429 error - stop immediately (quota or rate limit)
           if (error.code === 403 || error.code === 429 || error.response?.status === 429) {
-            console.log(`API limit error for task ${task.id} - stopping sync`);
+            logger.warn('[Google Tasks] API limit error', { userId: req.user.id, taskId: task.id, code: error.code });
             return { success: false, taskId: task.id, error: 'quota', message: error.message };
           }
 
           // Handle 404 or 400 "Missing task ID" for updates - task was deleted from Google, recreate it
           if (isUpdate && (error.code === 404 || (error.code === 400 && error.message?.includes('Missing task ID')))) {
-            console.log(`Task ${task.id} not found in Google (${error.code}), recreating...`);
             try {
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,
                 resource: createGoogleTaskData(task)
               });
-              console.log(`Recreated task ${task.id} as Google task ${newTask.data.id}`);
+              logger.debug('[Google Tasks] Recreated deleted task', { userId: req.user.id, taskId: task.id });
               return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
             } catch (insertError) {
               if (insertError.code === 403 || insertError.code === 429) {
@@ -653,7 +715,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
           }
 
           // Other errors
-          console.error(`Error syncing task ${task.id}:`, error.message);
+          logger.error('[Google Tasks] Sync task error', { userId: req.user.id, taskId: task.id, error: error.message });
           return { success: false, taskId: task.id, error: 'other', message: error.message };
         }
       });
@@ -687,7 +749,6 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
       // If any quota errors in this batch, stop processing further batches
       if (quotaErrorsInBatch > 0) {
-        console.log(`${quotaErrorsInBatch} quota errors in batch, stopping sync immediately`);
         // Count remaining tasks as skipped
         for (let i = batchIndex + 1; i < batches.length; i++) {
           skipped += batches[i].length;
@@ -703,19 +764,24 @@ router.post('/sync', authenticateToken, async (req, res) => {
         // If any errors, increase backoff significantly
         if (results.some(r => !r.success)) {
           currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
-          console.log(`Increased backoff to ${currentBackoff}ms due to errors`);
         }
-        console.log(`Waiting ${currentBackoff}ms before next batch...`);
         await delay(currentBackoff);
       }
     }
 
     // Update last sync time
-    console.log('=== SYNC COMPLETE ===');
-    console.log(`Results: ${synced} new, ${updated} updated, ${unchanged} unchanged, ${skipped} skipped, ${errors} errors`);
     user.googleTasks.lastSyncAt = new Date();
     await user.save();
-    console.log('User saved successfully');
+
+    logger.info('[Google Tasks] Sync completed', {
+      userId: req.user.id,
+      synced,
+      updated,
+      unchanged,
+      skipped,
+      errors,
+      quotaExceeded
+    });
 
     let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
@@ -739,9 +805,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('=== SYNC ERROR ===');
-    console.error('Error syncing to Google Tasks:', error);
-    console.error('Stack:', error.stack);
+    logger.error('[Google Tasks] Sync error', { error: error.message, stack: error.stack, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
   }
 });
@@ -751,23 +815,27 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
+
     if (!user.googleTasks?.enabled) {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
-
-    console.log('Resetting sync state for user:', user.username);
 
     user.googleTasks.syncedTaskIds = new Map();
     user.googleTasks.syncedTaskHashes = new Map();
     user.googleTasks.quotaUsedToday = 0;
     await user.save();
 
+    logger.info('[Google Tasks] Sync state reset', { userId: req.user.id, username: user.username });
+
     res.json({
       success: true,
       message: 'Synchronizačný stav bol resetovaný. Teraz môžete spustiť novú synchronizáciu.'
     });
   } catch (error) {
-    console.error('Error resetting sync state:', error);
+    logger.error('[Google Tasks] Reset sync error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri resetovaní: ' + error.message });
   }
 });
@@ -777,15 +845,19 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
+
     if (!user.googleTasks?.enabled) {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
 
     const tasksApi = await getTasksClient(user);
 
-    // Get all current task IDs
-    const globalTasks = await Task.find({});
-    const contacts = await Contact.find({});
+    // Get all current task IDs - only fetch necessary fields
+    const globalTasks = await Task.find({}, { _id: 1 }).lean();
+    const contacts = await Contact.find({}, { 'tasks.id': 1 }).lean();
 
     const currentTaskIds = new Set();
 
@@ -816,8 +888,11 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
             });
             deleted++;
           } catch (e) {
-            console.log(`Failed to delete task ${googleTaskId}:`, e.message);
-            errors++;
+            // 404 is OK - task already deleted
+            if (e.code !== 404) {
+              logger.warn('[Google Tasks] Failed to delete task', { taskId, googleTaskId, error: e.message });
+              errors++;
+            }
           }
           user.googleTasks.syncedTaskIds.delete(taskId);
         }
@@ -826,6 +901,8 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
     await user.save();
 
+    logger.info('[Google Tasks] Cleanup completed', { userId: req.user.id, deleted, errors });
+
     res.json({
       success: true,
       message: `Vyčistené: ${deleted} úloh odstránených, ${errors} chýb`,
@@ -833,7 +910,7 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
       errors
     });
   } catch (error) {
-    console.error('Error cleaning up tasks:', error);
+    logger.error('[Google Tasks] Cleanup error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
   }
 });
@@ -888,7 +965,6 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
   try {
     // Skip if task has no due date (for create/update)
     if (action !== 'delete' && !taskData.dueDate) {
-      console.log('Auto-sync Tasks: Task has no due date, skipping sync');
       return;
     }
 
@@ -897,17 +973,20 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       taskId = taskId.toString();
     }
 
-    console.log(`Auto-sync Tasks: Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action})`);
+    // Validate taskId
+    if (!taskId) {
+      logger.warn('[Auto-sync Tasks] Missing task ID', { title: taskData.title });
+      return;
+    }
+
+    logger.debug('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title });
 
     // Find all users with Google Tasks enabled
     const users = await User.find({ 'googleTasks.enabled': true });
 
     if (users.length === 0) {
-      console.log('Auto-sync Tasks: No users with Google Tasks connected');
       return;
     }
-
-    console.log(`Auto-sync Tasks: Found ${users.length} users with Google Tasks connected`);
 
     // Helper for retrying with exponential backoff
     const retryWithBackoff = async (fn, maxRetries = 3) => {
@@ -924,7 +1003,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
           // Retry on rate limit with exponential backoff
           if (error.code === 429 || error.response?.status === 429) {
             const waitTime = Math.min(1000 * Math.pow(2, attempt), 16000);
-            console.log(`Auto-sync Tasks: Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`);
+            logger.debug('[Auto-sync Tasks] Rate limited, retrying', { attempt: attempt + 1, maxRetries, waitTime });
             await delay(waitTime);
             continue;
           }
@@ -947,9 +1026,12 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 tasklist: user.googleTasks.taskListId,
                 task: googleTaskId
               }));
-              console.log(`Auto-sync Tasks: Deleted task ${googleTaskId} for user ${user.username}`);
+              logger.debug('[Auto-sync Tasks] Deleted task', { userId: user._id, taskId });
             } catch (e) {
-              console.log(`Auto-sync Tasks: Task deletion failed:`, e.message);
+              // 404 is OK - task was already deleted
+              if (e.code !== 404) {
+                logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
+              }
             }
             user.googleTasks.syncedTaskIds.delete(taskId);
             await user.save();
@@ -973,7 +1055,6 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 task: existingTaskId,
                 resource: googleTaskData
               }));
-              console.log(`Auto-sync Tasks: Updated task ${existingTaskId} for user ${user.username}`);
             } catch (e) {
               if (e.code === 404) {
                 const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
@@ -982,7 +1063,6 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 }));
                 user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
                 await user.save();
-                console.log(`Auto-sync Tasks: Created new task for user ${user.username}`);
               } else {
                 throw e;
               }
@@ -994,15 +1074,14 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             }));
             user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
             await user.save();
-            console.log(`Auto-sync Tasks: Created task ${newTask.data.id} for user ${user.username}`);
           }
         }
       } catch (error) {
-        console.error(`Auto-sync Tasks: Error syncing for user ${user.username}:`, error.message);
+        logger.error('[Auto-sync Tasks] Error for user', { userId: user._id, error: error.message });
       }
     }
   } catch (error) {
-    console.error('Auto-sync Tasks: Error in autoSyncTaskToGoogleTasks:', error.message);
+    logger.error('[Auto-sync Tasks] Error', { error: error.message });
   }
 };
 
