@@ -543,6 +543,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let errors = 0;
     let skipped = 0;
     let quotaExceeded = false;
+    let rateLimitHit = false;
 
     // Initialize hash map if not exists
     if (!user.googleTasks.syncedTaskHashes) {
@@ -632,9 +633,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     // Process tasks in batches - stop immediately on any rate limit error
-    const BATCH_SIZE = 5;
-    let currentBackoff = 1000;  // Delay between batches
-    const MAX_BACKOFF = 32000;
+    // Google Tasks API allows ~10 requests per second, so we use small batches with delays
+    const BATCH_SIZE = 10;
+    let currentBackoff = 2000;  // 2 second delay between batches to avoid rate limits
+    const MAX_BACKOFF = 60000;
 
     // Combine tasks to create and update, prioritizing updates (they're more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -666,8 +668,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
 
       const batch = batches[batchIndex];
+      rateLimitHit = false; // Reset for each batch
 
-      // Process batch - no retries, fail fast on any limit error
+      // Process batch
       const batchPromises = batch.map(async (task) => {
         const isUpdate = !!task.googleTaskId;
 
@@ -691,10 +694,22 @@ router.post('/sync', authenticateToken, async (req, res) => {
             return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
           }
         } catch (error) {
-          // Any 403 or 429 error - stop immediately (quota or rate limit)
-          if (error.code === 403 || error.code === 429 || error.response?.status === 429) {
-            logger.warn('[Google Tasks] API limit error', { userId: req.user.id, taskId: task.id, code: error.code });
+          // Rate limit error (429) - mark for retry with backoff
+          if (error.code === 429 || error.response?.status === 429) {
+            logger.warn('[Google Tasks] Rate limit hit', { userId: req.user.id, taskId: task.id });
+            return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
+          }
+
+          // Quota exceeded (403 with specific message) - stop immediately
+          if (error.code === 403 && (error.message?.includes('Quota') || error.message?.includes('quota') || error.message?.includes('rate'))) {
+            logger.warn('[Google Tasks] Quota/rate error', { userId: req.user.id, taskId: task.id, message: error.message });
             return { success: false, taskId: task.id, error: 'quota', message: error.message };
+          }
+
+          // Other 403 errors (permissions, etc.)
+          if (error.code === 403) {
+            logger.error('[Google Tasks] Permission error', { userId: req.user.id, taskId: task.id, message: error.message });
+            return { success: false, taskId: task.id, error: 'permission', message: error.message };
           }
 
           // Handle 404 or 400 "Missing task ID" for updates - task was deleted from Google, recreate it
@@ -736,24 +751,35 @@ router.post('/sync', authenticateToken, async (req, res) => {
           } else {
             updated++;
           }
+        } else if (result.error === 'rate_limit') {
+          // Rate limit - increase backoff significantly and continue
+          rateLimitHit = true;
+          skipped++;
+          logger.info('[Google Tasks] Rate limit hit, will increase backoff', { taskId: result.taskId });
         } else if (result.error === 'quota') {
           // Quota exceeded - stop immediately, don't retry
           quotaErrorsInBatch++;
           quotaExceeded = true;
           skipped++;
-          console.log(`Quota error detected for task ${result.taskId}, stopping sync`);
+          logger.warn('[Google Tasks] Quota exceeded, stopping sync', { taskId: result.taskId });
         } else {
           errors++;
         }
       }
 
-      // If any quota errors in this batch, stop processing further batches
+      // If quota errors, stop completely
       if (quotaErrorsInBatch > 0) {
         // Count remaining tasks as skipped
         for (let i = batchIndex + 1; i < batches.length; i++) {
           skipped += batches[i].length;
         }
         break; // Exit batch processing loop
+      }
+
+      // If rate limit hit, increase backoff significantly
+      if (rateLimitHit) {
+        currentBackoff = Math.min(currentBackoff * 3, MAX_BACKOFF);
+        logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff });
       }
 
       // Track quota usage
