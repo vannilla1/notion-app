@@ -1280,6 +1280,12 @@ function Tasks() {
     return true;
   });
 
+  // Sort tasks: incomplete first, completed at the end
+  const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
+    if (a.completed === b.completed) return 0;
+    return a.completed ? 1 : -1;
+  });
+
   const completedCount = tasks.filter(t => t.completed).length;
   const activeCount = tasks.filter(t => !t.completed).length;
   const newCount = countNewOrModified(tasks);
@@ -1644,7 +1650,7 @@ function Tasks() {
           ) : (
             <div className="tasks-page">
               <div className="tasks-header">
-                <h2>Zoznam úloh ({filteredTasks.length})</h2>
+                <h2>Zoznam úloh ({sortedFilteredTasks.length})</h2>
                 <div className="search-box">
                   <input
                     type="text"
@@ -1685,7 +1691,7 @@ function Tasks() {
 
               {loading ? (
                 <div className="loading">Načítavam...</div>
-              ) : filteredTasks.length === 0 ? (
+              ) : sortedFilteredTasks.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">✓</div>
                   <h2>Žiadne úlohy</h2>
@@ -1693,7 +1699,7 @@ function Tasks() {
                 </div>
               ) : (
                 <div className="tasks-list">
-                  {filteredTasks.map(task => {
+                  {sortedFilteredTasks.map(task => {
                     // Check if main task matches assigned filter
                     const currentUserId = user?.id?.toString();
                     const taskMatchesAssigned = isAssignedFilter(filter) && currentUserId &&
