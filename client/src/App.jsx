@@ -24,10 +24,47 @@ function App() {
   }, [isAuthenticated]);
 
   // Handle URL query params for deep linking from push notifications
+  // Store pending navigation while not authenticated
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+
+    // If we have deep link params but not authenticated, store them for later
+    if (!isAuthenticated && !loading) {
+      if ((location.pathname === '/crm' && params.get('expandContact')) ||
+          (location.pathname === '/tasks' && params.get('highlightTask'))) {
+        // Store the full URL for after login
+        sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
+      }
+      return;
+    }
+
     if (!isAuthenticated) return;
 
-    const params = new URLSearchParams(location.search);
+    // Check for pending deep link from before login
+    const pendingLink = sessionStorage.getItem('pendingDeepLink');
+    if (pendingLink) {
+      sessionStorage.removeItem('pendingDeepLink');
+      const pendingUrl = new URL(pendingLink, window.location.origin);
+      const pendingParams = new URLSearchParams(pendingUrl.search);
+
+      if (pendingUrl.pathname === '/crm' && pendingParams.get('expandContact')) {
+        navigate('/crm', {
+          state: { expandContactId: pendingParams.get('expandContact') },
+          replace: true
+        });
+        return;
+      }
+      if (pendingUrl.pathname === '/tasks' && pendingParams.get('highlightTask')) {
+        navigate('/tasks', {
+          state: {
+            highlightTaskId: pendingParams.get('highlightTask'),
+            highlightSubtaskId: pendingParams.get('subtask') || null
+          },
+          replace: true
+        });
+        return;
+      }
+    }
 
     // Handle CRM contact expansion
     if (location.pathname === '/crm' && params.get('expandContact')) {
@@ -52,7 +89,7 @@ function App() {
         replace: true
       });
     }
-  }, [location, isAuthenticated, navigate]);
+  }, [location, isAuthenticated, loading, navigate]);
 
   // Listen for messages from service worker (push notification clicks)
   useEffect(() => {

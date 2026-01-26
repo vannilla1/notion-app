@@ -1,10 +1,10 @@
 // Push notification service worker
-// Version: 2.1 - Production ready with improved error handling
+// Version: 2.2 - Fixed iOS navigation from push notifications
 
-const SW_VERSION = '2.1';
+const SW_VERSION = '2.2';
 
-// Debug logging - disabled in production
-const DEBUG = false;
+// Debug logging - enabled temporarily for troubleshooting
+const DEBUG = true;
 const log = (...args) => DEBUG && console.log('[SW]', ...args);
 const logError = (...args) => console.error('[SW]', ...args);
 
@@ -60,11 +60,13 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   log('Notification clicked');
+  log('Notification data:', JSON.stringify(event.notification.data));
 
   event.notification.close();
 
   // Get the URL to open - could be relative or absolute
   let urlToOpen = event.notification.data?.url || '/';
+  log('Original URL from notification:', urlToOpen);
 
   // Validate URL to prevent open redirect attacks
   try {
@@ -82,7 +84,7 @@ self.addEventListener('notificationclick', (event) => {
     urlToOpen = self.location.origin + '/';
   }
 
-  log('Opening URL:', urlToOpen);
+  log('Final URL to open:', urlToOpen);
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
@@ -91,8 +93,9 @@ self.addEventListener('notificationclick', (event) => {
 
         // Check if there's already a window open with our app
         for (const client of windowClients) {
+          log('Checking client URL:', client.url);
           if (client.url.includes(self.location.origin)) {
-            log('Found existing client');
+            log('Found existing client, focusing and navigating');
             // Focus the existing window and navigate to the new URL
             return client.focus().then(() => {
               // Use postMessage to navigate within the SPA
@@ -101,16 +104,17 @@ self.addEventListener('notificationclick', (event) => {
                 url: urlToOpen,
                 data: event.notification.data
               });
+              log('Sent NOTIFICATION_CLICK message to client');
               return client;
-            }).catch(() => {
-              // If focus fails, open new window
+            }).catch((focusError) => {
+              log('Focus failed, opening new window:', focusError.message);
               return clients.openWindow(urlToOpen);
             });
           }
         }
 
-        // If no window is open, open a new one
-        log('No existing client, opening new window');
+        // If no window is open, open a new one with the full URL (including query params)
+        log('No existing client, opening new window with URL:', urlToOpen);
         if (clients.openWindow) {
           return clients.openWindow(urlToOpen);
         }
