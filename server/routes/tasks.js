@@ -1674,13 +1674,16 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
               }));
 
               // Build parent task object with contact info
+              // Use toObject() to properly convert Mongoose subdocument to plain object
+              const taskObj = contact.tasks[taskIndex].toObject ? contact.tasks[taskIndex].toObject() : contact.tasks[taskIndex];
               const parentTask = {
-                ...contact.tasks[taskIndex],
+                ...taskObj,
+                id: taskObj.id || contact.tasks[taskIndex].id,
                 contactId: contact._id.toString(),
                 contactName: contact.name
               };
 
-              console.log('[DeleteSubtask] parentTask.id:', parentTask.id, 'deletedSubtask.id:', deletedSubtask.id);
+              console.log('[DeleteSubtask] parentTask.id:', parentTask.id, 'taskObj.id:', taskObj.id, 'deletedSubtask.id:', deletedSubtask.id);
 
               // Send notifications for deleted subtask and all nested subtasks
               await sendDeleteNotifications(deletedSubtask, parentTask);
