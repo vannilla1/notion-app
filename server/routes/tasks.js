@@ -155,8 +155,15 @@ router.get('/', authenticateToken, async (req, res) => {
     // Combine all tasks
     const allTasks = [...enrichedGlobalTasks, ...contactTasks];
 
-    // Sort by createdAt descending (newest first)
-    allTasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Sort: incomplete first, then by createdAt descending (newest first)
+    allTasks.sort((a, b) => {
+      // First sort by completed status (incomplete first)
+      if (a.completed !== b.completed) {
+        return a.completed ? 1 : -1;
+      }
+      // Then sort by createdAt descending
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
 
     res.json(allTasks);
   } catch (error) {
