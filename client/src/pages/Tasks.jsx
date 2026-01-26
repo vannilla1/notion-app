@@ -1282,8 +1282,11 @@ function Tasks() {
 
   // Sort tasks: incomplete first, completed at the end
   const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
-    if (a.completed === b.completed) return 0;
-    return a.completed ? 1 : -1;
+    const aCompleted = a.completed === true;
+    const bCompleted = b.completed === true;
+    if (aCompleted && !bCompleted) return 1;
+    if (!aCompleted && bCompleted) return -1;
+    return 0;
   });
 
   const completedCount = tasks.filter(t => t.completed).length;
