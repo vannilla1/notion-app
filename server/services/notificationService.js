@@ -69,21 +69,30 @@ const initialize = (socketIo) => {
  * Generate URL for navigation based on notification type and data
  */
 const generateNotificationUrl = (type, data = {}) => {
+  logger.debug('[NotificationService] generateNotificationUrl', { type, data });
+
   // Contact notifications -> /crm with contact expansion
   if (type?.startsWith('contact') && data.contactId) {
-    return `/crm?expandContact=${data.contactId}`;
+    const url = `/crm?expandContact=${data.contactId}`;
+    logger.debug('[NotificationService] Generated contact URL', { url });
+    return url;
   }
 
   // Task notifications -> /tasks with task highlight
   if (type?.startsWith('task') && data.taskId) {
-    return `/tasks?highlightTask=${data.taskId}`;
+    const url = `/tasks?highlightTask=${data.taskId}`;
+    logger.debug('[NotificationService] Generated task URL', { url });
+    return url;
   }
 
   // Subtask notifications -> /tasks with parent task highlight
   if (type?.startsWith('subtask') && data.taskId) {
-    return `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
+    const url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
+    logger.debug('[NotificationService] Generated subtask URL', { url });
+    return url;
   }
 
+  logger.warn('[NotificationService] No URL match, returning /', { type, data });
   return '/';
 };
 
