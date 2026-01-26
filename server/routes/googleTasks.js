@@ -544,6 +544,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let skipped = 0;
     let quotaExceeded = false;
     let rateLimitHit = false;
+    let rateLimitCount = 0;
 
     // Initialize hash map if not exists
     if (!user.googleTasks.syncedTaskHashes) {
@@ -722,8 +723,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
               logger.debug('[Google Tasks] Recreated deleted task', { userId: req.user.id, taskId: task.id });
               return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
             } catch (insertError) {
-              if (insertError.code === 403 || insertError.code === 429) {
-                return { success: false, taskId: task.id, error: 'quota', message: insertError.message };
+              if (insertError.code === 429 || insertError.response?.status === 429) {
+                return { success: false, taskId: task.id, error: 'rate_limit', message: insertError.message };
+              }
+              if (insertError.code === 403) {
+                return { success: false, taskId: task.id, error: 'permission', message: insertError.message };
               }
               return { success: false, taskId: task.id, error: 'other', message: insertError.message };
             }
@@ -754,14 +758,19 @@ router.post('/sync', authenticateToken, async (req, res) => {
         } else if (result.error === 'rate_limit') {
           // Rate limit - increase backoff significantly and continue
           rateLimitHit = true;
+          rateLimitCount++;
           skipped++;
-          logger.info('[Google Tasks] Rate limit hit, will increase backoff', { taskId: result.taskId });
+          logger.info('[Google Tasks] Rate limit hit, will increase backoff', { taskId: result.taskId, totalRateLimits: rateLimitCount });
         } else if (result.error === 'quota') {
           // Quota exceeded - stop immediately, don't retry
           quotaErrorsInBatch++;
           quotaExceeded = true;
           skipped++;
           logger.warn('[Google Tasks] Quota exceeded, stopping sync', { taskId: result.taskId });
+        } else if (result.error === 'permission') {
+          // Permission error - log but continue with other tasks
+          errors++;
+          logger.warn('[Google Tasks] Permission error, skipping task', { taskId: result.taskId, message: result.message });
         } else {
           errors++;
         }
@@ -776,10 +785,22 @@ router.post('/sync', authenticateToken, async (req, res) => {
         break; // Exit batch processing loop
       }
 
-      // If rate limit hit, increase backoff significantly
+      // If rate limit hit, increase backoff significantly and wait longer
       if (rateLimitHit) {
         currentBackoff = Math.min(currentBackoff * 3, MAX_BACKOFF);
-        logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff });
+        logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff, rateLimitCount });
+
+        // If too many rate limits, stop to avoid being blocked
+        if (rateLimitCount >= 20) {
+          logger.warn('[Google Tasks] Too many rate limits, stopping sync', { rateLimitCount });
+          for (let i = batchIndex + 1; i < batches.length; i++) {
+            skipped += batches[i].length;
+          }
+          break;
+        }
+
+        // Wait longer after rate limit
+        await delay(currentBackoff);
       }
 
       // Track quota usage
@@ -812,7 +833,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
     let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
-    if (quotaExceeded) message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
+    if (quotaExceeded) {
+      message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
+    } else if (rateLimitCount > 0) {
+      message += ` (${rateLimitCount}x rate limit - skúste znova o chvíľu)`;
+    }
 
     res.json({
       success: true,
