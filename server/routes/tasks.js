@@ -1680,6 +1680,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
                 contactName: contact.name
               };
 
+              console.log('[DeleteSubtask] parentTask.id:', parentTask.id, 'deletedSubtask.id:', deletedSubtask.id);
+
               // Send notifications for deleted subtask and all nested subtasks
               await sendDeleteNotifications(deletedSubtask, parentTask);
 
