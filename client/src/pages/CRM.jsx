@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '@/api/api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -72,6 +72,8 @@ function CRM() {
 
   // Highlight state for push notification navigation
   const [highlightedContactId, setHighlightedContactId] = useState(null);
+  // Store pending highlight from navigation (for when contacts haven't loaded yet)
+  const pendingHighlightRef = useRef(null);
 
   useEffect(() => {
     fetchContacts();
@@ -80,13 +82,24 @@ function CRM() {
 
   // Handle navigation state to expand contact from Dashboard or push notification
   useEffect(() => {
-    if (location.state?.expandContactId && contacts.length > 0) {
-      const contactId = location.state.expandContactId;
+    // If we have expand params in navigation state, store them
+    if (location.state?.expandContactId) {
+      pendingHighlightRef.current = {
+        contactId: location.state.expandContactId
+      };
+      // Clear the navigation state immediately
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
+
+  // Process pending highlight when contacts are loaded
+  useEffect(() => {
+    if (pendingHighlightRef.current && contacts.length > 0) {
+      const { contactId } = pendingHighlightRef.current;
+      pendingHighlightRef.current = null; // Clear pending highlight
+
       setExpandedContact(contactId);
       setHighlightedContactId(contactId);
-
-      // Clear the navigation state
-      navigate(location.pathname, { replace: true, state: {} });
 
       // Scroll to contact after a short delay
       setTimeout(() => {
@@ -101,7 +114,7 @@ function CRM() {
         setHighlightedContactId(null);
       }, 3000);
     }
-  }, [location.state, contacts, navigate, location.pathname]);
+  }, [contacts]);
 
   // Helper function to get due date status class
   const getDueDateClass = (dueDate, completed) => {

@@ -1,7 +1,7 @@
 // Push notification service worker
-// Version: 2.2 - Fixed iOS navigation from push notifications
+// Version: 2.3 - Improved iOS deep linking for push notifications
 
-const SW_VERSION = '2.2';
+const SW_VERSION = '2.3';
 
 // Debug logging - enabled temporarily for troubleshooting
 const DEBUG = true;
@@ -116,7 +116,10 @@ self.addEventListener('notificationclick', (event) => {
         // If no window is open, open a new one with the full URL (including query params)
         log('No existing client, opening new window with URL:', urlToOpen);
         if (clients.openWindow) {
-          return clients.openWindow(urlToOpen);
+          return clients.openWindow(urlToOpen).then((windowClient) => {
+            log('New window opened successfully', windowClient ? 'with client' : 'without client');
+            return windowClient;
+          });
         }
       })
       .catch((error) => {

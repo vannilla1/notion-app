@@ -23,6 +23,8 @@ function Tasks() {
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
   const [highlightedSubtaskId, setHighlightedSubtaskId] = useState(null);
   const taskRefs = useRef({});
+  // Store pending highlight from navigation (for when tasks haven't loaded yet)
+  const pendingHighlightRef = useRef(null);
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -328,9 +330,22 @@ function Tasks() {
 
   // Handle highlight from navigation state (push notification click)
   useEffect(() => {
-    if (location.state?.highlightTaskId && tasks.length > 0) {
-      const taskId = location.state.highlightTaskId;
-      const subtaskId = location.state.highlightSubtaskId;
+    // If we have highlight params in navigation state, store them
+    if (location.state?.highlightTaskId) {
+      pendingHighlightRef.current = {
+        taskId: location.state.highlightTaskId,
+        subtaskId: location.state.highlightSubtaskId
+      };
+      // Clear the navigation state immediately
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
+
+  // Process pending highlight when tasks are loaded
+  useEffect(() => {
+    if (pendingHighlightRef.current && tasks.length > 0) {
+      const { taskId, subtaskId } = pendingHighlightRef.current;
+      pendingHighlightRef.current = null; // Clear pending highlight
 
       setHighlightedTaskId(taskId);
       setExpandedTask(taskId);
@@ -354,11 +369,8 @@ function Tasks() {
         setHighlightedTaskId(null);
         setHighlightedSubtaskId(null);
       }, 3000);
-
-      // Clear the navigation state
-      navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location.state, tasks, navigate, location.pathname]);
+  }, [tasks]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
