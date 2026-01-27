@@ -980,6 +980,117 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
   }
 });
 
+// Delete tasks from Google Tasks by search term
+router.post('/delete-by-search', authenticateToken, async (req, res) => {
+  try {
+    const { searchTerm } = req.body;
+
+    if (!searchTerm || searchTerm.length < 2) {
+      return res.status(400).json({ message: 'Vyhľadávací výraz musí mať aspoň 2 znaky' });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
+
+    if (!user.googleTasks?.enabled) {
+      return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    const tasksApi = await getTasksClient(user);
+    const taskListId = user.googleTasks.taskListId;
+
+    // Fetch all tasks from Google Tasks
+    let allTasks = [];
+    let pageToken = null;
+
+    do {
+      const response = await tasksApi.tasks.list({
+        tasklist: taskListId,
+        maxResults: 100,
+        showCompleted: true,
+        showHidden: true,
+        pageToken
+      });
+
+      if (response.data.items) {
+        allTasks = allTasks.concat(response.data.items);
+      }
+      pageToken = response.data.nextPageToken;
+    } while (pageToken);
+
+    // Filter tasks matching the search term (case insensitive)
+    const searchRegex = new RegExp(searchTerm, 'i');
+    const tasksToDelete = allTasks.filter(t => t.title && searchRegex.test(t.title));
+
+    logger.info('[Google Tasks] Delete by search', {
+      userId: req.user.id,
+      searchTerm,
+      totalTasks: allTasks.length,
+      matchingTasks: tasksToDelete.length
+    });
+
+    let deleted = 0;
+    let errors = 0;
+
+    for (const task of tasksToDelete) {
+      try {
+        await tasksApi.tasks.delete({
+          tasklist: taskListId,
+          task: task.id
+        });
+        deleted++;
+
+        // Also remove from syncedTaskIds if present
+        if (user.googleTasks.syncedTaskIds) {
+          for (const [localId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+            if (googleId === task.id) {
+              user.googleTasks.syncedTaskIds.delete(localId);
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        if (e.code !== 404) {
+          logger.warn('[Google Tasks] Failed to delete task by search', {
+            taskId: task.id,
+            title: task.title,
+            error: e.message
+          });
+          errors++;
+        }
+      }
+
+      // Small delay to avoid rate limiting
+      if (deleted % 10 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    await user.save();
+
+    logger.info('[Google Tasks] Delete by search completed', {
+      userId: req.user.id,
+      searchTerm,
+      deleted,
+      errors
+    });
+
+    res.json({
+      success: true,
+      message: `Vymazané: ${deleted} úloh s "${searchTerm}", ${errors} chýb`,
+      found: tasksToDelete.length,
+      deleted,
+      errors
+    });
+  } catch (error) {
+    logger.error('[Google Tasks] Delete by search error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+  }
+});
+
 // Helper functions
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;

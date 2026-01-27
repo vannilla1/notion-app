@@ -44,6 +44,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
+  const [deleteSearchTerm, setDeleteSearchTerm] = useState('');
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -416,6 +417,34 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     } catch (error) {
       console.error('Error cleaning up Google Tasks:', error);
       setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri čistení');
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  const handleDeleteBySearch = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setGoogleTasksMessage('Zadajte aspoň 2 znaky pre vyhľadávanie');
+      return;
+    }
+
+    if (!confirm(`Naozaj chcete vymazať všetky úlohy obsahujúce "${searchTerm}" z Google Tasks?`)) {
+      return;
+    }
+
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      setGoogleTasksMessage('');
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/google-tasks/delete-by-search`,
+        { searchTerm },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGoogleTasksMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleTasksStatus();
+    } catch (error) {
+      console.error('Error deleting by search:', error);
+      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri mazaní');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -1016,6 +1045,29 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks}>
                         Odpojiť
                       </button>
+                    </div>
+                    <div style={{ marginTop: '12px', padding: '10px', background: '#f8f9fa', borderRadius: '6px' }}>
+                      <label style={{ fontSize: '12px', color: '#666', marginBottom: '4px', display: 'block' }}>
+                        Vymazať z Google Tasks podľa názvu:
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          value={deleteSearchTerm}
+                          onChange={(e) => setDeleteSearchTerm(e.target.value)}
+                          placeholder="napr. vzor"
+                          style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '14px' }}
+                          disabled={googleTasks.syncing}
+                        />
+                        <button
+                          className="btn btn-warning"
+                          onClick={() => handleDeleteBySearch(deleteSearchTerm)}
+                          disabled={googleTasks.syncing || deleteSearchTerm.length < 2}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          Vymazať
+                        </button>
+                      </div>
                     </div>
                     {googleTasksMessage && (
                       <div className="form-success" style={{ marginTop: '12px' }}>
