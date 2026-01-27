@@ -96,16 +96,8 @@ function Tasks() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchTasks();
-    fetchContacts();
-    fetchUsers();
-    // Sync completed tasks from Google Tasks (if connected)
-    syncCompletedFromGoogle();
-  }, [fetchTasks, fetchContacts, fetchUsers]);
-
   // Sync completed tasks from Google Tasks to CRM
-  const syncCompletedFromGoogle = async () => {
+  const syncCompletedFromGoogle = useCallback(async () => {
     try {
       // This will silently sync completed tasks from Google Tasks
       // No UI feedback needed - it runs in background
@@ -116,7 +108,15 @@ function Tasks() {
       // Silently ignore errors (user may not have Google Tasks connected)
       console.log('Google Tasks sync skipped:', error.response?.data?.message || error.message);
     }
-  };
+  }, [fetchTasks]);
+
+  useEffect(() => {
+    fetchTasks();
+    fetchContacts();
+    fetchUsers();
+    // Sync completed tasks from Google Tasks (if connected)
+    syncCompletedFromGoogle();
+  }, [fetchTasks, fetchContacts, fetchUsers, syncCompletedFromGoogle]);
 
   // Handle Google Calendar and Google Tasks OAuth callback parameters
   useEffect(() => {
