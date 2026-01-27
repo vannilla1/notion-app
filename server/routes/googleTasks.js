@@ -1242,11 +1242,12 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
               }
             }
-            // Use atomic update to remove from syncedTaskIds
-            await User.updateOne(
-              { _id: user._id },
-              { $unset: { [`googleTasks.syncedTaskIds.${taskId}`]: 1 } }
-            );
+            // Re-fetch user before modifying Map
+            const userToSave = await User.findById(user._id);
+            if (userToSave) {
+              userToSave.googleTasks.syncedTaskIds.delete(taskId);
+              await userToSave.save();
+            }
           }
         } else {
           const googleTaskData = createGoogleTaskData({
@@ -1260,34 +1261,40 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
 
           // Re-fetch user to get latest syncedTaskIds (prevents race condition)
           const freshUser = await User.findById(user._id);
-          const existingTaskId = freshUser?.googleTasks?.syncedTaskIds?.get(taskId);
+          if (!freshUser) {
+            logger.warn('[Auto-sync Tasks] User not found on re-fetch', { userId: user._id });
+            continue;
+          }
+
+          const existingGoogleId = freshUser.googleTasks?.syncedTaskIds?.get(taskId);
 
           logger.debug('[Auto-sync Tasks] Checking existing', {
             userId: user._id,
             taskId,
-            existingTaskId: existingTaskId || 'none'
+            existingGoogleId: existingGoogleId || 'none'
           });
 
-          if (existingTaskId) {
+          if (existingGoogleId) {
             try {
               await retryWithBackoff(() => tasksApi.tasks.update({
-                tasklist: user.googleTasks.taskListId,
-                task: existingTaskId,
+                tasklist: freshUser.googleTasks.taskListId,
+                task: existingGoogleId,
                 resource: googleTaskData
               }));
-              logger.debug('[Auto-sync Tasks] Updated existing task', { userId: user._id, taskId, googleTaskId: existingTaskId });
+              logger.debug('[Auto-sync Tasks] Updated existing task', { userId: user._id, taskId, googleTaskId: existingGoogleId });
             } catch (e) {
               if (e.code === 404) {
                 // Task was deleted from Google, create new one
                 const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-                  tasklist: user.googleTasks.taskListId,
+                  tasklist: freshUser.googleTasks.taskListId,
                   resource: googleTaskData
                 }));
-                // Use atomic update to prevent race conditions
-                await User.updateOne(
-                  { _id: user._id },
-                  { $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id } }
-                );
+                // Re-fetch again before saving to prevent overwriting other changes
+                const userToSave = await User.findById(user._id);
+                if (userToSave) {
+                  userToSave.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
+                  await userToSave.save();
+                }
                 logger.debug('[Auto-sync Tasks] Recreated deleted task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
               } else {
                 throw e;
@@ -1295,14 +1302,15 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             }
           } else {
             const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-              tasklist: user.googleTasks.taskListId,
+              tasklist: freshUser.googleTasks.taskListId,
               resource: googleTaskData
             }));
-            // Use atomic update to prevent race conditions
-            await User.updateOne(
-              { _id: user._id },
-              { $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id } }
-            );
+            // Re-fetch again before saving to prevent overwriting other changes
+            const userToSave = await User.findById(user._id);
+            if (userToSave) {
+              userToSave.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
+              await userToSave.save();
+            }
             logger.debug('[Auto-sync Tasks] Created new task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
           }
         }
