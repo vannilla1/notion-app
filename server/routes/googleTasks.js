@@ -1133,9 +1133,34 @@ function createGoogleTaskData(task) {
 
 // ==================== AUTO-SYNC HELPER FUNCTIONS ====================
 
+// In-memory lock to prevent duplicate syncs for the same task
+const syncLocks = new Map();
+const LOCK_TIMEOUT = 30000; // 30 seconds
+
+const acquireLock = (key) => {
+  const now = Date.now();
+  const existingLock = syncLocks.get(key);
+
+  // Clean up expired lock
+  if (existingLock && now - existingLock > LOCK_TIMEOUT) {
+    syncLocks.delete(key);
+  }
+
+  if (syncLocks.has(key)) {
+    return false; // Lock exists
+  }
+
+  syncLocks.set(key, now);
+  return true;
+};
+
+const releaseLock = (key) => {
+  syncLocks.delete(key);
+};
+
 /**
  * Automatically sync a task to Google Tasks for all users who have Google Tasks connected
- * Uses exponential backoff for rate limiting
+ * Uses exponential backoff for rate limiting and locks to prevent duplicates
  */
 const autoSyncTaskToGoogleTasks = async (taskData, action) => {
   try {
@@ -1155,8 +1180,16 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       return;
     }
 
+    // Acquire lock to prevent duplicate syncs
+    const lockKey = `sync-${taskId}-${action}`;
+    if (!acquireLock(lockKey)) {
+      logger.debug('[Auto-sync Tasks] Skipping - sync already in progress', { taskId, action });
+      return;
+    }
+
     logger.debug('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title });
 
+    try {
     // Find all users with Google Tasks enabled
     const users = await User.find({ 'googleTasks.enabled': true });
 
@@ -1209,8 +1242,11 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
               }
             }
-            user.googleTasks.syncedTaskIds.delete(taskId);
-            await user.save();
+            // Use atomic update to remove from syncedTaskIds
+            await User.updateOne(
+              { _id: user._id },
+              { $unset: { [`googleTasks.syncedTaskIds.${taskId}`]: 1 } }
+            );
           }
         } else {
           const googleTaskData = createGoogleTaskData({
@@ -1222,7 +1258,15 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             contact: taskData.contactName || taskData.contact || null
           });
 
-          const existingTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
+          // Re-fetch user to get latest syncedTaskIds (prevents race condition)
+          const freshUser = await User.findById(user._id);
+          const existingTaskId = freshUser?.googleTasks?.syncedTaskIds?.get(taskId);
+
+          logger.debug('[Auto-sync Tasks] Checking existing', {
+            userId: user._id,
+            taskId,
+            existingTaskId: existingTaskId || 'none'
+          });
 
           if (existingTaskId) {
             try {
@@ -1231,14 +1275,20 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 task: existingTaskId,
                 resource: googleTaskData
               }));
+              logger.debug('[Auto-sync Tasks] Updated existing task', { userId: user._id, taskId, googleTaskId: existingTaskId });
             } catch (e) {
               if (e.code === 404) {
+                // Task was deleted from Google, create new one
                 const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
                   tasklist: user.googleTasks.taskListId,
                   resource: googleTaskData
                 }));
-                user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
-                await user.save();
+                // Use atomic update to prevent race conditions
+                await User.updateOne(
+                  { _id: user._id },
+                  { $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id } }
+                );
+                logger.debug('[Auto-sync Tasks] Recreated deleted task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
               } else {
                 throw e;
               }
@@ -1248,13 +1298,20 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
               tasklist: user.googleTasks.taskListId,
               resource: googleTaskData
             }));
-            user.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
-            await user.save();
+            // Use atomic update to prevent race conditions
+            await User.updateOne(
+              { _id: user._id },
+              { $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id } }
+            );
+            logger.debug('[Auto-sync Tasks] Created new task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
           }
         }
       } catch (error) {
         logger.error('[Auto-sync Tasks] Error for user', { userId: user._id, error: error.message });
       }
+    }
+    } finally {
+      releaseLock(lockKey);
     }
   } catch (error) {
     logger.error('[Auto-sync Tasks] Error', { error: error.message });
