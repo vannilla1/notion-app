@@ -108,15 +108,21 @@ function App() {
           const params = new URLSearchParams(urlObj.search);
 
           // Navigate based on notification data
+          // Add timestamp to force state update even when already on same page
+          const navTimestamp = Date.now();
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
             navigate('/crm', {
-              state: { expandContactId: params.get('expandContact') || data.contactId }
+              state: {
+                expandContactId: params.get('expandContact') || data.contactId,
+                navTimestamp
+              }
             });
           } else if (path === '/tasks' && (params.get('highlightTask') || data?.taskId)) {
             navigate('/tasks', {
               state: {
                 highlightTaskId: params.get('highlightTask') || data.taskId,
-                highlightSubtaskId: params.get('subtask') || data.subtaskId || null
+                highlightSubtaskId: params.get('subtask') || data.subtaskId || null,
+                navTimestamp
               }
             });
           } else {

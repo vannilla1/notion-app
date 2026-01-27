@@ -81,16 +81,44 @@ function CRM() {
   }, []);
 
   // Handle navigation state to expand contact from Dashboard or push notification
+  // Track navTimestamp to detect new navigation even when on same page
+  const lastNavTimestampRef = useRef(null);
+
   useEffect(() => {
     // If we have expand params in navigation state, store them
     if (location.state?.expandContactId) {
-      pendingHighlightRef.current = {
-        contactId: location.state.expandContactId
-      };
-      // Clear the navigation state immediately
-      navigate(location.pathname, { replace: true, state: {} });
+      // Check if this is a new navigation (different timestamp or first time)
+      const currentTimestamp = location.state.navTimestamp;
+      if (currentTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = currentTimestamp;
+        pendingHighlightRef.current = {
+          contactId: location.state.expandContactId
+        };
+        // Clear the navigation state immediately
+        navigate(location.pathname, { replace: true, state: {} });
+
+        // If contacts are already loaded, process immediately
+        if (contacts.length > 0) {
+          const { contactId } = pendingHighlightRef.current;
+          pendingHighlightRef.current = null;
+
+          setExpandedContact(contactId);
+          setHighlightedContactId(contactId);
+
+          setTimeout(() => {
+            const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
+            if (contactElement) {
+              contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+
+          setTimeout(() => {
+            setHighlightedContactId(null);
+          }, 3000);
+        }
+      }
     }
-  }, [location.state, navigate, location.pathname]);
+  }, [location.state, navigate, location.pathname, contacts.length]);
 
   // Process pending highlight when contacts are loaded
   useEffect(() => {

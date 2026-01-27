@@ -345,17 +345,50 @@ function Tasks() {
   };
 
   // Handle highlight from navigation state (push notification click)
+  // Track navTimestamp to detect new navigation even when on same page
+  const lastNavTimestampRef = useRef(null);
+
   useEffect(() => {
     // If we have highlight params in navigation state, store them
     if (location.state?.highlightTaskId) {
-      pendingHighlightRef.current = {
-        taskId: location.state.highlightTaskId,
-        subtaskId: location.state.highlightSubtaskId
-      };
-      // Clear the navigation state immediately
-      navigate(location.pathname, { replace: true, state: {} });
+      // Check if this is a new navigation (different timestamp or first time)
+      const currentTimestamp = location.state.navTimestamp;
+      if (currentTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = currentTimestamp;
+        pendingHighlightRef.current = {
+          taskId: location.state.highlightTaskId,
+          subtaskId: location.state.highlightSubtaskId
+        };
+        // Clear the navigation state immediately
+        navigate(location.pathname, { replace: true, state: {} });
+
+        // If tasks are already loaded, process immediately
+        if (tasks.length > 0) {
+          const { taskId, subtaskId } = pendingHighlightRef.current;
+          pendingHighlightRef.current = null;
+
+          setHighlightedTaskId(taskId);
+          setExpandedTask(taskId);
+
+          if (subtaskId) {
+            setHighlightedSubtaskId(subtaskId);
+            setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
+          }
+
+          setTimeout(() => {
+            if (taskRefs.current[taskId]) {
+              taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 100);
+
+          setTimeout(() => {
+            setHighlightedTaskId(null);
+            setHighlightedSubtaskId(null);
+          }, 3000);
+        }
+      }
     }
-  }, [location.state, navigate, location.pathname]);
+  }, [location.state, navigate, location.pathname, tasks.length]);
 
   // Process pending highlight when tasks are loaded
   useEffect(() => {
