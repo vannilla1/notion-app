@@ -908,17 +908,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
               );
             }
 
-            // Send notification about task update
-            const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
-            notificationService.notifyTaskChange(taskType, taskData, req.user);
-
-            // Notify newly assigned users (those who weren't assigned before)
+            // Determine newly assigned users first
+            let newlyAssigned = [];
             if (assignedTo !== undefined) {
               const newAssignedTo = assignedTo || [];
-              const newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-              if (newlyAssigned.length > 0) {
-                notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-              }
+              newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+            }
+
+            // Send notification about task update (exclude newly assigned - they get assignment notification)
+            const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
+            notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned);
+
+            // Notify newly assigned users with specific assignment notification
+            if (newlyAssigned.length > 0) {
+              notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
             }
 
             return res.json(taskData);
@@ -1005,18 +1008,21 @@ router.put('/:id', authenticateToken, async (req, res) => {
         );
       }
 
-      // Send notification about task update
-      const prevCompleted = task.completed;
-      const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
-      notificationService.notifyTaskChange(taskType, taskData, req.user);
-
-      // Notify newly assigned users (those who weren't assigned before)
+      // Determine newly assigned users first
+      let newlyAssigned = [];
       if (assignedTo !== undefined) {
         const newAssignedTo = (assignedTo || []).map(id => id.toString());
-        const newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-        if (newlyAssigned.length > 0) {
-          notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-        }
+        newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+      }
+
+      // Send notification about task update (exclude newly assigned - they get assignment notification)
+      const prevCompleted = task.completed;
+      const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
+      notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned);
+
+      // Notify newly assigned users with specific assignment notification
+      if (newlyAssigned.length > 0) {
+        notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
       }
 
       return res.json(taskData);
@@ -1071,17 +1077,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
             );
           }
 
-          // Send notification about task update
-          const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
-          notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user);
-
-          // Notify newly assigned users (those who weren't assigned before)
+          // Determine newly assigned users first
+          let newlyAssigned = [];
           if (assignedTo !== undefined) {
             const newAssignedTo = assignedTo || [];
-            const newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
-            if (newlyAssigned.length > 0) {
-              notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-            }
+            newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
+          }
+
+          // Send notification about task update (exclude newly assigned - they get assignment notification)
+          const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
+          notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned);
+
+          // Notify newly assigned users with specific assignment notification
+          if (newlyAssigned.length > 0) {
+            notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
           }
 
           return res.json(taskData);

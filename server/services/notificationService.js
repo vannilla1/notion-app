@@ -421,13 +421,17 @@ const notifyContactChange = async (type, contact, actor, excludeActorId = true) 
 
 /**
  * Helper to create task notification
+ * @param {string} type - Notification type
+ * @param {Object} task - Task object
+ * @param {Object} actor - User who performed the action
+ * @param {Array} excludeUserIds - User IDs to exclude from notification (e.g., newly assigned users who get separate notification)
  */
-const notifyTaskChange = async (type, task, actor, additionalRecipients = []) => {
+const notifyTaskChange = async (type, task, actor, excludeUserIds = []) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, task.title);
   const message = getNotificationMessage(type, actorName, { contactName: task.contactName });
 
-  logger.debug('[NotificationService] Task change', { type, taskTitle: task.title, actorName });
+  logger.debug('[NotificationService] Task change', { type, taskTitle: task.title, actorName, excludeUserIds });
 
   const notificationData = {
     type,
@@ -455,19 +459,28 @@ const notifyTaskChange = async (type, task, actor, additionalRecipients = []) =>
     });
   }
 
-  // Add additional recipients
-  additionalRecipients.forEach(id => {
-    if (id) recipientIds.add(id.toString());
-  });
-
   // Remove the actor
   if (actor) {
     recipientIds.delete((actor._id || actor.id).toString());
   }
 
+  // Remove excluded users (e.g., newly assigned who get their own notification)
+  if (excludeUserIds && Array.isArray(excludeUserIds)) {
+    excludeUserIds.forEach(id => {
+      if (id) recipientIds.delete(id.toString());
+    });
+  }
+
   if (recipientIds.size === 0) {
-    // If no specific recipients, notify all except actor
-    return await notifyAllExcept(actor?._id || actor?.id, notificationData);
+    // If no specific recipients, notify all except actor and excluded users
+    const allExcluded = new Set();
+    if (actor) allExcluded.add((actor._id || actor.id).toString());
+    excludeUserIds.forEach(id => { if (id) allExcluded.add(id.toString()); });
+
+    // Get all users except excluded
+    const users = await User.find({ _id: { $nin: Array.from(allExcluded) } }, '_id').lean();
+    const userIds = users.map(u => u._id.toString());
+    return await notifyUsers(userIds, notificationData);
   }
 
   return await notifyUsers(Array.from(recipientIds), notificationData);
