@@ -481,6 +481,16 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
   const title = getNotificationTitle('task.assigned', actorName, task.title);
   const message = getNotificationMessage('task.assigned', actorName, { contactName: task.contactName });
 
+  logger.info('[NotificationService] Task assignment notification', {
+    actorName,
+    actorId: actor?.id || actor?._id,
+    taskTitle: task.title,
+    contactName: task.contactName,
+    title,
+    message,
+    assignedUserIds
+  });
+
   const notificationData = {
     type: 'task.assigned',
     title,
