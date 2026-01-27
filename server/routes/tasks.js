@@ -748,8 +748,12 @@ router.post('/', authenticateToken, async (req, res) => {
       notificationService.notifyTaskChange('task.created', taskObj, req.user);
 
       // Notify assigned users
+      console.log('[Task Create Global] Assignment check:', { assignedTo });
       if (assignedTo && assignedTo.length > 0) {
+        console.log('[Task Create Global] Sending assignment notification to:', assignedTo);
         notificationService.notifyTaskAssignment(taskObj, assignedTo, req.user);
+      } else {
+        console.log('[Task Create Global] No assigned users, skipping assignment notification');
       }
 
       return res.status(201).json(taskObj);
@@ -806,8 +810,12 @@ router.post('/', authenticateToken, async (req, res) => {
       notificationService.notifyTaskChange('task.created', task, req.user);
 
       // Notify assigned users
+      console.log('[Task Create Contact] Assignment check:', { assignedTo: task.assignedTo });
       if (task.assignedTo && task.assignedTo.length > 0) {
+        console.log('[Task Create Contact] Sending assignment notification to:', task.assignedTo);
         notificationService.notifyTaskAssignment(task, task.assignedTo, req.user);
+      } else {
+        console.log('[Task Create Contact] No assigned users, skipping assignment notification');
       }
     }
 
@@ -913,6 +921,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
             if (assignedTo !== undefined) {
               const newAssignedTo = assignedTo || [];
               newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+              console.log('[Task Update Contact] Assignment check:', {
+                originalAssignedTo,
+                newAssignedTo,
+                newlyAssigned,
+                assignedToFromBody: assignedTo
+              });
             }
 
             // Send notification about task update (exclude newly assigned - they get assignment notification)
@@ -921,7 +935,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
+              console.log('[Task Update Contact] Sending assignment notification to:', newlyAssigned);
               notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+            } else {
+              console.log('[Task Update Contact] No newly assigned users, skipping assignment notification');
             }
 
             return res.json(taskData);
@@ -1013,6 +1030,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (assignedTo !== undefined) {
         const newAssignedTo = (assignedTo || []).map(id => id.toString());
         newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+        console.log('[Task Update Global] Assignment check:', {
+          originalAssignedTo,
+          newAssignedTo,
+          newlyAssigned,
+          assignedToFromBody: assignedTo
+        });
       }
 
       // Send notification about task update (exclude newly assigned - they get assignment notification)
@@ -1022,7 +1045,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       // Notify newly assigned users with specific assignment notification
       if (newlyAssigned.length > 0) {
+        console.log('[Task Update Global] Sending assignment notification to:', newlyAssigned);
         notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+      } else {
+        console.log('[Task Update Global] No newly assigned users, skipping assignment notification');
       }
 
       return res.json(taskData);
@@ -1082,6 +1108,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
           if (assignedTo !== undefined) {
             const newAssignedTo = assignedTo || [];
             newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
+            console.log('[Task Update Fallback] Assignment check:', {
+              originalCtaskAssignedTo,
+              newAssignedTo,
+              newlyAssigned,
+              assignedToFromBody: assignedTo
+            });
           }
 
           // Send notification about task update (exclude newly assigned - they get assignment notification)
@@ -1090,7 +1122,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
           // Notify newly assigned users with specific assignment notification
           if (newlyAssigned.length > 0) {
+            console.log('[Task Update Fallback] Sending assignment notification to:', newlyAssigned);
             notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+          } else {
+            console.log('[Task Update Fallback] No newly assigned users, skipping assignment notification');
           }
 
           return res.json(taskData);
