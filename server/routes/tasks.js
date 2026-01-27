@@ -1563,9 +1563,11 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
     // Helper to update subtask recursively
     // BUGFIX: Preserve all existing fields including priority and nested subtasks
+    // Returns { updated, originalAssignedTo } for assignment notification logic
     const updateSubtaskInTask = (task) => {
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);
       if (found) {
+        const originalAssignedTo = found.subtask.assignedTo || [];
         found.parent[found.index] = {
           ...found.subtask,
           id: found.subtask.id, // Ensure ID is preserved
@@ -1579,7 +1581,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           createdAt: found.subtask.createdAt, // Preserve createdAt
           modifiedAt: new Date().toISOString() // Set modification timestamp
         };
-        return found.parent[found.index];
+        return { updated: found.parent[found.index], originalAssignedTo };
       }
       return null;
     };
@@ -1591,8 +1593,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
           if (taskIndex !== -1) {
-            const updated = updateSubtaskInTask(contact.tasks[taskIndex]);
-            if (updated) {
+            const result = updateSubtaskInTask(contact.tasks[taskIndex]);
+            if (result) {
+              const { updated, originalAssignedTo } = result;
               contact.markModified('tasks');
               await contact.save();
 
@@ -1614,9 +1617,27 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
                 contactName: contact.name
               }, 'update');
 
-              // Send notification about subtask update
+              // Determine newly assigned users
+              let newlyAssigned = [];
+              if (assignedTo !== undefined) {
+                const newAssignedTo = assignedTo || [];
+                newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+                console.log('[Subtask Update Contact] Assignment check:', {
+                  originalAssignedTo,
+                  newAssignedTo,
+                  newlyAssigned
+                });
+              }
+
+              // Send notification about subtask update (exclude newly assigned)
               const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
               notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user);
+
+              // Notify newly assigned users with specific assignment notification
+              if (newlyAssigned.length > 0) {
+                console.log('[Subtask Update Contact] Sending assignment notification to:', newlyAssigned);
+                notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+              }
 
               return res.json(updated);
             }
@@ -1628,8 +1649,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
     // Try global tasks
     const task = await Task.findById(req.params.taskId);
     if (task) {
-      const updated = updateSubtaskInTask(task);
-      if (updated) {
+      const result = updateSubtaskInTask(task);
+      if (result) {
+        const { updated, originalAssignedTo } = result;
         task.markModified('subtasks');
         await task.save();
 
@@ -1646,9 +1668,27 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           contactName: null
         }, 'update');
 
+        // Determine newly assigned users
+        let newlyAssigned = [];
+        if (assignedTo !== undefined) {
+          const newAssignedTo = assignedTo || [];
+          newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+          console.log('[Subtask Update Global] Assignment check:', {
+            originalAssignedTo,
+            newAssignedTo,
+            newlyAssigned
+          });
+        }
+
         // Send notification about subtask update
         const globalSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
         notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user);
+
+        // Notify newly assigned users with specific assignment notification
+        if (newlyAssigned.length > 0) {
+          console.log('[Subtask Update Global] Sending assignment notification to:', newlyAssigned);
+          notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user);
+        }
 
         return res.json(updated);
       }
@@ -1660,8 +1700,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
-          const updated = updateSubtaskInTask(contact.tasks[taskIndex]);
-          if (updated) {
+          const result = updateSubtaskInTask(contact.tasks[taskIndex]);
+          if (result) {
+            const { updated, originalAssignedTo } = result;
             contact.markModified('tasks');
             await contact.save();
 
@@ -1683,9 +1724,27 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               contactName: contact.name
             }, 'update');
 
+            // Determine newly assigned users
+            let newlyAssigned = [];
+            if (assignedTo !== undefined) {
+              const newAssignedTo = assignedTo || [];
+              newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+              console.log('[Subtask Update Fallback] Assignment check:', {
+                originalAssignedTo,
+                newAssignedTo,
+                newlyAssigned
+              });
+            }
+
             // Send notification about subtask update
             const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
             notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user);
+
+            // Notify newly assigned users with specific assignment notification
+            if (newlyAssigned.length > 0) {
+              console.log('[Subtask Update Fallback] Sending assignment notification to:', newlyAssigned);
+              notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+            }
 
             return res.json(updated);
           }
