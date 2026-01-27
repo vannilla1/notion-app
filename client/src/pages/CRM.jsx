@@ -110,18 +110,26 @@ function CRM() {
 
   // Listen for custom event from App.jsx (when notification clicked while on this page)
   useEffect(() => {
-    const handleCrmHighlight = (event) => {
+    const handleCrmHighlight = async (event) => {
       console.log('[CRM] Received crm-highlight event:', event.detail);
       const { contactId, timestamp } = event.detail;
       if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = timestamp.toString();
-        processContactHighlight(contactId);
+
+        // Refresh contacts first to get latest data
+        console.log('[CRM] Refreshing contacts before highlight...');
+        await fetchContacts();
+
+        // Then highlight the contact (with small delay to ensure state updated)
+        setTimeout(() => {
+          processContactHighlight(contactId);
+        }, 100);
       }
     };
 
     window.addEventListener('crm-highlight', handleCrmHighlight);
     return () => window.removeEventListener('crm-highlight', handleCrmHighlight);
-  }, [processContactHighlight]);
+  }, [processContactHighlight, fetchContacts]);
 
   useEffect(() => {
     // Check URL query params first (from service worker navigate)
@@ -263,7 +271,7 @@ function CRM() {
     };
   }, [socket, isConnected, expandedContact]);
 
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async () => {
     try {
       const res = await api.get('/api/contacts');
       setContacts(res.data);
@@ -272,7 +280,7 @@ function CRM() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchGlobalTasks = async () => {
     try {

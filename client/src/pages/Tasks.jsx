@@ -379,18 +379,26 @@ function Tasks() {
 
   // Listen for custom event from App.jsx (when notification clicked while on this page)
   useEffect(() => {
-    const handleTaskHighlight = (event) => {
+    const handleTaskHighlight = async (event) => {
       console.log('[Tasks] Received task-highlight event:', event.detail);
       const { taskId, subtaskId, timestamp } = event.detail;
       if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = timestamp.toString();
-        processHighlight(taskId, subtaskId);
+
+        // Refresh tasks first to get latest data
+        console.log('[Tasks] Refreshing tasks before highlight...');
+        await fetchTasks();
+
+        // Then highlight the task (with small delay to ensure state updated)
+        setTimeout(() => {
+          processHighlight(taskId, subtaskId);
+        }, 100);
       }
     };
 
     window.addEventListener('task-highlight', handleTaskHighlight);
     return () => window.removeEventListener('task-highlight', handleTaskHighlight);
-  }, [processHighlight]);
+  }, [processHighlight, fetchTasks]);
 
   useEffect(() => {
     // Check URL query params first (from service worker navigate)
@@ -581,7 +589,7 @@ function Tasks() {
     }
   }, [filter, tasks, user]);
 
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async () => {
     try {
       const res = await api.get('/api/tasks');
       setTasks(res.data);
@@ -590,7 +598,7 @@ function Tasks() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchContacts = async () => {
     try {
