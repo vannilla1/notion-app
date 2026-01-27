@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -349,13 +349,10 @@ function Tasks() {
   const lastNavTimestampRef = useRef(null);
 
   // Helper function to process highlight
-  const processHighlight = (taskId, subtaskId) => {
-    pendingHighlightRef.current = { taskId, subtaskId };
+  const processHighlight = useCallback((taskId, subtaskId) => {
+    console.log('[Tasks] processHighlight called:', taskId, subtaskId, 'tasks loaded:', tasks.length);
 
-    // If tasks are already loaded, process immediately
     if (tasks.length > 0) {
-      pendingHighlightRef.current = null;
-
       setHighlightedTaskId(taskId);
       setExpandedTask(taskId);
 
@@ -374,8 +371,26 @@ function Tasks() {
         setHighlightedTaskId(null);
         setHighlightedSubtaskId(null);
       }, 3000);
+    } else {
+      // Tasks not loaded yet, store for later
+      pendingHighlightRef.current = { taskId, subtaskId };
     }
-  };
+  }, [tasks.length]);
+
+  // Listen for custom event from App.jsx (when notification clicked while on this page)
+  useEffect(() => {
+    const handleTaskHighlight = (event) => {
+      console.log('[Tasks] Received task-highlight event:', event.detail);
+      const { taskId, subtaskId, timestamp } = event.detail;
+      if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = timestamp.toString();
+        processHighlight(taskId, subtaskId);
+      }
+    };
+
+    window.addEventListener('task-highlight', handleTaskHighlight);
+    return () => window.removeEventListener('task-highlight', handleTaskHighlight);
+  }, [processHighlight]);
 
   useEffect(() => {
     // Check URL query params first (from service worker navigate)

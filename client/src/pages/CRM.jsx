@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '@/api/api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -85,13 +85,10 @@ function CRM() {
   const lastNavTimestampRef = useRef(null);
 
   // Helper function to process contact highlight
-  const processContactHighlight = (contactId) => {
-    pendingHighlightRef.current = { contactId };
+  const processContactHighlight = useCallback((contactId) => {
+    console.log('[CRM] processContactHighlight called:', contactId, 'contacts loaded:', contacts.length);
 
-    // If contacts are already loaded, process immediately
     if (contacts.length > 0) {
-      pendingHighlightRef.current = null;
-
       setExpandedContact(contactId);
       setHighlightedContactId(contactId);
 
@@ -105,8 +102,26 @@ function CRM() {
       setTimeout(() => {
         setHighlightedContactId(null);
       }, 3000);
+    } else {
+      // Contacts not loaded yet, store for later
+      pendingHighlightRef.current = { contactId };
     }
-  };
+  }, [contacts.length]);
+
+  // Listen for custom event from App.jsx (when notification clicked while on this page)
+  useEffect(() => {
+    const handleCrmHighlight = (event) => {
+      console.log('[CRM] Received crm-highlight event:', event.detail);
+      const { contactId, timestamp } = event.detail;
+      if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = timestamp.toString();
+        processContactHighlight(contactId);
+      }
+    };
+
+    window.addEventListener('crm-highlight', handleCrmHighlight);
+    return () => window.removeEventListener('crm-highlight', handleCrmHighlight);
+  }, [processContactHighlight]);
 
   useEffect(() => {
     // Check URL query params first (from service worker navigate)

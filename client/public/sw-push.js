@@ -1,7 +1,7 @@
 // Push notification service worker
-// Version: 2.4 - Always use openWindow for reliable navigation
+// Version: 2.5 - PWA-friendly navigation with postMessage
 
-const SW_VERSION = '2.4';
+const SW_VERSION = '2.5';
 
 // Debug logging - enabled temporarily for troubleshooting
 const DEBUG = true;
@@ -91,16 +91,42 @@ self.addEventListener('notificationclick', (event) => {
 
   log('Final URL to open:', urlToOpen);
 
-  // Always use openWindow - most reliable across all browsers including iOS Safari
-  // This will either open a new tab or focus existing one depending on browser
+  // For PWA: find existing window and use postMessage, or open new window
   event.waitUntil(
-    clients.openWindow(urlToOpen)
-      .then((windowClient) => {
-        log('Window opened successfully', windowClient ? 'with client' : 'without client');
-        return windowClient;
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((windowClients) => {
+        log('Found clients:', windowClients.length);
+
+        // Find a client that belongs to our app
+        for (const client of windowClients) {
+          log('Checking client:', client.url, 'visibilityState:', client.visibilityState);
+          if (client.url.includes(self.location.origin)) {
+            log('Found existing PWA client, sending message');
+            // Send navigation message to the client
+            client.postMessage({
+              type: 'NOTIFICATION_CLICK',
+              url: urlToOpen,
+              data: event.notification.data,
+              timestamp: Date.now()
+            });
+            // Focus the window
+            if (client.focus) {
+              return client.focus().catch(err => {
+                log('Focus failed:', err.message);
+                return client;
+              });
+            }
+            return client;
+          }
+        }
+
+        // No existing window found, open new one
+        log('No existing client, opening new window');
+        return clients.openWindow(urlToOpen);
       })
       .catch((error) => {
-        logError('Error opening window:', error.message);
+        logError('Error handling notification click:', error.message);
+        return clients.openWindow(urlToOpen);
       })
   );
 });

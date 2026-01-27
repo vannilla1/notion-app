@@ -110,7 +110,7 @@ function App() {
       console.log('[App] Message from service worker:', event.data);
 
       if (event.data?.type === 'NOTIFICATION_CLICK') {
-        const { url, data } = event.data;
+        const { url, data, timestamp } = event.data;
 
         // Parse URL to extract path and params
         try {
@@ -118,31 +118,41 @@ function App() {
           const path = urlObj.pathname;
           const params = new URLSearchParams(urlObj.search);
 
-          // Navigate based on notification data
-          // Add timestamp to force state update even when already on same page
-          const navTimestamp = Date.now();
+          const navTimestamp = timestamp || Date.now();
+
+          // Dispatch custom event that pages can listen to
+          // This works even when we're already on the target page
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
-            navigate('/crm', {
-              state: {
-                expandContactId: params.get('expandContact') || data.contactId,
-                navTimestamp
-              }
-            });
+            const contactId = params.get('expandContact') || data.contactId;
+            console.log('[App] Dispatching crm-highlight event for contact:', contactId);
+            window.dispatchEvent(new CustomEvent('crm-highlight', {
+              detail: { contactId, timestamp: navTimestamp }
+            }));
+            // Also navigate in case we're on a different page
+            if (location.pathname !== '/crm') {
+              navigate('/crm', {
+                state: { expandContactId: contactId, navTimestamp }
+              });
+            }
           } else if (path === '/tasks' && (params.get('highlightTask') || data?.taskId)) {
-            navigate('/tasks', {
-              state: {
-                highlightTaskId: params.get('highlightTask') || data.taskId,
-                highlightSubtaskId: params.get('subtask') || data.subtaskId || null,
-                navTimestamp
-              }
-            });
+            const taskId = params.get('highlightTask') || data.taskId;
+            const subtaskId = params.get('subtask') || data.subtaskId || null;
+            console.log('[App] Dispatching task-highlight event for task:', taskId);
+            window.dispatchEvent(new CustomEvent('task-highlight', {
+              detail: { taskId, subtaskId, timestamp: navTimestamp }
+            }));
+            // Also navigate in case we're on a different page
+            if (location.pathname !== '/tasks') {
+              navigate('/tasks', {
+                state: { highlightTaskId: taskId, highlightSubtaskId: subtaskId, navTimestamp }
+              });
+            }
           } else {
             // Fallback: navigate to the path
             navigate(path);
           }
         } catch (e) {
           console.error('[App] Error parsing notification URL:', e);
-          // Fallback: try to navigate directly
           if (url.startsWith('/')) {
             navigate(url);
           }
@@ -155,7 +165,7 @@ function App() {
     return () => {
       navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
     };
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, location.pathname]);
 
   if (loading) {
     return (
