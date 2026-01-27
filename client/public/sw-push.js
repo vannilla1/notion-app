@@ -84,6 +84,11 @@ self.addEventListener('notificationclick', (event) => {
     urlToOpen = self.location.origin + '/';
   }
 
+  // Add timestamp to URL to force navigation even when app is already on the same page
+  const urlWithTimestamp = new URL(urlToOpen);
+  urlWithTimestamp.searchParams.set('_t', Date.now().toString());
+  urlToOpen = urlWithTimestamp.toString();
+
   log('Final URL to open:', urlToOpen);
 
   event.waitUntil(
@@ -96,16 +101,22 @@ self.addEventListener('notificationclick', (event) => {
           log('Checking client URL:', client.url);
           if (client.url.includes(self.location.origin)) {
             log('Found existing client, focusing and navigating');
-            // Focus the existing window and navigate to the new URL
-            return client.focus().then(() => {
-              // Use postMessage to navigate within the SPA
+            // Focus the existing window first
+            return client.focus().then((focusedClient) => {
+              // Try to navigate the client directly (works better on iOS)
+              if (focusedClient && focusedClient.navigate) {
+                log('Using client.navigate()');
+                return focusedClient.navigate(urlToOpen);
+              }
+              // Fallback: use postMessage for SPA navigation
+              log('Falling back to postMessage');
               client.postMessage({
                 type: 'NOTIFICATION_CLICK',
                 url: urlToOpen,
                 data: event.notification.data
               });
               log('Sent NOTIFICATION_CLICK message to client');
-              return client;
+              return focusedClient || client;
             }).catch((focusError) => {
               log('Focus failed, opening new window:', focusError.message);
               return clients.openWindow(urlToOpen);

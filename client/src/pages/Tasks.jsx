@@ -344,51 +344,68 @@ function Tasks() {
     return parentIds;
   };
 
-  // Handle highlight from navigation state (push notification click)
+  // Handle highlight from navigation state OR URL query params (push notification click)
   // Track navTimestamp to detect new navigation even when on same page
   const lastNavTimestampRef = useRef(null);
 
-  useEffect(() => {
-    // If we have highlight params in navigation state, store them
-    if (location.state?.highlightTaskId) {
-      // Check if this is a new navigation (different timestamp or first time)
-      const currentTimestamp = location.state.navTimestamp;
-      if (currentTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = currentTimestamp;
-        pendingHighlightRef.current = {
-          taskId: location.state.highlightTaskId,
-          subtaskId: location.state.highlightSubtaskId
-        };
-        // Clear the navigation state immediately
-        navigate(location.pathname, { replace: true, state: {} });
+  // Helper function to process highlight
+  const processHighlight = (taskId, subtaskId) => {
+    pendingHighlightRef.current = { taskId, subtaskId };
 
-        // If tasks are already loaded, process immediately
-        if (tasks.length > 0) {
-          const { taskId, subtaskId } = pendingHighlightRef.current;
-          pendingHighlightRef.current = null;
+    // If tasks are already loaded, process immediately
+    if (tasks.length > 0) {
+      pendingHighlightRef.current = null;
 
-          setHighlightedTaskId(taskId);
-          setExpandedTask(taskId);
+      setHighlightedTaskId(taskId);
+      setExpandedTask(taskId);
 
-          if (subtaskId) {
-            setHighlightedSubtaskId(subtaskId);
-            setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
-          }
+      if (subtaskId) {
+        setHighlightedSubtaskId(subtaskId);
+        setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
+      }
 
-          setTimeout(() => {
-            if (taskRefs.current[taskId]) {
-              taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }, 100);
-
-          setTimeout(() => {
-            setHighlightedTaskId(null);
-            setHighlightedSubtaskId(null);
-          }, 3000);
+      setTimeout(() => {
+        if (taskRefs.current[taskId]) {
+          taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+      }, 100);
+
+      setTimeout(() => {
+        setHighlightedTaskId(null);
+        setHighlightedSubtaskId(null);
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    // Check URL query params first (from service worker navigate)
+    const params = new URLSearchParams(location.search);
+    const urlTaskId = params.get('highlightTask');
+    const urlSubtaskId = params.get('subtask');
+    const urlTimestamp = params.get('_t');
+
+    if (urlTaskId && urlTimestamp) {
+      // Check if this is a new navigation
+      if (urlTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = urlTimestamp;
+        // Clear query params from URL
+        navigate(location.pathname, { replace: true, state: {} });
+        processHighlight(urlTaskId, urlSubtaskId);
+        return;
       }
     }
-  }, [location.state, navigate, location.pathname, tasks.length]);
+
+    // Fallback: Check navigation state (from postMessage)
+    if (location.state?.highlightTaskId) {
+      const currentTimestamp = location.state.navTimestamp?.toString();
+      if (currentTimestamp && currentTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = currentTimestamp;
+        // Clear the navigation state immediately
+        navigate(location.pathname, { replace: true, state: {} });
+        processHighlight(location.state.highlightTaskId, location.state.highlightSubtaskId);
+      }
+    }
+  }, [location.search, location.state, navigate, location.pathname, tasks.length]);
 
   // Process pending highlight when tasks are loaded
   useEffect(() => {

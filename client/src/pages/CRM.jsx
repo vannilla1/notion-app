@@ -80,45 +80,62 @@ function CRM() {
     fetchGlobalTasks();
   }, []);
 
-  // Handle navigation state to expand contact from Dashboard or push notification
+  // Handle navigation state OR URL query params to expand contact from Dashboard or push notification
   // Track navTimestamp to detect new navigation even when on same page
   const lastNavTimestampRef = useRef(null);
 
-  useEffect(() => {
-    // If we have expand params in navigation state, store them
-    if (location.state?.expandContactId) {
-      // Check if this is a new navigation (different timestamp or first time)
-      const currentTimestamp = location.state.navTimestamp;
-      if (currentTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = currentTimestamp;
-        pendingHighlightRef.current = {
-          contactId: location.state.expandContactId
-        };
-        // Clear the navigation state immediately
-        navigate(location.pathname, { replace: true, state: {} });
+  // Helper function to process contact highlight
+  const processContactHighlight = (contactId) => {
+    pendingHighlightRef.current = { contactId };
 
-        // If contacts are already loaded, process immediately
-        if (contacts.length > 0) {
-          const { contactId } = pendingHighlightRef.current;
-          pendingHighlightRef.current = null;
+    // If contacts are already loaded, process immediately
+    if (contacts.length > 0) {
+      pendingHighlightRef.current = null;
 
-          setExpandedContact(contactId);
-          setHighlightedContactId(contactId);
+      setExpandedContact(contactId);
+      setHighlightedContactId(contactId);
 
-          setTimeout(() => {
-            const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
-            if (contactElement) {
-              contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-          }, 100);
-
-          setTimeout(() => {
-            setHighlightedContactId(null);
-          }, 3000);
+      setTimeout(() => {
+        const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
+        if (contactElement) {
+          contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+      }, 100);
+
+      setTimeout(() => {
+        setHighlightedContactId(null);
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    // Check URL query params first (from service worker navigate)
+    const params = new URLSearchParams(location.search);
+    const urlContactId = params.get('expandContact');
+    const urlTimestamp = params.get('_t');
+
+    if (urlContactId && urlTimestamp) {
+      // Check if this is a new navigation
+      if (urlTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = urlTimestamp;
+        // Clear query params from URL
+        navigate(location.pathname, { replace: true, state: {} });
+        processContactHighlight(urlContactId);
+        return;
       }
     }
-  }, [location.state, navigate, location.pathname, contacts.length]);
+
+    // Fallback: Check navigation state (from postMessage)
+    if (location.state?.expandContactId) {
+      const currentTimestamp = location.state.navTimestamp?.toString();
+      if (currentTimestamp && currentTimestamp !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = currentTimestamp;
+        // Clear the navigation state immediately
+        navigate(location.pathname, { replace: true, state: {} });
+        processContactHighlight(location.state.expandContactId);
+      }
+    }
+  }, [location.search, location.state, navigate, location.pathname, contacts.length]);
 
   // Process pending highlight when contacts are loaded
   useEffect(() => {

@@ -28,6 +28,9 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
 
+    // Get the timestamp param (used to force re-navigation)
+    const navTimestamp = params.get('_t');
+
     // If we have deep link params but not authenticated, store them for later
     if (!isAuthenticated && !loading) {
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
@@ -49,7 +52,10 @@ function App() {
 
       if (pendingUrl.pathname === '/crm' && pendingParams.get('expandContact')) {
         navigate('/crm', {
-          state: { expandContactId: pendingParams.get('expandContact') },
+          state: {
+            expandContactId: pendingParams.get('expandContact'),
+            navTimestamp: Date.now()
+          },
           replace: true
         });
         return;
@@ -58,7 +64,8 @@ function App() {
         navigate('/tasks', {
           state: {
             highlightTaskId: pendingParams.get('highlightTask'),
-            highlightSubtaskId: pendingParams.get('subtask') || null
+            highlightSubtaskId: pendingParams.get('subtask') || null,
+            navTimestamp: Date.now()
           },
           replace: true
         });
@@ -71,7 +78,10 @@ function App() {
       const contactId = params.get('expandContact');
       // Navigate with state and clear the query param
       navigate('/crm', {
-        state: { expandContactId: contactId },
+        state: {
+          expandContactId: contactId,
+          navTimestamp: navTimestamp || Date.now()
+        },
         replace: true
       });
     }
@@ -84,7 +94,8 @@ function App() {
       navigate('/tasks', {
         state: {
           highlightTaskId: taskId,
-          highlightSubtaskId: subtaskId || null
+          highlightSubtaskId: subtaskId || null,
+          navTimestamp: navTimestamp || Date.now()
         },
         replace: true
       });
