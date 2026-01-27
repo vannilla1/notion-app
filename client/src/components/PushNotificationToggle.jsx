@@ -44,11 +44,16 @@ const PushNotificationToggle = () => {
       // Check push notification support
       const isSupported = isPushSupported();
       setPushSupported(isSupported);
+      console.log('[PushToggle] Push supported:', isSupported);
 
       if (isSupported) {
-        setPermission(getPermissionStatus());
+        const perm = getPermissionStatus();
+        setPermission(perm);
+        console.log('[PushToggle] Permission status:', perm);
+
         const isSub = await isSubscribedToPush();
         setPushSubscribed(isSub);
+        console.log('[PushToggle] Is subscribed:', isSub);
       }
     } catch (err) {
       console.error('Error checking push status:', err);
@@ -133,7 +138,12 @@ const PushNotificationToggle = () => {
       {notificationsEnabled && (
         <div className="push-status-info">
           {!pushSupported ? (
-            <span className="status-note warning">⚠️ Push notifikácie nie sú podporované v tomto prehliadači</span>
+            <span className="status-note warning">
+              ⚠️ Push notifikácie nie sú podporované.
+              {/iPhone|iPad|iPod/.test(navigator.userAgent) && (
+                <> Pre iOS: otvorte aplikáciu cez ikonu na ploche (PWA).</>
+              )}
+            </span>
           ) : permission === 'denied' ? (
             <span className="status-note warning">⚠️ Push notifikácie sú zablokované v prehliadači</span>
           ) : pushSubscribed ? (

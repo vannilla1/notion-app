@@ -4,9 +4,23 @@ const PUSH_SW_PATH = '/sw-push.js';
 
 /**
  * Check if push notifications are supported
+ * Note: iOS Safari requires PWA mode (added to home screen) for push notifications
  */
 export const isPushSupported = () => {
-  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const hasServiceWorker = 'serviceWorker' in navigator;
+  const hasPushManager = 'PushManager' in window;
+  const hasNotification = 'Notification' in window;
+
+  // Debug logging for iOS troubleshooting
+  console.log('[Push] Support check:', {
+    serviceWorker: hasServiceWorker,
+    pushManager: hasPushManager,
+    notification: hasNotification,
+    standalone: window.navigator.standalone,
+    displayMode: window.matchMedia('(display-mode: standalone)').matches
+  });
+
+  return hasServiceWorker && hasPushManager && hasNotification;
 };
 
 /**
