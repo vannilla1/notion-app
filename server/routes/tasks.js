@@ -865,6 +865,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
           if (taskIndex !== -1) {
             const task = contact.tasks[taskIndex];
+            // Save original assignedTo before update
+            const originalAssignedTo = task.assignedTo || [];
             contact.tasks[taskIndex] = {
               ...task,
               id: task.id,
@@ -910,6 +912,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
             const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
             notificationService.notifyTaskChange(taskType, taskData, req.user);
 
+            // Notify newly assigned users (those who weren't assigned before)
+            if (assignedTo !== undefined) {
+              const newAssignedTo = assignedTo || [];
+              const newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+              if (newlyAssigned.length > 0) {
+                notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+              }
+            }
+
             return res.json(taskData);
           }
         }
@@ -921,6 +932,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     let task = await Task.findById(req.params.id);
 
     if (task) {
+      // Save original assignedTo before update
+      const originalAssignedTo = (task.assignedTo || []).map(id => id.toString());
+
       // Support both old contactId and new contactIds
       let finalContactIds = task.contactIds || [];
       let contactNames = [];
@@ -996,6 +1010,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
       const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
       notificationService.notifyTaskChange(taskType, taskData, req.user);
 
+      // Notify newly assigned users (those who weren't assigned before)
+      if (assignedTo !== undefined) {
+        const newAssignedTo = (assignedTo || []).map(id => id.toString());
+        const newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+        if (newlyAssigned.length > 0) {
+          notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+        }
+      }
+
       return res.json(taskData);
     }
 
@@ -1006,8 +1029,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
         if (taskIndex !== -1) {
           const ctask = contact.tasks[taskIndex];
-          // Save original title before update to detect title change
+          // Save original values before update
           const originalCtaskTitle = ctask.title;
+          const originalCtaskAssignedTo = ctask.assignedTo || [];
           contact.tasks[taskIndex] = {
             ...ctask,
             id: ctask.id,
@@ -1016,17 +1040,21 @@ router.put('/:id', authenticateToken, async (req, res) => {
             dueDate: dueDate !== undefined ? dueDate : ctask.dueDate,
             priority: priority !== undefined ? priority : ctask.priority,
             completed: completed !== undefined ? completed : ctask.completed,
+            assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
             subtasks: req.body.subtasks !== undefined ? req.body.subtasks : ctask.subtasks,
-            createdAt: ctask.createdAt
+            createdAt: ctask.createdAt,
+            modifiedAt: new Date().toISOString()
           };
           contact.markModified('tasks');
           await contact.save();
 
           io.emit('contact-updated', contactToPlainObject(contact));
+          const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
           const taskData = taskToPlainObject(contact.tasks[taskIndex], {
             contactId: contact._id.toString(),
             contactName: contact.name,
-            source: 'contact'
+            source: 'contact',
+            assignedUsers
           });
           io.emit('task-updated', taskData);
 
@@ -1046,6 +1074,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
           // Send notification about task update
           const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
           notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user);
+
+          // Notify newly assigned users (those who weren't assigned before)
+          if (assignedTo !== undefined) {
+            const newAssignedTo = assignedTo || [];
+            const newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
+            if (newlyAssigned.length > 0) {
+              notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+            }
+          }
 
           return res.json(taskData);
         }
