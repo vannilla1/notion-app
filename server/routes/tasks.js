@@ -1629,9 +1629,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
                 });
               }
 
-              // Send notification about subtask update (exclude newly assigned)
+              // Send notification about subtask update (exclude newly assigned - they get assignment notification)
               const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-              notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user);
+              notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned);
 
               // Notify newly assigned users with specific assignment notification
               if (newlyAssigned.length > 0) {
@@ -1680,9 +1680,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
           });
         }
 
-        // Send notification about subtask update
+        // Send notification about subtask update (exclude newly assigned - they get assignment notification)
         const globalSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-        notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user);
+        notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user, newlyAssigned);
 
         // Notify newly assigned users with specific assignment notification
         if (newlyAssigned.length > 0) {
@@ -1736,9 +1736,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               });
             }
 
-            // Send notification about subtask update
+            // Send notification about subtask update (exclude newly assigned - they get assignment notification)
             const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-            notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user);
+            notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned);
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {

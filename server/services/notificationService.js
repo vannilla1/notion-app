@@ -565,13 +565,18 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
 
 /**
  * Helper to create subtask notification
+ * @param {string} type - Notification type
+ * @param {Object} subtask - Subtask object
+ * @param {Object} parentTask - Parent task object
+ * @param {Object} actor - User who performed the action
+ * @param {Array} excludeUserIds - User IDs to exclude from notification (e.g., newly assigned users who get separate notification)
  */
-const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
+const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUserIds = []) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, subtask.title);
   const message = getNotificationMessage(type, actorName, { taskTitle: parentTask.title });
 
-  logger.debug('[NotificationService] Subtask change', { type, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName });
+  logger.debug('[NotificationService] Subtask change', { type, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName, excludeUserIds });
 
   const notificationData = {
     type,
@@ -604,8 +609,22 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor) => {
     recipientIds.delete((actor._id || actor.id).toString());
   }
 
+  // Remove excluded users (e.g., newly assigned who get their own notification)
+  if (excludeUserIds && Array.isArray(excludeUserIds)) {
+    excludeUserIds.forEach(id => {
+      if (id) recipientIds.delete(id.toString());
+    });
+  }
+
   if (recipientIds.size === 0) {
-    return await notifyAllExcept(actor?._id || actor?.id, notificationData);
+    // Get all users except actor and excluded
+    const allExcluded = new Set();
+    if (actor) allExcluded.add((actor._id || actor.id).toString());
+    excludeUserIds.forEach(id => { if (id) allExcluded.add(id.toString()); });
+
+    const users = await User.find({ _id: { $nin: Array.from(allExcluded) } }, '_id').lean();
+    const userIds = users.map(u => u._id.toString());
+    return await notifyUsers(userIds, notificationData);
   }
 
   return await notifyUsers(Array.from(recipientIds), notificationData);
