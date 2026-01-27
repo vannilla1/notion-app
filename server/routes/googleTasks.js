@@ -1091,6 +1091,160 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
   }
 });
 
+// Sync completed tasks FROM Google Tasks TO CRM
+router.post('/sync-completed', authenticateToken, async (req, res) => {
+  logger.info('[Google Tasks] Sync completed tasks started', { userId: req.user.id });
+
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
+
+    if (!user.googleTasks?.enabled) {
+      return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    const tasksApi = await getTasksClient(user);
+    const taskListId = user.googleTasks.taskListId;
+
+    // Get completed tasks from Google Tasks
+    let completedGoogleTasks = [];
+    let pageToken = null;
+
+    do {
+      const response = await tasksApi.tasks.list({
+        tasklist: taskListId,
+        maxResults: 100,
+        showCompleted: true,
+        showHidden: true,
+        pageToken
+      });
+
+      if (response.data.items) {
+        // Filter only completed tasks
+        const completed = response.data.items.filter(t => t.status === 'completed');
+        completedGoogleTasks = completedGoogleTasks.concat(completed);
+      }
+      pageToken = response.data.nextPageToken;
+    } while (pageToken);
+
+    logger.debug('[Google Tasks] Found completed tasks in Google', {
+      userId: req.user.id,
+      count: completedGoogleTasks.length
+    });
+
+    // Build reverse map: googleTaskId -> crmTaskId
+    const reverseMap = new Map();
+    if (user.googleTasks.syncedTaskIds) {
+      for (const [crmId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+        reverseMap.set(googleId, crmId);
+      }
+    }
+
+    let updated = 0;
+    let alreadyCompleted = 0;
+    let notFound = 0;
+    const io = req.app.get('io');
+
+    for (const googleTask of completedGoogleTasks) {
+      const crmTaskId = reverseMap.get(googleTask.id);
+
+      if (!crmTaskId) {
+        notFound++;
+        continue;
+      }
+
+      // Try to find and update the task in CRM
+      // First check global tasks
+      const globalTask = await Task.findById(crmTaskId);
+      if (globalTask) {
+        if (globalTask.completed) {
+          alreadyCompleted++;
+          continue;
+        }
+
+        globalTask.completed = true;
+        globalTask.modifiedAt = new Date().toISOString();
+        await globalTask.save();
+        updated++;
+
+        logger.info('[Google Tasks] Marked task as completed from Google', {
+          userId: req.user.id,
+          taskId: crmTaskId,
+          title: globalTask.title
+        });
+
+        // Emit socket event
+        if (io) {
+          io.emit('task-updated', {
+            ...globalTask.toObject(),
+            id: globalTask._id.toString(),
+            source: 'global'
+          });
+        }
+        continue;
+      }
+
+      // Check contact tasks
+      const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+      for (const contact of contacts) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+        if (taskIndex !== -1) {
+          if (contact.tasks[taskIndex].completed) {
+            alreadyCompleted++;
+            continue;
+          }
+
+          contact.tasks[taskIndex].completed = true;
+          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+          contact.markModified('tasks');
+          await contact.save();
+          updated++;
+
+          logger.info('[Google Tasks] Marked contact task as completed from Google', {
+            userId: req.user.id,
+            taskId: crmTaskId,
+            title: contact.tasks[taskIndex].title,
+            contactName: contact.name
+          });
+
+          // Emit socket events
+          if (io) {
+            io.emit('contact-updated', contact.toObject());
+            io.emit('task-updated', {
+              ...contact.tasks[taskIndex],
+              contactId: contact._id.toString(),
+              contactName: contact.name,
+              source: 'contact'
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    logger.info('[Google Tasks] Sync completed tasks finished', {
+      userId: req.user.id,
+      updated,
+      alreadyCompleted,
+      notFound
+    });
+
+    res.json({
+      success: true,
+      message: `Synchronizované: ${updated} úloh označených ako dokončené`,
+      updated,
+      alreadyCompleted,
+      notFound
+    });
+  } catch (error) {
+    logger.error('[Google Tasks] Sync completed error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+  }
+});
+
 // Helper functions
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;

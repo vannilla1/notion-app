@@ -388,6 +388,17 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
+
+      // First sync FROM Google (completed tasks) THEN sync TO Google
+      // This ensures bi-directional sync
+      try {
+        await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (e) {
+        console.log('Sync completed from Google skipped:', e.message);
+      }
+
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
