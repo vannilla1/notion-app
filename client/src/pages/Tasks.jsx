@@ -66,13 +66,43 @@ function Tasks() {
   // Google Calendar notification
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
 
+  // Define fetch functions early so they can be used in useEffects
+  const fetchTasks = useCallback(async () => {
+    try {
+      const res = await api.get('/api/tasks');
+      setTasks(res.data);
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchContacts = useCallback(async () => {
+    try {
+      const res = await api.get('/api/contacts');
+      setContacts(res.data);
+    } catch (error) {
+      console.error('Failed to fetch contacts:', error);
+    }
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await api.get('/api/auth/users');
+      setUsers(res.data);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTasks();
     fetchContacts();
     fetchUsers();
     // Sync completed tasks from Google Tasks (if connected)
     syncCompletedFromGoogle();
-  }, []);
+  }, [fetchTasks, fetchContacts, fetchUsers]);
 
   // Sync completed tasks from Google Tasks to CRM
   const syncCompletedFromGoogle = async () => {
@@ -139,15 +169,6 @@ function Tasks() {
       }, 5000);
     }
   }, [location.search, navigate]);
-
-  const fetchUsers = async () => {
-    try {
-      const res = await api.get('/api/auth/users');
-      setUsers(res.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    }
-  };
 
   // Close calendar menu when clicking outside
   useEffect(() => {
@@ -588,26 +609,6 @@ function Tasks() {
       setExpandedSubtasks(prev => ({ ...prev, ...subtasksToExpand }));
     }
   }, [filter, tasks, user]);
-
-  const fetchTasks = useCallback(async () => {
-    try {
-      const res = await api.get('/api/tasks');
-      setTasks(res.data);
-    } catch (error) {
-      console.error('Failed to fetch tasks:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchContacts = async () => {
-    try {
-      const res = await api.get('/api/contacts');
-      setContacts(res.data);
-    } catch (error) {
-      console.error('Failed to fetch contacts:', error);
-    }
-  };
 
   const refreshTask = async (taskId) => {
     try {

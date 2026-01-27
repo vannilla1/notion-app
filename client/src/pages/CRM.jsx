@@ -75,10 +75,33 @@ function CRM() {
   // Store pending highlight from navigation (for when contacts haven't loaded yet)
   const pendingHighlightRef = useRef(null);
 
+  // Define fetch functions early so they can be used in useEffects
+  const fetchContacts = useCallback(async () => {
+    try {
+      const res = await api.get('/api/contacts');
+      setContacts(res.data);
+    } catch (error) {
+      console.error('Failed to fetch contacts:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchGlobalTasks = useCallback(async () => {
+    try {
+      const res = await api.get('/api/tasks');
+      // Filter only global tasks that have contactId
+      const globalOnly = res.data.filter(t => t.source === 'global');
+      setGlobalTasks(globalOnly);
+    } catch (error) {
+      console.error('Failed to fetch global tasks:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchContacts();
     fetchGlobalTasks();
-  }, []);
+  }, [fetchContacts, fetchGlobalTasks]);
 
   // Handle navigation state OR URL query params to expand contact from Dashboard or push notification
   // Track navTimestamp to detect new navigation even when on same page
@@ -270,28 +293,6 @@ function CRM() {
       socket.off('task-deleted', handleTaskDeleted);
     };
   }, [socket, isConnected, expandedContact]);
-
-  const fetchContacts = useCallback(async () => {
-    try {
-      const res = await api.get('/api/contacts');
-      setContacts(res.data);
-    } catch (error) {
-      console.error('Failed to fetch contacts:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchGlobalTasks = async () => {
-    try {
-      const res = await api.get('/api/tasks');
-      // Filter only global tasks that have contactId
-      const globalOnly = res.data.filter(t => t.source === 'global');
-      setGlobalTasks(globalOnly);
-    } catch (error) {
-      console.error('Failed to fetch global tasks:', error);
-    }
-  };
 
   const createContact = async (e) => {
     e.preventDefault();
