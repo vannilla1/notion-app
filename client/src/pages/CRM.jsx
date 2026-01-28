@@ -4,6 +4,41 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import UserMenu from '../components/UserMenu';
+import HelpGuide from '../components/HelpGuide';
+
+// Help tips for CRM/Contacts page
+const crmHelpTips = [
+  {
+    icon: '👤',
+    title: 'Vytvorenie kontaktu',
+    description: 'Kliknite na tlačidlo "+ Nový kontakt" v pravom hornom rohu pre pridanie nového kontaktu do systému.'
+  },
+  {
+    icon: '📋',
+    title: 'Detail kontaktu',
+    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s úlohami, poznámkami a súbormi.'
+  },
+  {
+    icon: '✏️',
+    title: 'Úprava kontaktu',
+    description: 'V rozbalenom detaile kliknite na ikonu ceruzky pre úpravu údajov kontaktu.'
+  },
+  {
+    icon: '📎',
+    title: 'Súbory a prílohy',
+    description: 'Ku každému kontaktu môžete nahrať súbory (dokumenty, obrázky). Kliknite na "Súbory" v detaile kontaktu.'
+  },
+  {
+    icon: '🔍',
+    title: 'Vyhľadávanie',
+    description: 'Použite vyhľadávacie pole na rýchle nájdenie kontaktu podľa mena, emailu alebo firmy.'
+  },
+  {
+    icon: '🏷️',
+    title: 'Filtrovanie podľa stavu',
+    description: 'V ľavom paneli môžete filtrovať kontakty podľa stavu: Všetky, Nové, Aktívne, Dokončené.'
+  }
+];
 
 function CRM() {
   const { user, logout, updateUser } = useAuth();
@@ -1886,6 +1921,13 @@ function CRM() {
           </div>
         </div>
       )}
+
+      {/* Help Guide */}
+      <HelpGuide
+        section="crm"
+        title="Správa kontaktov"
+        tips={crmHelpTips}
+      />
     </div>
   );
 }

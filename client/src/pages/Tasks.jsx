@@ -4,6 +4,46 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
+import HelpGuide from '../components/HelpGuide';
+
+// Help tips for Tasks page
+const tasksHelpTips = [
+  {
+    icon: '➕',
+    title: 'Vytvorenie úlohy',
+    description: 'Kliknite na "+ Nová úloha" pre vytvorenie novej úlohy. Môžete ju priradiť ku kontaktu alebo vytvoriť globálnu úlohu.'
+  },
+  {
+    icon: '📅',
+    title: 'Termíny a priorita',
+    description: 'Každej úlohe môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny.'
+  },
+  {
+    icon: '📝',
+    title: 'Podúlohy',
+    description: 'Rozbaľte úlohu a pridajte podúlohy pre lepšiu organizáciu. Každá podúloha môže mať vlastný termín a poznámky.'
+  },
+  {
+    icon: '👤',
+    title: 'Priradenie úloh',
+    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu.'
+  },
+  {
+    icon: '🔍',
+    title: 'Filtrovanie',
+    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority.'
+  },
+  {
+    icon: '✅',
+    title: 'Dokončenie úlohy',
+    description: 'Kliknutím na checkbox označíte úlohu ako dokončenú. Dokončené úlohy sú zobrazené v sekcii "Dokončené".'
+  },
+  {
+    icon: '📆',
+    title: 'Synchronizácia s kalendárom',
+    description: 'V nastaveniach môžete prepojiť úlohy s Google Calendar pre automatickú synchronizáciu termínov.'
+  }
+];
 
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
@@ -2107,6 +2147,13 @@ function Tasks() {
           </div>
         </div>
       )}
+
+      {/* Help Guide */}
+      <HelpGuide
+        section="tasks"
+        title="Správa úloh"
+        tips={tasksHelpTips}
+      />
     </div>
   );
 }

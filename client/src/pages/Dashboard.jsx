@@ -4,6 +4,36 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
+import HelpGuide from '../components/HelpGuide';
+
+// Help tips for Dashboard
+const dashboardHelpTips = [
+  {
+    icon: '📊',
+    title: 'Prehľad štatistík',
+    description: 'Na ľavej strane vidíte prehľad vašich kontaktov a úloh. Kliknutím na štatistiku zobrazíte detailný zoznam.'
+  },
+  {
+    icon: '👥',
+    title: 'Kontakty podľa stavu',
+    description: 'Kontakty sú rozdelené podľa stavu: Aktívni, Čakajúci a Dokončení. Kliknutím na kategóriu zobrazíte zoznam.'
+  },
+  {
+    icon: '✅',
+    title: 'Úlohy na dnes',
+    description: 'V sekcii "Úlohy na dnes" vidíte úlohy s dnešným termínom. Môžete ich priamo označiť ako dokončené.'
+  },
+  {
+    icon: '🔔',
+    title: 'Notifikácie',
+    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami o zmenách, ktoré urobili ostatní členovia tímu.'
+  },
+  {
+    icon: '⚡',
+    title: 'Rýchla navigácia',
+    description: 'Pomocou tlačidiel "Kontakty" a "Úlohy" v hlavičke sa rýchlo prepnete na detailné zobrazenie.'
+  }
+];
 
 function Dashboard() {
   const { user, logout, updateUser } = useAuth();
@@ -1013,6 +1043,13 @@ function Dashboard() {
           )}
         </main>
       </div>
+
+      {/* Help Guide */}
+      <HelpGuide
+        section="dashboard"
+        title="Vitajte na Dashboard"
+        tips={dashboardHelpTips}
+      />
     </div>
   );
 }
