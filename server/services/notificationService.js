@@ -80,14 +80,22 @@ const generateNotificationUrl = (type, data = {}) => {
 
   // Task notifications -> /tasks with task highlight
   if (type?.startsWith('task') && data.taskId) {
-    const url = `/tasks?highlightTask=${data.taskId}`;
+    let url = `/tasks?highlightTask=${data.taskId}`;
+    // Add contactId for contact-based tasks to help with navigation
+    if (data.contactId) {
+      url += `&contactId=${data.contactId}`;
+    }
     logger.debug('[NotificationService] Generated task URL', { url });
     return url;
   }
 
   // Subtask notifications -> /tasks with parent task highlight
   if (type?.startsWith('subtask') && data.taskId) {
-    const url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
+    let url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
+    // Add contactId for contact-based tasks to help with navigation
+    if (data.contactId) {
+      url += `&contactId=${data.contactId}`;
+    }
     logger.debug('[NotificationService] Generated subtask URL', { url });
     return url;
   }
@@ -617,14 +625,9 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
   }
 
   if (recipientIds.size === 0) {
-    // Get all users except actor and excluded
-    const allExcluded = new Set();
-    if (actor) allExcluded.add((actor._id || actor.id).toString());
-    excludeUserIds.forEach(id => { if (id) allExcluded.add(id.toString()); });
-
-    const users = await User.find({ _id: { $nin: Array.from(allExcluded) } }, '_id').lean();
-    const userIds = users.map(u => u._id.toString());
-    return await notifyUsers(userIds, notificationData);
+    // No specific recipients - don't spam all users, just skip
+    logger.debug('[NotificationService] No recipients for subtask notification, skipping');
+    return [];
   }
 
   return await notifyUsers(Array.from(recipientIds), notificationData);
