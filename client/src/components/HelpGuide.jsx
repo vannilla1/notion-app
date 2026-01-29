@@ -130,7 +130,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
         }
 
         .help-guide-modal {
-          background: var(--card-bg, #1e1e2e);
+          background: #2a2a3e;
           border-radius: 16px;
           max-width: 500px;
           width: 100%;
@@ -158,19 +158,19 @@ const HelpGuide = ({ section, tips, title, children }) => {
           align-items: center;
           justify-content: space-between;
           padding: 20px 24px;
-          border-bottom: 1px solid var(--border-color, #333);
+          border-bottom: 1px solid #404055;
         }
 
         .help-guide-header h2 {
           margin: 0;
           font-size: 20px;
-          color: var(--text-primary, #fff);
+          color: #ffffff;
         }
 
         .help-guide-close {
           background: none;
           border: none;
-          color: var(--text-secondary, #888);
+          color: #9ca3af;
           font-size: 28px;
           cursor: pointer;
           padding: 0;
@@ -179,7 +179,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
         }
 
         .help-guide-close:hover {
-          color: var(--text-primary, #fff);
+          color: #ffffff;
         }
 
         .help-guide-content {
@@ -198,7 +198,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
           display: flex;
           gap: 16px;
           padding: 16px 0;
-          border-bottom: 1px solid var(--border-color, #333);
+          border-bottom: 1px solid #404055;
         }
 
         .help-guide-tip:last-child {
@@ -216,21 +216,21 @@ const HelpGuide = ({ section, tips, title, children }) => {
 
         .tip-content strong {
           display: block;
-          color: var(--text-primary, #fff);
+          color: #ffffff;
           margin-bottom: 4px;
           font-size: 15px;
         }
 
         .tip-content p {
           margin: 0;
-          color: var(--text-secondary, #aaa);
+          color: #d1d5db;
           font-size: 14px;
           line-height: 1.5;
         }
 
         .help-guide-footer {
           padding: 16px 24px;
-          border-top: 1px solid var(--border-color, #333);
+          border-top: 1px solid #404055;
           display: flex;
           justify-content: flex-end;
         }
