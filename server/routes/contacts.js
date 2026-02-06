@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const Contact = require('../models/Contact');
 const notificationService = require('../services/notificationService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -216,15 +217,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    // Delete associated files
-    if (contact.files) {
-      contact.files.forEach(file => {
-        const filePath = path.join(UPLOADS_DIR, file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      });
-    }
+    // Files are stored in MongoDB as Base64, no disk cleanup needed
 
     // Store contact data for notification before deletion
     const contactData = { _id: contact._id, name: contact.name };
@@ -360,7 +353,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
-    console.error('Delete task error:', error);
+    logger.error('Delete task error', { error: error.message });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -582,7 +575,7 @@ router.post('/:id/files', authenticateToken, (req, res) => {
 
       res.status(201).json(responseData);
     } catch (error) {
-      console.error('File upload error:', error);
+      logger.error('File upload error', { error: error.message });
       res.status(500).json({ message: 'Server error', error: error.message });
     }
   });

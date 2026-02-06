@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -14,10 +15,10 @@ const router = express.Router();
 const autoSyncToGoogle = async (taskData, action) => {
   await Promise.all([
     autoSyncTaskToCalendar(taskData, action).catch(err =>
-      console.error('Auto-sync Calendar error:', err.message)
+      logger.warn('Auto-sync Calendar error', { error: err.message })
     ),
     autoSyncTaskToGoogleTasks(taskData, action).catch(err =>
-      console.error('Auto-sync Tasks error:', err.message)
+      logger.warn('Auto-sync Tasks error', { error: err.message })
     )
   ]);
 };
@@ -25,10 +26,10 @@ const autoSyncToGoogle = async (taskData, action) => {
 const autoDeleteFromGoogle = async (taskId) => {
   await Promise.all([
     autoDeleteTaskFromCalendar(taskId).catch(err =>
-      console.error('Auto-delete Calendar error:', err.message)
+      logger.warn('Auto-delete Calendar error', { error: err.message })
     ),
     autoDeleteTaskFromGoogleTasks(taskId).catch(err =>
-      console.error('Auto-delete Tasks error:', err.message)
+      logger.warn('Auto-delete Tasks error', { error: err.message })
     )
   ]);
 };
@@ -317,7 +318,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="perun-crm-tasks.ics"');
     res.send(ical);
   } catch (error) {
-    console.error('Calendar export error:', error);
+    logger.error('Calendar export error', { error: error.message });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -357,7 +358,7 @@ router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
       message: 'Kalendár feed bol aktivovaný'
     });
   } catch (error) {
-    console.error('Calendar feed generate error:', error);
+    logger.error('Calendar feed generate error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -388,7 +389,7 @@ router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
       createdAt: user.calendarFeedCreatedAt
     });
   } catch (error) {
-    console.error('Calendar feed status error:', error);
+    logger.error('Calendar feed status error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -407,7 +408,7 @@ router.post('/calendar/feed/disable', authenticateToken, async (req, res) => {
       message: 'Kalendár feed bol deaktivovaný'
     });
   } catch (error) {
-    console.error('Calendar feed disable error:', error);
+    logger.error('Calendar feed disable error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -433,7 +434,7 @@ router.post('/calendar/feed/regenerate', authenticateToken, async (req, res) => 
       message: 'Nový kalendár feed bol vygenerovaný'
     });
   } catch (error) {
-    console.error('Calendar feed regenerate error:', error);
+    logger.error('Calendar feed regenerate error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
@@ -510,10 +511,10 @@ router.get('/calendar/feed/:token', async (req, res) => {
     };
 
     // Collect from global tasks
-    console.log('Calendar feed - Global tasks count:', globalTasks.length);
+    logger.debug('Calendar feed - Global tasks count', { count: globalTasks.length });
     for (const task of globalTasks) {
       const taskId = task._id.toString();
-      console.log('Calendar feed - Task:', task.title, 'dueDate:', task.dueDate);
+      logger.debug('Calendar feed - Task', { title: task.title, dueDate: task.dueDate });
       if (task.dueDate) {
         events.push({
           uid: createUID(taskId),
@@ -531,12 +532,12 @@ router.get('/calendar/feed/:token', async (req, res) => {
     }
 
     // Collect from contact tasks
-    console.log('Calendar feed - Contacts count:', contacts.length);
+    logger.debug('Calendar feed - Contacts count', { count: contacts.length });
     for (const contact of contacts) {
       if (contact.tasks) {
-        console.log('Calendar feed - Contact:', contact.name, 'tasks:', contact.tasks.length);
+        logger.debug('Calendar feed - Contact', { name: contact.name, taskCount: contact.tasks.length });
         for (const task of contact.tasks) {
-          console.log('Calendar feed - Contact task:', task.title, 'dueDate:', task.dueDate);
+          logger.debug('Calendar feed - Contact task', { title: task.title, dueDate: task.dueDate });
           if (task.dueDate) {
             events.push({
               uid: createUID(task.id),
@@ -555,7 +556,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
       }
     }
 
-    console.log('Calendar feed - Total events:', events.length);
+    logger.debug('Calendar feed - Total events', { count: events.length });
 
     // Build iCal feed with VTODO (tasks) instead of VEVENT (events)
     let ical = 'BEGIN:VCALENDAR\r\n';
@@ -633,7 +634,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
     res.setHeader('Expires', '0');
     res.send(ical);
   } catch (error) {
-    console.error('Calendar feed error:', error);
+    logger.error('Calendar feed error', { error: error.message });
     res.status(500).send('Chyba pri generovaní kalendára');
   }
 });
@@ -748,12 +749,12 @@ router.post('/', authenticateToken, async (req, res) => {
       notificationService.notifyTaskChange('task.created', taskObj, req.user);
 
       // Notify assigned users
-      console.log('[Task Create Global] Assignment check:', { assignedTo });
+      logger.debug('[Task Create Global] Assignment check', { assignedTo });
       if (assignedTo && assignedTo.length > 0) {
-        console.log('[Task Create Global] Sending assignment notification to:', assignedTo);
+        logger.debug('[Task Create Global] Sending assignment notification', { assignedTo });
         notificationService.notifyTaskAssignment(taskObj, assignedTo, req.user);
       } else {
-        console.log('[Task Create Global] No assigned users, skipping assignment notification');
+        logger.debug('[Task Create Global] No assigned users, skipping');
       }
 
       return res.status(201).json(taskObj);
@@ -810,12 +811,12 @@ router.post('/', authenticateToken, async (req, res) => {
       notificationService.notifyTaskChange('task.created', task, req.user);
 
       // Notify assigned users
-      console.log('[Task Create Contact] Assignment check:', { assignedTo: task.assignedTo });
+      logger.debug('[Task Create Contact] Assignment check', { assignedTo: task.assignedTo });
       if (task.assignedTo && task.assignedTo.length > 0) {
-        console.log('[Task Create Contact] Sending assignment notification to:', task.assignedTo);
+        logger.debug('[Task Create Contact] Sending assignment notification', { assignedTo: task.assignedTo });
         notificationService.notifyTaskAssignment(task, task.assignedTo, req.user);
       } else {
-        console.log('[Task Create Contact] No assigned users, skipping assignment notification');
+        logger.debug('[Task Create Contact] No assigned users, skipping');
       }
     }
 
@@ -867,11 +868,18 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // If source is 'contact', update in contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({});
-      for (const contact of contacts) {
-        if (contact.tasks) {
-          const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
-          if (taskIndex !== -1) {
+      // Optimization: if contactId is provided, use it directly
+      // Otherwise use MongoDB query with index on tasks.id
+      let contact;
+      if (contactId) {
+        contact = await Contact.findById(contactId);
+      } else {
+        contact = await Contact.findOne({ 'tasks.id': req.params.id });
+      }
+
+      if (contact && contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
+        if (taskIndex !== -1) {
             const task = contact.tasks[taskIndex];
             // Save original assignedTo before update
             const originalAssignedTo = task.assignedTo || [];
@@ -910,9 +918,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
             if (title !== undefined && title !== originalTitle) {
               const newTitle = title;
               const subtasks = contact.tasks[taskIndex].subtasks;
-              console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
+              logger.debug("Auto-sync: Parent task title changed", { originalTitle, newTitle, subtaskCount: (subtasks || []).length });
               syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
-                console.error('Auto-sync error updating subtasks after parent title change (contact):', err.message)
+                logger.warn("Auto-sync error updating subtasks (contact)", { error: err.message })
               );
             }
 
@@ -921,7 +929,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             if (assignedTo !== undefined) {
               const newAssignedTo = assignedTo || [];
               newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-              console.log('[Task Update Contact] Assignment check:', {
+              logger.debug('[Task Update Contact] Assignment check', {
                 originalAssignedTo,
                 newAssignedTo,
                 newlyAssigned,
@@ -935,16 +943,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
-              console.log('[Task Update Contact] Sending assignment notification to:', newlyAssigned);
+              logger.debug('[Task Update Contact] Sending assignment notification', { newlyAssigned });
               notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-            } else {
-              console.log('[Task Update Contact] No newly assigned users, skipping assignment notification');
             }
 
             return res.json(taskData);
           }
         }
-      }
       return res.status(404).json({ message: 'Task not found in contacts' });
     }
 
@@ -1019,9 +1024,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (title !== undefined && title !== originalTitle) {
         const newTitle = title;
         const subtasks = task.subtasks;
-        console.log(`Auto-sync: Parent task title changed from "${originalTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar`);
+        logger.debug("Auto-sync: Parent task title changed", { originalTitle, newTitle, subtaskCount: (subtasks || []).length });
         syncSubtasksToGoogle(subtasks, newTitle, null).catch(err =>
-          console.error('Auto-sync error updating subtasks after parent title change (global):', err.message)
+          logger.warn("Auto-sync error updating subtasks (global)", { error: err.message })
         );
       }
 
@@ -1030,7 +1035,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (assignedTo !== undefined) {
         const newAssignedTo = (assignedTo || []).map(id => id.toString());
         newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-        console.log('[Task Update Global] Assignment check:', {
+        logger.debug('[Task Update Global] Assignment check', {
           originalAssignedTo,
           newAssignedTo,
           newlyAssigned,
@@ -1045,10 +1050,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       // Notify newly assigned users with specific assignment notification
       if (newlyAssigned.length > 0) {
-        console.log('[Task Update Global] Sending assignment notification to:', newlyAssigned);
+        logger.debug('[Task Update Global] Sending assignment notification', { newlyAssigned });
         notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-      } else {
-        console.log('[Task Update Global] No newly assigned users, skipping assignment notification');
       }
 
       return res.json(taskData);
@@ -1097,9 +1100,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
           if (title !== undefined && title !== originalCtaskTitle) {
             const newTitle = title;
             const subtasks = contact.tasks[taskIndex].subtasks;
-            console.log(`Auto-sync: Parent task title changed from "${originalCtaskTitle}" to "${newTitle}", updating ${(subtasks || []).length} subtasks in calendar (fallback)`);
+            logger.debug('Auto-sync: Parent task title changed (fallback)', { originalCtaskTitle, newTitle, subtaskCount: (subtasks || []).length });
             syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
-              console.error('Auto-sync error updating subtasks after parent title change (contact fallback):', err.message)
+              logger.warn('Auto-sync error updating subtasks (fallback)', { error: err.message })
             );
           }
 
@@ -1108,7 +1111,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
           if (assignedTo !== undefined) {
             const newAssignedTo = assignedTo || [];
             newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
-            console.log('[Task Update Fallback] Assignment check:', {
+            logger.debug('[Task Update Fallback] Assignment check', {
               originalCtaskAssignedTo,
               newAssignedTo,
               newlyAssigned,
@@ -1122,10 +1125,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
           // Notify newly assigned users with specific assignment notification
           if (newlyAssigned.length > 0) {
-            console.log('[Task Update Fallback] Sending assignment notification to:', newlyAssigned);
+            logger.debug('[Task Update Fallback] Sending assignment notification', { newlyAssigned });
             notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-          } else {
-            console.log('[Task Update Fallback] No newly assigned users, skipping assignment notification');
           }
 
           return res.json(taskData);
@@ -1361,7 +1362,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
       message: `Úloha bola duplikovaná do ${duplicatedTasks.length} kontaktov`
     });
   } catch (error) {
-    console.error('Duplicate task error:', error);
+    logger.error('Duplicate task error', { error: error.message });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -1622,7 +1623,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
               if (assignedTo !== undefined) {
                 const newAssignedTo = assignedTo || [];
                 newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-                console.log('[Subtask Update Contact] Assignment check:', {
+                logger.debug('[Subtask Update Contact] Assignment check', {
                   originalAssignedTo,
                   newAssignedTo,
                   newlyAssigned
@@ -1635,7 +1636,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
               // Notify newly assigned users with specific assignment notification
               if (newlyAssigned.length > 0) {
-                console.log('[Subtask Update Contact] Sending assignment notification to:', newlyAssigned);
+                logger.debug('[Subtask Update Contact] Sending assignment notification', { newlyAssigned });
                 notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
               }
 
@@ -1673,7 +1674,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
         if (assignedTo !== undefined) {
           const newAssignedTo = assignedTo || [];
           newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-          console.log('[Subtask Update Global] Assignment check:', {
+          logger.debug('[Subtask Update Global] Assignment check', {
             originalAssignedTo,
             newAssignedTo,
             newlyAssigned
@@ -1686,7 +1687,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
         // Notify newly assigned users with specific assignment notification
         if (newlyAssigned.length > 0) {
-          console.log('[Subtask Update Global] Sending assignment notification to:', newlyAssigned);
+          logger.debug('[Subtask Update Global] Sending assignment notification', { newlyAssigned });
           notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user);
         }
 
@@ -1729,7 +1730,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
             if (assignedTo !== undefined) {
               const newAssignedTo = assignedTo || [];
               newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-              console.log('[Subtask Update Fallback] Assignment check:', {
+              logger.debug('[Subtask Update Fallback] Assignment check', {
                 originalAssignedTo,
                 newAssignedTo,
                 newlyAssigned
@@ -1742,7 +1743,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
-              console.log('[Subtask Update Fallback] Sending assignment notification to:', newlyAssigned);
+              logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
               notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
             }
 
@@ -1823,7 +1824,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res
                 contactName: contact.name
               };
 
-              console.log('[DeleteSubtask] parentTask.id:', parentTask.id, 'taskObj.id:', taskObj.id, 'deletedSubtask.id:', deletedSubtask.id);
+              logger.debug('[DeleteSubtask] IDs', { parentTaskId: parentTask.id, taskObjId: taskObj.id, deletedSubtaskId: deletedSubtask.id });
 
               // Send notifications for deleted subtask and all nested subtasks
               await sendDeleteNotifications(deletedSubtask, parentTask);

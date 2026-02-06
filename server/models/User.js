@@ -106,4 +106,9 @@ const userSchema = new mongoose.Schema({
   }
 });
 
+// Indexes for efficient lookups
+userSchema.index({ 'googleCalendar.enabled': 1 });
+userSchema.index({ 'googleTasks.enabled': 1 });
+userSchema.index({ role: 1 });
+
 module.exports = mongoose.model('User', userSchema);

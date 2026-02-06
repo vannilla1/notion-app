@@ -480,15 +480,9 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = []) => {
   }
 
   if (recipientIds.size === 0) {
-    // If no specific recipients, notify all except actor and excluded users
-    const allExcluded = new Set();
-    if (actor) allExcluded.add((actor._id || actor.id).toString());
-    excludeUserIds.forEach(id => { if (id) allExcluded.add(id.toString()); });
-
-    // Get all users except excluded
-    const users = await User.find({ _id: { $nin: Array.from(allExcluded) } }, '_id').lean();
-    const userIds = users.map(u => u._id.toString());
-    return await notifyUsers(userIds, notificationData);
+    // No specific recipients - don't spam all users, just skip
+    logger.debug('[NotificationService] No recipients for task notification, skipping');
+    return [];
   }
 
   return await notifyUsers(Array.from(recipientIds), notificationData);

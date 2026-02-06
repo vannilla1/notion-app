@@ -20,4 +20,21 @@ api.interceptors.request.use(
   }
 );
 
+// Handle 401 responses - automatic logout on token expiry
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      // Token expired or invalid - clear auth and redirect to login
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;
