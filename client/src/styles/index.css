@@ -7579,6 +7579,67 @@ a.detail-value:hover {
     font-size: 11px !important;
     padding: 2px 6px !important;
   }
+
+  /* Override inline marginLeft for cascading subtasks on mobile */
+  .contact-tasks .subtask-tree-item {
+    margin-left: 0 !important;
+  }
+
+  /* Use border-left for visual hierarchy instead of margin */
+  .contact-tasks .subtask-tree-item .subtask-tree-item {
+    border-left: 3px solid var(--accent-light) !important;
+    padding-left: 8px !important;
+    margin-left: 4px !important;
+  }
+
+  .contact-tasks .subtask-tree-item .subtask-tree-item .subtask-tree-item {
+    border-left-color: var(--border-color) !important;
+  }
+
+  /* Subtask notes in contact tasks */
+  .contact-tasks .subtask-notes-display {
+    margin-left: 0 !important;
+    font-size: 12px !important;
+    padding: 6px 8px !important;
+    background: var(--bg-hover) !important;
+    border-radius: var(--radius-sm) !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Add subtask form in contacts */
+  .contact-tasks .add-subtask-wrapper {
+    margin-left: 0 !important;
+  }
+
+  .contact-tasks .add-subtask-form {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    padding: 6px 0 !important;
+  }
+
+  .contact-tasks .add-subtask-form .form-input {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    font-size: 13px !important;
+    padding: 8px !important;
+  }
+
+  .contact-tasks .add-subtask-form .form-input.task-date-input {
+    flex: 0 0 auto !important;
+    width: auto !important;
+  }
+
+  .contact-tasks .add-subtask-form .btn {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+
+  /* Subtask children container */
+  .contact-tasks .subtask-children {
+    margin-top: 4px !important;
+  }
 }
 
 /* Extra support for iOS large text accessibility */
