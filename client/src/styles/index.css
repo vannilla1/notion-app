@@ -7538,14 +7538,26 @@ a.detail-value:hover {
   }
 
   /* Hide "Kontakty" text, show only 👥 icon */
-  .crm-header-right > .btn-secondary:not(.calendar-export-dropdown .btn-secondary) {
+  .btn-nav-contacts {
     font-size: 0 !important;
     padding: 8px !important;
     min-width: 36px !important;
   }
 
-  .crm-header-right > .btn-secondary:not(.calendar-export-dropdown .btn-secondary)::before {
+  .btn-nav-contacts::before {
     content: "👥" !important;
+    font-size: 18px !important;
+  }
+
+  /* Hide "Úlohy" text, show only ✓ icon */
+  .btn-nav-tasks {
+    font-size: 0 !important;
+    padding: 8px !important;
+    min-width: 36px !important;
+  }
+
+  .btn-nav-tasks::before {
+    content: "✓" !important;
     font-size: 18px !important;
   }
 

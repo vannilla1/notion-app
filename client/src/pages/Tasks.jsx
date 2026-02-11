@@ -1500,7 +1500,7 @@ function Tasks() {
             )}
           </div>
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-nav-contacts"
             onClick={() => navigate('/crm')}
           >
             Kontakty
