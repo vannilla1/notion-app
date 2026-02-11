@@ -7720,10 +7720,14 @@ a.detail-value:hover {
     flex-shrink: 0 !important;
   }
 
-  /* Hide "Purple CRM" text */
+  /* Show "Purple CRM" as clickable home link */
   .crm-header h1,
   .header-title-link {
-    display: none !important;
+    display: block !important;
+    font-size: 14px !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
   }
 
   .crm-header-right {
