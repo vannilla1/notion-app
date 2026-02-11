@@ -7285,11 +7285,12 @@ a.detail-value:hover {
 }
 
 /* =============================================
-   FINAL MOBILE OVERRIDES - iPhone 12 and smaller
+   FINAL MOBILE OVERRIDES - All mobile devices
    Supports iOS text size accessibility settings
+   Works on: iPhone 12, iPhone 14 Plus, all smartphones
    Must be at the end to override all other styles
    ============================================= */
-@media (max-width: 430px) {
+@media (max-width: 768px) {
   /* Task card - simple flexbox, stacked layout */
   .task-main {
     display: flex !important;
@@ -7471,7 +7472,7 @@ a.detail-value:hover {
 }
 
 /* Extra support for iOS large text accessibility */
-@media (max-width: 430px) and (min-resolution: 2dppx) {
+@media (max-width: 768px) and (min-resolution: 2dppx) {
   .task-title,
   .subtask-title {
     font-size: clamp(14px, 1rem, 18px) !important;
@@ -7479,10 +7480,10 @@ a.detail-value:hover {
 }
 
 /* =============================================
-   HEADER FIX FOR SMALL SCREENS (iPhone 12, etc.)
-   Prevents header from overflowing viewport
+   HEADER FIX FOR ALL MOBILE SCREENS
+   Compact layout for all smartphones
    ============================================= */
-@media (max-width: 430px) {
+@media (max-width: 768px) {
   .crm-header {
     padding: 6px 8px !important;
     gap: 6px !important;
