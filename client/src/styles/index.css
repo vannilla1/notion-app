@@ -7291,8 +7291,10 @@ a.detail-value:hover {
    Must be at the end to override all other styles
    ============================================= */
 @media (max-width: 768px) {
-  /* Task card - simple flexbox, stacked layout */
-  .task-main {
+  /* ==========================================
+     TASKS PAGE - Task cards with stacked layout
+     ========================================== */
+  .tasks-page .task-main {
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
@@ -7300,7 +7302,7 @@ a.detail-value:hover {
     position: relative !important;
   }
 
-  .task-checkbox-styled {
+  .tasks-page .task-checkbox-styled {
     position: absolute !important;
     left: 12px !important;
     top: 12px !important;
@@ -7308,14 +7310,14 @@ a.detail-value:hover {
     height: 24px !important;
   }
 
-  .task-content {
+  .tasks-page .task-content {
     margin-left: 36px !important;
     margin-right: 0 !important;
     min-width: 0 !important;
     width: auto !important;
   }
 
-  .task-title {
+  .tasks-page .task-title {
     font-size: 1rem !important;
     line-height: 1.4 !important;
     word-break: normal !important;
@@ -7324,7 +7326,7 @@ a.detail-value:hover {
     margin-bottom: 4px;
   }
 
-  .task-meta {
+  .tasks-page .task-meta {
     margin-left: 36px !important;
     display: flex !important;
     flex-wrap: wrap !important;
@@ -7332,7 +7334,7 @@ a.detail-value:hover {
     align-items: center !important;
   }
 
-  .task-actions {
+  .tasks-page .task-actions {
     margin-left: 36px !important;
     display: flex !important;
     gap: 8px !important;
@@ -7340,7 +7342,7 @@ a.detail-value:hover {
     position: static !important;
   }
 
-  .task-actions .btn-icon {
+  .tasks-page .task-actions .btn-icon {
     padding: 6px !important;
     font-size: 1rem !important;
     min-width: 32px !important;
@@ -7350,12 +7352,12 @@ a.detail-value:hover {
   }
 
   /* ==========================================
-     SUBTASK - Clean mobile layout
+     TASKS PAGE - SUBTASK Clean mobile layout
      Row 1: checkbox + title (full width)
      Row 2: expand btn + meta info (date, count)
      Row 3: actions
      ========================================== */
-  .subtask-item {
+  .tasks-page .subtask-item {
     display: flex !important;
     flex-wrap: wrap !important;
     gap: 8px !important;
@@ -7365,7 +7367,7 @@ a.detail-value:hover {
   }
 
   /* Checkbox - inline, not absolute */
-  .subtask-checkbox-styled {
+  .tasks-page .subtask-checkbox-styled {
     position: relative !important;
     width: 24px !important;
     height: 24px !important;
@@ -7374,7 +7376,7 @@ a.detail-value:hover {
   }
 
   /* Title takes remaining space on first row */
-  .subtask-title {
+  .tasks-page .subtask-title {
     flex: 1 1 calc(100% - 40px) !important;
     font-size: 15px !important;
     line-height: 1.4 !important;
@@ -7387,7 +7389,7 @@ a.detail-value:hover {
   }
 
   /* Notes indicator - top right corner */
-  .subtask-notes-indicator {
+  .tasks-page .subtask-notes-indicator {
     position: absolute !important;
     top: 12px !important;
     right: 12px !important;
@@ -7395,7 +7397,7 @@ a.detail-value:hover {
   }
 
   /* Second row: expand + meta info */
-  .subtask-expand-btn {
+  .tasks-page .subtask-expand-btn {
     position: relative !important;
     width: 28px !important;
     height: 28px !important;
@@ -7410,7 +7412,7 @@ a.detail-value:hover {
     border: 1px solid var(--border-color) !important;
   }
 
-  .subtask-due-date {
+  .tasks-page .subtask-due-date {
     font-size: 13px !important;
     padding: 4px 8px !important;
     background: var(--bg-secondary) !important;
@@ -7418,7 +7420,7 @@ a.detail-value:hover {
     margin-left: 4px !important;
   }
 
-  .subtask-child-count {
+  .tasks-page .subtask-child-count {
     font-size: 13px !important;
     color: var(--text-muted) !important;
     padding: 4px 8px !important;
@@ -7426,20 +7428,20 @@ a.detail-value:hover {
     border-radius: var(--radius-sm) !important;
   }
 
-  .subtask-assigned-users {
+  .tasks-page .subtask-assigned-users {
     display: flex !important;
     gap: 4px !important;
     margin-left: 4px !important;
   }
 
-  .subtask-assigned-avatar {
+  .tasks-page .subtask-assigned-avatar {
     width: 24px !important;
     height: 24px !important;
     font-size: 11px !important;
   }
 
   /* Third row: actions - full width */
-  .subtask-actions {
+  .tasks-page .subtask-actions {
     flex-basis: 100% !important;
     display: flex !important;
     gap: 8px !important;
@@ -7449,7 +7451,7 @@ a.detail-value:hover {
     margin-top: 4px !important;
   }
 
-  .subtask-actions .btn-icon-sm {
+  .tasks-page .subtask-actions .btn-icon-sm {
     padding: 8px 12px !important;
     font-size: 14px !important;
     min-width: auto !important;
@@ -7460,7 +7462,7 @@ a.detail-value:hover {
   }
 
   /* Subtask notes display */
-  .subtask-notes-display {
+  .tasks-page .subtask-notes-display {
     flex-basis: 100% !important;
     margin-left: 32px !important;
     font-size: 13px !important;
@@ -7469,13 +7471,129 @@ a.detail-value:hover {
     border-radius: var(--radius-sm) !important;
     color: var(--text-secondary) !important;
   }
+
+  /* ==========================================
+     CONTACT TASKS - Simple inline layout
+     for tasks displayed in contact detail
+     ========================================== */
+  .contact-tasks .task-item {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  .contact-tasks .task-checkbox-styled {
+    position: relative !important;
+    width: 22px !important;
+    height: 22px !important;
+    flex-shrink: 0 !important;
+    margin-top: 2px !important;
+  }
+
+  .contact-tasks .task-title {
+    flex: 1 1 calc(100% - 80px) !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    hyphens: none !important;
+    min-width: 0 !important;
+  }
+
+  .contact-tasks .task-item-actions {
+    display: flex !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .contact-tasks .task-item-actions .btn-icon-sm {
+    padding: 6px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+  }
+
+  /* Contact tasks - subtask items */
+  .contact-tasks .subtask-item {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+
+  .contact-tasks .subtask-checkbox-styled {
+    position: relative !important;
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin-top: 2px !important;
+  }
+
+  .contact-tasks .subtask-title {
+    flex: 1 1 calc(100% - 70px) !important;
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    hyphens: none !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .contact-tasks .subtask-expand-btn {
+    position: relative !important;
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 10px !important;
+    margin-left: 0 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .contact-tasks .subtask-actions {
+    display: flex !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+    margin-left: 0 !important;
+    margin-top: 0 !important;
+    flex-basis: auto !important;
+  }
+
+  .contact-tasks .subtask-actions .btn-icon-sm {
+    padding: 4px 6px !important;
+    font-size: 12px !important;
+    min-width: 24px !important;
+    min-height: 24px !important;
+  }
+
+  .contact-tasks .subtask-due-date {
+    font-size: 11px !important;
+    padding: 2px 6px !important;
+  }
+
+  .contact-tasks .subtask-child-count {
+    font-size: 11px !important;
+    padding: 2px 6px !important;
+  }
 }
 
 /* Extra support for iOS large text accessibility */
 @media (max-width: 768px) and (min-resolution: 2dppx) {
-  .task-title,
-  .subtask-title {
+  .tasks-page .task-title,
+  .tasks-page .subtask-title {
     font-size: clamp(14px, 1rem, 18px) !important;
+  }
+
+  .contact-tasks .task-title {
+    font-size: clamp(13px, 0.9rem, 16px) !important;
+  }
+
+  .contact-tasks .subtask-title {
+    font-size: clamp(12px, 0.85rem, 15px) !important;
   }
 }
 
