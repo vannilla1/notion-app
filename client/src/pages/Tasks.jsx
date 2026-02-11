@@ -1489,7 +1489,7 @@ function Tasks() {
             onClick={() => navigate('/')}
             title="Domov"
           >
-            🏠
+            Domov
           </button>
           <div className="calendar-export-dropdown" ref={calendarMenuRef}>
             <button

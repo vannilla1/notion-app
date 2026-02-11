@@ -1160,7 +1160,7 @@ function CRM() {
             onClick={() => navigate('/')}
             title="Domov"
           >
-            🏠
+            Domov
           </button>
           <button
             className="btn btn-secondary btn-nav-tasks"
