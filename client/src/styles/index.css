@@ -3200,6 +3200,42 @@ a.detail-value:hover {
   padding: 12px;
 }
 
+/* Contact Tasks Link Button */
+.contact-tasks-link {
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.contact-tasks-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Contact Filter Banner (Tasks page) */
+.contact-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-color);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: var(--accent-color);
+  font-size: 14px;
+}
+
+.contact-filter-banner strong {
+  color: var(--text-primary);
+}
+
 /* Contact Files Section */
 .contact-files {
   background: var(--bg-secondary);

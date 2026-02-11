@@ -54,6 +54,7 @@ function Tasks() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [contactFilter, setContactFilter] = useState(null); // Filter by specific contact
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -207,6 +208,18 @@ function Tasks() {
       setTimeout(() => {
         setGoogleCalendarNotification(null);
       }, 5000);
+    }
+  }, [location.search, navigate]);
+
+  // Handle contact filter from URL (when navigating from CRM)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const contactId = params.get('contactId');
+
+    if (contactId) {
+      setContactFilter(contactId);
+      // Clear URL parameter but keep the filter active
+      navigate('/tasks', { replace: true });
     }
   }, [location.search, navigate]);
 
@@ -1364,7 +1377,13 @@ function Tasks() {
   };
 
   const filteredTasks = tasks.filter(t => {
-    // First apply search filter
+    // First apply contact filter (from CRM navigation)
+    if (contactFilter) {
+      const taskContactIds = t.contactIds || (t.contactId ? [t.contactId] : []);
+      if (!taskContactIds.includes(contactFilter)) return false;
+    }
+
+    // Then apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
       const titleMatch = t.title?.toLowerCase().includes(query);
@@ -1794,6 +1813,20 @@ function Tasks() {
             </div>
           ) : (
             <div className="tasks-page">
+              {/* Contact filter banner */}
+              {contactFilter && (
+                <div className="contact-filter-banner">
+                  <span>
+                    Úlohy pre kontakt: <strong>{contacts.find(c => c.id === contactFilter)?.name || 'Načítavam...'}</strong>
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setContactFilter(null)}
+                  >
+                    × Zrušiť filter
+                  </button>
+                </div>
+              )}
               <div className="tasks-header">
                 <h2>Zoznam úloh ({sortedFilteredTasks.length})</h2>
                 <div className="search-box">
