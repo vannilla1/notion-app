@@ -7454,3 +7454,85 @@ a.detail-value:hover {
     font-size: clamp(14px, 1rem, 18px) !important;
   }
 }
+
+/* =============================================
+   HEADER FIX FOR SMALL SCREENS
+   Prevents header from overflowing viewport
+   ============================================= */
+@media (max-width: 430px) {
+  .crm-header {
+    padding: 8px !important;
+    gap: 4px !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden !important;
+  }
+
+  .crm-header-left {
+    flex-shrink: 0 !important;
+    gap: 4px !important;
+    min-width: 0 !important;
+  }
+
+  .btn-menu {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 6px !important;
+  }
+
+  /* Hide "Purple CRM" text, show only on wider screens */
+  .crm-header h1,
+  .header-title-link {
+    display: none !important;
+  }
+
+  .crm-header-right {
+    flex-shrink: 1 !important;
+    gap: 4px !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Make buttons icon-only */
+  .crm-header .btn-secondary {
+    padding: 8px !important;
+    font-size: 14px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+  }
+
+  /* Hide "Export" text, show only 📅 icon */
+  .calendar-export-dropdown .btn-secondary {
+    font-size: 0 !important;
+  }
+
+  .calendar-export-dropdown .btn-secondary::before {
+    content: "📅" !important;
+    font-size: 16px !important;
+  }
+
+  /* Hide "Kontakty" text, show only 👥 icon */
+  .crm-header-right > .btn-secondary:not(.calendar-export-dropdown .btn-secondary) {
+    font-size: 0 !important;
+  }
+
+  .crm-header-right > .btn-secondary:not(.calendar-export-dropdown .btn-secondary)::before {
+    content: "👥" !important;
+    font-size: 16px !important;
+  }
+
+  /* User menu compact */
+  .user-menu-trigger {
+    padding: 4px !important;
+    gap: 0 !important;
+  }
+
+  .user-avatar {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .user-name,
+  .dropdown-arrow {
+    display: none !important;
+  }
+}
