@@ -7407,11 +7407,20 @@ a.detail-value:hover {
   }
 
   .subtask-due-date {
-    margin-left: 38px !important;
+    margin-left: 62px !important;
     font-size: 0.85rem !important;
   }
 
+  /* When no expand button, less margin for due date */
+  .subtask-item:not(:has(.subtask-expand-btn)) .subtask-due-date {
+    margin-left: 38px !important;
+  }
+
   .subtask-assigned-users {
+    margin-left: 62px !important;
+  }
+
+  .subtask-item:not(:has(.subtask-expand-btn)) .subtask-assigned-users {
     margin-left: 38px !important;
   }
 
@@ -7422,13 +7431,17 @@ a.detail-value:hover {
   }
 
   .subtask-actions {
-    margin-left: 38px !important;
+    margin-left: 62px !important;
     display: flex !important;
     gap: 8px !important;
     opacity: 1 !important;
     position: static !important;
     width: auto !important;
     margin-top: 4px !important;
+  }
+
+  .subtask-item:not(:has(.subtask-expand-btn)) .subtask-actions {
+    margin-left: 38px !important;
   }
 
   .subtask-actions .btn-icon-sm {
@@ -7442,7 +7455,7 @@ a.detail-value:hover {
 
   /* Subtask notes display */
   .subtask-notes-display {
-    margin-left: 38px !important;
+    margin-left: 62px !important;
     font-size: 0.85rem !important;
   }
 }
