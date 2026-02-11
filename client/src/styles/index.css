@@ -7752,6 +7752,18 @@ a.detail-value:hover {
     font-size: 18px !important;
   }
 
+  /* Home button - always show icon */
+  .btn-nav-home {
+    font-size: 0 !important;
+    padding: 8px !important;
+    min-width: 36px !important;
+  }
+
+  .btn-nav-home::before {
+    content: "🏠" !important;
+    font-size: 18px !important;
+  }
+
   /* Hide "Kontakty" text, show only 👥 icon */
   .btn-nav-contacts {
     font-size: 0 !important;

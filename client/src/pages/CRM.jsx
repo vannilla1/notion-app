@@ -1156,6 +1156,13 @@ function CRM() {
         </div>
         <div className="crm-header-right">
           <button
+            className="btn btn-secondary btn-nav-home"
+            onClick={() => navigate('/')}
+            title="Domov"
+          >
+            🏠
+          </button>
+          <button
             className="btn btn-secondary btn-nav-tasks"
             onClick={() => navigate('/tasks')}
           >

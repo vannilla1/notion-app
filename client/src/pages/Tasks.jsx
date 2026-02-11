@@ -1484,6 +1484,13 @@ function Tasks() {
           <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
+          <button
+            className="btn btn-secondary btn-nav-home"
+            onClick={() => navigate('/')}
+            title="Domov"
+          >
+            🏠
+          </button>
           <div className="calendar-export-dropdown" ref={calendarMenuRef}>
             <button
               className="btn btn-secondary"
