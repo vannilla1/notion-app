@@ -1266,23 +1266,27 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
 }
 
 function createGoogleTaskData(task) {
-  // Google Tasks API uses RFC 3339 timestamp for due date
-  const dueDate = new Date(task.dueDate);
-  // Set to end of day in UTC
-  dueDate.setUTCHours(23, 59, 59, 999);
-
   let notes = task.notes || '';
   if (task.contact) {
     notes += notes ? '\n\n' : '';
     notes += `Kontakt: ${task.contact}`;
   }
 
-  return {
+  const result = {
     title: task.title,
     notes: notes,
-    due: dueDate.toISOString(),
     status: task.completed ? 'completed' : 'needsAction'
   };
+
+  // Only add due date if task has one (Google Tasks API allows tasks without due date)
+  if (task.dueDate) {
+    const dueDate = new Date(task.dueDate);
+    // Set to end of day in UTC
+    dueDate.setUTCHours(23, 59, 59, 999);
+    result.due = dueDate.toISOString();
+  }
+
+  return result;
 }
 
 // ==================== AUTO-SYNC HELPER FUNCTIONS ====================
@@ -1318,10 +1322,7 @@ const releaseLock = (key) => {
  */
 const autoSyncTaskToGoogleTasks = async (taskData, action) => {
   try {
-    // Skip if task has no due date (for create/update)
-    if (action !== 'delete' && !taskData.dueDate) {
-      return;
-    }
+    // Tasks without due date can also be synced to Google Tasks
 
     let taskId = taskData.id || taskData._id;
     if (taskId && typeof taskId === 'object' && taskId.toString) {
