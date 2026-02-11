@@ -7531,19 +7531,28 @@ a.detail-value:hover {
   }
 
   .user-menu-trigger {
-    padding: 4px 6px !important;
-    gap: 0 !important;
+    padding: 4px 8px !important;
+    gap: 4px !important;
     background: rgba(255, 255, 255, 0.15) !important;
     border-radius: var(--radius) !important;
+    display: flex !important;
+    align-items: center !important;
   }
 
   .user-menu-trigger .user-avatar {
-    width: 28px !important;
-    height: 28px !important;
+    width: 26px !important;
+    height: 26px !important;
   }
 
-  .user-menu-trigger .user-name,
-  .user-menu-trigger .dropdown-arrow {
+  .user-menu-trigger .user-name {
     display: none !important;
+  }
+
+  /* Keep dropdown arrow visible so user knows it's clickable */
+  .user-menu-trigger .dropdown-arrow {
+    display: inline !important;
+    font-size: 8px !important;
+    color: white !important;
+    margin-left: 2px !important;
   }
 }
