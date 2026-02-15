@@ -433,21 +433,23 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleSyncGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('');
+      setGoogleTasksMessage('Synchronizujem...');
       const token = localStorage.getItem('token');
 
       // First sync FROM Google (completed tasks) THEN sync TO Google
       // This ensures bi-directional sync
       try {
         await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 30000 // 30 second timeout
         });
       } catch (e) {
         console.log('Sync completed from Google skipped:', e.message);
       }
 
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 90000 // 90 second timeout (server has 60s limit + buffer)
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -455,7 +457,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error syncing Google Tasks:', error);
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
+      let errorMsg;
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMsg = 'Synchronizácia trvala príliš dlho. Skúste to znova.';
+      } else {
+        errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
+      }
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }

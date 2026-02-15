@@ -467,8 +467,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
+// Maximum sync time: 60 seconds to prevent hanging requests
+const SYNC_TIMEOUT = 60000;
+
 router.post('/sync', authenticateToken, async (req, res) => {
   const forceSync = req.body.force === true;
+  const syncStartTime = Date.now();
   logger.info('[Google Tasks] Sync started', { userId: req.user.id, forceSync });
 
   try {
@@ -683,11 +687,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     // Process tasks in batches - Google Tasks API has per-user per-minute limits
-    // Even though daily quota is 50k, there's a per-minute limit (~100-200 requests/minute)
-    // Use small batches with longer delays to stay under the limit
-    const BATCH_SIZE = 5;  // Small batch size
-    let currentBackoff = 3000;  // 3 second delay between batches
-    const MAX_BACKOFF = 120000; // Max 2 minutes
+    // Google allows ~100-200 requests/minute, so we use reasonable batch sizes
+    // with minimal delays to ensure fast sync while respecting rate limits
+    const BATCH_SIZE = 10;  // Process 10 tasks at a time
+    let currentBackoff = 500;  // 500ms delay between batches (was 3000ms)
+    const MAX_BACKOFF = 30000; // Max 30 seconds (was 2 minutes)
 
     // Combine tasks to create and update, prioritizing updates (they're more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -702,6 +706,20 @@ router.post('/sync', authenticateToken, async (req, res) => {
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       // Stop if quota exceeded
       if (quotaExceeded) {
+        for (let i = batchIndex; i < batches.length; i++) {
+          skipped += batches[i].length;
+        }
+        break;
+      }
+
+      // Stop if sync is taking too long (timeout protection)
+      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+        logger.warn('[Google Tasks] Sync timeout reached, stopping', {
+          userId: req.user.id,
+          elapsed: Date.now() - syncStartTime,
+          batchesCompleted: batchIndex,
+          totalBatches: batches.length
+        });
         for (let i = batchIndex; i < batches.length; i++) {
           skipped += batches[i].length;
         }
@@ -848,13 +866,13 @@ router.post('/sync', authenticateToken, async (req, res) => {
         break; // Exit batch processing loop
       }
 
-      // If rate limit hit, increase backoff significantly and wait longer
+      // If rate limit hit, increase backoff and wait
       if (rateLimitHit) {
-        currentBackoff = Math.min(currentBackoff * 3, MAX_BACKOFF);
+        currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
         logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff, rateLimitCount });
 
         // If too many rate limits, stop to avoid being blocked
-        if (rateLimitCount >= 20) {
+        if (rateLimitCount >= 10) {
           logger.warn('[Google Tasks] Too many rate limits, stopping sync', { rateLimitCount });
           for (let i = batchIndex + 1; i < batches.length; i++) {
             skipped += batches[i].length;
@@ -862,19 +880,16 @@ router.post('/sync', authenticateToken, async (req, res) => {
           break;
         }
 
-        // Wait longer after rate limit
+        // Wait after rate limit
         await delay(currentBackoff);
       }
 
       // Track quota usage
       incrementQuota(user, batchApiCalls);
 
-      // Add delay between batches - important to avoid rate limits
-      if (batchIndex < batches.length - 1 && !quotaExceeded) {
-        // If any errors, increase backoff significantly
-        if (results.some(r => !r.success)) {
-          currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
-        }
+      // Add small delay between batches to avoid rate limits
+      if (batchIndex < batches.length - 1 && !quotaExceeded && !rateLimitHit) {
+        // Only add delay if no rate limit was hit (otherwise we already waited)
         await delay(currentBackoff);
       }
     }
@@ -883,6 +898,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
     user.googleTasks.lastSyncAt = new Date();
     await user.save();
 
+    const syncDuration = Date.now() - syncStartTime;
+    const timedOut = syncDuration >= SYNC_TIMEOUT;
+
     logger.info('[Google Tasks] Sync completed', {
       userId: req.user.id,
       synced,
@@ -890,16 +908,20 @@ router.post('/sync', authenticateToken, async (req, res) => {
       unchanged,
       skipped,
       errors,
-      quotaExceeded
+      quotaExceeded,
+      duration: syncDuration,
+      timedOut
     });
 
     let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
-    if (quotaExceeded) {
+    if (timedOut) {
+      message += ' (časový limit - spustite sync znova pre zvyšok)';
+    } else if (quotaExceeded) {
       message += ' (denný limit Google API dosiahnutý - skúste zajtra)';
     } else if (rateLimitCount > 0) {
-      message += ` (spomalené kvôli Google API limitu - zvyšok sa dosyncuje pri ďalšej sync)`;
+      message += ' (spomalené kvôli Google API limitu)';
     }
 
     res.json({
