@@ -5,6 +5,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
@@ -492,6 +493,7 @@ function Dashboard() {
           <h1 className="header-title-link active" onClick={closeDetailView}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
+          <WorkspaceSwitcher />
           <button
             className="btn btn-secondary"
             onClick={() => navigate('/crm')}

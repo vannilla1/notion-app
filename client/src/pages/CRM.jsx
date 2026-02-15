@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -1155,6 +1156,7 @@ function CRM() {
           <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
+          <WorkspaceSwitcher />
           <button
             className="btn btn-secondary btn-nav-tasks"
             onClick={() => navigate('/tasks')}

@@ -5,6 +5,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -1484,6 +1485,7 @@ function Tasks() {
           <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
+          <WorkspaceSwitcher />
           <div className="calendar-export-dropdown" ref={calendarMenuRef}>
             <button
               className="btn btn-secondary"
