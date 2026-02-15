@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api, { API_BASE_URL } from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import UserMenu from '../components/UserMenu';
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 function AdminPanel() {
   const { user, logout, updateUser } = useAuth();
@@ -10,10 +11,11 @@ function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
-    // Redirect non-admin users
-    if (user && user.role !== 'admin') {
+    // Redirect if not admin or manager
+    if (user && user.role !== 'admin' && user.role !== 'manager') {
       navigate('/');
     }
   }, [user, navigate]);
@@ -53,6 +55,42 @@ function AdminPanel() {
     }
   };
 
+  const handleDeleteUser = async (targetUser) => {
+    const confirmMessage = `Naozaj chcete vymazať účet používateľa "${targetUser.username}"?\n\nTáto akcia je nevratná a používateľ stratí prístup do systému.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setDeleting(targetUser.id);
+    try {
+      await api.delete(`/api/auth/users/${targetUser.id}`);
+      setUsers(prev => prev.filter(u => u.id !== targetUser.id));
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri mazaní používateľa');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  // Check if current user can delete target user
+  const canDeleteUser = (targetUser) => {
+    // Cannot delete yourself
+    if (targetUser.id === user.id) return false;
+
+    // Admin can delete managers and users
+    if (user.role === 'admin') {
+      return targetUser.role !== 'admin';
+    }
+
+    // Manager can delete users only
+    if (user.role === 'manager') {
+      return targetUser.role === 'user';
+    }
+
+    return false;
+  };
+
   const getRoleLabel = (role) => {
     switch (role) {
       case 'admin': return 'Admin';
@@ -67,7 +105,8 @@ function AdminPanel() {
     return new Date(dateString).toLocaleDateString('sk-SK');
   };
 
-  if (user?.role !== 'admin') {
+  // Only admin and manager can access
+  if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
     return null;
   }
 
@@ -84,6 +123,7 @@ function AdminPanel() {
           <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
         </div>
         <div className="crm-header-right">
+          <WorkspaceSwitcher />
           <UserMenu
             user={user}
             onLogout={logout}
@@ -96,7 +136,10 @@ function AdminPanel() {
         <div className="admin-panel">
           <h2>Správa používateľov</h2>
           <p className="admin-description">
-            Spravujte role používateľov v systéme. Admin má plný prístup, Manažér môže spravovať úlohy a kontakty, Používateľ môže pracovať s úlohami.
+            {user.role === 'admin'
+              ? 'Spravujte role používateľov v systéme. Admin má plný prístup, Manažér môže spravovať úlohy a kontakty, Používateľ môže pracovať s úlohami.'
+              : 'Ako manažér môžete vymazať účty bežných používateľov.'
+            }
           </p>
 
           {loading ? (
@@ -144,17 +187,33 @@ function AdminPanel() {
                         </span>
                       </td>
                       <td>
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          disabled={updating === u.id}
-                          className="role-select"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="manager">Manažér</option>
-                          <option value="user">Používateľ</option>
-                        </select>
-                        {updating === u.id && <span className="updating-spinner">...</span>}
+                        <div className="actions-cell">
+                          {user.role === 'admin' && (
+                            <>
+                              <select
+                                value={u.role}
+                                onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                                disabled={updating === u.id}
+                                className="role-select"
+                              >
+                                <option value="admin">Admin</option>
+                                <option value="manager">Manažér</option>
+                                <option value="user">Používateľ</option>
+                              </select>
+                              {updating === u.id && <span className="updating-spinner">...</span>}
+                            </>
+                          )}
+                          {canDeleteUser(u) && (
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDeleteUser(u)}
+                              disabled={deleting === u.id}
+                              title="Vymazať používateľa"
+                            >
+                              {deleting === u.id ? '...' : '🗑️'}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

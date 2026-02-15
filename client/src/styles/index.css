@@ -5739,6 +5739,24 @@ a.detail-value:hover {
   color: var(--text-secondary);
 }
 
+.actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.btn-danger.btn-sm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+}
+
 @media (max-width: 768px) {
   .admin-content {
     padding: 16px;

@@ -368,6 +368,66 @@ router.post('/set-admin', async (req, res) => {
   }
 });
 
+// Delete user (admin can delete managers and users, manager can delete users)
+router.delete('/users/:userId', authenticateToken, async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user.id);
+    const targetUser = await User.findById(req.params.userId);
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+
+    // Cannot delete yourself
+    if (req.user.id === req.params.userId) {
+      return res.status(400).json({ message: 'Nemôžete vymazať vlastný účet' });
+    }
+
+    // Permission check
+    const canDelete = (() => {
+      // Admin can delete managers and users
+      if (currentUser.role === 'admin') {
+        return targetUser.role !== 'admin'; // Cannot delete other admins
+      }
+      // Manager can delete users only
+      if (currentUser.role === 'manager') {
+        return targetUser.role === 'user';
+      }
+      return false;
+    })();
+
+    if (!canDelete) {
+      return res.status(403).json({
+        message: currentUser.role === 'admin'
+          ? 'Admin nemôže vymazať iného admina'
+          : 'Nemáte oprávnenie vymazať tohto užívateľa'
+      });
+    }
+
+    // Delete user's workspace memberships
+    const WorkspaceMember = require('../models/WorkspaceMember');
+    await WorkspaceMember.deleteMany({ userId: req.params.userId });
+
+    // Delete the user
+    await User.findByIdAndDelete(req.params.userId);
+
+    const io = req.app.get('io');
+    io.emit('user-deleted', { userId: req.params.userId });
+
+    logger.info('User deleted', {
+      deletedBy: req.user.id,
+      deletedByRole: currentUser.role,
+      deletedUserId: req.params.userId,
+      deletedUserRole: targetUser.role
+    });
+
+    res.json({ message: 'Užívateľ bol úspešne vymazaný' });
+  } catch (error) {
+    logger.error('Delete user error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
 // Update user role (admin only)
 router.put('/users/:userId/role', authenticateToken, async (req, res) => {
   try {
