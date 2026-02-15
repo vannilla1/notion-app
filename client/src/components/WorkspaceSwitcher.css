@@ -114,6 +114,102 @@
   font-weight: bold;
 }
 
+/* Edit icon */
+.workspace-edit-icon {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.workspace-edit-icon:hover {
+  opacity: 1;
+}
+
+.workspace-indicator:hover .workspace-edit-icon,
+.workspace-dropdown-item:hover .workspace-edit-icon {
+  opacity: 0.8;
+}
+
+/* Edit inline styles */
+.workspace-edit-inline,
+.workspace-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.workspace-edit-row {
+  padding: 8px 12px;
+}
+
+.workspace-edit-input {
+  flex: 1;
+  background: #2a2a3e;
+  border: 1px solid #3a3a50;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #fff;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.workspace-edit-input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.workspace-edit-input:disabled {
+  opacity: 0.6;
+}
+
+.workspace-edit-btn {
+  background: none;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.workspace-edit-btn.save {
+  background: #10b981;
+  color: white;
+}
+
+.workspace-edit-btn.save:hover {
+  background: #059669;
+}
+
+.workspace-edit-btn.cancel {
+  background: #ef4444;
+  color: white;
+}
+
+.workspace-edit-btn.cancel:hover {
+  background: #dc2626;
+}
+
+.workspace-edit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-current-section {
+  border-bottom: 1px solid #2a2a3e;
+}
+
 /* Mobile styles */
 @media (max-width: 768px) {
   .workspace-name {

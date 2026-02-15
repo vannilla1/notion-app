@@ -3,21 +3,34 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
-  const { workspaces, currentWorkspace, switchWorkspace, loading } = useWorkspace();
+  const { workspaces, currentWorkspace, switchWorkspace, updateWorkspace, loading } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [saving, setSaving] = useState(false);
   const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsOpen(false);
+        setIsEditing(false);
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
 
   const handleSwitch = async (workspaceId) => {
     if (workspaceId === currentWorkspace?.id) {
@@ -35,6 +48,46 @@ const WorkspaceSwitcher = () => {
     }
   };
 
+  const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin';
+
+  const startEditing = (e) => {
+    e.stopPropagation();
+    setEditName(currentWorkspace.name);
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+    setEditName('');
+  };
+
+  const saveWorkspaceName = async () => {
+    if (!editName.trim() || editName.trim() === currentWorkspace.name) {
+      cancelEditing();
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await updateWorkspace({ name: editName.trim() });
+      setIsEditing(false);
+      setEditName('');
+    } catch (err) {
+      console.error('Error updating workspace:', err);
+      alert('Chyba pri ukladaní názvu');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      saveWorkspaceName();
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  };
+
   if (loading || !currentWorkspace) {
     return null;
   }
@@ -42,12 +95,54 @@ const WorkspaceSwitcher = () => {
   // Only show switcher if user has multiple workspaces
   if (workspaces.length <= 1) {
     return (
-      <div className="workspace-indicator">
-        <span
-          className="workspace-color"
-          style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
-        />
-        <span className="workspace-name">{currentWorkspace.name}</span>
+      <div className="workspace-indicator" ref={dropdownRef}>
+        {isEditing ? (
+          <div className="workspace-edit-inline">
+            <input
+              ref={inputRef}
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="workspace-edit-input"
+              placeholder="Názov workspace"
+              disabled={saving}
+            />
+            <button
+              onClick={saveWorkspaceName}
+              className="workspace-edit-btn save"
+              disabled={saving}
+              title="Uložiť"
+            >
+              ✓
+            </button>
+            <button
+              onClick={cancelEditing}
+              className="workspace-edit-btn cancel"
+              disabled={saving}
+              title="Zrušiť"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <>
+            <span
+              className="workspace-color"
+              style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
+            />
+            <span className="workspace-name">{currentWorkspace.name}</span>
+            {canEdit && (
+              <button
+                className="workspace-edit-icon"
+                onClick={startEditing}
+                title="Upraviť názov"
+              >
+                ✏️
+              </button>
+            )}
+          </>
+        )}
       </div>
     );
   }
@@ -56,7 +151,7 @@ const WorkspaceSwitcher = () => {
     <div className="workspace-switcher" ref={dropdownRef}>
       <button
         className="workspace-switcher-btn"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => !isEditing && setIsOpen(!isOpen)}
         title="Prepnúť pracovné prostredie"
       >
         <span
@@ -72,10 +167,69 @@ const WorkspaceSwitcher = () => {
           <div className="workspace-dropdown-header">
             Pracovné prostredia
           </div>
-          {workspaces.map((ws) => (
+
+          {/* Current workspace with edit option */}
+          <div className="workspace-current-section">
+            {isEditing ? (
+              <div className="workspace-edit-row">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  className="workspace-edit-input"
+                  placeholder="Názov workspace"
+                  disabled={saving}
+                />
+                <button
+                  onClick={saveWorkspaceName}
+                  className="workspace-edit-btn save"
+                  disabled={saving}
+                  title="Uložiť"
+                >
+                  ✓
+                </button>
+                <button
+                  onClick={cancelEditing}
+                  className="workspace-edit-btn cancel"
+                  disabled={saving}
+                  title="Zrušiť"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="workspace-dropdown-item active">
+                <span
+                  className="workspace-color"
+                  style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
+                />
+                <span className="workspace-info">
+                  <span className="workspace-item-name">{currentWorkspace.name}</span>
+                  <span className="workspace-item-role">
+                    {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+                  </span>
+                </span>
+                {canEdit && (
+                  <button
+                    className="workspace-edit-icon"
+                    onClick={startEditing}
+                    title="Upraviť názov"
+                  >
+                    ✏️
+                  </button>
+                )}
+                <span className="workspace-check">✓</span>
+              </div>
+            )}
+          </div>
+
+          {/* Other workspaces */}
+          {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws) => (
             <button
               key={ws.id}
-              className={`workspace-dropdown-item ${ws.id === currentWorkspace.id ? 'active' : ''}`}
+              className="workspace-dropdown-item"
               onClick={() => handleSwitch(ws.id)}
             >
               <span
@@ -88,9 +242,6 @@ const WorkspaceSwitcher = () => {
                   {ws.role === 'owner' ? 'Vlastník' : ws.role === 'admin' ? 'Admin' : 'Člen'}
                 </span>
               </span>
-              {ws.id === currentWorkspace.id && (
-                <span className="workspace-check">✓</span>
-              )}
             </button>
           ))}
         </div>
