@@ -5,6 +5,49 @@ import { API_BASE_URL } from '../api/api';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
 
+/**
+ * Translate common API error messages to Slovak
+ */
+const translateErrorMessage = (message) => {
+  if (!message) return 'Neznáma chyba';
+
+  const translations = {
+    'Google Tasks token expired. Please reconnect your account.':
+      'Token pre Google Tasks expiroval. Prosím, odpojte a znova pripojte váš účet kliknutím na tlačidlo "Odpojiť" a potom "Pripojiť Google Tasks".',
+    'Google Tasks not connected':
+      'Google Tasks nie je pripojený. Kliknite na "Pripojiť Google Tasks".',
+    'Google Tasks OAuth not configured':
+      'Google Tasks integrácia nie je nakonfigurovaná na serveri.',
+    'Token refresh failed':
+      'Nepodarilo sa obnoviť prístupový token. Prosím, odpojte a znova pripojte účet.',
+    'invalid_grant':
+      'Platnosť prístupu vypršala. Prosím, odpojte a znova pripojte váš Google účet.',
+    'Network Error':
+      'Chyba siete. Skontrolujte pripojenie k internetu.',
+    'Request failed with status code 401':
+      'Neautorizovaný prístup. Prosím, prihláste sa znova.',
+    'Request failed with status code 403':
+      'Prístup zamietnutý. Nemáte oprávnenie na túto akciu.',
+    'Request failed with status code 500':
+      'Chyba servera. Skúste to znova neskôr.'
+  };
+
+  // Check for exact match
+  if (translations[message]) {
+    return translations[message];
+  }
+
+  // Check for partial matches
+  for (const [key, value] of Object.entries(translations)) {
+    if (message.includes(key)) {
+      return value;
+    }
+  }
+
+  // Return original if no translation found
+  return message;
+};
+
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
@@ -306,7 +349,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     } catch (error) {
       console.error('Error syncing Google Calendar:', error);
-      setErrors({ general: error.response?.data?.message || 'Chyba pri synchronizácii' });
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
+      setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -322,7 +366,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     } catch (error) {
       console.error('Error cleaning up Google Calendar:', error);
-      setErrors({ general: error.response?.data?.message || 'Chyba pri čistení' });
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
+      setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -410,7 +455,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error syncing Google Tasks:', error);
-      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri synchronizácii');
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
+      setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -429,7 +475,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error cleaning up Google Tasks:', error);
-      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri čistení');
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
+      setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -457,7 +504,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error deleting by search:', error);
-      setGoogleTasksMessage(error.response?.data?.message || 'Chyba pri mazaní');
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní';
+      setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
