@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 import PushNotificationToggle from './PushNotificationToggle';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
+  const { currentWorkspace } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -652,6 +654,19 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               <span className="dropdown-email">{user?.email}</span>
             </div>
           </div>
+          {/* Mobile-only workspace info */}
+          {currentWorkspace && (
+            <div className="user-menu-workspace-mobile">
+              <span
+                className="workspace-color-dot"
+                style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
+              />
+              <span className="workspace-name-mobile">{currentWorkspace.name}</span>
+              <span className="workspace-role-mobile">
+                {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+              </span>
+            </div>
+          )}
           <div className="user-menu-divider"></div>
           <button className="user-menu-item" onClick={handleOpenProfile}>
             <span className="menu-icon">👤</span>

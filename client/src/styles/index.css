@@ -2661,6 +2661,45 @@ body {
   background: var(--border-color);
 }
 
+/* Mobile-only workspace info in user menu dropdown */
+.user-menu-workspace-mobile {
+  display: none; /* Hidden on desktop */
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.workspace-name-mobile {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.workspace-role-mobile {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Show workspace info only on mobile */
+@media (max-width: 768px) {
+  .user-menu-workspace-mobile {
+    display: flex;
+  }
+}
+
 .user-menu-item {
   display: flex;
   align-items: center;
@@ -7951,59 +7990,10 @@ a.detail-value:hover {
     margin-left: 2px !important;
   }
 
-  /* Workspace switcher mobile styles */
+  /* Hide workspace switcher on mobile - it causes overlap with header title */
+  /* Workspace info is accessible via UserMenu dropdown on mobile */
   .workspace-switcher,
   .workspace-indicator {
-    flex-shrink: 1 !important;
-    min-width: 0 !important;
-  }
-
-  .workspace-indicator,
-  .workspace-switcher-btn {
-    padding: 6px 8px !important;
-    gap: 4px !important;
-    background: rgba(255, 255, 255, 0.12) !important;
-  }
-
-  .workspace-name {
-    max-width: 70px !important;
-    font-size: 12px !important;
-  }
-
-  .workspace-color {
-    width: 8px !important;
-    height: 8px !important;
-  }
-
-  .workspace-arrow {
-    font-size: 8px !important;
-    margin-left: 2px !important;
-  }
-
-  .workspace-edit-icon {
-    padding: 4px !important;
-    font-size: 12px !important;
-  }
-}
-
-/* Extra small screens - hide workspace name, show only color dot */
-@media (max-width: 400px) {
-  .workspace-name {
-    display: none !important;
-  }
-
-  .workspace-indicator,
-  .workspace-switcher-btn {
-    padding: 6px !important;
-    min-width: 32px !important;
-  }
-
-  .workspace-color {
-    width: 10px !important;
-    height: 10px !important;
-  }
-
-  .workspace-edit-icon {
     display: none !important;
   }
 }
