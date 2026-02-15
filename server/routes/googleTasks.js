@@ -467,8 +467,8 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
-// Maximum sync time: 60 seconds to prevent hanging requests
-const SYNC_TIMEOUT = 60000;
+// Maximum sync time: 5 minutes to allow large syncs
+const SYNC_TIMEOUT = 300000;
 
 router.post('/sync', authenticateToken, async (req, res) => {
   const forceSync = req.body.force === true;
@@ -686,12 +686,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
-    // Process tasks in batches - Google Tasks API has per-user per-minute limits
-    // Google allows ~100-200 requests/minute, so we use reasonable batch sizes
-    // with minimal delays to ensure fast sync while respecting rate limits
-    const BATCH_SIZE = 10;  // Process 10 tasks at a time
-    let currentBackoff = 500;  // 500ms delay between batches (was 3000ms)
-    const MAX_BACKOFF = 30000; // Max 30 seconds (was 2 minutes)
+    // Process tasks in parallel - Google Tasks API allows concurrent requests
+    // We use larger batches with minimal delay for faster sync
+    const BATCH_SIZE = 20;  // Process 20 tasks at a time (parallel)
+    let currentBackoff = 100;  // 100ms delay between batches - minimal
+    const MAX_BACKOFF = 10000; // Max 10 seconds on rate limit
 
     // Combine tasks to create and update, prioritizing updates (they're more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -871,25 +870,28 @@ router.post('/sync', authenticateToken, async (req, res) => {
         currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
         logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff, rateLimitCount });
 
-        // If too many rate limits, stop to avoid being blocked
-        if (rateLimitCount >= 10) {
-          logger.warn('[Google Tasks] Too many rate limits, stopping sync', { rateLimitCount });
-          for (let i = batchIndex + 1; i < batches.length; i++) {
-            skipped += batches[i].length;
-          }
-          break;
+        // If too many rate limits in a row, wait longer but continue
+        if (rateLimitCount >= 20) {
+          logger.warn('[Google Tasks] Many rate limits, taking longer break', { rateLimitCount });
+          await delay(5000); // 5 second break
+          rateLimitCount = 0; // Reset counter after break
+        } else {
+          // Wait after rate limit
+          await delay(currentBackoff);
         }
-
-        // Wait after rate limit
-        await delay(currentBackoff);
       }
 
       // Track quota usage
       incrementQuota(user, batchApiCalls);
 
-      // Add small delay between batches to avoid rate limits
+      // Save progress periodically (every 5 batches) to prevent losing work on timeout
+      if (batchIndex > 0 && batchIndex % 5 === 0) {
+        await user.save();
+        logger.debug('[Google Tasks] Progress saved', { batchIndex, synced, updated });
+      }
+
+      // Minimal delay between batches - only if no issues
       if (batchIndex < batches.length - 1 && !quotaExceeded && !rateLimitHit) {
-        // Only add delay if no rate limit was hit (otherwise we already waited)
         await delay(currentBackoff);
       }
     }
