@@ -81,9 +81,7 @@ workspaceSchema.statics.generateInviteCode = function() {
   return crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 character code
 };
 
-// Indexes
+// Indexes (slug and inviteCode already indexed via unique: true in schema)
 workspaceSchema.index({ ownerId: 1 });
-workspaceSchema.index({ inviteCode: 1 });
-workspaceSchema.index({ slug: 1 });
 
 module.exports = mongoose.model('Workspace', workspaceSchema);
