@@ -39,6 +39,12 @@ const userSchema = new mongoose.Schema({
     enum: ['admin', 'manager', 'user'],
     default: 'user'
   },
+  // Current active workspace
+  currentWorkspaceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Workspace',
+    default: null
+  },
   lastCalendarExport: {
     type: Date,
     default: null

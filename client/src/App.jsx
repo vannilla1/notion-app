@@ -1,16 +1,19 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
 import AdminPanel from './pages/AdminPanel';
 import NotificationToast from './components/NotificationToast';
+import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 
-function App() {
+function AppContent() {
   const { isAuthenticated, loading } = useAuth();
+  const { needsWorkspace, loading: workspaceLoading } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -167,17 +170,24 @@ function App() {
     };
   }, [isAuthenticated, navigate, location.pathname]);
 
-  if (loading) {
+  if (loading || (isAuthenticated && workspaceLoading)) {
     return (
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        height: '100vh'
+        height: '100vh',
+        background: '#1a1a2e',
+        color: '#fff'
       }}>
-        Nacitavam...
+        Načítavam...
       </div>
     );
+  }
+
+  // Show workspace setup if authenticated but needs workspace
+  if (isAuthenticated && needsWorkspace) {
+    return <WorkspaceSetup />;
   }
 
   return (
@@ -206,6 +216,15 @@ function App() {
         />
       </Routes>
     </>
+  );
+}
+
+// Wrap with WorkspaceProvider
+function App() {
+  return (
+    <WorkspaceProvider>
+      <AppContent />
+    </WorkspaceProvider>
   );
 }
 

@@ -1,0 +1,147 @@
+.workspace-switcher {
+  position: relative;
+}
+
+.workspace-indicator,
+.workspace-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.workspace-switcher-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.workspace-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.workspace-name {
+  font-weight: 500;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-arrow {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.workspace-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: #1e1e2f;
+  border: 1px solid #3a3a50;
+  border-radius: 12px;
+  min-width: 240px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.workspace-dropdown-header {
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8888a0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.workspace-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-align: left;
+}
+
+.workspace-dropdown-item:hover {
+  background: #252538;
+}
+
+.workspace-dropdown-item.active {
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.workspace-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-item-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-item-role {
+  font-size: 12px;
+  color: #8888a0;
+}
+
+.workspace-check {
+  color: #10b981;
+  font-weight: bold;
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+  .workspace-name {
+    max-width: 100px;
+  }
+
+  .workspace-dropdown {
+    right: -10px;
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace-indicator,
+  .workspace-switcher-btn {
+    padding: 6px 10px;
+  }
+
+  .workspace-name {
+    max-width: 80px;
+    font-size: 13px;
+  }
+
+  .workspace-dropdown {
+    position: fixed;
+    top: 60px;
+    left: 10px;
+    right: 10px;
+    min-width: auto;
+  }
+}

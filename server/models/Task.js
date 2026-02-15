@@ -17,6 +17,12 @@ const subtaskSchema = new mongoose.Schema({
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
+  workspaceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Workspace',
+    required: true,
+    index: true
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -73,11 +79,11 @@ const taskSchema = new mongoose.Schema({
 });
 
 // Database indexes for better query performance
-taskSchema.index({ userId: 1 });
-taskSchema.index({ completed: 1 });
-taskSchema.index({ dueDate: 1 });
-taskSchema.index({ priority: 1 });
-taskSchema.index({ contactIds: 1 });
+taskSchema.index({ workspaceId: 1, userId: 1 });
+taskSchema.index({ workspaceId: 1, completed: 1 });
+taskSchema.index({ workspaceId: 1, dueDate: 1 });
+taskSchema.index({ workspaceId: 1, priority: 1 });
+taskSchema.index({ workspaceId: 1, contactIds: 1 });
 
 // Pre-save middleware to ensure all subtasks have IDs
 taskSchema.pre('save', function() {

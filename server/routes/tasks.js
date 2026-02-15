@@ -1,6 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
+const { requireWorkspace } = require('../middleware/workspace');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
@@ -79,11 +80,12 @@ const populateAssignedUsers = async (assignedToIds) => {
   }));
 };
 
-// Get all tasks (including tasks from contacts) - shared workspace
-router.get('/', authenticateToken, async (req, res) => {
+// Get all tasks (including tasks from contacts) - for current workspace
+router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // Only get truly global tasks (without contact assignments)
+    // Only get truly global tasks (without contact assignments) for this workspace
     const globalTasks = await Task.find({
+      workspaceId: req.workspaceId,
       $or: [
         { contactIds: { $exists: false } },
         { contactIds: { $size: 0 } },
@@ -93,9 +95,9 @@ router.get('/', authenticateToken, async (req, res) => {
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
     }).lean();
-    // Only fetch contacts with tasks, exclude files.data (large Base64)
+    // Only fetch contacts with tasks from this workspace, exclude files.data (large Base64)
     const contacts = await Contact.find(
-      { tasks: { $exists: true, $ne: [] } },
+      { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
       { 'files.data': 0 }
     ).lean();
 
@@ -640,17 +642,17 @@ router.get('/calendar/feed/:token', async (req, res) => {
 });
 
 // Get single task (from global tasks or contacts)
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // First check global tasks
-    const task = await Task.findById(req.params.id).lean();
+    // First check global tasks in this workspace
+    const task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId }).lean();
     if (task) {
       return res.json({ ...task, source: 'global', id: task._id.toString() });
     }
 
     // Check tasks in contacts using MongoDB query (much faster than loading all contacts)
     const contact = await Contact.findOne(
-      { 'tasks.id': req.params.id },
+      { workspaceId: req.workspaceId, 'tasks.id': req.params.id },
       { name: 1, 'tasks.$': 1 }
     ).lean();
 
@@ -693,7 +695,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 };
 
 // Create task - creates independent embedded tasks in each selected contact
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -713,6 +715,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // If no contacts selected, create as global task
     if (finalContactIds.length === 0) {
       const task = new Task({
+        workspaceId: req.workspaceId,
         userId: req.user.id,
         title: title.trim(),
         description: description || '',
@@ -765,7 +768,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const updatedContacts = [];
 
     for (const cId of finalContactIds) {
-      const contact = await Contact.findById(cId);
+      const contact = await Contact.findOne({ _id: cId, workspaceId: req.workspaceId });
       if (!contact) continue;
 
       // Create new embedded task for this contact
@@ -861,7 +864,7 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
 };
 
 // Update task (global or from contact)
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, description, dueDate, priority, completed, contactId, contactIds, source, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -1141,7 +1144,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete task (global or from contact)
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const io = req.app.get('io');
     const source = req.query.source;
@@ -1244,7 +1247,7 @@ const duplicateSubtasksRecursive = (subtasks) => {
 };
 
 // Duplicate task with new contact assignment - creates independent embedded tasks in each contact
-router.post('/:id/duplicate', authenticateToken, async (req, res) => {
+router.post('/:id/duplicate', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { contactIds, source } = req.body;
     const io = req.app.get('io');
@@ -1370,7 +1373,7 @@ router.post('/:id/duplicate', authenticateToken, async (req, res) => {
 // ==================== SUBTASKS (RECURSIVE) ====================
 
 // Add subtask to task (global or from contact)
-router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
+router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, source, parentSubtaskId, dueDate, notes, priority, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -1557,7 +1560,7 @@ router.post('/:taskId/subtasks', authenticateToken, async (req, res) => {
 });
 
 // Update subtask (global or from contact)
-router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
+router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, completed, source, dueDate, notes, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -1760,7 +1763,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) =
 });
 
 // Delete subtask (global or from contact)
-router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
+router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const io = req.app.get('io');
     const source = req.query.source;

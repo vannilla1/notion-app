@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
+const { requireWorkspace } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
@@ -99,11 +100,14 @@ const stripFileData = (contact) => {
   return result;
 };
 
-// Get all contacts (shared workspace) - sorted alphabetically by name
-router.get('/', authenticateToken, async (req, res) => {
+// Get all contacts (for current workspace) - sorted alphabetically by name
+router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     // Exclude files.data field from query - it contains large Base64 data
-    const contacts = await Contact.find({}, { 'files.data': 0 }).sort({ name: 1 }).lean();
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId },
+      { 'files.data': 0 }
+    ).sort({ name: 1 }).lean();
     // Add id field to each contact
     const contactsWithId = contacts.map(contact => ({
       ...contact,
@@ -116,10 +120,13 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Get single contact
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     // Exclude files.data field - it contains large Base64 data
-    const contact = await Contact.findById(req.params.id, { 'files.data': 0 }).lean();
+    const contact = await Contact.findOne(
+      { _id: req.params.id, workspaceId: req.workspaceId },
+      { 'files.data': 0 }
+    ).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
@@ -130,7 +137,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create contact
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
@@ -143,6 +150,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const contact = new Contact({
+      workspaceId: req.workspaceId,
       userId: req.user.id,
       name: name || '',
       email: email || '',
@@ -171,7 +179,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update contact
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
@@ -183,8 +191,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
     }
 
-    const contact = await Contact.findByIdAndUpdate(
-      req.params.id,
+    const contact = await Contact.findOneAndUpdate(
+      { _id: req.params.id, workspaceId: req.workspaceId },
       {
         name, email, phone, company, website, notes, status
       },
@@ -209,9 +217,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete contact
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id);
+    const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -239,7 +247,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // ==================== TASKS ====================
 
 // Add task to contact
-router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
+router.post('/:contactId/tasks', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, description, dueDate, priority, assignedTo } = req.body;
 
@@ -247,7 +255,7 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Názov úlohy je povinný' });
     }
 
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -281,11 +289,11 @@ router.post('/:contactId/tasks', authenticateToken, async (req, res) => {
 });
 
 // Update task
-router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
+router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, description, dueDate, priority, completed, assignedTo } = req.body;
 
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -328,9 +336,9 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
 });
 
 // Delete task
-router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) => {
+router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -359,7 +367,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, async (req, res) =
 });
 
 // Add subtask to task
-router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req, res) => {
+router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, parentSubtaskId, dueDate, notes, priority } = req.body;
 
@@ -367,7 +375,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
       return res.status(400).json({ message: 'Nazov podulohy je povinny' });
     }
 
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -432,11 +440,11 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, async (req,
 });
 
 // Update subtask
-router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
+router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, completed, dueDate, notes } = req.body;
 
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -484,9 +492,9 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, a
 });
 
 // Delete subtask
-router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, async (req, res) => {
+router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.contactId);
+    const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -524,7 +532,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 // ==================== FILE UPLOAD ====================
 
 // Upload file to contact (stored in MongoDB as Base64)
-router.post('/:id/files', authenticateToken, (req, res) => {
+router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('file')(req, res, async (err) => {
     try {
       // Handle multer errors
@@ -535,7 +543,7 @@ router.post('/:id/files', authenticateToken, (req, res) => {
         return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
       }
 
-      const contact = await Contact.findById(req.params.id);
+      const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
       if (!contact) {
         return res.status(404).json({ message: 'Contact not found' });
       }
@@ -582,9 +590,9 @@ router.post('/:id/files', authenticateToken, (req, res) => {
 });
 
 // Download file (from MongoDB Base64)
-router.get('/:id/files/:fileId/download', authenticateToken, async (req, res) => {
+router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id);
+    const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
@@ -615,9 +623,9 @@ router.get('/:id/files/:fileId/download', authenticateToken, async (req, res) =>
 });
 
 // Delete file from contact
-router.delete('/:id/files/:fileId', authenticateToken, async (req, res) => {
+router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id);
+    const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }

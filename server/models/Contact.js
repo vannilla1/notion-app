@@ -39,6 +39,12 @@ const fileSchema = new mongoose.Schema({
 }, { _id: false });
 
 const contactSchema = new mongoose.Schema({
+  workspaceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Workspace',
+    required: true,
+    index: true
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -78,10 +84,10 @@ const contactSchema = new mongoose.Schema({
 });
 
 // Database indexes for better query performance
-contactSchema.index({ userId: 1 });
-contactSchema.index({ name: 1 });
-contactSchema.index({ status: 1 });
-contactSchema.index({ email: 1 });
+contactSchema.index({ workspaceId: 1, userId: 1 });
+contactSchema.index({ workspaceId: 1, name: 1 });
+contactSchema.index({ workspaceId: 1, status: 1 });
+contactSchema.index({ workspaceId: 1, email: 1 });
 contactSchema.index({ 'tasks.dueDate': 1 });
 contactSchema.index({ 'tasks.id': 1 });
 
