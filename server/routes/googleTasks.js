@@ -88,7 +88,7 @@ const incrementQuota = (user, count = 1) => {
 };
 
 // Helper to get authenticated tasks client for user
-const getTasksClient = async (user) => {
+const getTasksClient = async (user, forceRefresh = false) => {
   if (!oauth2Client) {
     throw new Error('Google Tasks OAuth not configured');
   }
@@ -97,35 +97,72 @@ const getTasksClient = async (user) => {
     throw new Error('Google Tasks not connected');
   }
 
+  // Check if we have a refresh token - this is critical for long-term access
+  if (!user.googleTasks.refreshToken) {
+    logger.warn('[Google Tasks] No refresh token stored - user needs to reconnect', { userId: user._id });
+    throw new Error('Google Tasks token expired. Please reconnect your account.');
+  }
+
   oauth2Client.setCredentials({
     access_token: user.googleTasks.accessToken,
     refresh_token: user.googleTasks.refreshToken,
     expiry_date: user.googleTasks.tokenExpiry?.getTime()
   });
 
-  // Check if token needs refresh (with 5 min buffer)
+  // Check if token needs refresh (with 10 min buffer for safety)
   const now = new Date();
   const tokenExpiry = user.googleTasks.tokenExpiry;
-  const expiryBuffer = 5 * 60 * 1000; // 5 minutes
+  const expiryBuffer = 10 * 60 * 1000; // 10 minutes buffer
+  const needsRefresh = forceRefresh || !tokenExpiry || now.getTime() >= tokenExpiry.getTime() - expiryBuffer;
 
-  if (tokenExpiry && now.getTime() >= tokenExpiry.getTime() - expiryBuffer) {
+  if (needsRefresh) {
+    logger.debug('[Google Tasks] Token refresh needed', {
+      userId: user._id,
+      forceRefresh,
+      tokenExpiry: tokenExpiry?.toISOString(),
+      now: now.toISOString()
+    });
+
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
       user.googleTasks.accessToken = credentials.access_token;
       user.googleTasks.tokenExpiry = new Date(credentials.expiry_date);
+      // Google sometimes returns a new refresh token - always save it
       if (credentials.refresh_token) {
         user.googleTasks.refreshToken = credentials.refresh_token;
+        logger.info('[Google Tasks] New refresh token received', { userId: user._id });
       }
       await user.save();
       oauth2Client.setCredentials(credentials);
-      logger.debug('[Google Tasks] Token refreshed', { userId: user._id });
+      logger.info('[Google Tasks] Token refreshed successfully', { userId: user._id });
     } catch (refreshError) {
-      logger.error('[Google Tasks] Token refresh failed', { userId: user._id, error: refreshError.message });
-      // If refresh fails, try to continue with existing token - it might still work
-      if (refreshError.message?.includes('invalid_grant')) {
-        // Token is completely invalid - user needs to reconnect
+      logger.error('[Google Tasks] Token refresh failed', {
+        userId: user._id,
+        error: refreshError.message,
+        code: refreshError.code
+      });
+
+      // Check for various invalid grant scenarios
+      const errorMessage = refreshError.message?.toLowerCase() || '';
+      const isInvalidGrant = errorMessage.includes('invalid_grant') ||
+                            errorMessage.includes('token has been expired or revoked') ||
+                            errorMessage.includes('token has been revoked') ||
+                            refreshError.code === 400;
+
+      if (isInvalidGrant) {
+        // Clear invalid credentials
+        user.googleTasks.accessToken = null;
+        user.googleTasks.refreshToken = null;
+        user.googleTasks.tokenExpiry = null;
+        user.googleTasks.connected = false;
+        await user.save();
+
+        logger.warn('[Google Tasks] Credentials cleared due to invalid grant', { userId: user._id });
         throw new Error('Google Tasks token expired. Please reconnect your account.');
       }
+
+      // For other errors, try to continue with existing token
+      logger.warn('[Google Tasks] Continuing with existing token after refresh failure', { userId: user._id });
     }
   }
 
@@ -234,18 +271,30 @@ router.get('/callback', async (req, res) => {
       }
     }
 
+    // IMPORTANT: Google only sends refresh_token on first authorization
+    // or if we use prompt: 'consent'. Make sure we save it!
+    if (!tokens.refresh_token) {
+      logger.warn('[Google Tasks] No refresh token received! User may need to reconnect later.', { userId });
+    }
+
     user.googleTasks = {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
+      refreshToken: tokens.refresh_token || user.googleTasks?.refreshToken, // Keep old if not provided
       tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
       taskListId: taskListId,
       enabled: true,
+      connected: true,
       connectedAt: new Date(),
       syncedTaskIds: user.googleTasks?.syncedTaskIds || new Map()
     };
 
     await user.save();
-    logger.info('[Google Tasks] User connected successfully', { userId, username: user.username });
+    logger.info('[Google Tasks] User connected successfully', {
+      userId,
+      username: user.username,
+      hasRefreshToken: !!user.googleTasks.refreshToken,
+      tokenExpiry: user.googleTasks.tokenExpiry
+    });
 
     res.redirect(`${baseUrl}/tasks?google_tasks=connected`);
   } catch (error) {

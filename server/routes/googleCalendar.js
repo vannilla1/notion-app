@@ -22,9 +22,15 @@ const oauth2Client = new google.auth.OAuth2(
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
 // Helper to get authenticated calendar client for user
-const getCalendarClient = async (user) => {
+const getCalendarClient = async (user, forceRefresh = false) => {
   if (!user.googleCalendar?.accessToken) {
     throw new Error('Google Calendar not connected');
+  }
+
+  // Check if we have a refresh token - this is critical for long-term access
+  if (!user.googleCalendar.refreshToken) {
+    console.warn('[Google Calendar] No refresh token stored - user needs to reconnect', { userId: user._id });
+    throw new Error('Google Calendar token expired. Please reconnect your account.');
   }
 
   oauth2Client.setCredentials({
@@ -33,13 +39,61 @@ const getCalendarClient = async (user) => {
     expiry_date: user.googleCalendar.tokenExpiry?.getTime()
   });
 
-  // Check if token needs refresh
-  if (user.googleCalendar.tokenExpiry && new Date() >= user.googleCalendar.tokenExpiry) {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    user.googleCalendar.accessToken = credentials.access_token;
-    user.googleCalendar.tokenExpiry = new Date(credentials.expiry_date);
-    await user.save();
-    oauth2Client.setCredentials(credentials);
+  // Check if token needs refresh (with 10 min buffer for safety)
+  const now = new Date();
+  const tokenExpiry = user.googleCalendar.tokenExpiry;
+  const expiryBuffer = 10 * 60 * 1000; // 10 minutes buffer
+  const needsRefresh = forceRefresh || !tokenExpiry || now.getTime() >= tokenExpiry.getTime() - expiryBuffer;
+
+  if (needsRefresh) {
+    console.log('[Google Calendar] Token refresh needed', {
+      userId: user._id,
+      forceRefresh,
+      tokenExpiry: tokenExpiry?.toISOString(),
+      now: now.toISOString()
+    });
+
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      user.googleCalendar.accessToken = credentials.access_token;
+      user.googleCalendar.tokenExpiry = new Date(credentials.expiry_date);
+      // Google sometimes returns a new refresh token - always save it
+      if (credentials.refresh_token) {
+        user.googleCalendar.refreshToken = credentials.refresh_token;
+        console.log('[Google Calendar] New refresh token received', { userId: user._id });
+      }
+      await user.save();
+      oauth2Client.setCredentials(credentials);
+      console.log('[Google Calendar] Token refreshed successfully', { userId: user._id });
+    } catch (refreshError) {
+      console.error('[Google Calendar] Token refresh failed', {
+        userId: user._id,
+        error: refreshError.message,
+        code: refreshError.code
+      });
+
+      // Check for various invalid grant scenarios
+      const errorMessage = refreshError.message?.toLowerCase() || '';
+      const isInvalidGrant = errorMessage.includes('invalid_grant') ||
+                            errorMessage.includes('token has been expired or revoked') ||
+                            errorMessage.includes('token has been revoked') ||
+                            refreshError.code === 400;
+
+      if (isInvalidGrant) {
+        // Clear invalid credentials
+        user.googleCalendar.accessToken = null;
+        user.googleCalendar.refreshToken = null;
+        user.googleCalendar.tokenExpiry = null;
+        user.googleCalendar.enabled = false;
+        await user.save();
+
+        console.warn('[Google Calendar] Credentials cleared due to invalid grant', { userId: user._id });
+        throw new Error('Google Calendar token expired. Please reconnect your account.');
+      }
+
+      // For other errors, try to continue with existing token
+      console.warn('[Google Calendar] Continuing with existing token after refresh failure', { userId: user._id });
+    }
   }
 
   return google.calendar({ version: 'v3', auth: oauth2Client });
@@ -100,9 +154,15 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=user_not_found`);
     }
 
+    // IMPORTANT: Google only sends refresh_token on first authorization
+    // or if we use prompt: 'consent'. Make sure we save it!
+    if (!tokens.refresh_token) {
+      console.warn('[Google Calendar] No refresh token received! User may need to reconnect later.', { userId });
+    }
+
     user.googleCalendar = {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
+      refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken, // Keep old if not provided
       tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
       calendarId: 'primary',
       enabled: true,
@@ -111,7 +171,12 @@ router.get('/callback', async (req, res) => {
     };
 
     await user.save();
-    console.log('User updated with Google Calendar credentials');
+    console.log('[Google Calendar] User connected successfully', {
+      userId,
+      username: user.username,
+      hasRefreshToken: !!user.googleCalendar.refreshToken,
+      tokenExpiry: user.googleCalendar.tokenExpiry
+    });
 
     // Redirect back to app with success
     res.redirect(`${baseUrl}/tasks?google_calendar=connected`);
@@ -605,7 +670,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
   try {
     // Skip if task has no due date (for create/update)
     if (action !== 'delete' && !taskData.dueDate) {
-      console.log('Auto-sync: Task has no due date, skipping sync');
+      console.log('[Auto-sync Calendar] Task has no due date, skipping sync');
       return;
     }
 
@@ -615,22 +680,28 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       taskId = taskId.toString();
     }
 
-    console.log(`Auto-sync: Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action})`);
+    // Validate taskId
+    if (!taskId) {
+      console.warn('[Auto-sync Calendar] Missing task ID', { title: taskData.title });
+      return;
+    }
+
+    console.log(`[Auto-sync Calendar] Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action})`);
 
     // Find all users with Google Calendar enabled
     const users = await User.find({ 'googleCalendar.enabled': true });
 
     if (users.length === 0) {
-      console.log('Auto-sync: No users with Google Calendar connected');
+      console.log('[Auto-sync Calendar] No users with Google Calendar connected');
       return;
     }
 
-    console.log(`Auto-sync: Found ${users.length} users with Google Calendar connected`);
+    console.log(`[Auto-sync Calendar] Found ${users.length} users with Google Calendar connected`);
 
     for (const user of users) {
       try {
         const calendar = await getCalendarClient(user);
-        console.log(`Auto-sync: Processing for user ${user.username}, syncedTaskIds has ${user.googleCalendar.syncedTaskIds?.size || 0} entries`);
+        console.log(`[Auto-sync Calendar] Processing for user ${user.username}, syncedTaskIds has ${user.googleCalendar.syncedTaskIds?.size || 0} entries`);
 
         if (action === 'delete') {
           // Delete event from calendar
@@ -641,12 +712,19 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 calendarId: user.googleCalendar.calendarId,
                 eventId: eventId
               });
-              console.log(`Auto-sync: Deleted event ${eventId} for user ${user.username}`);
+              console.log(`[Auto-sync Calendar] Deleted event ${eventId} for user ${user.username}`);
             } catch (e) {
-              console.log(`Auto-sync: Event deletion failed (may already be deleted):`, e.message);
+              // 404 is OK - event already deleted
+              if (e.code !== 404) {
+                console.warn(`[Auto-sync Calendar] Event deletion failed:`, e.message);
+              }
             }
-            user.googleCalendar.syncedTaskIds.delete(taskId);
-            await user.save();
+            // Re-fetch user before modifying Map to prevent race conditions
+            const userToSave = await User.findById(user._id);
+            if (userToSave) {
+              userToSave.googleCalendar.syncedTaskIds.delete(taskId);
+              await userToSave.save();
+            }
           }
         } else {
           // Create or update event
@@ -660,27 +738,38 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             contact: taskData.contactName || taskData.contact || null
           });
 
-          const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskId);
+          // Re-fetch user to get latest syncedTaskIds (prevents race condition)
+          const freshUser = await User.findById(user._id);
+          if (!freshUser) {
+            console.warn('[Auto-sync Calendar] User not found on re-fetch', { userId: user._id });
+            continue;
+          }
+
+          const existingEventId = freshUser.googleCalendar.syncedTaskIds?.get(taskId);
 
           if (existingEventId) {
             // Update existing event
             try {
               await calendar.events.update({
-                calendarId: user.googleCalendar.calendarId,
+                calendarId: freshUser.googleCalendar.calendarId,
                 eventId: existingEventId,
                 resource: eventData
               });
-              console.log(`Auto-sync: Updated event ${existingEventId} for user ${user.username}`);
+              console.log(`[Auto-sync Calendar] Updated event ${existingEventId} for user ${user.username}`);
             } catch (e) {
               // If event doesn't exist, create new one
               if (e.code === 404) {
                 const event = await calendar.events.insert({
-                  calendarId: user.googleCalendar.calendarId,
+                  calendarId: freshUser.googleCalendar.calendarId,
                   resource: eventData
                 });
-                user.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
-                await user.save();
-                console.log(`Auto-sync: Created new event (old was deleted) for user ${user.username}`);
+                // Re-fetch again before saving to prevent overwriting other changes
+                const userToSave = await User.findById(user._id);
+                if (userToSave) {
+                  userToSave.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
+                  await userToSave.save();
+                }
+                console.log(`[Auto-sync Calendar] Created new event (old was deleted) for user ${user.username}`);
               } else {
                 throw e;
               }
@@ -688,20 +777,29 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
           } else {
             // Create new event
             const event = await calendar.events.insert({
-              calendarId: user.googleCalendar.calendarId,
+              calendarId: freshUser.googleCalendar.calendarId,
               resource: eventData
             });
-            user.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
-            await user.save();
-            console.log(`Auto-sync: Created event ${event.data.id} for user ${user.username}`);
+            // Re-fetch again before saving to prevent overwriting other changes
+            const userToSave = await User.findById(user._id);
+            if (userToSave) {
+              userToSave.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
+              await userToSave.save();
+            }
+            console.log(`[Auto-sync Calendar] Created event ${event.data.id} for user ${user.username}`);
           }
         }
       } catch (error) {
-        console.error(`Auto-sync: Error syncing for user ${user.username}:`, error.message);
+        // Check if this is a token expired error - log it prominently
+        if (error.message?.includes('token expired') || error.message?.includes('reconnect')) {
+          console.warn(`[Auto-sync Calendar] Token expired for user ${user.username}, skipping sync`);
+        } else {
+          console.error(`[Auto-sync Calendar] Error syncing for user ${user.username}:`, error.message);
+        }
       }
     }
   } catch (error) {
-    console.error('Auto-sync: Error in autoSyncTaskToCalendar:', error.message);
+    console.error('[Auto-sync Calendar] Error in autoSyncTaskToCalendar:', error.message);
   }
 };
 
