@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '@/api/api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -1113,32 +1113,36 @@ function CRM() {
     }
   };
 
-  const filteredContacts = contacts.filter(c => {
-    // First apply status filter
-    if (filter !== 'all' && c.status !== filter) return false;
+  // Memoize filtered contacts to prevent unnecessary recalculations
+  const filteredContacts = useMemo(() => {
+    return contacts.filter(c => {
+      // First apply status filter
+      if (filter !== 'all' && c.status !== filter) return false;
 
-    // Then apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      const nameMatch = c.name?.toLowerCase().includes(query);
-      const emailMatch = c.email?.toLowerCase().includes(query);
-      const phoneMatch = c.phone?.toLowerCase().includes(query);
-      const companyMatch = c.company?.toLowerCase().includes(query);
-      const notesMatch = c.notes?.toLowerCase().includes(query);
-      // Search in task titles too
-      const taskMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
-      return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || taskMatch;
-    }
-    return true;
-  });
+      // Then apply search filter
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        const nameMatch = c.name?.toLowerCase().includes(query);
+        const emailMatch = c.email?.toLowerCase().includes(query);
+        const phoneMatch = c.phone?.toLowerCase().includes(query);
+        const companyMatch = c.company?.toLowerCase().includes(query);
+        const notesMatch = c.notes?.toLowerCase().includes(query);
+        // Search in task titles too
+        const taskMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
+        return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || taskMatch;
+      }
+      return true;
+    });
+  }, [contacts, filter, searchQuery]);
 
-  const statusCounts = {
+  // Memoize status counts to prevent unnecessary recalculations
+  const statusCounts = useMemo(() => ({
     all: contacts.length,
     new: contacts.filter(c => c.status === 'new').length,
     active: contacts.filter(c => c.status === 'active').length,
     completed: contacts.filter(c => c.status === 'completed').length,
     cancelled: contacts.filter(c => c.status === 'cancelled').length
-  };
+  }), [contacts]);
 
   return (
     <div className="crm-container">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import api from '../api/api';
 
 function TaskList({ contactId, tasks = [], onContactRefresh }) {
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -22,7 +22,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
     if (!newTaskTitle.trim()) return;
 
     try {
-      await axios.post(`/api/contacts/${contactId}/tasks`, {
+      await api.post(`/api/contacts/${contactId}/tasks`, {
         title: newTaskTitle,
         priority: 'medium'
       });
@@ -35,7 +35,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
 
   const toggleTask = async (taskId, completed) => {
     try {
-      await axios.put(`/api/contacts/${contactId}/tasks/${taskId}`, {
+      await api.put(`/api/contacts/${contactId}/tasks/${taskId}`, {
         completed: !completed
       });
       await refreshContact();
@@ -47,7 +47,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
   const deleteTask = async (taskId) => {
     if (!window.confirm('Vymazať túto úlohu?')) return;
     try {
-      await axios.delete(`/api/contacts/${contactId}/tasks/${taskId}`);
+      await api.delete(`/api/contacts/${contactId}/tasks/${taskId}`);
       await refreshContact();
     } catch (error) {
       console.error('Failed to delete task:', error);
@@ -60,7 +60,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
     if (!subtaskTitle.trim()) return;
 
     try {
-      await axios.post(`/api/contacts/${contactId}/tasks/${taskId}/subtasks`, {
+      await api.post(`/api/contacts/${contactId}/tasks/${taskId}/subtasks`, {
         title: subtaskTitle
       });
       setSubtaskInputs(prev => ({ ...prev, [taskId]: '' }));
@@ -72,7 +72,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
 
   const toggleSubtask = async (taskId, subtaskId, completed) => {
     try {
-      await axios.put(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`, {
+      await api.put(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`, {
         completed: !completed
       });
       await refreshContact();
@@ -83,7 +83,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
 
   const deleteSubtask = async (taskId, subtaskId) => {
     try {
-      await axios.delete(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`);
+      await api.delete(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`);
       await refreshContact();
     } catch (error) {
       console.error('Failed to delete subtask:', error);
@@ -98,7 +98,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
   const saveSubtask = async (taskId, subtaskId) => {
     if (!editSubtaskTitle.trim()) return;
     try {
-      await axios.put(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`, {
+      await api.put(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`, {
         title: editSubtaskTitle
       });
       setEditingSubtask(null);
@@ -126,7 +126,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
 
   const saveTask = async (taskId) => {
     try {
-      await axios.put(`/api/contacts/${contactId}/tasks/${taskId}`, editForm);
+      await api.put(`/api/contacts/${contactId}/tasks/${taskId}`, editForm);
       setEditingTask(null);
       await refreshContact();
     } catch (error) {

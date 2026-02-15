@@ -1,7 +1,21 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'notion-app-secret-key-2024';
+// JWT_SECRET must be set in environment variables for security
+// In development, a fallback is used but production MUST set this
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET environment variable is not set in production!');
+    process.exit(1);
+  } else {
+    console.warn('WARNING: JWT_SECRET not set, using development fallback. DO NOT use in production!');
+  }
+}
+
+// Use fallback only in development
+const SECRET_KEY = JWT_SECRET || 'dev-only-secret-change-in-production';
 
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -12,7 +26,7 @@ const authenticateToken = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, SECRET_KEY);
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -41,7 +55,7 @@ const authenticateSocket = async (socket, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, SECRET_KEY);
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -61,4 +75,4 @@ const authenticateSocket = async (socket, next) => {
   }
 };
 
-module.exports = { authenticateToken, authenticateSocket, JWT_SECRET };
+module.exports = { authenticateToken, authenticateSocket, JWT_SECRET: SECRET_KEY };
