@@ -8,8 +8,20 @@ const WorkspaceSwitcher = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -88,7 +100,8 @@ const WorkspaceSwitcher = () => {
     }
   };
 
-  if (loading || !currentWorkspace) {
+  // Don't render on mobile - workspace info is shown in UserMenu instead
+  if (isMobile || loading || !currentWorkspace) {
     return null;
   }
 
