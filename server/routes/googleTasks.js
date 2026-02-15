@@ -277,6 +277,8 @@ router.get('/callback', async (req, res) => {
       logger.warn('[Google Tasks] No refresh token received! User may need to reconnect later.', { userId });
     }
 
+    // IMPORTANT: Clear old sync data when reconnecting to avoid stale references
+    // Old syncedTaskIds point to tasks in potentially different task list
     user.googleTasks = {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || user.googleTasks?.refreshToken, // Keep old if not provided
@@ -285,7 +287,8 @@ router.get('/callback', async (req, res) => {
       enabled: true,
       connected: true,
       connectedAt: new Date(),
-      syncedTaskIds: user.googleTasks?.syncedTaskIds || new Map()
+      syncedTaskIds: new Map(), // Always start fresh on reconnect
+      syncedTaskHashes: new Map() // Always start fresh on reconnect
     };
 
     await user.save();
@@ -646,11 +649,15 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    logger.debug('[Google Tasks] Sync analysis', {
+    logger.info('[Google Tasks] Sync analysis', {
       userId: req.user.id,
+      totalTasksToSync: tasksToSync.length,
       toCreate: tasksToCreate.length,
       toUpdate: tasksToUpdate.length,
-      unchanged
+      unchanged,
+      skipped,
+      syncedTaskIdsSize: user.googleTasks.syncedTaskIds?.size || 0,
+      syncedTaskHashesSize: user.googleTasks.syncedTaskHashes?.size || 0
     });
 
     // If nothing to do, return early
