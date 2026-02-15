@@ -5755,6 +5755,15 @@ a.detail-value:hover {
   align-items: center;
   justify-content: center;
   min-width: 32px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  box-shadow: none;
+}
+
+.btn-danger.btn-sm:hover {
+  background: var(--danger);
+  color: white;
 }
 
 @media (max-width: 768px) {
