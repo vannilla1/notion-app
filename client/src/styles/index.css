@@ -5766,23 +5766,136 @@ a.detail-value:hover {
   color: white;
 }
 
-@media (max-width: 768px) {
+/* Tablet styles for admin panel */
+@media (max-width: 1024px) {
   .admin-content {
     padding: 16px;
+  }
+
+  .admin-panel {
+    padding: 20px;
+  }
+
+  .actions-cell {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .role-select {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+}
+
+/* Mobile styles for admin panel */
+@media (max-width: 768px) {
+  .admin-content {
+    padding: 12px;
   }
 
   .admin-panel {
     padding: 16px;
   }
 
-  .users-table th,
-  .users-table td {
-    padding: 10px 12px;
+  .admin-panel h2 {
+    font-size: 20px;
   }
 
+  .admin-description {
+    font-size: 13px;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 10px 8px;
+    font-size: 13px;
+  }
+
+  /* Hide email column on mobile */
   .users-table th:nth-child(2),
   .users-table td:nth-child(2) {
     display: none;
+  }
+
+  .user-cell {
+    gap: 8px;
+  }
+
+  .table-avatar,
+  .table-avatar-img {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .actions-cell {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .role-select {
+    width: 100%;
+    font-size: 13px;
+    padding: 8px;
+  }
+
+  .btn-danger.btn-sm {
+    width: 100%;
+    padding: 8px;
+    min-width: auto;
+  }
+
+  .role-badge {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+}
+
+/* Small mobile styles for admin panel */
+@media (max-width: 480px) {
+  .admin-content {
+    padding: 8px;
+  }
+
+  .admin-panel {
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .admin-panel h2 {
+    font-size: 18px;
+  }
+
+  .users-table-wrapper {
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 8px 6px;
+    font-size: 12px;
+  }
+
+  /* Hide role column header text, show abbreviated */
+  .users-table th:nth-child(3) {
+    font-size: 10px;
+  }
+
+  .user-name-cell {
+    font-size: 13px;
+  }
+
+  .you-badge {
+    font-size: 9px;
+  }
+
+  .table-avatar,
+  .table-avatar-img {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
   }
 }
 
@@ -7836,5 +7949,61 @@ a.detail-value:hover {
     font-size: 8px !important;
     color: white !important;
     margin-left: 2px !important;
+  }
+
+  /* Workspace switcher mobile styles */
+  .workspace-switcher,
+  .workspace-indicator {
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .workspace-indicator,
+  .workspace-switcher-btn {
+    padding: 6px 8px !important;
+    gap: 4px !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+  }
+
+  .workspace-name {
+    max-width: 70px !important;
+    font-size: 12px !important;
+  }
+
+  .workspace-color {
+    width: 8px !important;
+    height: 8px !important;
+  }
+
+  .workspace-arrow {
+    font-size: 8px !important;
+    margin-left: 2px !important;
+  }
+
+  .workspace-edit-icon {
+    padding: 4px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* Extra small screens - hide workspace name, show only color dot */
+@media (max-width: 400px) {
+  .workspace-name {
+    display: none !important;
+  }
+
+  .workspace-indicator,
+  .workspace-switcher-btn {
+    padding: 6px !important;
+    min-width: 32px !important;
+  }
+
+  .workspace-color {
+    width: 10px !important;
+    height: 10px !important;
+  }
+
+  .workspace-edit-icon {
+    display: none !important;
   }
 }

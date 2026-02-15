@@ -210,22 +210,19 @@
   border-bottom: 1px solid #2a2a3e;
 }
 
-/* Mobile styles */
-@media (max-width: 768px) {
+/* Tablet styles */
+@media (max-width: 1024px) {
   .workspace-name {
-    max-width: 100px;
-  }
-
-  .workspace-dropdown {
-    right: -10px;
-    min-width: 220px;
+    max-width: 120px;
   }
 }
 
-@media (max-width: 480px) {
+/* Mobile styles */
+@media (max-width: 768px) {
   .workspace-indicator,
   .workspace-switcher-btn {
     padding: 6px 10px;
+    gap: 6px;
   }
 
   .workspace-name {
@@ -233,11 +230,86 @@
     font-size: 13px;
   }
 
+  .workspace-color {
+    width: 10px;
+    height: 10px;
+  }
+
+  .workspace-arrow {
+    font-size: 8px;
+  }
+
   .workspace-dropdown {
     position: fixed;
-    top: 60px;
+    top: 56px;
+    right: 10px;
+    left: auto;
+    min-width: 260px;
+    max-width: calc(100vw - 20px);
+  }
+
+  .workspace-edit-icon {
+    opacity: 1;
+    font-size: 14px;
+    padding: 6px;
+  }
+
+  .workspace-edit-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+    padding: 8px 10px;
+  }
+
+  .workspace-edit-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace-indicator,
+  .workspace-switcher-btn {
+    padding: 5px 8px;
+    gap: 4px;
+  }
+
+  .workspace-name {
+    max-width: 60px;
+    font-size: 12px;
+  }
+
+  .workspace-color {
+    width: 8px;
+    height: 8px;
+  }
+
+  .workspace-dropdown {
+    position: fixed;
+    top: 52px;
     left: 10px;
     right: 10px;
     min-width: auto;
+    max-height: calc(100vh - 70px);
+    overflow-y: auto;
+  }
+
+  .workspace-dropdown-item {
+    padding: 14px 16px;
+  }
+
+  .workspace-edit-row {
+    padding: 10px 12px;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .workspace-name {
+    max-width: 50px;
+  }
+
+  .workspace-indicator,
+  .workspace-switcher-btn {
+    padding: 4px 6px;
   }
 }
