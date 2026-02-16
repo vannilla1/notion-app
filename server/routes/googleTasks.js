@@ -709,215 +709,108 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
-    // Process tasks in parallel - Google Tasks API allows concurrent requests
-    // We use larger batches with minimal delay for faster sync
-    const BATCH_SIZE = 20;  // Process 20 tasks at a time (parallel)
-    let currentBackoff = 100;  // 100ms delay between batches - minimal
-    const MAX_BACKOFF = 10000; // Max 10 seconds on rate limit
+    // Process all tasks with high concurrency - no artificial delays
+    // Google Tasks API can handle many concurrent requests
+    const CONCURRENCY = 50; // Max concurrent API calls
+    let activeCount = 0;
+    let taskIndex = 0;
 
-    // Combine tasks to create and update, prioritizing updates (they're more important)
+    // Combine tasks - updates first (more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
 
-    const batches = [];
-    for (let i = 0; i < allTasksToProcess.length; i += BATCH_SIZE) {
-      batches.push(allTasksToProcess.slice(i, i + BATCH_SIZE));
-    }
+    logger.info('[Google Tasks] Processing tasks', { userId: req.user.id, total: allTasksToProcess.length, concurrency: CONCURRENCY });
 
-    logger.debug('[Google Tasks] Processing batches', { userId: req.user.id, batches: batches.length, batchSize: BATCH_SIZE });
+    // Process a single task
+    const processTask = async (task) => {
+      const isUpdate = !!task.googleTaskId;
+      try {
+        const taskData = createGoogleTaskData(task);
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      // Stop if quota exceeded
-      if (quotaExceeded) {
-        for (let i = batchIndex; i < batches.length; i++) {
-          skipped += batches[i].length;
-        }
-        break;
-      }
-
-      // Stop if sync is taking too long (timeout protection)
-      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
-        logger.warn('[Google Tasks] Sync timeout reached, stopping', {
-          userId: req.user.id,
-          elapsed: Date.now() - syncStartTime,
-          batchesCompleted: batchIndex,
-          totalBatches: batches.length
-        });
-        for (let i = batchIndex; i < batches.length; i++) {
-          skipped += batches[i].length;
-        }
-        break;
-      }
-
-      // Check remaining quota before each batch
-      if (getRemainingQuota(user) < BATCH_SIZE) {
-        logger.warn('[Google Tasks] Quota running low, stopping', { userId: req.user.id });
-        quotaExceeded = true;
-        for (let i = batchIndex; i < batches.length; i++) {
-          skipped += batches[i].length;
-        }
-        break;
-      }
-
-      const batch = batches[batchIndex];
-      rateLimitHit = false; // Reset for each batch
-
-      // Process batch
-      const batchPromises = batch.map(async (task) => {
-        const isUpdate = !!task.googleTaskId;
-
-        try {
-          const taskData = createGoogleTaskData(task);
-
-          if (isUpdate) {
-            // Update existing task
+        if (isUpdate) {
+          try {
             await tasksApi.tasks.update({
               tasklist: user.googleTasks.taskListId,
               task: task.googleTaskId,
               resource: taskData
             });
             return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
-          } else {
-            // Create new task
-            const newTask = await tasksApi.tasks.insert({
-              tasklist: user.googleTasks.taskListId,
-              resource: taskData
-            });
-            return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
-          }
-        } catch (error) {
-          // Log full error details for debugging
-          logger.error('[Google Tasks] API error', {
-            userId: req.user.id,
-            taskId: task.id,
-            code: error.code,
-            status: error.response?.status,
-            message: error.message,
-            errors: error.errors
-          });
-
-          // Rate limit error (429) - mark for retry with backoff
-          if (error.code === 429 || error.response?.status === 429) {
-            return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
-          }
-
-          // 403 errors - check specific reason
-          if (error.code === 403) {
-            const msg = (error.message || '').toLowerCase();
-            // "Quota Exceeded" from Google is usually per-minute rate limit, not daily quota
-            // Treat it as rate_limit so we slow down but continue
-            if (msg.includes('quota') || msg.includes('limit exceeded') || msg.includes('rate limit') || msg.includes('usage limit') || msg.includes('too many')) {
-              return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
-            }
-            // Only treat as hard quota stop if it explicitly says "daily"
-            if (msg.includes('daily limit') || msg.includes('daily quota')) {
-              return { success: false, taskId: task.id, error: 'quota', message: error.message };
-            }
-            // Other 403 - permission or unknown, continue with other tasks
-            return { success: false, taskId: task.id, error: 'permission', message: error.message };
-          }
-
-          // Handle 404 or 400 for updates - task was deleted from Google or ID is invalid, recreate it
-          if (isUpdate && (error.code === 404 || error.code === 400 || error.response?.status === 404 || error.response?.status === 400)) {
-            try {
+          } catch (updateError) {
+            // If task doesn't exist in Google anymore, create it
+            if (updateError.code === 404 || updateError.code === 400 || updateError.response?.status === 404 || updateError.response?.status === 400) {
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,
-                resource: createGoogleTaskData(task)
+                resource: taskData
               });
-              logger.debug('[Google Tasks] Recreated deleted task', { userId: req.user.id, taskId: task.id });
               return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
-            } catch (insertError) {
-              if (insertError.code === 429 || insertError.response?.status === 429) {
-                return { success: false, taskId: task.id, error: 'rate_limit', message: insertError.message };
-              }
-              if (insertError.code === 403) {
-                return { success: false, taskId: task.id, error: 'permission', message: insertError.message };
-              }
-              return { success: false, taskId: task.id, error: 'other', message: insertError.message };
             }
+            throw updateError;
           }
-
-          // Other errors
-          logger.error('[Google Tasks] Sync task error', { userId: req.user.id, taskId: task.id, error: error.message });
-          return { success: false, taskId: task.id, error: 'other', message: error.message };
+        } else {
+          const newTask = await tasksApi.tasks.insert({
+            tasklist: user.googleTasks.taskListId,
+            resource: taskData
+          });
+          return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
         }
+      } catch (error) {
+        const code = error.code || error.response?.status;
+        if (code === 429 || code === 403) {
+          return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
+        }
+        logger.error('[Google Tasks] Task error', { taskId: task.id, code, message: error.message });
+        return { success: false, taskId: task.id, error: 'other', message: error.message };
+      }
+    };
+
+    // Run with concurrency pool
+    const results = [];
+    const executing = new Set();
+
+    for (const task of allTasksToProcess) {
+      // Check timeout
+      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+        skipped += allTasksToProcess.length - taskIndex;
+        logger.warn('[Google Tasks] Timeout reached', { processed: taskIndex, total: allTasksToProcess.length });
+        break;
+      }
+
+      const promise = processTask(task).then(result => {
+        executing.delete(promise);
+        return result;
       });
+      executing.add(promise);
+      results.push(promise);
+      taskIndex++;
 
-      const results = await Promise.all(batchPromises);
-
-      // Process results and track quota
-      let batchApiCalls = 0;
-      let quotaErrorsInBatch = 0;
-      for (const result of results) {
-        batchApiCalls++;
-        if (result.success) {
-          user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
-          user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
-
-          if (result.action === 'created' || result.action === 'recreated') {
-            synced++;
-          } else {
-            updated++;
-          }
-        } else if (result.error === 'rate_limit') {
-          // Rate limit - increase backoff significantly and continue
-          rateLimitHit = true;
-          rateLimitCount++;
-          skipped++;
-          logger.info('[Google Tasks] Rate limit hit, will increase backoff', { taskId: result.taskId, totalRateLimits: rateLimitCount });
-        } else if (result.error === 'quota') {
-          // Quota exceeded - stop immediately, don't retry
-          quotaErrorsInBatch++;
-          quotaExceeded = true;
-          skipped++;
-          logger.warn('[Google Tasks] Quota exceeded, stopping sync', { taskId: result.taskId });
-        } else if (result.error === 'permission') {
-          // Permission error - log but continue with other tasks
-          errors++;
-          logger.warn('[Google Tasks] Permission error, skipping task', { taskId: result.taskId, message: result.message });
-        } else {
-          errors++;
-        }
-      }
-
-      // If quota errors, stop completely
-      if (quotaErrorsInBatch > 0) {
-        // Count remaining tasks as skipped
-        for (let i = batchIndex + 1; i < batches.length; i++) {
-          skipped += batches[i].length;
-        }
-        break; // Exit batch processing loop
-      }
-
-      // If rate limit hit, increase backoff and wait
-      if (rateLimitHit) {
-        currentBackoff = Math.min(currentBackoff * 2, MAX_BACKOFF);
-        logger.info('[Google Tasks] Increased backoff due to rate limit', { backoff: currentBackoff, rateLimitCount });
-
-        // If too many rate limits in a row, wait longer but continue
-        if (rateLimitCount >= 20) {
-          logger.warn('[Google Tasks] Many rate limits, taking longer break', { rateLimitCount });
-          await delay(5000); // 5 second break
-          rateLimitCount = 0; // Reset counter after break
-        } else {
-          // Wait after rate limit
-          await delay(currentBackoff);
-        }
-      }
-
-      // Track quota usage
-      incrementQuota(user, batchApiCalls);
-
-      // Save progress periodically (every 5 batches) to prevent losing work on timeout
-      if (batchIndex > 0 && batchIndex % 5 === 0) {
-        await user.save();
-        logger.debug('[Google Tasks] Progress saved', { batchIndex, synced, updated });
-      }
-
-      // Minimal delay between batches - only if no issues
-      if (batchIndex < batches.length - 1 && !quotaExceeded && !rateLimitHit) {
-        await delay(currentBackoff);
+      // When pool is full, wait for one to finish
+      if (executing.size >= CONCURRENCY) {
+        await Promise.race(executing);
       }
     }
+
+    // Wait for remaining tasks
+    const allResults = await Promise.all(results);
+
+    // Process results
+    for (const result of allResults) {
+      if (!result) continue;
+      if (result.success) {
+        user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
+        user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
+        if (result.action === 'created' || result.action === 'recreated') {
+          synced++;
+        } else {
+          updated++;
+        }
+      } else if (result.error === 'rate_limit') {
+        rateLimitCount++;
+        skipped++;
+      } else {
+        errors++;
+      }
+    }
+
+    incrementQuota(user, allResults.length);
 
     // Update last sync time
     user.googleTasks.lastSyncAt = new Date();
