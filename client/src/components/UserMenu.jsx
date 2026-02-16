@@ -531,23 +531,40 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     if (!confirm('Odstrániť duplikované úlohy z Google Tasks? Ponechá sa jedna kópia každej úlohy.')) return;
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('Odstraňujem duplikáty...');
+      setGoogleTasksMessage('Hľadám duplikáty...');
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 660000
+        timeout: 30000
       });
-      setGoogleTasksMessage(response.data.message);
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      await fetchGoogleTasksStatus();
+
+      if (response.data.status === 'running') {
+        // Start polling for progress
+        setGoogleTasksMessage(response.data.message);
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await axios.get(`${API_URL}/google-tasks/remove-duplicates/status`, {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 10000
+            });
+            setGoogleTasksMessage(statusRes.data.message);
+            if (statusRes.data.status !== 'running') {
+              clearInterval(pollInterval);
+              setGoogleTasks(prev => ({ ...prev, syncing: false }));
+              await fetchGoogleTasksStatus();
+            }
+          } catch (pollErr) {
+            console.error('Error polling dedup status:', pollErr);
+          }
+        }, 5000); // Poll every 5 seconds
+      } else {
+        // Completed immediately (no duplicates)
+        setGoogleTasksMessage(response.data.message);
+        setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      }
     } catch (error) {
       console.error('Error removing duplicates:', error);
-      let errorMsg;
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        errorMsg = 'Odstraňovanie duplikátov trvalo príliš dlho. Skúste to znova - duplikáty sa odstraňovali na pozadí.';
-      } else {
-        errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
-      }
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
