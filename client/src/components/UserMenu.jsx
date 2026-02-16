@@ -455,7 +455,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 330000 // 5.5 min timeout (server has 5 min limit + buffer)
+        timeout: 660000 // 5.5 min timeout (server has 5 min limit + buffer)
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -489,7 +489,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       // Step 2: Run full sync
       const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 330000
+        timeout: 660000
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));

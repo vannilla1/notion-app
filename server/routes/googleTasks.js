@@ -470,8 +470,8 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
-// Maximum sync time: 5 minutes to allow large syncs
-const SYNC_TIMEOUT = 300000;
+// Maximum sync time: 10 minutes to allow large syncs to complete
+const SYNC_TIMEOUT = 600000;
 
 router.post('/sync', authenticateToken, async (req, res) => {
   const forceSync = req.body.force === true;
@@ -710,9 +710,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
     }
 
     // Process tasks with adaptive concurrency and retry on rate limit
-    const CONCURRENCY = 10; // Google Tasks API handles ~10 req/s well
+    const CONCURRENCY = 15; // Balance between speed and rate limits
     const MAX_RETRIES = 3;
+    const SAVE_INTERVAL = 50; // Save progress every 50 completed tasks
     let taskIndex = 0;
+    let completedSinceLastSave = 0;
 
     // Combine tasks - updates first (more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
@@ -776,43 +778,18 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     };
 
-    // Run with concurrency pool
-    const results = [];
+    // Run with concurrency pool - process results immediately as they complete
     const executing = new Set();
-
-    for (const task of allTasksToProcess) {
-      // Check timeout
-      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
-        skipped += allTasksToProcess.length - taskIndex;
-        logger.warn('[Google Tasks] Timeout reached', { processed: taskIndex, total: allTasksToProcess.length });
-        break;
-      }
-
-      const promise = processTask(task).then(result => {
-        executing.delete(promise);
-        return result;
-      });
-      executing.add(promise);
-      results.push(promise);
-      taskIndex++;
-
-      // When pool is full, wait for one to finish
-      if (executing.size >= CONCURRENCY) {
-        await Promise.race(executing);
-      }
-    }
-
-    // Wait for remaining tasks
-    const allResults = await Promise.all(results);
-
-    // Process results and save progress
     let successCount = 0;
-    for (const result of allResults) {
-      if (!result) continue;
+
+    // Process a single result immediately
+    const handleResult = (result) => {
+      if (!result) return;
       if (result.success) {
         user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
         user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
         successCount++;
+        completedSinceLastSave++;
         if (result.action === 'created' || result.action === 'recreated') {
           synced++;
         } else {
@@ -824,7 +801,46 @@ router.post('/sync', authenticateToken, async (req, res) => {
       } else {
         errors++;
       }
+    };
+
+    // Periodic save to prevent data loss on timeout
+    const saveProgressIfNeeded = async () => {
+      if (completedSinceLastSave >= SAVE_INTERVAL) {
+        try {
+          await user.save();
+          logger.info('[Google Tasks] Progress saved', { synced, updated, successCount });
+          completedSinceLastSave = 0;
+        } catch (saveErr) {
+          logger.error('[Google Tasks] Progress save failed', { error: saveErr.message });
+        }
+      }
+    };
+
+    for (const task of allTasksToProcess) {
+      // Check timeout
+      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+        skipped += allTasksToProcess.length - taskIndex;
+        logger.warn('[Google Tasks] Timeout reached', { processed: taskIndex, total: allTasksToProcess.length });
+        break;
+      }
+
+      const promise = processTask(task).then(result => {
+        executing.delete(promise);
+        handleResult(result);
+        return result;
+      });
+      executing.add(promise);
+      taskIndex++;
+
+      // When pool is full, wait for one to finish and save if needed
+      if (executing.size >= CONCURRENCY) {
+        await Promise.race(executing);
+        await saveProgressIfNeeded();
+      }
     }
+
+    // Wait for remaining tasks
+    const remaining = await Promise.all(executing);
 
     incrementQuota(user, successCount);
 
