@@ -1064,7 +1064,6 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     let deleted = 0;
     let errors = 0;
     let duplicateGroups = 0;
-    const CONCURRENCY = 15;
 
     const tasksToDelete = [];
 
@@ -1107,45 +1106,89 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
       toDelete: tasksToDelete.length
     });
 
-    // Delete duplicates with concurrency pool
+    if (tasksToDelete.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Žiadne duplikáty nenájdené',
+        deleted: 0,
+        errors: 0,
+        duplicateGroups: 0
+      });
+    }
+
+    // Delete duplicates sequentially with rate limit handling
+    // Google Tasks API has strict per-minute quotas, so we go one at a time
+    // with smart backoff on rate limit errors
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-    const executing = new Set();
+    let consecutiveRateLimits = 0;
 
-    for (const task of tasksToDelete) {
-      const promise = (async () => {
-        for (let attempt = 0; attempt <= 2; attempt++) {
-          try {
-            await tasksApi.tasks.delete({
-              tasklist: taskListId,
-              task: task.id
-            });
-            deleted++;
-            return;
-          } catch (e) {
-            if (e.code === 404 || e.response?.status === 404) {
-              deleted++; // Already gone
-              return;
-            }
-            const code = e.code || e.response?.status;
-            if ((code === 429 || code === 403) && attempt < 2) {
-              await sleep(Math.pow(2, attempt) * 1000);
-              continue;
-            }
-            logger.warn('[Google Tasks] Failed to delete duplicate', {
-              taskId: task.id, title: task.title, error: e.message
-            });
-            errors++;
-            return;
+    for (let i = 0; i < tasksToDelete.length; i++) {
+      const task = tasksToDelete[i];
+
+      for (let attempt = 0; attempt <= 4; attempt++) {
+        try {
+          await tasksApi.tasks.delete({
+            tasklist: taskListId,
+            task: task.id
+          });
+          deleted++;
+          consecutiveRateLimits = 0;
+
+          // Small delay between deletes to avoid hitting rate limit
+          if (i < tasksToDelete.length - 1) {
+            await sleep(100);
           }
+          break;
+        } catch (e) {
+          if (e.code === 404 || e.response?.status === 404) {
+            deleted++; // Already gone
+            consecutiveRateLimits = 0;
+            break;
+          }
+          const code = e.code || e.response?.status;
+          const msg = e.message || '';
+          if ((code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota') || msg.includes('Rate')) && attempt < 4) {
+            consecutiveRateLimits++;
+            // Progressive backoff: 5s, 15s, 30s, 60s
+            const delay = [5000, 15000, 30000, 60000][attempt];
+            logger.info('[Google Tasks] Rate limit on delete, waiting', {
+              attempt, delay, deleted, remaining: tasksToDelete.length - i
+            });
+            await sleep(delay);
+            continue;
+          }
+          logger.warn('[Google Tasks] Failed to delete duplicate', {
+            taskId: task.id, title: task.title, error: e.message
+          });
+          errors++;
+          break;
         }
-      })().then(() => executing.delete(promise));
+      }
 
-      executing.add(promise);
-      if (executing.size >= CONCURRENCY) {
-        await Promise.race(executing);
+      // Save progress every 25 deletes
+      if (deleted > 0 && deleted % 25 === 0) {
+        try {
+          // Clean up syncedTaskIds for deleted tasks so far
+          const deletedSoFar = new Set(tasksToDelete.slice(0, i + 1).map(t => t.id));
+          for (const [taskId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+            if (deletedSoFar.has(googleId)) {
+              user.googleTasks.syncedTaskIds.delete(taskId);
+              if (user.googleTasks.syncedTaskHashes) {
+                user.googleTasks.syncedTaskHashes.delete(taskId);
+              }
+            }
+          }
+          await user.save();
+          // Re-fetch user to avoid stale data
+          const freshUser = await User.findById(req.user.id);
+          if (freshUser) {
+            user.googleTasks = freshUser.googleTasks;
+          }
+        } catch (saveErr) {
+          logger.error('[Google Tasks] Progress save failed during dedup', { error: saveErr.message });
+        }
       }
     }
-    await Promise.all(executing);
 
     // Also clean up syncedTaskIds - remove entries pointing to deleted tasks
     if (user.googleTasks.syncedTaskIds) {
