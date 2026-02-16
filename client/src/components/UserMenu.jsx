@@ -1272,7 +1272,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         </button>
                       </div>
                     </div>
-                    {googleTasksMessage && !googleTasks.syncing && (
+                    {googleTasksMessage && (
                       <div className="form-success" style={{ marginTop: '12px' }}>
                         {googleTasksMessage}
                       </div>
