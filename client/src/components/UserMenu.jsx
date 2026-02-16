@@ -433,7 +433,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleSyncGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('Synchronizujem...');
+      setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
 
       // First sync FROM Google (completed tasks) THEN sync TO Google
@@ -471,7 +471,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleResetAndSyncGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('Resetujem sync dáta...');
+      setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
 
       // Step 1: Reset sync state
@@ -481,7 +481,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
 
       // Step 2: Run full sync
-      setGoogleTasksMessage('Synchronizujem všetky úlohy...');
       const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 330000
@@ -1192,7 +1191,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         </button>
                       </div>
                     </div>
-                    {googleTasksMessage && (
+                    {googleTasksMessage && !googleTasks.syncing && (
                       <div className="form-success" style={{ marginTop: '12px' }}>
                         {googleTasksMessage}
                       </div>
