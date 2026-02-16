@@ -1008,7 +1008,7 @@ const dedupJobs = new Map(); // userId -> { status, deleted, errors, total, dupl
 // Everything runs in background - response is sent immediately
 router.post('/remove-duplicates', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.id.toString(); // Convert ObjectId to string for Map key
 
     // Check if already running
     const existingJob = dedupJobs.get(userId);
@@ -1221,7 +1221,7 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
 
 // Check dedup job status
 router.get('/remove-duplicates/status', authenticateToken, (req, res) => {
-  const job = dedupJobs.get(req.user.id);
+  const job = dedupJobs.get(req.user.id.toString());
   if (!job) {
     logger.info('[Google Tasks] Dedup status check - no job found', { userId: req.user.id, jobsCount: dedupJobs.size });
     return res.json({ status: 'none', message: 'Žiadna úloha neprebieha', version: 'v3-background' });
