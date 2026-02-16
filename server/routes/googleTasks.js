@@ -1005,7 +1005,7 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 const dedupJobs = new Map(); // userId -> { status, deleted, errors, total, duplicateGroups }
 
 // Remove duplicate tasks from Google Tasks (keep one, delete copies)
-// Returns immediately, deletion runs in background
+// Everything runs in background - response is sent immediately
 router.post('/remove-duplicates', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1031,96 +1031,100 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
 
-    const tasksApi = await getTasksClient(user);
-    const taskListId = user.googleTasks.taskListId;
-
-    // Fetch ALL tasks from Google Tasks
-    let allGoogleTasks = [];
-    let pageToken = null;
-
-    do {
-      const response = await tasksApi.tasks.list({
-        tasklist: taskListId,
-        maxResults: 100,
-        showCompleted: true,
-        showHidden: true,
-        pageToken
-      });
-      if (response.data.items) {
-        allGoogleTasks.push(...response.data.items);
-      }
-      pageToken = response.data.nextPageToken;
-    } while (pageToken);
-
-    logger.info('[Google Tasks] Remove duplicates - fetched tasks', {
-      userId, total: allGoogleTasks.length
-    });
-
-    // Group by title
-    const titleMap = new Map();
-    for (const gTask of allGoogleTasks) {
-      const title = (gTask.title || '').trim();
-      if (!title) continue;
-      if (!titleMap.has(title)) titleMap.set(title, []);
-      titleMap.get(title).push(gTask);
-    }
-
-    // Find tracked IDs
-    const trackedGoogleIds = new Set();
-    if (user.googleTasks.syncedTaskIds) {
-      for (const [, googleId] of user.googleTasks.syncedTaskIds.entries()) {
-        trackedGoogleIds.add(googleId);
-      }
-    }
-
-    let duplicateGroups = 0;
-    const tasksToDelete = [];
-
-    for (const [title, tasks] of titleMap.entries()) {
-      if (tasks.length <= 1) continue;
-      duplicateGroups++;
-
-      let keepTask = null;
-      for (const t of tasks) {
-        if (trackedGoogleIds.has(t.id)) { keepTask = t; break; }
-      }
-      if (!keepTask) {
-        keepTask = tasks.sort((a, b) =>
-          new Date(b.updated || 0).getTime() - new Date(a.updated || 0).getTime()
-        )[0];
-      }
-
-      for (const t of tasks) {
-        if (t.id !== keepTask.id) tasksToDelete.push(t);
-      }
-    }
-
-    if (tasksToDelete.length === 0) {
-      return res.json({
-        success: true,
-        message: 'Žiadne duplikáty nenájdené',
-        deleted: 0, errors: 0, duplicateGroups: 0, status: 'completed'
-      });
-    }
-
-    // Initialize job tracking
-    const job = { status: 'running', deleted: 0, errors: 0, total: tasksToDelete.length, duplicateGroups };
+    // Initialize job immediately - before any Google API calls
+    const job = { status: 'running', deleted: 0, errors: 0, total: 0, duplicateGroups: 0, phase: 'scanning' };
     dedupJobs.set(userId, job);
 
-    // Send response immediately - deletion continues in background
+    // Send response IMMEDIATELY - everything else runs in background
     res.json({
       success: true,
-      message: `Nájdených ${tasksToDelete.length} duplikátov v ${duplicateGroups} skupinách. Mazanie prebieha na pozadí...`,
-      status: 'running',
-      total: tasksToDelete.length,
-      duplicateGroups
+      message: 'Spúšťam hľadanie duplikátov na pozadí...',
+      status: 'running'
     });
 
-    // Background deletion
+    // ENTIRE process runs in background
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     (async () => {
       try {
+        const tasksApi = await getTasksClient(user);
+        const taskListId = user.googleTasks.taskListId;
+
+        // Fetch ALL tasks from Google Tasks
+        let allGoogleTasks = [];
+        let pageToken = null;
+
+        do {
+          const response = await tasksApi.tasks.list({
+            tasklist: taskListId,
+            maxResults: 100,
+            showCompleted: true,
+            showHidden: true,
+            pageToken
+          });
+          if (response.data.items) {
+            allGoogleTasks.push(...response.data.items);
+          }
+          pageToken = response.data.nextPageToken;
+        } while (pageToken);
+
+        logger.info('[Google Tasks] Remove duplicates - fetched tasks', {
+          userId, total: allGoogleTasks.length
+        });
+
+        // Group by title
+        const titleMap = new Map();
+        for (const gTask of allGoogleTasks) {
+          const title = (gTask.title || '').trim();
+          if (!title) continue;
+          if (!titleMap.has(title)) titleMap.set(title, []);
+          titleMap.get(title).push(gTask);
+        }
+
+        // Find tracked IDs
+        const trackedGoogleIds = new Set();
+        if (user.googleTasks.syncedTaskIds) {
+          for (const [, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+            trackedGoogleIds.add(googleId);
+          }
+        }
+
+        const tasksToDelete = [];
+
+        for (const [title, tasks] of titleMap.entries()) {
+          if (tasks.length <= 1) continue;
+          job.duplicateGroups++;
+
+          let keepTask = null;
+          for (const t of tasks) {
+            if (trackedGoogleIds.has(t.id)) { keepTask = t; break; }
+          }
+          if (!keepTask) {
+            keepTask = tasks.sort((a, b) =>
+              new Date(b.updated || 0).getTime() - new Date(a.updated || 0).getTime()
+            )[0];
+          }
+
+          for (const t of tasks) {
+            if (t.id !== keepTask.id) tasksToDelete.push(t);
+          }
+        }
+
+        job.total = tasksToDelete.length;
+        job.phase = 'deleting';
+
+        logger.info('[Google Tasks] Duplicates found', {
+          userId, duplicateGroups: job.duplicateGroups, toDelete: tasksToDelete.length
+        });
+
+        if (tasksToDelete.length === 0) {
+          job.status = 'completed';
+          job.phase = 'done';
+          setTimeout(() => dedupJobs.delete(userId), 300000);
+          return;
+        }
+
+        // Delete sequentially with rate limit handling
         for (let i = 0; i < tasksToDelete.length; i++) {
           const task = tasksToDelete[i];
 
@@ -1193,11 +1197,11 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
         }
 
         job.status = 'completed';
+        job.phase = 'done';
         logger.info('[Google Tasks] Background dedup completed', {
-          userId, deleted: job.deleted, errors: job.errors, duplicateGroups
+          userId, deleted: job.deleted, errors: job.errors, duplicateGroups: job.duplicateGroups
         });
 
-        // Clean up job after 5 minutes
         setTimeout(() => dedupJobs.delete(userId), 300000);
       } catch (bgError) {
         job.status = 'error';
@@ -1218,11 +1222,22 @@ router.get('/remove-duplicates/status', authenticateToken, (req, res) => {
   if (!job) {
     return res.json({ status: 'none', message: 'Žiadna úloha neprebieha' });
   }
-  const message = job.status === 'running'
-    ? `Odstraňujem duplikáty... ${job.deleted}/${job.total}`
-    : job.status === 'completed'
-      ? `Dokončené: ${job.deleted} duplikátov odstránených` + (job.errors > 0 ? `, ${job.errors} chýb` : '')
-      : `Chyba: ${job.errorMessage}`;
+  let message;
+  if (job.status === 'running') {
+    if (job.phase === 'scanning') {
+      message = 'Sťahujem úlohy z Google Tasks a hľadám duplikáty...';
+    } else {
+      message = job.total > 0
+        ? `Odstraňujem duplikáty... ${job.deleted}/${job.total}`
+        : 'Analyzujem duplikáty...';
+    }
+  } else if (job.status === 'completed') {
+    message = job.total === 0
+      ? 'Žiadne duplikáty nenájdené'
+      : `Dokončené: ${job.deleted} duplikátov odstránených` + (job.errors > 0 ? `, ${job.errors} chýb` : '');
+  } else {
+    message = `Chyba: ${job.errorMessage}`;
+  }
   res.json({ ...job, message });
 });
 
