@@ -318,6 +318,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleDisconnectGoogleCalendar = async () => {
+    if (!confirm('Naozaj chcete odpojiť Google Calendar? Všetky synchronizačné dáta budú vymazané.')) {
+      return;
+    }
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
       const token = localStorage.getItem('token');
@@ -410,6 +413,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleDisconnectGoogleTasks = async () => {
+    if (!confirm('Naozaj chcete odpojiť Google Tasks? Všetky synchronizačné dáta budú vymazané.')) {
+      return;
+    }
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
       const token = localStorage.getItem('token');
