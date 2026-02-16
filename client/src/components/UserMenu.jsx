@@ -535,12 +535,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 30000
+        timeout: 120000 // 2 min for initial scan of all Google Tasks
       });
+
+      setGoogleTasksMessage(response.data.message);
 
       if (response.data.status === 'running') {
         // Start polling for progress
-        setGoogleTasksMessage(response.data.message);
+        let pollFailCount = 0;
         const pollInterval = setInterval(async () => {
           try {
             const statusRes = await axios.get(`${API_URL}/google-tasks/remove-duplicates/status`, {
@@ -548,23 +550,41 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               timeout: 10000
             });
             setGoogleTasksMessage(statusRes.data.message);
-            if (statusRes.data.status !== 'running') {
+
+            if (statusRes.data.status === 'completed' || statusRes.data.status === 'error') {
               clearInterval(pollInterval);
               setGoogleTasks(prev => ({ ...prev, syncing: false }));
               await fetchGoogleTasksStatus();
+            } else if (statusRes.data.status === 'none') {
+              // Job disappeared (server restart) - stop polling
+              pollFailCount++;
+              if (pollFailCount >= 2) {
+                clearInterval(pollInterval);
+                setGoogleTasksMessage('Mazanie duplikátov bolo prerušené (server sa reštartoval). Skúste to znova.');
+                setGoogleTasks(prev => ({ ...prev, syncing: false }));
+              }
             }
           } catch (pollErr) {
             console.error('Error polling dedup status:', pollErr);
+            pollFailCount++;
+            if (pollFailCount >= 3) {
+              clearInterval(pollInterval);
+              setGoogleTasksMessage('Nepodarilo sa zistiť stav mazania duplikátov.');
+              setGoogleTasks(prev => ({ ...prev, syncing: false }));
+            }
           }
-        }, 5000); // Poll every 5 seconds
+        }, 5000);
       } else {
-        // Completed immediately (no duplicates)
-        setGoogleTasksMessage(response.data.message);
         setGoogleTasks(prev => ({ ...prev, syncing: false }));
       }
     } catch (error) {
       console.error('Error removing duplicates:', error);
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
+      let errorMsg;
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMsg = 'Hľadanie duplikátov trvalo príliš dlho. Skúste to znova.';
+      } else {
+        errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
+      }
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
