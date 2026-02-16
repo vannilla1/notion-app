@@ -1127,12 +1127,17 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
           return;
         }
 
-        // Delete with concurrency pool - same approach as sync
-        const DEDUP_CONCURRENCY = 15;
+        // Delete with concurrency pool - conservative to avoid rate limits
+        const DEDUP_CONCURRENCY = 5;
         const executing = new Set();
+        let globalBackoff = 0; // Shared backoff when rate limited
 
         const deleteTask = async (task) => {
-          for (let attempt = 0; attempt <= 3; attempt++) {
+          for (let attempt = 0; attempt <= 5; attempt++) {
+            // Wait for global backoff if another task hit rate limit
+            if (globalBackoff > Date.now()) {
+              await sleep(globalBackoff - Date.now());
+            }
             try {
               await tasksApi.tasks.delete({ tasklist: taskListId, task: task.id });
               job.deleted++;
@@ -1144,8 +1149,15 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
               }
               const code = e.code || e.response?.status;
               const msg = e.message || '';
-              if ((code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota')) && attempt < 3) {
-                await sleep(Math.pow(2, attempt) * 1000); // 1s, 2s, 4s
+              const isRateLimit = code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota') || msg.includes('Rate');
+              if (isRateLimit && attempt < 5) {
+                // Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                const delay = Math.pow(2, attempt + 1) * 1000;
+                globalBackoff = Date.now() + delay; // Tell other tasks to wait too
+                logger.info('[Google Tasks] Rate limit on delete, backing off', {
+                  attempt, delay, deleted: job.deleted, errors: job.errors
+                });
+                await sleep(delay);
                 continue;
               }
               job.errors++;
