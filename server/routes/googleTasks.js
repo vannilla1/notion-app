@@ -709,10 +709,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
       });
     }
 
-    // Process all tasks with high concurrency - no artificial delays
-    // Google Tasks API can handle many concurrent requests
-    const CONCURRENCY = 50; // Max concurrent API calls
-    let activeCount = 0;
+    // Process tasks with adaptive concurrency and retry on rate limit
+    const CONCURRENCY = 10; // Google Tasks API handles ~10 req/s well
+    const MAX_RETRIES = 3;
     let taskIndex = 0;
 
     // Combine tasks - updates first (more important)
@@ -720,45 +719,60 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     logger.info('[Google Tasks] Processing tasks', { userId: req.user.id, total: allTasksToProcess.length, concurrency: CONCURRENCY });
 
-    // Process a single task
+    // Sleep helper
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Process a single task with retry on rate limit
     const processTask = async (task) => {
       const isUpdate = !!task.googleTaskId;
-      try {
-        const taskData = createGoogleTaskData(task);
 
-        if (isUpdate) {
-          try {
-            await tasksApi.tasks.update({
-              tasklist: user.googleTasks.taskListId,
-              task: task.googleTaskId,
-              resource: taskData
-            });
-            return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
-          } catch (updateError) {
-            // If task doesn't exist in Google anymore, create it
-            if (updateError.code === 404 || updateError.code === 400 || updateError.response?.status === 404 || updateError.response?.status === 400) {
-              const newTask = await tasksApi.tasks.insert({
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const taskData = createGoogleTaskData(task);
+
+          if (isUpdate) {
+            try {
+              await tasksApi.tasks.update({
                 tasklist: user.googleTasks.taskListId,
+                task: task.googleTaskId,
                 resource: taskData
               });
-              return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
+              return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
+            } catch (updateError) {
+              const uCode = updateError.code || updateError.response?.status;
+              // Rate limit on update - throw to trigger retry
+              if (uCode === 429 || uCode === 403) throw updateError;
+              // If task doesn't exist in Google anymore, create it
+              if (uCode === 404 || uCode === 400) {
+                const newTask = await tasksApi.tasks.insert({
+                  tasklist: user.googleTasks.taskListId,
+                  resource: taskData
+                });
+                return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
+              }
+              throw updateError;
             }
-            throw updateError;
+          } else {
+            const newTask = await tasksApi.tasks.insert({
+              tasklist: user.googleTasks.taskListId,
+              resource: taskData
+            });
+            return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
           }
-        } else {
-          const newTask = await tasksApi.tasks.insert({
-            tasklist: user.googleTasks.taskListId,
-            resource: taskData
-          });
-          return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
+        } catch (error) {
+          const code = error.code || error.response?.status;
+          if ((code === 429 || code === 403) && attempt < MAX_RETRIES) {
+            // Exponential backoff: 1s, 2s, 4s
+            const delay = Math.pow(2, attempt) * 1000;
+            await sleep(delay);
+            continue;
+          }
+          if (code === 429 || code === 403) {
+            return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
+          }
+          logger.error('[Google Tasks] Task error', { taskId: task.id, code, message: error.message });
+          return { success: false, taskId: task.id, error: 'other', message: error.message };
         }
-      } catch (error) {
-        const code = error.code || error.response?.status;
-        if (code === 429 || code === 403) {
-          return { success: false, taskId: task.id, error: 'rate_limit', message: error.message };
-        }
-        logger.error('[Google Tasks] Task error', { taskId: task.id, code, message: error.message });
-        return { success: false, taskId: task.id, error: 'other', message: error.message };
       }
     };
 
@@ -791,12 +805,14 @@ router.post('/sync', authenticateToken, async (req, res) => {
     // Wait for remaining tasks
     const allResults = await Promise.all(results);
 
-    // Process results
+    // Process results and save progress
+    let successCount = 0;
     for (const result of allResults) {
       if (!result) continue;
       if (result.success) {
         user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
         user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
+        successCount++;
         if (result.action === 'created' || result.action === 'recreated') {
           synced++;
         } else {
@@ -810,7 +826,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    incrementQuota(user, allResults.length);
+    incrementQuota(user, successCount);
 
     // Update last sync time
     user.googleTasks.lastSyncAt = new Date();
