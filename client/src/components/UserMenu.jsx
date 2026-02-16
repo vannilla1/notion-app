@@ -535,14 +535,19 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 300000
+        timeout: 660000
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error removing duplicates:', error);
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
+      let errorMsg;
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMsg = 'Odstraňovanie duplikátov trvalo príliš dlho. Skúste to znova - duplikáty sa odstraňovali na pozadí.';
+      } else {
+        errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
+      }
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
