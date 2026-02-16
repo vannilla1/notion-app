@@ -527,6 +527,27 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  const handleRemoveDuplicatesGoogleTasks = async () => {
+    if (!confirm('Odstrániť duplikované úlohy z Google Tasks? Ponechá sa jedna kópia každej úlohy.')) return;
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      setGoogleTasksMessage('Odstraňujem duplikáty...');
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 300000
+      });
+      setGoogleTasksMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleTasksStatus();
+    } catch (error) {
+      console.error('Error removing duplicates:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
+      setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
   const handleDeleteBySearch = async (searchTerm) => {
     if (!searchTerm || searchTerm.length < 2) {
       setGoogleTasksMessage('Zadajte aspoň 2 znaky pre vyhľadávanie');
@@ -1169,6 +1190,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         title="Odstráni úlohy, ktoré už nemajú zodpovedajúcu úlohu v CRM"
                       >
                         Vyčistiť
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleRemoveDuplicatesGoogleTasks}
+                        disabled={googleTasks.syncing}
+                        title="Nájde a odstráni duplikované úlohy v Google Tasks"
+                        style={{ background: '#e67e22', color: 'white', border: 'none' }}
+                      >
+                        🧹 Odstrániť duplikáty
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks}>
                         Odpojiť
