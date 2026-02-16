@@ -1035,11 +1035,14 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     const job = { status: 'running', deleted: 0, errors: 0, total: 0, duplicateGroups: 0, phase: 'scanning' };
     dedupJobs.set(userId, job);
 
+    logger.info('[Google Tasks] Dedup job started, sending immediate response', { userId });
+
     // Send response IMMEDIATELY - everything else runs in background
     res.json({
       success: true,
       message: 'Spúšťam hľadanie duplikátov na pozadí...',
-      status: 'running'
+      status: 'running',
+      version: 'v3-background'
     });
 
     // ENTIRE process runs in background
@@ -1220,7 +1223,8 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
 router.get('/remove-duplicates/status', authenticateToken, (req, res) => {
   const job = dedupJobs.get(req.user.id);
   if (!job) {
-    return res.json({ status: 'none', message: 'Žiadna úloha neprebieha' });
+    logger.info('[Google Tasks] Dedup status check - no job found', { userId: req.user.id, jobsCount: dedupJobs.size });
+    return res.json({ status: 'none', message: 'Žiadna úloha neprebieha', version: 'v3-background' });
   }
   let message;
   if (job.status === 'running') {

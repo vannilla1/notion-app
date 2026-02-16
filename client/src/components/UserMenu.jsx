@@ -538,6 +538,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         timeout: 120000 // 2 min for initial scan of all Google Tasks
       });
 
+      console.log('[Dedup] POST response:', JSON.stringify(response.data));
       setGoogleTasksMessage(response.data.message);
 
       if (response.data.status === 'running') {
@@ -549,6 +550,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               headers: { Authorization: `Bearer ${token}` },
               timeout: 10000
             });
+            console.log('[Dedup] Poll response:', JSON.stringify(statusRes.data));
             setGoogleTasksMessage(statusRes.data.message);
 
             if (statusRes.data.status === 'completed' || statusRes.data.status === 'error') {
@@ -558,16 +560,17 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             } else if (statusRes.data.status === 'none') {
               // Job disappeared (server restart) - stop polling
               pollFailCount++;
-              if (pollFailCount >= 2) {
+              console.log('[Dedup] Job not found, pollFailCount:', pollFailCount);
+              if (pollFailCount >= 3) {
                 clearInterval(pollInterval);
                 setGoogleTasksMessage('Mazanie duplikátov bolo prerušené (server sa reštartoval). Skúste to znova.');
                 setGoogleTasks(prev => ({ ...prev, syncing: false }));
               }
             }
           } catch (pollErr) {
-            console.error('Error polling dedup status:', pollErr);
+            console.error('[Dedup] Poll error:', pollErr);
             pollFailCount++;
-            if (pollFailCount >= 3) {
+            if (pollFailCount >= 5) {
               clearInterval(pollInterval);
               setGoogleTasksMessage('Nepodarilo sa zistiť stav mazania duplikátov.');
               setGoogleTasks(prev => ({ ...prev, syncing: false }));
