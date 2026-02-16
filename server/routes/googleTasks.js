@@ -553,7 +553,13 @@ router.post('/sync', authenticateToken, async (req, res) => {
       {},
       { name: 1, tasks: 1 }
     ).lean();
-    logger.debug('[Google Tasks] Fetched tasks', { userId: req.user.id, globalTasks: globalTasks.length, contacts: contacts.length });
+    logger.info('[Google Tasks] Fetched tasks from DB', {
+      userId: req.user.id,
+      globalTasks: globalTasks.length,
+      contacts: contacts.length,
+      existingSyncedIds: user.googleTasks.syncedTaskIds?.size || 0,
+      existingSyncedHashes: user.googleTasks.syncedTaskHashes?.size || 0
+    });
 
     const tasksToSync = [];
 
@@ -664,9 +670,19 @@ router.post('/sync', authenticateToken, async (req, res) => {
     if (tasksToCreate.length === 0 && tasksToUpdate.length === 0) {
       user.googleTasks.lastSyncAt = new Date();
       await user.save();
+
+      let msg = '';
+      if (unchanged > 0 && skipped === 0) {
+        msg = `Všetky úlohy sú aktuálne (${unchanged} synchronizovaných)`;
+      } else if (unchanged === 0 && skipped === 0) {
+        msg = 'Žiadne úlohy na synchronizáciu (žiadne úlohy s termínom)';
+      } else {
+        msg = `Žiadne zmeny (${unchanged} aktuálnych, ${skipped} preskočených)`;
+      }
+
       return res.json({
         success: true,
-        message: `Všetky úlohy sú aktuálne (${unchanged} nezmenených)`,
+        message: msg,
         synced: 0,
         updated: 0,
         unchanged,
@@ -800,8 +816,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
             return { success: false, taskId: task.id, error: 'permission', message: error.message };
           }
 
-          // Handle 404 or 400 "Missing task ID" for updates - task was deleted from Google, recreate it
-          if (isUpdate && (error.code === 404 || (error.code === 400 && error.message?.includes('Missing task ID')))) {
+          // Handle 404 or 400 for updates - task was deleted from Google or ID is invalid, recreate it
+          if (isUpdate && (error.code === 404 || error.code === 400 || error.response?.status === 404 || error.response?.status === 400)) {
             try {
               const newTask = await tasksApi.tasks.insert({
                 tasklist: user.googleTasks.taskListId,

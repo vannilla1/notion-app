@@ -468,6 +468,40 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  const handleResetAndSyncGoogleTasks = async () => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      setGoogleTasksMessage('Resetujem sync dáta...');
+      const token = localStorage.getItem('token');
+
+      // Step 1: Reset sync state
+      await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000
+      });
+
+      // Step 2: Run full sync
+      setGoogleTasksMessage('Synchronizujem všetky úlohy...');
+      const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 330000
+      });
+      setGoogleTasksMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleTasksStatus();
+    } catch (error) {
+      console.error('Error in reset and sync:', error);
+      let errorMsg;
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMsg = 'Synchronizácia trvala príliš dlho. Skúste to znova.';
+      } else {
+        errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
+      }
+      setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
   const handleCleanupGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
@@ -1113,7 +1147,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         onClick={handleSyncGoogleTasks}
                         disabled={googleTasks.syncing}
                       >
-                        {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať teraz'}
+                        {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleResetAndSyncGoogleTasks}
+                        disabled={googleTasks.syncing}
+                        title="Vymaže staré sync dáta a synchronizuje všetko odznova"
+                      >
+                        🔃 Plná sync
                       </button>
                       <button
                         className="btn btn-secondary"
@@ -1121,7 +1163,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         disabled={googleTasks.syncing}
                         title="Odstráni úlohy, ktoré už nemajú zodpovedajúcu úlohu v CRM"
                       >
-                        Vyčistiť staré
+                        Vyčistiť
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks}>
                         Odpojiť
