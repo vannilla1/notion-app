@@ -1245,7 +1245,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       >
                         🧹 Odstrániť duplikáty
                       </button>
-                      <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks}>
+                      <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks} disabled={googleTasks.syncing}>
                         Odpojiť
                       </button>
                     </div>
