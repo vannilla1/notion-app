@@ -528,66 +528,22 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleRemoveDuplicatesGoogleTasks = async () => {
-    if (!confirm('Odstrániť duplikované úlohy z Google Tasks? Ponechá sa jedna kópia každej úlohy.')) return;
+    if (!confirm('Vymazať VŠETKY úlohy z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Plná sync" pre opätovné vytvorenie úloh.')) return;
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('Hľadám duplikáty...');
+      setGoogleTasksMessage('Mažem zoznam úloh z Google Tasks...');
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 120000 // 2 min for initial scan of all Google Tasks
+        timeout: 30000
       });
 
-      console.log('[Dedup] POST response:', JSON.stringify(response.data));
       setGoogleTasksMessage(response.data.message);
-
-      if (response.data.status === 'running') {
-        // Start polling for progress
-        let pollFailCount = 0;
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await axios.get(`${API_URL}/google-tasks/remove-duplicates/status`, {
-              headers: { Authorization: `Bearer ${token}` },
-              timeout: 10000
-            });
-            console.log('[Dedup] Poll response:', JSON.stringify(statusRes.data));
-            setGoogleTasksMessage(statusRes.data.message);
-
-            if (statusRes.data.status === 'completed' || statusRes.data.status === 'error') {
-              clearInterval(pollInterval);
-              setGoogleTasks(prev => ({ ...prev, syncing: false }));
-              await fetchGoogleTasksStatus();
-            } else if (statusRes.data.status === 'none') {
-              // Job disappeared (server restart) - stop polling
-              pollFailCount++;
-              console.log('[Dedup] Job not found, pollFailCount:', pollFailCount);
-              if (pollFailCount >= 3) {
-                clearInterval(pollInterval);
-                setGoogleTasksMessage('Mazanie duplikátov bolo prerušené (server sa reštartoval). Skúste to znova.');
-                setGoogleTasks(prev => ({ ...prev, syncing: false }));
-              }
-            }
-          } catch (pollErr) {
-            console.error('[Dedup] Poll error:', pollErr);
-            pollFailCount++;
-            if (pollFailCount >= 5) {
-              clearInterval(pollInterval);
-              setGoogleTasksMessage('Nepodarilo sa zistiť stav mazania duplikátov.');
-              setGoogleTasks(prev => ({ ...prev, syncing: false }));
-            }
-          }
-        }, 5000);
-      } else {
-        setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      }
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error removing duplicates:', error);
-      let errorMsg;
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        errorMsg = 'Hľadanie duplikátov trvalo príliš dlho. Skúste to znova.';
-      } else {
-        errorMsg = error.response?.data?.message || error.message || 'Chyba pri odstraňovaní duplikátov';
-      }
+      console.error('Error removing tasks:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní úloh';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
@@ -1240,10 +1196,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         className="btn btn-secondary"
                         onClick={handleRemoveDuplicatesGoogleTasks}
                         disabled={googleTasks.syncing}
-                        title="Nájde a odstráni duplikované úlohy v Google Tasks"
+                        title="Vymaže všetky úlohy z Google Tasks a vytvorí čistý zoznam. Potom spustite Plná sync."
                         style={{ background: '#e67e22', color: 'white', border: 'none' }}
                       >
-                        🧹 Odstrániť duplikáty
+                        🧹 Vymazať a obnoviť
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks} disabled={googleTasks.syncing}>
                         Odpojiť
