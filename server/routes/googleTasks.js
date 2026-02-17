@@ -1127,52 +1127,43 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
           return;
         }
 
-        // Delete with concurrency pool - conservative to avoid rate limits
-        const DEDUP_CONCURRENCY = 5;
-        const executing = new Set();
-        let globalBackoff = 0; // Shared backoff when rate limited
+        // Delete sequentially in batches with adaptive pacing
+        // Google Tasks API tolerates ~10 req/s but needs cooldown after bursts
+        const BATCH_SIZE = 10;
+        let deletedInBatch = 0;
 
-        const deleteTask = async (task) => {
-          for (let attempt = 0; attempt <= 5; attempt++) {
-            // Wait for global backoff if another task hit rate limit
-            if (globalBackoff > Date.now()) {
-              await sleep(globalBackoff - Date.now());
-            }
+        for (let i = 0; i < tasksToDelete.length; i++) {
+          const task = tasksToDelete[i];
+
+          for (let attempt = 0; attempt <= 3; attempt++) {
             try {
               await tasksApi.tasks.delete({ tasklist: taskListId, task: task.id });
               job.deleted++;
-              return;
+              deletedInBatch++;
+              break;
             } catch (e) {
               if (e.code === 404 || e.response?.status === 404) {
                 job.deleted++;
-                return;
+                deletedInBatch++;
+                break;
               }
               const code = e.code || e.response?.status;
               const msg = e.message || '';
               const isRateLimit = code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota') || msg.includes('Rate');
-              if (isRateLimit && attempt < 5) {
-                // Exponential backoff: 2s, 4s, 8s, 16s, 32s
-                const delay = Math.pow(2, attempt + 1) * 1000;
-                globalBackoff = Date.now() + delay; // Tell other tasks to wait too
-                logger.info('[Google Tasks] Rate limit on delete, backing off', {
-                  attempt, delay, deleted: job.deleted, errors: job.errors
-                });
-                await sleep(delay);
+              if (isRateLimit && attempt < 3) {
+                // Wait 3 seconds then retry
+                await sleep(3000);
                 continue;
               }
               job.errors++;
-              return;
+              break;
             }
           }
-        };
 
-        for (let i = 0; i < tasksToDelete.length; i++) {
-          const task = tasksToDelete[i];
-          const promise = deleteTask(task).then(() => executing.delete(promise));
-          executing.add(promise);
-
-          if (executing.size >= DEDUP_CONCURRENCY) {
-            await Promise.race(executing);
+          // After each batch, pause briefly to let rate limit reset
+          if (deletedInBatch >= BATCH_SIZE) {
+            await sleep(1000); // 1s pause after every 10 deletes
+            deletedInBatch = 0;
           }
 
           // Save progress every 200 deletes
@@ -1197,9 +1188,6 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
             }
           }
         }
-
-        // Wait for remaining
-        await Promise.all(executing);
 
         // Final cleanup of syncedTaskIds
         try {
