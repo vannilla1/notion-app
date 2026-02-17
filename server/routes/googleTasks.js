@@ -1127,43 +1127,41 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
           return;
         }
 
-        // Delete sequentially in batches with adaptive pacing
-        // Google Tasks API tolerates ~10 req/s but needs cooldown after bursts
-        const BATCH_SIZE = 10;
-        let deletedInBatch = 0;
+        // Delete with concurrency pool - each task retries independently
+        const DEDUP_CONCURRENCY = 5;
+        const executing = new Set();
 
-        for (let i = 0; i < tasksToDelete.length; i++) {
-          const task = tasksToDelete[i];
-
+        const deleteTask = async (task) => {
           for (let attempt = 0; attempt <= 3; attempt++) {
             try {
               await tasksApi.tasks.delete({ tasklist: taskListId, task: task.id });
               job.deleted++;
-              deletedInBatch++;
-              break;
+              return;
             } catch (e) {
               if (e.code === 404 || e.response?.status === 404) {
                 job.deleted++;
-                deletedInBatch++;
-                break;
+                return;
               }
               const code = e.code || e.response?.status;
               const msg = e.message || '';
               const isRateLimit = code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota') || msg.includes('Rate');
               if (isRateLimit && attempt < 3) {
-                // Wait 3 seconds then retry
-                await sleep(3000);
+                await sleep(2000); // Fixed 2s wait, only THIS task waits
                 continue;
               }
               job.errors++;
-              break;
+              return;
             }
           }
+        };
 
-          // After each batch, pause briefly to let rate limit reset
-          if (deletedInBatch >= BATCH_SIZE) {
-            await sleep(1000); // 1s pause after every 10 deletes
-            deletedInBatch = 0;
+        for (let i = 0; i < tasksToDelete.length; i++) {
+          const task = tasksToDelete[i];
+          const promise = deleteTask(task).then(() => executing.delete(promise));
+          executing.add(promise);
+
+          if (executing.size >= DEDUP_CONCURRENCY) {
+            await Promise.race(executing);
           }
 
           // Save progress every 200 deletes
@@ -1188,6 +1186,9 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
             }
           }
         }
+
+        // Wait for remaining
+        await Promise.all(executing);
 
         // Final cleanup of syncedTaskIds
         try {
