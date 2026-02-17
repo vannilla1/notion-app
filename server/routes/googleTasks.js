@@ -1081,42 +1081,54 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
     }
 
     const tasksApi = await getTasksClient(user);
-    const taskListId = user.googleTasks.taskListId;
 
-    // Fetch all tasks from Google Tasks
-    let allTasks = [];
-    let pageToken = null;
+    // Search ALL task lists, not just the current one
+    const taskListsRes = await tasksApi.tasklists.list();
+    const taskLists = taskListsRes.data.items || [];
 
-    do {
-      const response = await tasksApi.tasks.list({
-        tasklist: taskListId,
-        maxResults: 100,
-        showCompleted: true,
-        showHidden: true,
-        pageToken
-      });
-
-      if (response.data.items) {
-        allTasks = allTasks.concat(response.data.items);
-      }
-      pageToken = response.data.nextPageToken;
-    } while (pageToken);
-
-    // Filter tasks matching the search term (case insensitive)
-    const searchRegex = new RegExp(searchTerm, 'i');
-    const tasksToDelete = allTasks.filter(t => t.title && searchRegex.test(t.title));
-
-    logger.info('[Google Tasks] Delete by search', {
+    logger.info('[Google Tasks] Delete by search - scanning all task lists', {
       userId: req.user.id,
       searchTerm,
-      totalTasks: allTasks.length,
-      matchingTasks: tasksToDelete.length
+      taskListCount: taskLists.length,
+      taskListNames: taskLists.map(tl => tl.title)
+    });
+
+    // Collect matching tasks from ALL task lists
+    let allMatchingTasks = []; // { taskListId, task }
+    const searchRegex = new RegExp(searchTerm, 'i');
+
+    for (const taskList of taskLists) {
+      let pageToken = null;
+      do {
+        const response = await tasksApi.tasks.list({
+          tasklist: taskList.id,
+          maxResults: 100,
+          showCompleted: true,
+          showHidden: true,
+          pageToken
+        });
+
+        if (response.data.items) {
+          for (const task of response.data.items) {
+            if (task.title && searchRegex.test(task.title)) {
+              allMatchingTasks.push({ taskListId: taskList.id, task });
+            }
+          }
+        }
+        pageToken = response.data.nextPageToken;
+      } while (pageToken);
+    }
+
+    logger.info('[Google Tasks] Delete by search - found matches', {
+      userId: req.user.id,
+      searchTerm,
+      matchingTasks: allMatchingTasks.length
     });
 
     let deleted = 0;
     let errors = 0;
 
-    for (const task of tasksToDelete) {
+    for (const { taskListId, task } of allMatchingTasks) {
       try {
         await tasksApi.tasks.delete({
           tasklist: taskListId,
@@ -1134,20 +1146,20 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
           }
         }
       } catch (e) {
-        if (e.code !== 404) {
+        if (e.code !== 404 && e.response?.status !== 404) {
           logger.warn('[Google Tasks] Failed to delete task by search', {
             taskId: task.id,
             title: task.title,
             error: e.message
           });
           errors++;
+        } else {
+          deleted++; // Already gone = success
         }
       }
 
       // Small delay to avoid rate limiting
-      if (deleted % 10 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     await user.save();
@@ -1162,7 +1174,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
     res.json({
       success: true,
       message: `Vymazané: ${deleted} úloh s "${searchTerm}", ${errors} chýb`,
-      found: tasksToDelete.length,
+      found: allMatchingTasks.length,
       deleted,
       errors
     });

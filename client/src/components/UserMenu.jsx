@@ -561,11 +561,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('');
+      setGoogleTasksMessage(`Hľadám a mažem úlohy s "${searchTerm}"...`);
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/delete-by-search`,
         { searchTerm },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 300000 }
       );
       setGoogleTasksMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
