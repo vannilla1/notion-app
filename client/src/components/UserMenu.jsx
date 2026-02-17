@@ -1178,22 +1178,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </button>
                       <button
                         className="btn btn-secondary"
-                        onClick={handleResetAndSyncGoogleTasks}
-                        disabled={googleTasks.syncing}
-                        title="Vymaže staré sync dáta a synchronizuje všetko odznova"
-                      >
-                        🔃 Plná sync
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={handleCleanupGoogleTasks}
-                        disabled={googleTasks.syncing}
-                        title="Odstráni úlohy, ktoré už nemajú zodpovedajúcu úlohu v CRM"
-                      >
-                        Vyčistiť
-                      </button>
-                      <button
-                        className="btn btn-secondary"
                         onClick={handleRemoveDuplicatesGoogleTasks}
                         disabled={googleTasks.syncing}
                         title="Vymaže všetky úlohy z Google Tasks a vytvorí čistý zoznam. Potom spustite Plná sync."
