@@ -1171,9 +1171,20 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
       errors
     });
 
+    // Count total tasks across all lists for debugging
+    let totalTasksScanned = 0;
+    for (const taskList of taskLists) {
+      let pgToken = null;
+      do {
+        const r = await tasksApi.tasks.list({ tasklist: taskList.id, maxResults: 100, showCompleted: true, showHidden: true, pageToken: pgToken });
+        totalTasksScanned += (r.data.items || []).length;
+        pgToken = r.data.nextPageToken;
+      } while (pgToken);
+    }
+
     res.json({
       success: true,
-      message: `Vymazané: ${deleted} úloh s "${searchTerm}", ${errors} chýb`,
+      message: `Vymazané: ${deleted} úloh s "${searchTerm}", ${errors} chýb (prehľadaných ${totalTasksScanned} úloh v ${taskLists.length} zoznamoch: ${taskLists.map(tl => tl.title).join(', ')})`,
       found: allMatchingTasks.length,
       deleted,
       errors
