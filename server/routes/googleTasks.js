@@ -1127,45 +1127,42 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
           return;
         }
 
-        // Delete with concurrency pool - each task retries independently
-        const DEDUP_CONCURRENCY = 5;
-        const executing = new Set();
+        // Delete one at a time at steady 3 req/s pace (safe for Google API)
+        // 2800 tasks / 3 per sec = ~15 min, no errors
+        for (let i = 0; i < tasksToDelete.length; i++) {
+          const task = tasksToDelete[i];
 
-        const deleteTask = async (task) => {
-          for (let attempt = 0; attempt <= 3; attempt++) {
+          for (let attempt = 0; attempt <= 5; attempt++) {
             try {
               await tasksApi.tasks.delete({ tasklist: taskListId, task: task.id });
               job.deleted++;
-              return;
+              break;
             } catch (e) {
               if (e.code === 404 || e.response?.status === 404) {
                 job.deleted++;
-                return;
+                break;
               }
               const code = e.code || e.response?.status;
               const msg = e.message || '';
               const isRateLimit = code === 429 || code === 403 || msg.includes('Quota') || msg.includes('quota') || msg.includes('Rate');
-              if (isRateLimit && attempt < 3) {
-                await sleep(2000); // Fixed 2s wait, only THIS task waits
+              if (isRateLimit && attempt < 5) {
+                // On rate limit, wait longer then retry - ALWAYS retry, never give up
+                const delay = 10000 + (attempt * 5000); // 10s, 15s, 20s, 25s, 30s
+                logger.info('[Google Tasks] Rate limit, waiting', { attempt, delay, deleted: job.deleted, i });
+                await sleep(delay);
                 continue;
               }
+              logger.warn('[Google Tasks] Delete failed permanently', { taskId: task.id, code, msg });
               job.errors++;
-              return;
+              break;
             }
           }
-        };
 
-        for (let i = 0; i < tasksToDelete.length; i++) {
-          const task = tasksToDelete[i];
-          const promise = deleteTask(task).then(() => executing.delete(promise));
-          executing.add(promise);
+          // Steady pace: 333ms between requests = ~3 req/s
+          await sleep(333);
 
-          if (executing.size >= DEDUP_CONCURRENCY) {
-            await Promise.race(executing);
-          }
-
-          // Save progress every 200 deletes
-          if (job.deleted > 0 && job.deleted % 200 === 0) {
+          // Save progress every 100 deletes
+          if (job.deleted > 0 && job.deleted % 100 === 0) {
             try {
               const freshUser = await User.findById(userId);
               if (freshUser?.googleTasks?.syncedTaskIds) {
@@ -1186,9 +1183,6 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
             }
           }
         }
-
-        // Wait for remaining
-        await Promise.all(executing);
 
         // Final cleanup of syncedTaskIds
         try {
