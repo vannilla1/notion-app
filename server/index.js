@@ -167,26 +167,6 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5001;
 
-// Connect to MongoDB and start server
-const startServer = async () => {
-  const dbConnected = await connectDB();
-  if (!dbConnected) {
-    logger.warn('MongoDB not connected. Some features may not work.');
-  } else {
-    // Start due date checker scheduler after DB is connected
-    scheduleDueDateChecks();
-    // Start subscription cleanup scheduler
-    scheduleSubscriptionCleanup();
-  }
-
-  server.listen(PORT, () => {
-    logger.info(`Server running on port ${PORT}`, {
-      port: PORT,
-      environment: process.env.NODE_ENV || 'development'
-    });
-  });
-};
-
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
@@ -200,4 +180,25 @@ process.on('unhandledRejection', (reason, promise) => {
   sentry.captureException(reason);
 });
 
-startServer();
+// Start server FIRST (so Render sees it's alive), then connect DB in background
+server.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT}`, {
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development'
+  });
+
+  // Connect to MongoDB in background - don't block server startup
+  connectDB().then(dbConnected => {
+    if (!dbConnected) {
+      logger.warn('MongoDB not connected. Some features may not work.');
+    } else {
+      // Defer schedulers - run after 30s to not compete with first requests
+      setTimeout(() => {
+        scheduleDueDateChecks();
+        scheduleSubscriptionCleanup();
+      }, 30000);
+    }
+  }).catch(err => {
+    logger.error('MongoDB connection failed', { error: err.message });
+  });
+});

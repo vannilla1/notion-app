@@ -31,27 +31,23 @@ export const WorkspaceProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await workspaceApi.getWorkspaces();
+      // Fetch workspaces and current workspace in parallel
+      const [data, current] = await Promise.all([
+        workspaceApi.getWorkspaces(),
+        workspaceApi.getCurrentWorkspace().catch(err => {
+          if (err.response?.data?.code === 'NO_WORKSPACE') return null;
+          throw err;
+        })
+      ]);
       setWorkspaces(data.workspaces || []);
       setCurrentWorkspaceId(data.currentWorkspaceId);
 
-      // Check if user needs to select/create workspace
       if (data.workspaces.length === 0 || !data.currentWorkspaceId) {
         setNeedsWorkspace(true);
         setCurrentWorkspace(null);
       } else {
         setNeedsWorkspace(false);
-        // Fetch current workspace details
-        try {
-          const current = await workspaceApi.getCurrentWorkspace();
-          setCurrentWorkspace(current);
-        } catch (err) {
-          // If current workspace fetch fails, user needs to select workspace
-          if (err.response?.data?.code === 'NO_WORKSPACE') {
-            setNeedsWorkspace(true);
-            setCurrentWorkspace(null);
-          }
-        }
+        setCurrentWorkspace(current);
       }
     } catch (err) {
       console.error('Error fetching workspaces:', err);

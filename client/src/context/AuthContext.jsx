@@ -25,19 +25,27 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token]);
 
-  const fetchUser = async () => {
-  try {
-    const res = await api.get('/api/auth/me');
-    setUser(res.data);
-  } catch (error) {
-    console.error('Failed to fetch user:', error);
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
-  } finally {
-    setLoading(false);
-  }
-};
+  const fetchUser = async (retries = 2) => {
+    try {
+      const res = await api.get('/api/auth/me');
+      setUser(res.data);
+    } catch (error) {
+      // Retry on timeout (server cold-start on Render free tier)
+      const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+      const isNetwork = error.code === 'ERR_NETWORK' || !error.response;
+      if ((isTimeout || isNetwork) && retries > 0) {
+        console.log(`Auth retry (${retries} left), server may be waking up...`);
+        await new Promise(r => setTimeout(r, 2000));
+        return fetchUser(retries - 1);
+      }
+      console.error('Failed to fetch user:', error);
+      localStorage.removeItem('token');
+      setToken(null);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   const login = async (email, password) => {
