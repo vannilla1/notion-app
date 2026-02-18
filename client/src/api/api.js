@@ -21,15 +21,21 @@ api.interceptors.request.use(
   }
 );
 
-// Handle 401 responses - automatic logout on token expiry
+// Auto-retry on 503 (server starting up, DB not ready yet)
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const config = error.config;
+    if (error.response?.status === 503 && error.response?.data?.retryable && !config._retryCount) {
+      config._retryCount = (config._retryCount || 0) + 1;
+      if (config._retryCount <= 3) {
+        await new Promise(r => setTimeout(r, 2000));
+        return api(config);
+      }
+    }
     if (error.response?.status === 401 || error.response?.status === 403) {
-      // Token expired or invalid - clear auth and redirect to login
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      // Only redirect if not already on login page
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

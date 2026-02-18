@@ -62,7 +62,18 @@ app.use('/api', apiLimiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const mongoose = require('mongoose');
+  const dbReady = mongoose.connection.readyState === 1;
+  res.json({ status: dbReady ? 'ok' : 'starting', db: dbReady, timestamp: new Date().toISOString() });
+});
+
+// DB readiness check - return 503 if DB not connected yet (frontend will retry)
+const mongoose = require('mongoose');
+app.use('/api', (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ message: 'Server sa spúšťa, skúste o chvíľu...', retryable: true });
+  }
+  next();
 });
 
 // Make io and sentry accessible to routes

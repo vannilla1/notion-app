@@ -376,12 +376,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   // Google Tasks functions
-  const fetchGoogleTasksStatus = async () => {
+  const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/google-tasks/status`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000
       });
       setGoogleTasks({
         connected: response.data.connected,
@@ -392,6 +393,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         quota: response.data.quota || null
       });
     } catch (error) {
+      // Retry on network/timeout errors (server cold-start)
+      const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+      const isNetwork = error.code === 'ERR_NETWORK' || !error.response;
+      if ((isTimeout || isNetwork) && retries > 0) {
+        console.log(`Google Tasks status retry (${retries} left)...`);
+        await new Promise(r => setTimeout(r, 3000));
+        return fetchGoogleTasksStatus(retries - 1);
+      }
       console.error('Error fetching Google Tasks status:', error);
       setGoogleTasks(prev => ({ ...prev, loading: false }));
     }
