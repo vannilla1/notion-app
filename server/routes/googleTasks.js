@@ -734,10 +734,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
           if (isUpdate) {
             try {
-              await tasksApi.tasks.update({
+              await tasksApi.tasks.patch({
                 tasklist: user.googleTasks.taskListId,
                 task: task.googleTaskId,
-                resource: taskData
+                requestBody: taskData
               });
               return { success: true, taskId: task.id, googleTaskId: task.googleTaskId, hash: task.hash, action: 'updated' };
             } catch (updateError) {
@@ -1542,12 +1542,14 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
 
           if (existingGoogleId) {
             try {
-              await retryWithBackoff(() => tasksApi.tasks.update({
+              // Use patch instead of update - patch only updates specified fields
+              // update (PUT) can fail or ignore fields, patch (PATCH) is more reliable
+              await retryWithBackoff(() => tasksApi.tasks.patch({
                 tasklist: freshUser.googleTasks.taskListId,
                 task: existingGoogleId,
-                resource: googleTaskData
+                requestBody: googleTaskData
               }));
-              logger.info('[Auto-sync Tasks] Updated existing task in Google', { userId: user._id, taskId, googleTaskId: existingGoogleId, completed: taskData.completed });
+              logger.info('[Auto-sync Tasks] Patched existing task in Google', { userId: user._id, taskId, googleTaskId: existingGoogleId, completed: taskData.completed, status: googleTaskData.status });
             } catch (e) {
               if (e.code === 404) {
                 // Task was deleted from Google, create new one
