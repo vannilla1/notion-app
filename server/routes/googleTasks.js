@@ -1382,6 +1382,11 @@ function createGoogleTaskData(task) {
     status: task.completed ? 'completed' : 'needsAction'
   };
 
+  // Google Tasks API requires 'completed' timestamp when status is 'completed'
+  if (task.completed) {
+    result.completed = new Date().toISOString();
+  }
+
   // Only add due date if task has one (Google Tasks API allows tasks without due date)
   if (task.dueDate) {
     const dueDate = new Date(task.dueDate);
@@ -1446,7 +1451,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       return;
     }
 
-    logger.debug('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title });
+    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate });
 
     try {
     // Find all users with Google Tasks enabled
@@ -1527,10 +1532,12 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
 
           const existingGoogleId = freshUser.googleTasks?.syncedTaskIds?.get(taskId);
 
-          logger.debug('[Auto-sync Tasks] Checking existing', {
+          logger.info('[Auto-sync Tasks] Checking existing', {
             userId: user._id,
             taskId,
-            existingGoogleId: existingGoogleId || 'none'
+            existingGoogleId: existingGoogleId || 'none',
+            completed: taskData.completed,
+            googleTaskStatus: taskData.completed ? 'completed' : 'needsAction'
           });
 
           if (existingGoogleId) {
@@ -1540,7 +1547,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 task: existingGoogleId,
                 resource: googleTaskData
               }));
-              logger.debug('[Auto-sync Tasks] Updated existing task', { userId: user._id, taskId, googleTaskId: existingGoogleId });
+              logger.info('[Auto-sync Tasks] Updated existing task in Google', { userId: user._id, taskId, googleTaskId: existingGoogleId, completed: taskData.completed });
             } catch (e) {
               if (e.code === 404) {
                 // Task was deleted from Google, create new one
@@ -1574,7 +1581,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
           }
         }
       } catch (error) {
-        logger.error('[Auto-sync Tasks] Error for user', { userId: user._id, error: error.message });
+        logger.error('[Auto-sync Tasks] Error for user', { userId: user._id, taskId, action, error: error.message, stack: error.stack?.substring(0, 200) });
       }
     }
     } finally {
