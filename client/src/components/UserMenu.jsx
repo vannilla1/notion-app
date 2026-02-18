@@ -537,7 +537,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleRemoveDuplicatesGoogleTasks = async () => {
-    if (!confirm('Vymazať VŠETKY úlohy z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Plná sync" pre opätovné vytvorenie úloh.')) return;
+    if (!confirm('Vymazať VŠETKY úlohy z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Synchronizovať" pre opätovné vytvorenie úloh.')) return;
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('Mažem zoznam úloh z Google Tasks...');
@@ -1189,7 +1189,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         className="btn btn-secondary"
                         onClick={handleRemoveDuplicatesGoogleTasks}
                         disabled={googleTasks.syncing}
-                        title="Vymaže všetky úlohy z Google Tasks a vytvorí čistý zoznam. Potom spustite Plná sync."
+                        title="Vymaže všetky úlohy z Google Tasks a vytvorí čistý zoznam. Potom spustite Synchronizovať."
                         style={{ background: '#e67e22', color: 'white', border: 'none' }}
                       >
                         🧹 Vymazať a obnoviť

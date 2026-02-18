@@ -1003,7 +1003,7 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
 // Remove all tasks by deleting the entire task list and recreating it
 // This is MUCH faster than deleting individual tasks (2 API calls vs 2800+)
-// After this, user runs "Plná sync" to recreate all tasks from CRM
+// After this, user runs "Synchronizovať" to recreate all tasks from CRM
 router.post('/remove-duplicates', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id.toString();
@@ -1052,7 +1052,7 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     res.json({
       success: true,
       status: 'completed',
-      message: '✅ Všetky úlohy boli vymazané z Google Tasks. Spustite "Plná sync" pre opätovné vytvorenie úloh z CRM.',
+      message: '✅ Všetky úlohy boli vymazané z Google Tasks. Spustite "Synchronizovať" pre opätovné vytvorenie úloh z CRM.',
       needsResync: true
     });
   } catch (error) {
