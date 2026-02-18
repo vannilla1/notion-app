@@ -848,6 +848,100 @@ router.post('/sync', authenticateToken, async (req, res) => {
     user.googleTasks.lastSyncAt = new Date();
     await user.save();
 
+    // ===== REVERSE SYNC: Pull completed status FROM Google Tasks back to CRM =====
+    let completedFromGoogle = 0;
+    try {
+      // Build reverse map: googleTaskId -> crmTaskId
+      const reverseMap = new Map();
+      if (user.googleTasks.syncedTaskIds) {
+        for (const [crmId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+          reverseMap.set(googleId, crmId);
+        }
+      }
+
+      // Fetch all Google Tasks to check completion status
+      let allGoogleTasks = [];
+      let gPageToken = null;
+      do {
+        const gResponse = await tasksApi.tasks.list({
+          tasklist: user.googleTasks.taskListId,
+          maxResults: 100,
+          showCompleted: true,
+          showHidden: true,
+          pageToken: gPageToken
+        });
+        if (gResponse.data.items) {
+          allGoogleTasks = allGoogleTasks.concat(gResponse.data.items);
+        }
+        gPageToken = gResponse.data.nextPageToken;
+      } while (gPageToken);
+
+      const completedGoogleTasks = allGoogleTasks.filter(t => t.status === 'completed');
+      const io = req.app.get('io');
+
+      for (const googleTask of completedGoogleTasks) {
+        const crmTaskId = reverseMap.get(googleTask.id);
+        if (!crmTaskId) continue;
+
+        // Check global tasks
+        const globalTask = await Task.findById(crmTaskId);
+        if (globalTask && !globalTask.completed) {
+          globalTask.completed = true;
+          globalTask.modifiedAt = new Date().toISOString();
+          await globalTask.save();
+          completedFromGoogle++;
+          if (io) {
+            io.emit('task-updated', { ...globalTask.toObject(), id: globalTask._id.toString(), source: 'global' });
+          }
+          continue;
+        }
+
+        // Check contact tasks
+        if (!globalTask) {
+          const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+          for (const contact of contacts) {
+            const taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+            if (taskIndex !== -1 && !contact.tasks[taskIndex].completed) {
+              contact.tasks[taskIndex].completed = true;
+              contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+              contact.markModified('tasks');
+              await contact.save();
+              completedFromGoogle++;
+              if (io) {
+                io.emit('contact-updated', contact.toObject());
+                io.emit('task-updated', { ...contact.tasks[taskIndex], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+              }
+              break;
+            }
+          }
+        }
+
+        // Check subtasks - search in global tasks
+        if (!globalTask) {
+          const allTasks = await Task.find({ 'subtasks.id': crmTaskId });
+          for (const parentTask of allTasks) {
+            const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
+            if (subtask && !subtask.completed) {
+              subtask.completed = true;
+              parentTask.markModified('subtasks');
+              await parentTask.save();
+              completedFromGoogle++;
+              if (io) {
+                io.emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      if (completedFromGoogle > 0) {
+        logger.info('[Google Tasks] Reverse sync - marked tasks as completed from Google', { userId: req.user.id, completedFromGoogle });
+      }
+    } catch (reverseErr) {
+      logger.warn('[Google Tasks] Reverse sync error (non-fatal)', { error: reverseErr.message });
+    }
+
     const syncDuration = Date.now() - syncStartTime;
     const timedOut = syncDuration >= SYNC_TIMEOUT;
 
@@ -859,11 +953,13 @@ router.post('/sync', authenticateToken, async (req, res) => {
       skipped,
       errors,
       quotaExceeded,
+      completedFromGoogle,
       duration: syncDuration,
       timedOut
     });
 
     let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
+    if (completedFromGoogle > 0) message += `, ${completedFromGoogle} dokončených z Google`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
     if (timedOut) {
@@ -1350,6 +1446,18 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
 });
 
 // Helper functions
+function findSubtaskById(subtasks, id) {
+  if (!subtasks) return null;
+  for (const subtask of subtasks) {
+    if (subtask.id === id) return subtask;
+    if (subtask.subtasks) {
+      const found = findSubtaskById(subtask.subtasks, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;
   for (const subtask of subtasks) {
