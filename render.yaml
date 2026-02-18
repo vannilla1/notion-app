@@ -5,8 +5,8 @@ services:
     runtime: node
     region: frankfurt
     rootDir: server
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm ci --omit=dev
+    startCommand: node index.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
