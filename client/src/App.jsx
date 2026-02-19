@@ -177,10 +177,20 @@ function AppContent() {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: '#1a1a2e',
-        color: '#fff'
+        background: '#0c0c10',
+        color: '#9b96c4',
+        fontFamily: "'DM Sans', sans-serif",
+        fontSize: '14px',
+        gap: '10px'
       }}>
+        <div style={{
+          width: '18px', height: '18px', borderRadius: '50%',
+          border: '2px solid rgba(139, 92, 246, 0.2)',
+          borderTopColor: '#8b5cf6',
+          animation: 'spin 0.8s linear infinite'
+        }}/>
         Načítavam...
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
