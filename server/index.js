@@ -14,6 +14,7 @@ const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
 const googleCalendarRoutes = require('./routes/googleCalendar');
 const googleTasksRoutes = require('./routes/googleTasks');
+const { startGoogleTasksPolling } = require('./routes/googleTasks');
 const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
 const workspaceRoutes = require('./routes/workspaces');
@@ -207,6 +208,7 @@ server.listen(PORT, () => {
       setTimeout(() => {
         scheduleDueDateChecks();
         scheduleSubscriptionCleanup();
+        startGoogleTasksPolling(io);
       }, 30000);
     }
   }).catch(err => {

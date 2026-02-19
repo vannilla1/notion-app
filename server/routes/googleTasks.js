@@ -1706,6 +1706,144 @@ const autoDeleteTaskFromGoogleTasks = async (taskId) => {
   await autoSyncTaskToGoogleTasks({ id: taskId }, 'delete');
 };
 
+// ==================== BACKGROUND POLLING: Google Tasks → CRM ====================
+// Polls Google Tasks every 60s for completed tasks and syncs back to CRM
+
+let pollingInterval = null;
+let pollingIo = null; // Socket.IO instance for emitting updates
+
+const pollGoogleTasksCompleted = async () => {
+  try {
+    const users = await User.find({ 'googleTasks.enabled': true });
+    if (users.length === 0) return;
+
+    for (const user of users) {
+      try {
+        const tasksApi = await getTasksClient(user);
+        const taskListId = user.googleTasks.taskListId;
+        if (!taskListId) continue;
+
+        // Fetch completed tasks from Google
+        let completedGoogleTasks = [];
+        let pageToken = null;
+        do {
+          const response = await tasksApi.tasks.list({
+            tasklist: taskListId,
+            maxResults: 100,
+            showCompleted: true,
+            showHidden: true,
+            pageToken
+          });
+          if (response.data.items) {
+            completedGoogleTasks = completedGoogleTasks.concat(
+              response.data.items.filter(t => t.status === 'completed')
+            );
+          }
+          pageToken = response.data.nextPageToken;
+        } while (pageToken);
+
+        if (completedGoogleTasks.length === 0) continue;
+
+        // Build reverse map
+        const reverseMap = new Map();
+        if (user.googleTasks.syncedTaskIds) {
+          for (const [crmId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
+            reverseMap.set(googleId, crmId);
+          }
+        }
+
+        let updated = 0;
+
+        for (const googleTask of completedGoogleTasks) {
+          const crmTaskId = reverseMap.get(googleTask.id);
+          if (!crmTaskId) continue;
+
+          // Global tasks
+          const globalTask = await Task.findById(crmTaskId);
+          if (globalTask && !globalTask.completed) {
+            globalTask.completed = true;
+            globalTask.modifiedAt = new Date().toISOString();
+            await globalTask.save();
+            updated++;
+            if (pollingIo) {
+              pollingIo.emit('task-updated', { ...globalTask.toObject(), id: globalTask._id.toString(), source: 'global' });
+            }
+            continue;
+          }
+
+          // Contact tasks
+          if (!globalTask) {
+            const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+            for (const contact of contacts) {
+              const idx = contact.tasks.findIndex(t => t.id === crmTaskId);
+              if (idx !== -1 && !contact.tasks[idx].completed) {
+                contact.tasks[idx].completed = true;
+                contact.tasks[idx].modifiedAt = new Date().toISOString();
+                contact.markModified('tasks');
+                await contact.save();
+                updated++;
+                if (pollingIo) {
+                  pollingIo.emit('contact-updated', contact.toObject());
+                  pollingIo.emit('task-updated', { ...contact.tasks[idx], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+                }
+                break;
+              }
+            }
+          }
+
+          // Subtasks in global tasks
+          if (!globalTask) {
+            const parentTasks = await Task.find({ 'subtasks.id': crmTaskId });
+            for (const parentTask of parentTasks) {
+              const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
+              if (subtask && !subtask.completed) {
+                subtask.completed = true;
+                parentTask.markModified('subtasks');
+                await parentTask.save();
+                updated++;
+                if (pollingIo) {
+                  pollingIo.emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
+                }
+                break;
+              }
+            }
+          }
+        }
+
+        if (updated > 0) {
+          logger.info('[Google Tasks Poll] Synced completed tasks from Google', { userId: user._id, updated });
+        }
+      } catch (userErr) {
+        // Token errors are expected for inactive users - just skip
+        if (!userErr.message?.includes('expired') && !userErr.message?.includes('invalid_grant')) {
+          logger.warn('[Google Tasks Poll] Error for user', { userId: user._id, error: userErr.message });
+        }
+      }
+    }
+  } catch (err) {
+    logger.error('[Google Tasks Poll] Fatal error', { error: err.message });
+  }
+};
+
+const startGoogleTasksPolling = (io) => {
+  pollingIo = io;
+  // Poll every 60 seconds
+  pollingInterval = setInterval(pollGoogleTasksCompleted, 60000);
+  // Run first poll after 15 seconds (let server stabilize)
+  setTimeout(pollGoogleTasksCompleted, 15000);
+  logger.info('[Google Tasks Poll] Background polling started (60s interval)');
+};
+
+const stopGoogleTasksPolling = () => {
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
+    logger.info('[Google Tasks Poll] Background polling stopped');
+  }
+};
+
 module.exports = router;
 module.exports.autoSyncTaskToGoogleTasks = autoSyncTaskToGoogleTasks;
 module.exports.autoDeleteTaskFromGoogleTasks = autoDeleteTaskFromGoogleTasks;
+module.exports.startGoogleTasksPolling = startGoogleTasksPolling;
+module.exports.stopGoogleTasksPolling = stopGoogleTasksPolling;
