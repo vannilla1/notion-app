@@ -4,7 +4,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:50
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000, // 15s timeout - fail fast on cold starts
+  timeout: 30000, // 30s timeout - enough for Render cold starts
 });
 
 // Add auth token to all requests
@@ -26,7 +26,7 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
-    if (error.response?.status === 503 && error.response?.data?.retryable && !config._retryCount) {
+    if (error.response?.status === 503 && error.response?.data?.retryable) {
       config._retryCount = (config._retryCount || 0) + 1;
       if (config._retryCount <= 3) {
         await new Promise(r => setTimeout(r, 2000));

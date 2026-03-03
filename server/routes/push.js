@@ -119,7 +119,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
     res.json({ message: 'Subscription saved', subscriptionId: subscription._id });
   } catch (error) {
     logger.error('[Push] Error saving subscription', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -139,7 +139,7 @@ router.post('/unsubscribe', authenticateToken, async (req, res) => {
     res.json({ message: 'Subscription removed' });
   } catch (error) {
     logger.error('[Push] Error removing subscription', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -151,7 +151,7 @@ router.get('/subscriptions', authenticateToken, async (req, res) => {
     res.json({ count });
   } catch (error) {
     logger.error('[Push] Error getting subscriptions', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -229,7 +229,7 @@ router.post('/test', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Push Test] Error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -253,7 +253,7 @@ router.post('/check-due-dates', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Due Date Check] Error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -273,7 +273,7 @@ router.get('/metrics', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Metrics] Error getting metrics', { error: error.message });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -290,7 +290,7 @@ router.post('/metrics/reset', authenticateToken, async (req, res) => {
     res.json({ message: 'Metrics reset successfully' });
   } catch (error) {
     logger.error('[Metrics] Error resetting metrics', { error: error.message });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -310,7 +310,7 @@ router.post('/cleanup-subscriptions', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Cleanup] Error during manual cleanup', { error: error.message });
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

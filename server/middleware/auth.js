@@ -22,7 +22,7 @@ const authenticateToken = async (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
+    return res.status(401).json({ message: 'Prístupový token je povinný' });
   }
 
   try {
@@ -30,7 +30,7 @@ const authenticateToken = async (req, res, next) => {
     const user = await User.findById(decoded.id);
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
     }
 
     req.user = {
@@ -43,7 +43,7 @@ const authenticateToken = async (req, res, next) => {
     };
     next();
   } catch (err) {
-    return res.status(403).json({ message: 'Invalid or expired token' });
+    return res.status(403).json({ message: 'Neplatný alebo expirovaný token' });
   }
 };
 

@@ -20,9 +20,7 @@ function AppContent() {
   // Initialize push notifications when user is authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      initializePush().catch(err => {
-        console.log('Push notifications not initialized:', err.message);
-      });
+      initializePush().catch(() => {});
     }
   }, [isAuthenticated]);
 
@@ -110,8 +108,6 @@ function AppContent() {
     if (!isAuthenticated) return;
 
     const handleServiceWorkerMessage = (event) => {
-      console.log('[App] Message from service worker:', event.data);
-
       if (event.data?.type === 'NOTIFICATION_CLICK') {
         const { url, data, timestamp } = event.data;
 
@@ -127,7 +123,6 @@ function AppContent() {
           // This works even when we're already on the target page
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
             const contactId = params.get('expandContact') || data.contactId;
-            console.log('[App] Dispatching crm-highlight event for contact:', contactId);
             window.dispatchEvent(new CustomEvent('crm-highlight', {
               detail: { contactId, timestamp: navTimestamp }
             }));
@@ -140,7 +135,6 @@ function AppContent() {
           } else if (path === '/tasks' && (params.get('highlightTask') || data?.taskId)) {
             const taskId = params.get('highlightTask') || data.taskId;
             const subtaskId = params.get('subtask') || data.subtaskId || null;
-            console.log('[App] Dispatching task-highlight event for task:', taskId);
             window.dispatchEvent(new CustomEvent('task-highlight', {
               detail: { taskId, subtaskId, timestamp: navTimestamp }
             }));
@@ -177,8 +171,8 @@ function AppContent() {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: '#1a1a2e',
-        color: '#fff'
+        background: 'var(--bg-secondary, #f8fafc)',
+        color: 'var(--text-secondary, #64748b)'
       }}>
         Načítavam...
       </div>

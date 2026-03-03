@@ -2,10 +2,10 @@ const rateLimit = require('express-rate-limit');
 const logger = require('../utils/logger');
 
 // Rate limiter for login attempts
-// 5 attempts per 15 minutes per IP
+// 10 attempts per 15 minutes per IP
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts
+  max: 10, // 10 attempts (higher due to cold-start retries)
   message: {
     message: 'Príliš veľa pokusov o prihlásenie. Skúste znova o 15 minút.'
   },

@@ -170,7 +170,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json(allTasks);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -321,7 +321,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     res.send(ical);
   } catch (error) {
     logger.error('Calendar export error', { error: error.message });
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -668,7 +668,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -834,7 +834,7 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
       });
     }
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1139,7 +1139,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1218,7 +1218,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1366,7 +1366,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, async (req, r
     });
   } catch (error) {
     logger.error('Duplicate task error', { error: error.message });
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1555,7 +1555,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1758,7 +1758,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -1901,7 +1901,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 

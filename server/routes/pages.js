@@ -10,7 +10,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const pages = await Page.find({ userId: req.user.id });
     res.json(pages);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -26,7 +26,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // Check access - for now all users can access all pages
     res.json(page);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -51,7 +51,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     res.status(201).json(page);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -79,7 +79,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     res.json(page);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -110,7 +110,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Page deleted' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 

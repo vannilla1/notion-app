@@ -22,7 +22,15 @@ function Login() {
         await login(email, password);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'An error occurred');
+      if (err.response?.data?.message) {
+        setError(err.response.data.message);
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Server neodpovedá. Skúste to znova o chvíľu.');
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('Chyba pripojenia k serveru. Skontrolujte internetové pripojenie.');
+      } else {
+        setError('Nastala neočakávaná chyba. Skúste to znova.');
+      }
     } finally {
       setLoading(false);
     }
@@ -70,6 +78,7 @@ function Login() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Zadajte používateľské meno"
+                autoComplete="username"
                 required
               />
             </div>
@@ -83,6 +92,7 @@ function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Zadajte email"
+              autoComplete="email"
               required
             />
           </div>
@@ -95,6 +105,7 @@ function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Zadajte heslo"
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
               required
             />
           </div>

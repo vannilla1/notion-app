@@ -41,13 +41,13 @@ router.post('/register', registerLimiter, async (req, res) => {
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       logger.auth('register', null, null, false, req.ip);
-      return res.status(400).json({ message: 'Email already registered' });
+      return res.status(400).json({ message: 'Email je už zaregistrovaný' });
     }
 
     const existingUsername = await User.findOne({ username });
     if (existingUsername) {
       logger.auth('register', null, null, false, req.ip);
-      return res.status(400).json({ message: 'Username already taken' });
+      return res.status(400).json({ message: 'Používateľské meno je už obsadené' });
     }
 
     // Hash password
@@ -89,7 +89,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error('Registration error', { error: error.message, ip: req.ip });
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
@@ -107,14 +107,14 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       logger.auth('login', null, email, false, req.ip);
-      return res.status(400).json({ message: 'Invalid credentials' });
+      return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       logger.auth('login', user._id, user.username, false, req.ip);
-      return res.status(400).json({ message: 'Invalid credentials' });
+      return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
     // Generate token
@@ -135,7 +135,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error('Login error', { error: error.message, ip: req.ip });
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
