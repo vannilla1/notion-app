@@ -89,6 +89,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState('');
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
+  const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
   const [deleteSearchTerm, setDeleteSearchTerm] = useState('');
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
   const menuRef = useRef(null);
@@ -180,6 +181,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     setIsOpen(false);
     setMessage('');
     setErrors({});
+    setGoogleTasksMessage('');
     await Promise.all([
       fetchCalendarFeedStatus(),
       fetchGoogleCalendarStatus(),
@@ -467,6 +469,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         timeout: 660000 // 5.5 min timeout (server has 5 min limit + buffer)
       });
       setGoogleTasksMessage(response.data.message);
+      setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       // Refresh status to show updated quota and sync counts
       await fetchGoogleTasksStatus();
@@ -479,6 +482,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
       }
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -501,6 +505,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         timeout: 660000
       });
       setGoogleTasksMessage(response.data.message);
+      setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
@@ -512,6 +517,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
       }
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -525,6 +531,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       setGoogleTasksMessage(response.data.message);
+      setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       // Refresh status to show updated counts
       await fetchGoogleTasksStatus();
@@ -532,6 +539,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       console.error('Error cleaning up Google Tasks:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -548,12 +556,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
 
       setGoogleTasksMessage(response.data.message);
+      setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error removing tasks:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní úloh';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -577,12 +587,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         { headers: { Authorization: `Bearer ${token}` }, timeout: 300000 }
       );
       setGoogleTasksMessage(response.data.message);
+      setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error deleting by search:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
+      setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
@@ -1222,7 +1234,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     </div>
                     {googleTasksMessage && (
-                      <div className="form-success" style={{ marginTop: '12px' }}>
+                      <div className={googleTasksMessageType === 'error' ? 'form-error' : 'form-success'} style={{ marginTop: '12px' }}>
                         {googleTasksMessage}
                       </div>
                     )}
