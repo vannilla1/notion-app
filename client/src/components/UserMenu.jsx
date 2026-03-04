@@ -1234,7 +1234,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     </div>
                     {googleTasksMessage && (
-                      <div className={googleTasksMessageType === 'error' ? 'form-error' : 'form-success'} style={{ marginTop: '12px' }}>
+                      <div className="form-success" style={{
+                        marginTop: '12px',
+                        ...(googleTasksMessageType === 'error' ? {
+                          background: '#FEE2E2',
+                          color: '#DC2626'
+                        } : {})
+                      }}>
                         {googleTasksMessage}
                       </div>
                     )}
