@@ -843,18 +843,15 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
   if (!subtasks || subtasks.length === 0) return;
 
   for (const subtask of subtasks) {
-    // Only sync subtasks that have a due date
-    if (subtask.dueDate) {
-      autoSyncToGoogle({
-        id: subtask.id,
-        title: `${subtask.title} (${parentTitle})`,
-        description: subtask.notes || '',
-        dueDate: subtask.dueDate,
-        completed: subtask.completed,
-        priority: subtask.priority,
-        contactName: contactName
-      }, 'update');
-    }
+    autoSyncToGoogle({
+      id: subtask.id,
+      title: `${subtask.title} (${parentTitle})`,
+      description: subtask.notes || '',
+      dueDate: subtask.dueDate,
+      completed: subtask.completed,
+      priority: subtask.priority,
+      contactName: contactName
+    }, 'update');
 
     // Recursively sync nested subtasks
     if (subtask.subtasks && subtask.subtasks.length > 0) {
@@ -1442,17 +1439,15 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req
               }));
 
               // Auto-sync subtask to Google
-              if (subtask.dueDate) {
-                autoSyncToGoogle({
-                  id: subtask.id,
-                  title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
-                  description: subtask.notes || '',
-                  dueDate: subtask.dueDate,
-                  completed: subtask.completed,
-                  priority: subtask.priority,
-                  contactName: contact.name
-                }, 'create');
-              }
+              autoSyncToGoogle({
+                id: subtask.id,
+                title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
+                description: subtask.notes || '',
+                dueDate: subtask.dueDate,
+                completed: subtask.completed,
+                priority: subtask.priority,
+                contactName: contact.name
+              }, 'create');
 
               // Send notification about new subtask
               notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
@@ -1481,17 +1476,15 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req
         io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
         // Auto-sync subtask to Google
-        if (subtask.dueDate) {
-          autoSyncToGoogle({
-            id: subtask.id,
-            title: `${subtask.title} (${task.title})`,
-            description: subtask.notes || '',
-            dueDate: subtask.dueDate,
-            completed: subtask.completed,
-            priority: subtask.priority,
-            contactName: null
-          }, 'create');
-        }
+        autoSyncToGoogle({
+          id: subtask.id,
+          title: `${subtask.title} (${task.title})`,
+          description: subtask.notes || '',
+          dueDate: subtask.dueDate,
+          completed: subtask.completed,
+          priority: subtask.priority,
+          contactName: null
+        }, 'create');
 
         // Send notification about new subtask
         notificationService.notifySubtaskChange('subtask.created', subtask, task, req.user);
@@ -1526,17 +1519,15 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req
             }));
 
             // Auto-sync subtask to Google
-            if (subtask.dueDate) {
-              autoSyncToGoogle({
-                id: subtask.id,
-                title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
-                description: subtask.notes || '',
-                dueDate: subtask.dueDate,
-                completed: subtask.completed,
-                priority: subtask.priority,
-                contactName: contact.name
-              }, 'create');
-            }
+            autoSyncToGoogle({
+              id: subtask.id,
+              title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
+              description: subtask.notes || '',
+              dueDate: subtask.dueDate,
+              completed: subtask.completed,
+              priority: subtask.priority,
+              contactName: contact.name
+            }, 'create');
 
             // Send notification about new subtask
             notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);

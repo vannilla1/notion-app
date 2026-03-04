@@ -322,24 +322,23 @@ router.get('/status', authenticateToken, async (req, res) => {
     const remainingQuota = getRemainingQuota(user);
     const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
 
-    // Count pending tasks (tasks with due date that are not yet synced)
-    let totalTasksWithDueDate = 0;
+    // Count pending tasks (all non-completed tasks that should be synced)
+    let totalTasks = 0;
     let syncedCount = 0;
 
     if (user.googleTasks?.enabled) {
-      // Only fetch tasks with due dates for efficiency
       const globalTasks = await Task.find(
-        { dueDate: { $exists: true, $ne: null }, completed: { $ne: true } },
+        { completed: { $ne: true } },
         { _id: 1, subtasks: 1 }
       ).lean();
       const contacts = await Contact.find(
-        { 'tasks.dueDate': { $exists: true } },
-        { 'tasks.id': 1, 'tasks.dueDate': 1, 'tasks.completed': 1, 'tasks.subtasks': 1 }
+        {},
+        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1 }
       ).lean();
 
-      // Count global tasks with due dates
+      // Count global tasks
       for (const task of globalTasks) {
-        totalTasksWithDueDate++;
+        totalTasks++;
         const taskId = task._id.toString();
         const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
         if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
@@ -348,17 +347,17 @@ router.get('/status', authenticateToken, async (req, res) => {
         // Count subtasks
         if (task.subtasks) {
           const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
-          totalTasksWithDueDate += subtaskCounts.total;
+          totalTasks += subtaskCounts.total;
           syncedCount += subtaskCounts.synced;
         }
       }
 
-      // Count contact tasks with due dates
+      // Count contact tasks
       for (const contact of contacts) {
         if (contact.tasks) {
           for (const task of contact.tasks) {
-            if (task.dueDate && !task.completed) {
-              totalTasksWithDueDate++;
+            if (!task.completed) {
+              totalTasks++;
               const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
               if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
                 syncedCount++;
@@ -367,7 +366,7 @@ router.get('/status', authenticateToken, async (req, res) => {
             // Count subtasks
             if (task.subtasks) {
               const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
-              totalTasksWithDueDate += subtaskCounts.total;
+              totalTasks += subtaskCounts.total;
               syncedCount += subtaskCounts.synced;
             }
           }
@@ -375,14 +374,14 @@ router.get('/status', authenticateToken, async (req, res) => {
       }
     }
 
-    const pendingCount = totalTasksWithDueDate - syncedCount;
+    const pendingCount = totalTasks - syncedCount;
 
     res.json({
       connected: user.googleTasks?.enabled || false,
       connectedAt: user.googleTasks?.connectedAt || null,
       lastSyncAt: user.googleTasks?.lastSyncAt || null,
       pendingTasks: {
-        total: totalTasksWithDueDate,
+        total: totalTasks,
         synced: syncedCount,
         pending: pendingCount
       },
@@ -407,7 +406,7 @@ function countSubtasksPendingSync(subtasks, user) {
   if (!subtasks || !Array.isArray(subtasks)) return { total, synced };
 
   for (const subtask of subtasks) {
-    if (subtask.dueDate && !subtask.completed) {
+    if (!subtask.completed) {
       total++;
       const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(subtask.id);
       if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
@@ -563,9 +562,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     const tasksToSync = [];
 
-    // Collect global tasks
+    // Collect global tasks (all tasks, not just ones with due dates)
     for (const task of globalTasks) {
-      if (task.dueDate && !task.completed) {
+      if (!task.completed) {
         tasksToSync.push({
           id: task._id.toString(),
           title: task.title,
@@ -579,11 +578,11 @@ router.post('/sync', authenticateToken, async (req, res) => {
       collectSubtasksForSync(task.subtasks, task.title, null, tasksToSync);
     }
 
-    // Collect contact tasks
+    // Collect contact tasks (all tasks, not just ones with due dates)
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
-          if (task.dueDate && !task.completed) {
+          if (!task.completed) {
             tasksToSync.push({
               id: task.id,
               title: task.title,
@@ -627,8 +626,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
         continue;
       }
 
-      // Skip tasks with invalid due date
-      if (!task.dueDate || isNaN(new Date(task.dueDate).getTime())) {
+      // Skip tasks with invalid due date (but allow tasks without due date)
+      if (task.dueDate && isNaN(new Date(task.dueDate).getTime())) {
         skipped++;
         continue;
       }
@@ -1461,7 +1460,7 @@ function findSubtaskById(subtasks, id) {
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;
   for (const subtask of subtasks) {
-    if (subtask.dueDate && !subtask.completed) {
+    if (!subtask.completed) {
       tasksToSync.push({
         id: subtask.id,
         title: `${subtask.title} (${parentTitle})`,
