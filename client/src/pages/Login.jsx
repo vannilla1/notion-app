@@ -156,6 +156,10 @@ function Login() {
             </button>
           </div>
         </div>
+
+        <a href="/privacy" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+          Zásady ochrany osobných údajov
+        </a>
       </div>
     </div>
   );
