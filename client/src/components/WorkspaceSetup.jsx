@@ -65,7 +65,7 @@ const WorkspaceSetup = () => {
     <div className="workspace-setup">
       <div className="workspace-setup-card">
         <div className="workspace-setup-header">
-          <h1>🏢 Vitajte v Purple CRM</h1>
+          <h1>🏢 Vitajte v Prpl CRM</h1>
           <p>Pre pokračovanie si vytvorte pracovné prostredie alebo sa pripojte k existujúcemu.</p>
         </div>
 

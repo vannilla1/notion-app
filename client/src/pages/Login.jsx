@@ -58,7 +58,7 @@ function Login() {
           </svg>
         </div>
         <h1 className="login-title">
-          {isRegister ? 'Vytvoriť účet' : 'Purple CRM'}
+          {isRegister ? 'Vytvoriť účet' : 'Prpl CRM'}
         </h1>
         <p className="login-subtitle">
           {isRegister

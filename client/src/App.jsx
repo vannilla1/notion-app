@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
 import AdminPanel from './pages/AdminPanel';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import NotificationToast from './components/NotificationToast';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
@@ -208,6 +209,7 @@ function AppContent() {
           path="/admin"
           element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
         />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
       </Routes>
     </>
   );

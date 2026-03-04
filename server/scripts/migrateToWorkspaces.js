@@ -18,8 +18,8 @@ const User = require('../models/User');
 const Contact = require('../models/Contact');
 const Task = require('../models/Task');
 
-const DEFAULT_WORKSPACE_NAME = 'Purple CRM';
-const DEFAULT_WORKSPACE_SLUG = 'purple-crm';
+const DEFAULT_WORKSPACE_NAME = 'Prpl CRM';
+const DEFAULT_WORKSPACE_SLUG = 'prpl-crm';
 
 async function migrate() {
   try {

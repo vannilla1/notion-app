@@ -120,7 +120,7 @@ function AdminPanel() {
           >
             ← Späť
           </button>
-          <h1 className="header-title-link" onClick={() => navigate('/')}>Purple CRM</h1>
+          <h1 className="header-title-link" onClick={() => navigate('/')}>Prpl CRM</h1>
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />

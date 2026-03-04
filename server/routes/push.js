@@ -180,7 +180,7 @@ router.post('/test', authenticateToken, async (req, res) => {
 
     const payload = JSON.stringify({
       title: 'Test notifikácia',
-      body: 'Toto je testovacia push notifikácia z Purple CRM',
+      body: 'Toto je testovacia push notifikácia z Prpl CRM',
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
       data: {

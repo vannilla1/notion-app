@@ -38,7 +38,7 @@ const initializeVapid = () => {
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     try {
       webpush.setVapidDetails(
-        process.env.VAPID_SUBJECT || 'mailto:admin@purplecrm.sk',
+        process.env.VAPID_SUBJECT || 'mailto:admin@prplcrm.sk',
         process.env.VAPID_PUBLIC_KEY,
         process.env.VAPID_PRIVATE_KEY
       );
