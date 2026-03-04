@@ -150,11 +150,12 @@ const getTasksClient = async (user, forceRefresh = false) => {
                             refreshError.code === 400;
 
       if (isInvalidGrant) {
-        // Clear invalid credentials
+        // Clear invalid credentials and disable sync
         user.googleTasks.accessToken = null;
         user.googleTasks.refreshToken = null;
         user.googleTasks.tokenExpiry = null;
         user.googleTasks.connected = false;
+        user.googleTasks.enabled = false;
         await user.save();
 
         logger.warn('[Google Tasks] Credentials cleared due to invalid grant', { userId: user._id });
@@ -377,7 +378,7 @@ router.get('/status', authenticateToken, async (req, res) => {
     const pendingCount = totalTasks - syncedCount;
 
     res.json({
-      connected: user.googleTasks?.enabled || false,
+      connected: (user.googleTasks?.enabled && !!user.googleTasks?.accessToken) || false,
       connectedAt: user.googleTasks?.connectedAt || null,
       lastSyncAt: user.googleTasks?.lastSyncAt || null,
       pendingTasks: {
