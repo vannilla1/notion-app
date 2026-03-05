@@ -10,7 +10,7 @@ const router = express.Router();
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://prpl-crm-api.onrender.com/api/google-calendar/callback';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-calendar/callback';
 
 const oauth2Client = new google.auth.OAuth2(
   GOOGLE_CLIENT_ID,
@@ -124,7 +124,7 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 
 // OAuth callback - handle Google's response
 router.get('/callback', async (req, res) => {
-  const baseUrl = process.env.CLIENT_URL || 'https://prpl-crm.onrender.com';
+  const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
 
   // Log all query parameters for debugging
   console.log('Google Calendar callback - full query:', req.query);

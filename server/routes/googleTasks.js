@@ -17,7 +17,7 @@ const isValidObjectId = (id) => {
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'https://prpl-crm-api.onrender.com/api/google-tasks/callback';
+const GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-tasks/callback';
 
 // Validate OAuth configuration at startup
 const isOAuthConfigured = () => {
@@ -199,7 +199,7 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 
 // OAuth callback - handle Google's response
 router.get('/callback', async (req, res) => {
-  const baseUrl = process.env.CLIENT_URL || 'https://prpl-crm.onrender.com';
+  const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
 
   logger.debug('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
 

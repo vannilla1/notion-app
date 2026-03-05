@@ -351,7 +351,7 @@ router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
       });
     }
 
-    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${token}`;
 
     res.json({
@@ -382,7 +382,7 @@ router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
       });
     }
 
-    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${user.calendarFeedToken}`;
 
     res.json({
@@ -427,7 +427,7 @@ router.post('/calendar/feed/regenerate', authenticateToken, async (req, res) => 
       calendarFeedCreatedAt: new Date()
     });
 
-    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${newToken}`;
 
     res.json({
