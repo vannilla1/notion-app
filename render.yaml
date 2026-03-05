@@ -1,7 +1,7 @@
 services:
   # Backend API
   - type: web
-    name: perun-crm-api
+    name: prpl-crm-api
     runtime: node
     region: frankfurt
     rootDir: server
@@ -30,7 +30,7 @@ services:
 
   # Frontend
   - type: web
-    name: perun-crm
+    name: prpl-crm
     runtime: static
     region: frankfurt
     rootDir: client

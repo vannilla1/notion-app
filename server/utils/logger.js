@@ -28,7 +28,7 @@ const jsonFormat = winston.format.combine(
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: process.env.NODE_ENV === 'production' ? jsonFormat : logFormat,
-  defaultMeta: { service: 'perun-crm' },
+  defaultMeta: { service: 'prpl-crm' },
   transports: [
     // Console transport
     new winston.transports.Console({

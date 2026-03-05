@@ -317,7 +317,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="perun-crm-tasks.ics"');
+    res.setHeader('Content-Disposition', 'attachment; filename="prpl-crm-tasks.ics"');
     res.send(ical);
   } catch (error) {
     logger.error('Calendar export error', { error: error.message });
@@ -351,7 +351,7 @@ router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
       });
     }
 
-    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${token}`;
 
     res.json({
@@ -382,7 +382,7 @@ router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
       });
     }
 
-    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${user.calendarFeedToken}`;
 
     res.json({
@@ -427,7 +427,7 @@ router.post('/calendar/feed/regenerate', authenticateToken, async (req, res) => 
       calendarFeedCreatedAt: new Date()
     });
 
-    const baseUrl = process.env.API_URL || 'https://perun-crm.onrender.com';
+    const baseUrl = process.env.API_URL || 'https://prpl-crm.onrender.com';
     const feedUrl = `${baseUrl}/api/tasks/calendar/feed/${newToken}`;
 
     res.json({
@@ -630,7 +630,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     // Set headers for calendar subscription
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Content-Disposition', 'inline; filename="perun-crm-tasks.ics"');
+    res.setHeader('Content-Disposition', 'inline; filename="prpl-crm-tasks.ics"');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');

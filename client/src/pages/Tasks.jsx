@@ -1294,7 +1294,7 @@ function Tasks() {
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = options.incremental ? 'perun-crm-tasks-new.ics' : 'perun-crm-tasks.ics';
+      a.download = options.incremental ? 'prpl-crm-tasks-new.ics' : 'prpl-crm-tasks.ics';
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(blobUrl);
