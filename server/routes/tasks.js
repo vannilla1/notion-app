@@ -209,7 +209,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
       return `${year}${month}${day}`;
     };
 
-    const createUID = (id) => `${id}@peruncrm`;
+    const createUID = (id) => `${id}@prplcrm`;
 
     // Check if task should be included (not already exported in incremental mode)
     const shouldIncludeTask = (taskId) => {
@@ -273,10 +273,10 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
 
     let ical = 'BEGIN:VCALENDAR\r\n';
     ical += 'VERSION:2.0\r\n';
-    ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
+    ical += 'PRODID:-//Prpl CRM//Task Calendar//SK\r\n';
     ical += 'CALSCALE:GREGORIAN\r\n';
     ical += 'METHOD:PUBLISH\r\n';
-    ical += 'X-WR-CALNAME:Perun CRM Úlohy\r\n';
+    ical += 'X-WR-CALNAME:Prpl CRM Úlohy\r\n';
 
     const now = new Date();
     const dtstamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -478,7 +478,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
       return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     };
 
-    const createUID = (id) => `${id}@peruncrm`;
+    const createUID = (id) => `${id}@prplcrm`;
 
     const getPriorityValue = (priority) => {
       // iCal priority: 1-4 high, 5 medium, 6-9 low
@@ -563,10 +563,10 @@ router.get('/calendar/feed/:token', async (req, res) => {
     // Build iCal feed with VTODO (tasks) instead of VEVENT (events)
     let ical = 'BEGIN:VCALENDAR\r\n';
     ical += 'VERSION:2.0\r\n';
-    ical += 'PRODID:-//Perun CRM//Task Calendar//SK\r\n';
+    ical += 'PRODID:-//Prpl CRM//Task Calendar//SK\r\n';
     ical += 'CALSCALE:GREGORIAN\r\n';
     ical += 'METHOD:PUBLISH\r\n';
-    ical += 'X-WR-CALNAME:Perun CRM - Úlohy\r\n';
+    ical += 'X-WR-CALNAME:Prpl CRM - Úlohy\r\n';
     ical += 'X-WR-TIMEZONE:Europe/Bratislava\r\n';
     ical += 'REFRESH-INTERVAL;VALUE=DURATION:PT15M\r\n'; // Suggest 15 min refresh
     ical += 'X-PUBLISHED-TTL:PT15M\r\n';

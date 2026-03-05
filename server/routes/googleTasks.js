@@ -239,14 +239,14 @@ router.get('/callback', async (req, res) => {
     oauth2Client.setCredentials(tokens);
     const tasksApi = google.tasks({ version: 'v1', auth: oauth2Client });
 
-    // Try to find or create "Perun CRM" task list
+    // Try to find or create "Prpl CRM" task list
     let taskListId = null;
     try {
       const taskListsResponse = await tasksApi.tasklists.list();
       const taskLists = taskListsResponse.data.items || [];
 
-      // Find existing Perun CRM list
-      const existingList = taskLists.find(list => list.title === 'Perun CRM');
+      // Find existing task list (check both new and old name)
+      const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
 
       if (existingList) {
         taskListId = existingList.id;
@@ -254,7 +254,7 @@ router.get('/callback', async (req, res) => {
       } else {
         // Create new task list
         const newList = await tasksApi.tasklists.insert({
-          resource: { title: 'Perun CRM' }
+          resource: { title: 'Prpl CRM' }
         });
         taskListId = newList.data.id;
         logger.info('[Google Tasks] Created new task list', { userId, taskListId });
@@ -531,7 +531,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
       // Task list doesn't exist, create a new one
       try {
         const newList = await tasksApi.tasklists.insert({
-          resource: { title: 'Perun CRM' }
+          resource: { title: 'Prpl CRM' }
         });
         user.googleTasks.taskListId = newList.data.id;
         user.googleTasks.syncedTaskIds = new Map(); // Reset synced tasks
@@ -1130,9 +1130,9 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
       logger.info('[Google Tasks] Task list already deleted or not found', { userId });
     }
 
-    // Step 2: Create a new "Perun CRM" task list
+    // Step 2: Create a new "Prpl CRM" task list
     const newList = await tasksApi.tasklists.insert({
-      resource: { title: 'Perun CRM' }
+      resource: { title: 'Prpl CRM' }
     });
     const newTaskListId = newList.data.id;
     logger.info('[Google Tasks] New task list created', { userId, newTaskListId });
