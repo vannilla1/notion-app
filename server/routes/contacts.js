@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
+const User = require('../models/User');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
 
@@ -140,6 +141,15 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
+
+    // Check trial limit
+    const user = await User.findById(req.user.id);
+    if (user?.subscription?.plan === 'trial') {
+      const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
+      if (contactCount >= 10) {
+        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 kontaktov. Pre neobmedzený prístup prejdite na Pro.' });
+      }
+    }
 
     if (email && !isValidEmail(email)) {
       return res.status(400).json({ message: 'Neplatný formát emailu' });
@@ -387,6 +397,15 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
 
     if (taskIndex === -1) {
       return res.status(404).json({ message: 'Task not found' });
+    }
+
+    // Check trial limit: max 10 subtasks per task
+    const user = await User.findById(req.user.id);
+    if (user?.subscription?.plan === 'trial') {
+      const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
+      if (countSubtasks(contact.tasks[taskIndex].subtasks) >= 10) {
+        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 podúloh na úlohu. Pre neobmedzený prístup prejdite na Pro.' });
+      }
     }
 
     // BUGFIX: Added priority field support for subtasks

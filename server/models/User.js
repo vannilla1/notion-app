@@ -39,6 +39,12 @@ const userSchema = new mongoose.Schema({
     enum: ['admin', 'manager', 'user'],
     default: 'user'
   },
+  // Subscription / plan
+  subscription: {
+    plan: { type: String, enum: ['trial', 'pro'], default: 'trial' },
+    trialEndsAt: { type: Date, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+    paidUntil: { type: Date, default: null }
+  },
   // Current active workspace
   currentWorkspaceId: {
     type: mongoose.Schema.Types.ObjectId,

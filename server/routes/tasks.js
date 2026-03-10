@@ -712,6 +712,10 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
       finalContactIds = [contactId];
     }
 
+    // Check trial limits
+    const user = await User.findById(req.user.id);
+    const isTrial = user?.subscription?.plan === 'trial';
+
     // If no contacts selected, create as global task
     if (finalContactIds.length === 0) {
       const task = new Task({
@@ -770,6 +774,11 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
     for (const cId of finalContactIds) {
       const contact = await Contact.findOne({ _id: cId, workspaceId: req.workspaceId });
       if (!contact) continue;
+
+      // Check trial limit: max 10 tasks per contact
+      if (isTrial && contact.tasks && contact.tasks.length >= 10) {
+        return res.status(403).json({ message: `Skúšobná verzia umožňuje max. 10 úloh na kontakt. Pre neobmedzený prístup prejdite na Pro.` });
+      }
 
       // Create new embedded task for this contact
       const newTask = {

@@ -219,13 +219,13 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Plný prístup ku všetkým funkciám
+                  Max. 10 kontaktov
                 </li>
                 <li>
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Neobmedzený počet kontaktov
+                  Max. 10 úloh a podúloh na kontakt
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -276,13 +276,13 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Všetko zo skúšobnej doby
+                  Neobmedzený počet kontaktov
                 </li>
                 <li>
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Neobmedzené používanie
+                  Neobmedzené úlohy a podúlohy
                 </li>
                 <li>
                   <span className="lp-pricing-check">
