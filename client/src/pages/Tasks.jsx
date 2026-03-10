@@ -1008,7 +1008,7 @@ function Tasks() {
           <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}>
             <div
               className="subtask-checkbox-styled"
-              onClick={() => !subtask.completed && toggleSubtask(task, subtask)}
+              onClick={() => (!subtask.completed || user?.role === 'admin') && toggleSubtask(task, subtask)}
               style={{
                 backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
               }}
@@ -1894,7 +1894,7 @@ function Tasks() {
                       <div className="task-main">
                         <div
                           className="task-checkbox-styled"
-                          onClick={() => !task.completed && toggleTask(task)}
+                          onClick={() => (!task.completed || user?.role === 'admin') && toggleTask(task)}
                           style={{
                             borderColor: getPriorityColor(task.priority),
                             backgroundColor: task.completed ? getPriorityColor(task.priority) : 'transparent'
