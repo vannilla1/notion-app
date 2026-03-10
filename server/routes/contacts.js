@@ -146,8 +146,8 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (user?.subscription?.plan === 'trial') {
       const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
-      if (contactCount >= 10) {
-        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 kontaktov. Pre neobmedzený prístup prejdite na Pro.' });
+      if (contactCount >= 5) {
+        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 5 kontaktov. Pre neobmedzený prístup prejdite na Pro.' });
       }
     }
 
