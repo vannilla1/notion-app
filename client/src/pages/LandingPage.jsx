@@ -205,12 +205,12 @@ export default function LandingPage() {
             {/* Free Trial */}
             <div className="lp-pricing-card">
               <h3 className="lp-pricing-name">Začiatok</h3>
-              <p className="lp-pricing-desc">Vyskúšajte všetko zadarmo</p>
+              <p className="lp-pricing-desc">Vyskúšajte CRM zadarmo na 7 dní</p>
 
               <div className="lp-pricing-price">
                 <span className="lp-pricing-amount">0 €</span>
               </div>
-              <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>7 dní plný prístup</p>
+              <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>Bez platobnej karty</p>
 
               <div className="lp-pricing-divider" />
 
