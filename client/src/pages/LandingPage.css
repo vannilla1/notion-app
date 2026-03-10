@@ -784,6 +784,16 @@
   font-size: 12px;
 }
 
+.lp-footer-credit a {
+  color: #94a3b8;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.lp-footer-credit a:hover {
+  color: white;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 1023px) {
   .lp-features-grid {

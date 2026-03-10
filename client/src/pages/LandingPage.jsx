@@ -383,7 +383,7 @@ export default function LandingPage() {
             <Link to="/privacy">Zásady ochrany osobných údajov</Link>
           </div>
         </div>
-        <p className="lp-footer-credit">Created by vannilla</p>
+        <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vannilla</a></p>
       </footer>
     </div>
   );
