@@ -777,6 +777,13 @@
   color: white;
 }
 
+.lp-footer-credit {
+  margin-top: 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 1023px) {
   .lp-features-grid {
