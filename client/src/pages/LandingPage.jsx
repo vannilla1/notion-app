@@ -268,6 +268,7 @@ export default function LandingPage() {
               {!isYearly && (
                 <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo 99 € ročne</p>
               )}
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 2 používateľov. Každý ďalší člen +{isYearly ? '99 €/rok' : '9,99 €/mes'}.</p>
 
               <div className="lp-pricing-divider" />
 
@@ -283,6 +284,12 @@ export default function LandingPage() {
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
                   Neobmedzené úlohy a podúlohy
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  2 používatelia v cene, ďalší za poplatok
                 </li>
                 <li>
                   <span className="lp-pricing-check">
