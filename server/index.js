@@ -36,9 +36,9 @@ const sentry = initSentry(app);
 
 const server = http.createServer(app);
 
-// CORS configuration - allow all origins
+// CORS configuration - restrict to frontend origin
 const corsOptions = {
-  origin: '*',
+  origin: process.env.CORS_ORIGIN || 'https://perun-crm.onrender.com',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: false,

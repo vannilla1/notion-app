@@ -249,9 +249,10 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Get all tasks with due dates
-    const globalTasks = await Task.find({});
-    const contacts = await Contact.find({});
+    // Get tasks with due dates for user's workspace
+    const workspaceId = user.currentWorkspaceId;
+    const globalTasks = workspaceId ? await Task.find({ workspaceId }) : [];
+    const contacts = workspaceId ? await Contact.find({ workspaceId }) : [];
 
     const tasksToSync = [];
 

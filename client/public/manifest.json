@@ -4,7 +4,7 @@
   "description": "CRM a správa úloh",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a2e",
+  "background_color": "#f8fafc",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "icons": [
