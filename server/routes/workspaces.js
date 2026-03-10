@@ -162,6 +162,15 @@ router.post('/join', authenticateToken, async (req, res) => {
       });
     }
 
+    // Check trial limit: max 2 members per workspace
+    const user = await User.findById(req.user.id);
+    if (user?.subscription?.plan === 'trial') {
+      const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+      if (memberCount >= 2) {
+        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 2 používateľov v tíme. Pre neobmedzený prístup prejdite na Pro.' });
+      }
+    }
+
     // Create membership
     const membership = new WorkspaceMember({
       workspaceId: workspace._id,
