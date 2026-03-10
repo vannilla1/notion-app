@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 function Login() {
   const { login, register } = useAuth();
-  const [isRegister, setIsRegister] = useState(false);
+  const [searchParams] = useSearchParams();
+  const [isRegister, setIsRegister] = useState(searchParams.get('register') === 'true');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');

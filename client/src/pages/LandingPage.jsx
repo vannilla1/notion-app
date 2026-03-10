@@ -81,7 +81,7 @@ export default function LandingPage() {
             Jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
-            <Link to="/login" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</Link>
+            <Link to="/login?register=true" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</Link>
             <Link to="/login" className="lp-btn lp-btn-outline">Prihlásiť sa</Link>
           </div>
         </div>
@@ -247,7 +247,7 @@ export default function LandingPage() {
                 </li>
               </ul>
 
-              <Link to="/login" className="lp-btn lp-btn-secondary lp-pricing-cta">
+              <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
                 Začať skúšobnú dobu
               </Link>
             </div>
@@ -304,7 +304,7 @@ export default function LandingPage() {
                 </li>
               </ul>
 
-              <Link to="/login" className="lp-btn lp-btn-primary lp-pricing-cta">
+              <Link to="/login?register=true" className="lp-btn lp-btn-primary lp-pricing-cta">
                 Začať s Pro
               </Link>
             </div>
