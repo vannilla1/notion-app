@@ -892,6 +892,21 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const task = contact.tasks[taskIndex];
             // Save original assignedTo before update
             const originalAssignedTo = task.assignedTo || [];
+            // Auto-complete all subtasks when main task is completed
+            const markAllSubtasksCompleted = (subtasks) => {
+              if (!subtasks) return subtasks;
+              return subtasks.map(s => ({
+                ...s,
+                completed: true,
+                subtasks: markAllSubtasksCompleted(s.subtasks)
+              }));
+            };
+
+            let updatedSubtasks = req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks;
+            if (completed === true) {
+              updatedSubtasks = markAllSubtasksCompleted(updatedSubtasks);
+            }
+
             contact.tasks[taskIndex] = {
               ...task,
               id: task.id,
@@ -901,7 +916,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               priority: priority !== undefined ? priority : task.priority,
               completed: completed !== undefined ? completed : task.completed,
               assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
-              subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
+              subtasks: updatedSubtasks,
               createdAt: task.createdAt,
               modifiedAt: new Date().toISOString()
             };
@@ -1009,6 +1024,19 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
         task.subtasks = req.body.subtasks;
+      }
+
+      // Auto-complete all subtasks when main task is completed
+      if (completed === true && task.subtasks && task.subtasks.length > 0) {
+        const markAllSubtasksCompleted = (subtasks) => {
+          if (!subtasks) return subtasks;
+          return subtasks.map(s => ({
+            ...s.toObject ? s.toObject() : s,
+            completed: true,
+            subtasks: markAllSubtasksCompleted(s.subtasks)
+          }));
+        };
+        task.subtasks = markAllSubtasksCompleted(task.subtasks);
       }
 
       await task.save();
