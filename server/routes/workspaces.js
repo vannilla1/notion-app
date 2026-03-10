@@ -42,6 +42,11 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
   try {
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
+    const owner = await User.findById(req.workspace.ownerId);
+    const paidSeats = req.workspace.paidSeats || 0;
+    const ownerIsPro = owner?.subscription?.plan === 'pro';
+    const maxMembers = ownerIsPro ? 2 + paidSeats : 2;
+
     res.json({
       id: req.workspace._id,
       name: req.workspace.name,
@@ -53,6 +58,8 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
       settings: req.workspace.settings,
       role: req.workspaceMember.role,
       memberCount,
+      paidSeats,
+      maxMembers,
       createdAt: req.workspace.createdAt
     });
   } catch (error) {
@@ -162,12 +169,24 @@ router.post('/join', authenticateToken, async (req, res) => {
       });
     }
 
-    // Check trial limit: max 2 members per workspace
-    const user = await User.findById(req.user.id);
-    if (user?.subscription?.plan === 'trial') {
-      const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+    // Check workspace member limits based on owner's plan and paid seats
+    const joiningUser = await User.findById(req.user.id);
+    const owner = await User.findById(workspace.ownerId);
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+
+    if (owner?.subscription?.plan === 'trial') {
+      // Trial workspace: max 2 members
       if (memberCount >= 2) {
         return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 2 používateľov v tíme. Pre neobmedzený prístup prejdite na Pro.' });
+      }
+    } else if (owner?.subscription?.plan === 'pro') {
+      // Pro workspace: 2 included + paidSeats extra
+      const maxSeats = 2 + (workspace.paidSeats || 0);
+      if (memberCount >= maxSeats) {
+        // Workspace is full - check if joining user has their own Pro plan
+        if (joiningUser?.subscription?.plan !== 'pro') {
+          return res.status(403).json({ message: 'Pracovné prostredie je plné. Požiadajte vlastníka o pridanie ďalšieho miesta alebo si aktivujte Pro plán.' });
+        }
       }
     }
 
@@ -275,6 +294,31 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
     });
   } catch (error) {
     logger.error('Update workspace error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Update paid seats (admin only)
+router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (req, res) => {
+  try {
+    const { paidSeats } = req.body;
+
+    if (paidSeats === undefined || typeof paidSeats !== 'number' || paidSeats < 0) {
+      return res.status(400).json({ message: 'Počet miest musí byť číslo väčšie alebo rovné 0' });
+    }
+
+    await Workspace.findByIdAndUpdate(req.workspace._id, { paidSeats: Math.floor(paidSeats) });
+
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
+
+    res.json({
+      paidSeats: Math.floor(paidSeats),
+      includedSeats: 2,
+      maxMembers: 2 + Math.floor(paidSeats),
+      memberCount
+    });
+  } catch (error) {
+    logger.error('Update seats error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

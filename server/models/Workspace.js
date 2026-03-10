@@ -40,6 +40,11 @@ const workspaceSchema = new mongoose.Schema({
     allowMemberInvites: { type: Boolean, default: false }, // Can members invite others?
     defaultMemberRole: { type: String, enum: ['member', 'admin'], default: 'member' }
   },
+  // Extra paid seats beyond the 2 included in Pro plan
+  paidSeats: {
+    type: Number,
+    default: 0
+  },
   // Workspace color/branding
   color: {
     type: String,
