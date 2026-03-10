@@ -36,11 +36,6 @@ function Login() {
     }
   };
 
-  const fillDemoUser = (userNum) => {
-    setEmail(`user${userNum}@example.com`);
-    setPassword('password123');
-  };
-
   return (
     <div className="login-container">
       <div className="login-card">
@@ -131,30 +126,6 @@ function Login() {
               </a>
             </>
           )}
-        </div>
-
-        <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--border-color)' }}>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', textAlign: 'center' }}>
-            Demo účty (heslo: password123)
-          </p>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => fillDemoUser(1)}
-              style={{ flex: 1 }}
-            >
-              Užívateľ 1
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => fillDemoUser(2)}
-              style={{ flex: 1 }}
-            >
-              Užívateľ 2
-            </button>
-          </div>
         </div>
 
         <a href="/privacy" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
