@@ -190,13 +190,14 @@ function AppContent() {
     <>
       {isAuthenticated && <NotificationToast />}
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate to="/" /> : <Login />}
+          element={isAuthenticated ? <Navigate to="/app" /> : <Login />}
         />
         <Route
-          path="/"
-          element={isAuthenticated ? <Dashboard /> : <LandingPage />}
+          path="/app"
+          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
         />
         <Route
           path="/crm"
