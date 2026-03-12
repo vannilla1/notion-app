@@ -11,6 +11,7 @@ const WorkspaceSwitcher = () => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [saving, setSaving] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [colorPickerFor, setColorPickerFor] = useState(null);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
@@ -71,6 +72,20 @@ const WorkspaceSwitcher = () => {
   };
 
   const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin';
+
+  const colorOptions = [
+    '#6366f1', '#3B82F6', '#10B981', '#F59E0B',
+    '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'
+  ];
+
+  const handleColorChange = async (color) => {
+    try {
+      await updateWorkspace({ color });
+      setColorPickerFor(null);
+    } catch (err) {
+      console.error('Error updating workspace color:', err);
+    }
+  };
 
   const startCreating = () => {
     setNewWorkspaceName('');
@@ -207,28 +222,49 @@ const WorkspaceSwitcher = () => {
                 </button>
               </div>
             ) : (
-              <div className="workspace-dropdown-item active">
-                <span
-                  className="workspace-color"
-                  style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
-                />
-                <span className="workspace-info">
-                  <span className="workspace-item-name">{currentWorkspace.name}</span>
-                  <span className="workspace-item-role">
-                    {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+              <>
+                <div className="workspace-dropdown-item active">
+                  <span
+                    className={`workspace-color ${canEdit ? 'clickable' : ''}`}
+                    style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
+                    onClick={(e) => {
+                      if (canEdit) {
+                        e.stopPropagation();
+                        setColorPickerFor(colorPickerFor === 'current' ? null : 'current');
+                      }
+                    }}
+                    title={canEdit ? 'Zmeniť farbu' : undefined}
+                  />
+                  <span className="workspace-info">
+                    <span className="workspace-item-name">{currentWorkspace.name}</span>
+                    <span className="workspace-item-role">
+                      {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+                    </span>
                   </span>
-                </span>
-                {canEdit && (
-                  <button
-                    className="workspace-edit-icon"
-                    onClick={startEditing}
-                    title="Upraviť názov"
-                  >
-                    ✏️
-                  </button>
+                  {canEdit && (
+                    <button
+                      className="workspace-edit-icon"
+                      onClick={startEditing}
+                      title="Upraviť názov"
+                    >
+                      ✏️
+                    </button>
+                  )}
+                  <span className="workspace-check">✓</span>
+                </div>
+                {colorPickerFor === 'current' && canEdit && (
+                  <div className="workspace-color-picker">
+                    {colorOptions.map(color => (
+                      <span
+                        key={color}
+                        className={`workspace-color-option ${(currentWorkspace.color || '#6366f1') === color ? 'selected' : ''}`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => handleColorChange(color)}
+                      />
+                    ))}
+                  </div>
                 )}
-                <span className="workspace-check">✓</span>
-              </div>
+              </>
             )}
           </div>
 
