@@ -8,6 +8,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 
 // Help tips for Tasks page
@@ -1048,7 +1049,7 @@ function Tasks() {
     const dndKey = sortedSubtasks.map(s => s.id).join(',');
 
     return (
-      <DndContext key={dndKey} sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, sortedSubtasks, e)}>
+      <DndContext key={dndKey} sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} autoScroll={false} onDragEnd={(e) => handleSubtaskDragEnd(task, sortedSubtasks, e)}>
         <SortableContext items={sortedSubtasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
           {sortedSubtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
@@ -2045,7 +2046,7 @@ function Tasks() {
                   <p>Vytvorte novú úlohu kliknutím na tlačidlo vyššie</p>
                 </div>
               ) : (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskDragEnd}>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} autoScroll={false} onDragEnd={handleTaskDragEnd}>
                   <SortableContext items={sortedFilteredTasks.map(t => t.id || t._id)} strategy={verticalListSortingStrategy}>
                 <div className="tasks-list">
                   {sortedFilteredTasks.map(task => {
