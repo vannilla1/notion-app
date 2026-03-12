@@ -261,8 +261,19 @@ router.get('/avatar/:userId', async (req, res) => {
 
     const user = await User.findById(req.params.userId);
 
-    if (!user || !user.avatarData) {
-      return res.status(404).json({ message: 'Avatar nenájdený' });
+    if (!user) {
+      return res.status(404).json({ message: 'Avatar nenájdený', debug: 'user_not_found' });
+    }
+
+    if (!user.avatarData) {
+      return res.status(404).json({
+        message: 'Avatar nenájdený',
+        debug: 'no_avatar_data',
+        hasAvatar: !!user.avatar,
+        avatarField: user.avatar,
+        hasAvatarData: !!user.avatarData,
+        hasMimetype: !!user.avatarMimetype
+      });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
