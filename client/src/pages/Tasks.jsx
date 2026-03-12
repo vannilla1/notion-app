@@ -1044,9 +1044,11 @@ function Tasks() {
 
     // Sort subtasks by order
     const sortedSubtasks = [...subtasks].sort((a, b) => (a.order || 0) - (b.order || 0));
+    // Key changes when order changes, forcing DndContext remount to prevent visual snap-back
+    const dndKey = sortedSubtasks.map(s => s.id).join(',');
 
     return (
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, sortedSubtasks, e)}>
+      <DndContext key={dndKey} sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, sortedSubtasks, e)}>
         <SortableContext items={sortedSubtasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
           {sortedSubtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
