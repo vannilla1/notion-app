@@ -1046,7 +1046,7 @@ function Tasks() {
     const sortedSubtasks = [...subtasks].sort((a, b) => (a.order || 0) - (b.order || 0));
 
     return (
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, subtasks, e)}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, sortedSubtasks, e)}>
         <SortableContext items={sortedSubtasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
           {sortedSubtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
@@ -1572,18 +1572,23 @@ function Tasks() {
 
     const reordered = arrayMove(parentSubtasks, oldIndex, newIndex);
 
-    // Optimistic update - rebuild subtasks array with new order
-    const updateSubtasksOrder = (subtasks, parentId) => {
+    // Build order map from new positions
+    const orderMap = {};
+    reordered.forEach((s, idx) => { orderMap[s.id] = idx; });
+
+    // Optimistic update - apply new order values recursively
+    const applyOrderToSubtasks = (subtasks) => {
       return subtasks.map(s => {
-        const newPos = reordered.findIndex(r => r.id === s.id);
-        if (newPos !== -1) return { ...s, order: newPos };
+        if (orderMap[s.id] !== undefined) {
+          return { ...s, order: orderMap[s.id] };
+        }
         return s;
       });
     };
 
     setTasks(prev => prev.map(t => {
       if ((t.id || t._id) === (task.id || task._id)) {
-        return { ...t, subtasks: updateSubtasksOrder(t.subtasks) };
+        return { ...t, subtasks: applyOrderToSubtasks(t.subtasks) };
       }
       return t;
     }));
