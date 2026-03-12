@@ -237,20 +237,33 @@ router.post('/avatar', authenticateToken, (req, res) => {
       user.avatar = `avatar-${userId}`;
       user.avatarData = base64Data;
       user.avatarMimetype = req.file.mimetype;
-      await user.save();
 
-      // Verify the data was actually saved
-      const verify = await User.findById(userId).select('avatarData avatarMimetype');
+      const saveResult = await user.save();
+
+      // Verify the data was actually saved by re-reading from DB
+      const verify = await User.findById(userId).select('avatar avatarData avatarMimetype');
+      const diagnostics = {
+        fileSize: req.file.size,
+        base64Length: base64Data.length,
+        mimetype: req.file.mimetype,
+        saveHasAvatarData: !!saveResult.avatarData,
+        saveAvatarDataLength: saveResult.avatarData ? saveResult.avatarData.length : 0,
+        verifyHasAvatarData: verify ? !!verify.avatarData : false,
+        verifyAvatarDataLength: verify?.avatarData ? verify.avatarData.length : 0,
+        verifyHasMimetype: verify ? !!verify.avatarMimetype : false
+      };
+
       if (!verify || !verify.avatarData) {
-        logger.error('Avatar save verification failed', { userId });
-        return res.status(500).json({ message: 'Avatar sa nepodarilo uložiť' });
+        logger.error('Avatar save verification failed', { userId, diagnostics });
+        return res.status(500).json({ message: 'Avatar sa nepodarilo uložiť', diagnostics });
       }
 
-      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size, base64Length: base64Data.length });
+      logger.info('Avatar uploaded', { userId, diagnostics });
 
       res.json({
         message: 'Avatar bol úspešne nahraný',
-        avatar: user.avatar
+        avatar: user.avatar,
+        diagnostics
       });
     } catch (error) {
       logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
