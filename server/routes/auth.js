@@ -299,6 +299,56 @@ router.get('/avatar/:userId', async (req, res) => {
   }
 });
 
+// Debug: test avatar save (TEMPORARY - remove after fixing)
+router.get('/avatar-test/:userId', async (req, res) => {
+  try {
+    if (!/^[0-9a-fA-F]{24}$/.test(req.params.userId)) {
+      return res.status(400).json({ message: 'Neplatné ID' });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.json({ step: 'findById', result: 'user_not_found' });
+    }
+
+    // Check current state
+    const before = {
+      hasAvatar: !!user.avatar,
+      avatarValue: user.avatar,
+      hasAvatarData: !!user.avatarData,
+      avatarDataLength: user.avatarData ? user.avatarData.length : 0,
+      hasMimetype: !!user.avatarMimetype,
+      mimetypeValue: user.avatarMimetype
+    };
+
+    // Try writing a test value
+    user.avatarData = 'dGVzdA=='; // "test" in base64
+    user.avatarMimetype = 'image/png';
+    user.avatar = 'test-avatar';
+    await user.save();
+
+    // Re-read from DB
+    const after = await User.findById(req.params.userId);
+    const afterState = {
+      hasAvatarData: !!after.avatarData,
+      avatarDataLength: after.avatarData ? after.avatarData.length : 0,
+      avatarDataValue: after.avatarData,
+      mimetypeValue: after.avatarMimetype,
+      avatarValue: after.avatar
+    };
+
+    // Clean up test data
+    after.avatarData = null;
+    after.avatarMimetype = null;
+    after.avatar = null;
+    await after.save();
+
+    res.json({ before, afterSave: afterState, conclusion: afterState.hasAvatarData ? 'SAVE_WORKS' : 'SAVE_BROKEN' });
+  } catch (error) {
+    res.json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Delete avatar
 router.delete('/avatar', authenticateToken, async (req, res) => {
   try {
