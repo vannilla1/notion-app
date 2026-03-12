@@ -259,7 +259,7 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.status(400).json({ message: 'Neplatné ID' });
     }
 
-    const user = await User.findById(req.params.userId).select('avatarData avatarMimetype');
+    const user = await User.findById(req.params.userId);
 
     if (!user || !user.avatarData) {
       return res.status(404).json({ message: 'Avatar nenájdený' });
