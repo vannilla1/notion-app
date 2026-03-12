@@ -1554,7 +1554,7 @@ function Tasks() {
         source: t.source || 'global',
         contactId: t.contactId || null
       }));
-      await api.put('/tasks/reorder', { tasks: reorderData });
+      await api.put('/api/tasks/reorder', { tasks: reorderData });
     } catch (err) {
       console.error('Reorder failed:', err);
       fetchTasks(); // Rollback
@@ -1596,7 +1596,7 @@ function Tasks() {
     // Save to server
     try {
       const subtaskOrders = reordered.map((s, idx) => ({ id: s.id, order: idx }));
-      await api.put('/tasks/reorder-subtasks', {
+      await api.put('/api/tasks/reorder-subtasks', {
         taskId: task.id || task._id,
         source: task.source || 'global',
         contactId: task.contactId || null,
