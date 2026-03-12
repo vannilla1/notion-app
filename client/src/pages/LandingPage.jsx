@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import './LandingPage.css';
 
 export default function LandingPage() {
-  const [isYearly, setIsYearly] = useState(true);
+  const [isYearly, setIsYearly] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
