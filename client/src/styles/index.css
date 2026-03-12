@@ -2700,6 +2700,57 @@ body {
   }
 }
 
+.mobile-workspace-list {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-workspace-list {
+    display: flex;
+    flex-direction: column;
+    background: rgba(99, 102, 241, 0.04);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .mobile-workspace-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 10px 32px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .mobile-workspace-item:hover,
+  .mobile-workspace-item:active {
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  .mobile-workspace-add {
+    padding-left: 28px;
+  }
+
+  .mobile-workspace-create-form {
+    padding: 8px 16px 8px 32px;
+  }
+
+  .mobile-workspace-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .mobile-workspace-input:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  }
+}
+
 .user-menu-item {
   display: flex;
   align-items: center;

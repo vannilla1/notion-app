@@ -50,8 +50,11 @@ const translateErrorMessage = (message) => {
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
+  const [showMobileWorkspaces, setShowMobileWorkspaces] = useState(false);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [showProfile, setShowProfile] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
@@ -791,18 +794,84 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               <span className="dropdown-email">{user?.email}</span>
             </div>
           </div>
-          {/* Mobile-only workspace info */}
+          {/* Mobile-only workspace switcher */}
           {currentWorkspace && (
-            <div className="user-menu-workspace-mobile">
-              <span
-                className="workspace-color-dot"
-                style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
-              />
-              <span className="workspace-name-mobile">{currentWorkspace.name}</span>
-              <span className="workspace-role-mobile">
-                {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
-              </span>
-            </div>
+            <>
+              <div
+                className="user-menu-workspace-mobile"
+                onClick={() => setShowMobileWorkspaces(!showMobileWorkspaces)}
+                style={{ cursor: 'pointer' }}
+              >
+                <span
+                  className="workspace-color-dot"
+                  style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
+                />
+                <span className="workspace-name-mobile">{currentWorkspace.name}</span>
+                <span className="workspace-role-mobile">
+                  {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+                </span>
+                <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#94a3b8' }}>
+                  {showMobileWorkspaces ? '▲' : '▼'}
+                </span>
+              </div>
+              {showMobileWorkspaces && (
+                <div className="mobile-workspace-list">
+                  {workspaces.filter(w => w._id !== currentWorkspace._id).map(ws => (
+                    <div
+                      key={ws._id}
+                      className="mobile-workspace-item"
+                      onClick={async () => {
+                        await switchWorkspace(ws._id);
+                        setShowMobileWorkspaces(false);
+                        setIsOpen(false);
+                        window.location.reload();
+                      }}
+                    >
+                      <span
+                        className="workspace-color-dot"
+                        style={{ backgroundColor: ws.color || '#6366f1' }}
+                      />
+                      <span className="workspace-name-mobile">{ws.name}</span>
+                      <span className="workspace-role-mobile">
+                        {ws.role === 'owner' ? 'Vlastník' : ws.role === 'admin' ? 'Admin' : 'Člen'}
+                      </span>
+                    </div>
+                  ))}
+                  {creatingWorkspace ? (
+                    <div className="mobile-workspace-create-form">
+                      <input
+                        type="text"
+                        value={newWorkspaceName}
+                        onChange={(e) => setNewWorkspaceName(e.target.value)}
+                        placeholder="Názov prostredia..."
+                        className="mobile-workspace-input"
+                        autoFocus
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && newWorkspaceName.trim()) {
+                            await createWorkspace(newWorkspaceName.trim());
+                            setNewWorkspaceName('');
+                            setCreatingWorkspace(false);
+                            window.location.reload();
+                          }
+                          if (e.key === 'Escape') {
+                            setCreatingWorkspace(false);
+                            setNewWorkspaceName('');
+                          }
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="mobile-workspace-item mobile-workspace-add"
+                      onClick={() => setCreatingWorkspace(true)}
+                    >
+                      <span style={{ fontSize: '16px', color: '#6366f1' }}>+</span>
+                      <span style={{ color: '#6366f1' }}>Nové prostredie</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
           <div className="user-menu-divider"></div>
           <button className="user-menu-item" onClick={handleOpenProfile}>
