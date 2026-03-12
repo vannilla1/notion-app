@@ -252,10 +252,14 @@ router.post('/avatar', authenticateToken, (req, res) => {
   });
 });
 
-// Get avatar image
-router.get('/avatar/:userId', authenticateToken, async (req, res) => {
+// Get avatar image (no auth - loaded via <img src>)
+router.get('/avatar/:userId', async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId);
+    if (!/^[0-9a-fA-F]{24}$/.test(req.params.userId)) {
+      return res.status(400).json({ message: 'Neplatné ID' });
+    }
+
+    const user = await User.findById(req.params.userId).select('avatarData avatarMimetype');
 
     if (!user || !user.avatarData) {
       return res.status(404).json({ message: 'Avatar nenájdený' });
