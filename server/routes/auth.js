@@ -229,21 +229,28 @@ router.post('/avatar', authenticateToken, (req, res) => {
       // Convert to Base64
       const base64Data = req.file.buffer.toString('base64');
 
-      const updatedUser = await User.findByIdAndUpdate(
-        userId,
-        {
-          avatar: `avatar-${userId}`,  // Just an identifier
-          avatarData: base64Data,
-          avatarMimetype: req.file.mimetype
-        },
-        { new: true }
-      );
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: 'Používateľ nenájdený' });
+      }
 
-      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
+      user.avatar = `avatar-${userId}`;
+      user.avatarData = base64Data;
+      user.avatarMimetype = req.file.mimetype;
+      await user.save();
+
+      // Verify the data was actually saved
+      const verify = await User.findById(userId).select('avatarData avatarMimetype');
+      if (!verify || !verify.avatarData) {
+        logger.error('Avatar save verification failed', { userId });
+        return res.status(500).json({ message: 'Avatar sa nepodarilo uložiť' });
+      }
+
+      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size, base64Length: base64Data.length });
 
       res.json({
         message: 'Avatar bol úspešne nahraný',
-        avatar: updatedUser.avatar
+        avatar: user.avatar
       });
     } catch (error) {
       logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
@@ -262,18 +269,11 @@ router.get('/avatar/:userId', async (req, res) => {
     const user = await User.findById(req.params.userId);
 
     if (!user) {
-      return res.status(404).json({ message: 'Avatar nenájdený', debug: 'user_not_found' });
+      return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     if (!user.avatarData) {
-      return res.status(404).json({
-        message: 'Avatar nenájdený',
-        debug: 'no_avatar_data',
-        hasAvatar: !!user.avatar,
-        avatarField: user.avatar,
-        hasAvatarData: !!user.avatarData,
-        hasMimetype: !!user.avatarMimetype
-      });
+      return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
