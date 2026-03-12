@@ -54,7 +54,8 @@ const io = new Server(server, {
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false, // CSP handled by frontend
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow frontend to load images from API
 }));
 
 // Enable pre-flight across-the-board
