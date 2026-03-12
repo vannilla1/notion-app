@@ -210,6 +210,39 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Create new workspace */
+.workspace-create-section {
+  border-top: 1px solid var(--border-color);
+}
+
+.workspace-create-btn {
+  color: var(--accent-color) !important;
+  font-weight: 500;
+}
+
+.workspace-create-btn:hover {
+  background: var(--accent-light) !important;
+}
+
+.workspace-create-icon {
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.workspace-create-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
 /* Tablet styles */
 @media (max-width: 1024px) {
   .workspace-name {
