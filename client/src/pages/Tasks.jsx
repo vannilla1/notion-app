@@ -1540,13 +1540,16 @@ function Tasks() {
 
     const reordered = arrayMove(sortedFilteredTasks, oldIndex, newIndex);
 
-    // Optimistic update
-    const updatedTasks = tasks.map(t => {
-      const newPos = reordered.findIndex(r => (r.id || r._id) === (t.id || t._id));
-      if (newPos !== -1) return { ...t, order: newPos };
+    // Build order map
+    const orderMap = {};
+    reordered.forEach((t, idx) => { orderMap[t.id || t._id] = idx; });
+
+    // Optimistic update using functional form
+    setTasks(prev => prev.map(t => {
+      const tid = t.id || t._id;
+      if (orderMap[tid] !== undefined) return { ...t, order: orderMap[tid] };
       return t;
-    });
-    setTasks(updatedTasks);
+    }));
 
     // Save to server
     try {
@@ -1559,9 +1562,8 @@ function Tasks() {
       await api.put('/api/tasks/reorder', { tasks: reorderData });
     } catch (err) {
       console.error('Reorder failed:', err);
-      fetchTasks(); // Rollback
     }
-  }, [sortedFilteredTasks, tasks]);
+  }, [sortedFilteredTasks]);
 
   // Handle subtask drag end
   const handleSubtaskDragEnd = useCallback(async (task, parentSubtasks, event) => {
@@ -1578,37 +1580,43 @@ function Tasks() {
     const orderMap = {};
     reordered.forEach((s, idx) => { orderMap[s.id] = idx; });
 
-    // Optimistic update - apply new order values recursively
-    const applyOrderToSubtasks = (subtasks) => {
+    // Deep update subtask order in task's subtask tree
+    const deepUpdateOrder = (subtasks) => {
       return subtasks.map(s => {
-        if (orderMap[s.id] !== undefined) {
-          return { ...s, order: orderMap[s.id] };
+        const newOrder = orderMap[s.id];
+        const updated = newOrder !== undefined ? { ...s, order: newOrder } : { ...s };
+        if (updated.subtasks && updated.subtasks.length > 0) {
+          updated.subtasks = deepUpdateOrder(updated.subtasks);
         }
-        return s;
+        return updated;
       });
     };
 
-    setTasks(prev => prev.map(t => {
-      if ((t.id || t._id) === (task.id || task._id)) {
-        return { ...t, subtasks: applyOrderToSubtasks(t.subtasks) };
-      }
-      return t;
-    }));
+    // Synchronous state update - must happen before DnD animation completes
+    const taskId = task.id || task._id;
+    setTasks(prev => {
+      const newTasks = prev.map(t => {
+        if ((t.id || t._id) === taskId) {
+          return { ...t, subtasks: deepUpdateOrder(t.subtasks) };
+        }
+        return t;
+      });
+      return newTasks;
+    });
 
-    // Save to server
+    // Save to server (fire and forget, don't rollback on error to avoid visual glitch)
     try {
       const subtaskOrders = reordered.map((s, idx) => ({ id: s.id, order: idx }));
       await api.put('/api/tasks/reorder-subtasks', {
-        taskId: task.id || task._id,
+        taskId: taskId,
         source: task.source || 'global',
         contactId: task.contactId || null,
         subtasks: subtaskOrders
       });
     } catch (err) {
       console.error('Subtask reorder failed:', err);
-      fetchTasks();
     }
-  }, [tasks]);
+  }, []);
 
   const completedCount = tasks.filter(t => t.completed).length;
   const activeCount = tasks.filter(t => !t.completed).length;
