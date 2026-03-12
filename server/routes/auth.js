@@ -238,32 +238,13 @@ router.post('/avatar', authenticateToken, (req, res) => {
       user.avatarData = base64Data;
       user.avatarMimetype = req.file.mimetype;
 
-      const saveResult = await user.save();
+      await user.save();
 
-      // Verify the data was actually saved by re-reading from DB
-      const verify = await User.findById(userId).select('avatar avatarData avatarMimetype');
-      const diagnostics = {
-        fileSize: req.file.size,
-        base64Length: base64Data.length,
-        mimetype: req.file.mimetype,
-        saveHasAvatarData: !!saveResult.avatarData,
-        saveAvatarDataLength: saveResult.avatarData ? saveResult.avatarData.length : 0,
-        verifyHasAvatarData: verify ? !!verify.avatarData : false,
-        verifyAvatarDataLength: verify?.avatarData ? verify.avatarData.length : 0,
-        verifyHasMimetype: verify ? !!verify.avatarMimetype : false
-      };
-
-      if (!verify || !verify.avatarData) {
-        logger.error('Avatar save verification failed', { userId, diagnostics });
-        return res.status(500).json({ message: 'Avatar sa nepodarilo uložiť', diagnostics });
-      }
-
-      logger.info('Avatar uploaded', { userId, diagnostics });
+      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
 
       res.json({
         message: 'Avatar bol úspešne nahraný',
-        avatar: user.avatar,
-        diagnostics
+        avatar: user.avatar
       });
     } catch (error) {
       logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
@@ -281,71 +262,18 @@ router.get('/avatar/:userId', async (req, res) => {
 
     const user = await User.findById(req.params.userId);
 
-    if (!user) {
-      return res.status(404).json({ message: 'Avatar nenájdený' });
-    }
-
-    if (!user.avatarData) {
+    if (!user || !user.avatarData) {
+      res.set('Cache-Control', 'no-store');
       return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
     res.set('Content-Type', user.avatarMimetype || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=86400');  // Cache for 24 hours
+    res.set('Cache-Control', 'public, max-age=3600');  // Cache for 1 hour
     res.send(buffer);
   } catch (error) {
     logger.error('Avatar get error', { error: error.message, userId: req.params.userId });
     res.status(500).json({ message: 'Chyba pri načítaní avatara' });
-  }
-});
-
-// Debug: test avatar save (TEMPORARY - remove after fixing)
-router.get('/avatar-test/:userId', async (req, res) => {
-  try {
-    if (!/^[0-9a-fA-F]{24}$/.test(req.params.userId)) {
-      return res.status(400).json({ message: 'Neplatné ID' });
-    }
-
-    const user = await User.findById(req.params.userId);
-    if (!user) {
-      return res.json({ step: 'findById', result: 'user_not_found' });
-    }
-
-    // Check current state
-    const before = {
-      hasAvatar: !!user.avatar,
-      avatarValue: user.avatar,
-      hasAvatarData: !!user.avatarData,
-      avatarDataLength: user.avatarData ? user.avatarData.length : 0,
-      hasMimetype: !!user.avatarMimetype,
-      mimetypeValue: user.avatarMimetype
-    };
-
-    // Try writing a test value
-    user.avatarData = 'dGVzdA=='; // "test" in base64
-    user.avatarMimetype = 'image/png';
-    user.avatar = 'test-avatar';
-    await user.save();
-
-    // Re-read from DB
-    const after = await User.findById(req.params.userId);
-    const afterState = {
-      hasAvatarData: !!after.avatarData,
-      avatarDataLength: after.avatarData ? after.avatarData.length : 0,
-      avatarDataValue: after.avatarData,
-      mimetypeValue: after.avatarMimetype,
-      avatarValue: after.avatar
-    };
-
-    // Clean up test data
-    after.avatarData = null;
-    after.avatarMimetype = null;
-    after.avatar = null;
-    await after.save();
-
-    res.json({ before, afterSave: afterState, conclusion: afterState.hasAvatarData ? 'SAVE_WORKS' : 'SAVE_BROKEN' });
-  } catch (error) {
-    res.json({ error: error.message, stack: error.stack });
   }
 });
 
