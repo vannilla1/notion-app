@@ -816,12 +816,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               </div>
               {showMobileWorkspaces && (
                 <div className="mobile-workspace-list">
-                  {workspaces.filter(w => w._id !== currentWorkspace._id).map(ws => (
+                  {workspaces.filter(w => (w.id || w._id) !== (currentWorkspace.id || currentWorkspace._id)).map(ws => (
                     <div
-                      key={ws._id}
+                      key={ws.id || ws._id}
                       className="mobile-workspace-item"
                       onClick={async () => {
-                        await switchWorkspace(ws._id);
+                        await switchWorkspace(ws.id || ws._id);
                         setShowMobileWorkspaces(false);
                         setIsOpen(false);
                         window.location.reload();
