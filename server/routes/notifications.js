@@ -142,8 +142,11 @@ router.delete('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Test endpoint - send a test notification to yourself (development/debugging only)
+// Test endpoint - send a test notification to yourself (development only)
 router.post('/test', authenticateToken, async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     const io = req.app.get('io');
     const userId = req.user.id.toString();

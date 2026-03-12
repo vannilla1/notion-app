@@ -26,11 +26,11 @@ const authenticateToken = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
+    const decoded = jwt.verify(token, SECRET_KEY, { algorithms: ['HS256'] });
     const user = await User.findById(decoded.id);
 
     if (!user) {
-      return res.status(404).json({ message: 'Používateľ nenájdený' });
+      return res.status(401).json({ message: 'Neplatný token' });
     }
 
     req.user = {
@@ -43,7 +43,7 @@ const authenticateToken = async (req, res, next) => {
     };
     next();
   } catch (err) {
-    return res.status(403).json({ message: 'Neplatný alebo expirovaný token' });
+    return res.status(401).json({ message: 'Neplatný alebo expirovaný token' });
   }
 };
 
@@ -55,7 +55,7 @@ const authenticateSocket = async (socket, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
+    const decoded = jwt.verify(token, SECRET_KEY, { algorithms: ['HS256'] });
     const user = await User.findById(decoded.id);
 
     if (!user) {

@@ -37,21 +37,21 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov' });
     }
 
-    // Check if user exists
+    // Check if user exists (generic message to prevent email/username enumeration)
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       logger.auth('register', null, null, false, req.ip);
-      return res.status(400).json({ message: 'Email je už zaregistrovaný' });
+      return res.status(400).json({ message: 'Registrácia zlyhala. Skúste iný email alebo používateľské meno.' });
     }
 
     const existingUsername = await User.findOne({ username });
     if (existingUsername) {
       logger.auth('register', null, null, false, req.ip);
-      return res.status(400).json({ message: 'Používateľské meno je už obsadené' });
+      return res.status(400).json({ message: 'Registrácia zlyhala. Skúste iný email alebo používateľské meno.' });
     }
 
     // Hash password
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Generate random color for user
@@ -89,7 +89,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error('Registration error', { error: error.message, ip: req.ip });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -135,7 +135,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     });
   } catch (error) {
     logger.error('Login error', { error: error.message, ip: req.ip });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -162,7 +162,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Get profile error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -207,7 +207,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Update profile error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -247,13 +247,13 @@ router.post('/avatar', authenticateToken, (req, res) => {
       });
     } catch (error) {
       logger.error('Avatar upload error', { error: error.message, userId: req.user.id });
-      res.status(500).json({ message: 'Chyba pri nahrávaní avatara', error: error.message });
+      res.status(500).json({ message: 'Chyba pri nahrávaní avatara' });
     }
   });
 });
 
 // Get avatar image
-router.get('/avatar/:userId', async (req, res) => {
+router.get('/avatar/:userId', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
 
@@ -286,7 +286,7 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
     res.json({ message: 'Avatar bol odstránený' });
   } catch (error) {
     logger.error('Avatar delete error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba pri odstraňovaní avatara', error: error.message });
+    res.status(500).json({ message: 'Chyba pri odstraňovaní avatara' });
   }
 });
 
@@ -310,7 +310,7 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     }
 
     // Hash new password
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
     await User.findByIdAndUpdate(userId, { password: hashedPassword });
@@ -320,14 +320,23 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     res.json({ message: 'Heslo bolo úspešne zmenené' });
   } catch (error) {
     logger.error('Password change error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba pri zmene hesla', error: error.message });
+    res.status(500).json({ message: 'Chyba pri zmene hesla' });
   }
 });
 
-// Get all users (for sharing)
+// Get all users in current workspace (for sharing/assignment)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
-    const users = await User.find({}, 'username email color avatar role');
+    const user = await User.findById(req.user.id);
+    if (!user || !user.currentWorkspaceId) {
+      return res.json([]);
+    }
+
+    const WorkspaceMember = require('../models/WorkspaceMember');
+    const members = await WorkspaceMember.find({ workspaceId: user.currentWorkspaceId });
+    const memberUserIds = members.map(m => m.userId);
+
+    const users = await User.find({ _id: { $in: memberUserIds } }, 'username email color avatar role');
     res.json(users.map(u => ({
       id: u._id,
       username: u.username,
@@ -338,17 +347,24 @@ router.get('/users', authenticateToken, async (req, res) => {
     })));
   } catch (error) {
     logger.error('Get users error', { error: error.message });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
-// Set admin by username (internal use - protected by secret)
-router.post('/set-admin', async (req, res) => {
+// Set admin by username (requires authentication + admin role + separate secret)
+router.post('/set-admin', authenticateToken, async (req, res) => {
   try {
     const { username, secret } = req.body;
+    const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
-    // Simple secret check - should match JWT_SECRET
-    if (secret !== JWT_SECRET) {
+    // Require separate ADMIN_SECRET (not JWT_SECRET)
+    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+      return res.status(403).json({ message: 'Neplatný prístup' });
+    }
+
+    // Only existing admins can promote others
+    const currentUser = await User.findById(req.user.id);
+    if (currentUser.role !== 'admin') {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
@@ -359,12 +375,12 @@ router.post('/set-admin', async (req, res) => {
 
     await User.findByIdAndUpdate(user._id, { role: 'admin' });
 
-    logger.info('Admin set via secret', { username });
+    logger.info('Admin set', { username, setBy: req.user.id });
 
     res.json({ message: `Užívateľ ${username} bol nastavený ako admin`, success: true });
   } catch (error) {
     logger.error('Set admin error', { error: error.message });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -424,7 +440,7 @@ router.delete('/users/:userId', authenticateToken, async (req, res) => {
     res.json({ message: 'Užívateľ bol úspešne vymazaný' });
   } catch (error) {
     logger.error('Delete user error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -485,7 +501,7 @@ router.put('/users/:userId/role', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Update user role error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

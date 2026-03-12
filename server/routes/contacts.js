@@ -116,7 +116,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     }));
     res.json(contactsWithId);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -133,7 +133,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
     res.json({ ...contact, id: contact._id.toString() });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -184,7 +184,7 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.status(201).json(contactData);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -222,7 +222,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json(contactData);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -250,7 +250,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json({ message: 'Contact deleted' });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -294,7 +294,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, async (req
 
     res.status(201).json(task);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -341,7 +341,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -372,7 +372,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
     res.json({ message: 'Task deleted' });
   } catch (error) {
     logger.error('Delete task error', { error: error.message });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -454,7 +454,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
 
     res.status(201).json(subtask);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -506,7 +506,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
 
     res.json(found.parent[found.index]);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -544,7 +544,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -603,7 +603,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
       res.status(201).json(responseData);
     } catch (error) {
       logger.error('File upload error', { error: error.message });
-      res.status(500).json({ message: 'Chyba servera', error: error.message });
+      res.status(500).json({ message: 'Chyba servera' });
     }
   });
 });
@@ -637,7 +637,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
 
     res.send(fileBuffer);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -662,7 +662,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 
     res.json({ message: 'File deleted' });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

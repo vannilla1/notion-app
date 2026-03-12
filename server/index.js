@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const http = require('http');
 const { Server } = require('socket.io');
 const dotenv = require('dotenv');
@@ -50,13 +51,19 @@ const io = new Server(server, {
   cors: corsOptions
 });
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP handled by frontend
+  crossOriginEmbedderPolicy: false
+}));
+
 // Enable pre-flight across-the-board
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
-// Body parsers
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsers with size limits
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Apply general API rate limiting
 app.use('/api', apiLimiter);
