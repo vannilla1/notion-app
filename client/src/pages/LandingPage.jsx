@@ -266,7 +266,7 @@ export default function LandingPage() {
                 <p className="lp-pricing-yearly-note">tj. 8,25 € / mesiac</p>
               )}
               {!isYearly && (
-                <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo 99 € ročne</p>
+                <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo <strong style={{ color: '#6366f1', fontWeight: 700 }}>99 € ročne</strong> (ušetríte 17%)</p>
               )}
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 2 používateľov. Každý ďalší: {isYearly ? '99 €/rok' : '9,99 €/mesiac'}.</p>
 
