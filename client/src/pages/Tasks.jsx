@@ -1136,8 +1136,10 @@ function Tasks() {
               <>
                 <span
                   className="subtask-title"
+                  onClick={() => hasChildren && toggleSubtaskExpanded(subtask.id)}
                   onDoubleClick={() => startEditSubtask(task, subtask)}
-                  title="Dvojklik pre upravu"
+                  title={hasChildren ? "Klikni pre rozbalenie, dvojklik pre úpravu" : "Dvojklik pre úpravu"}
+                  style={hasChildren ? { cursor: 'pointer' } : {}}
                 >
                   {subtask.title}
                 </span>
