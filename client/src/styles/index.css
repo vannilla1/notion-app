@@ -8063,3 +8063,49 @@ a.detail-value:hover {
 .error-boundary .error-actions .btn {
   min-width: 140px;
 }
+
+/* Drag & Drop */
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  user-select: none;
+  flex-shrink: 0;
+  touch-action: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.task-card:hover .drag-handle,
+.subtask-item:hover > .drag-handle {
+  opacity: 0.5;
+}
+
+.task-card:hover .drag-handle:hover,
+.subtask-item:hover > .drag-handle:hover {
+  opacity: 1;
+  color: var(--accent-color);
+}
+
+.task-card.dragging {
+  opacity: 0.5;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: var(--accent-color);
+  z-index: 100;
+}
+
+.subtask-tree-item.dragging {
+  opacity: 0.5;
+}
+
+.subtask-drag-handle {
+  font-size: 13px;
+  margin-right: -4px;
+}

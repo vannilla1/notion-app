@@ -14,7 +14,7 @@ self.addEventListener('push', (event) => {
   log('Push received');
 
   let data = {
-    title: 'Purple CRM',
+    title: 'Prpl CRM',
     body: 'Nová notifikácia',
     icon: '/icons/icon-192x192.png',
     badge: '/icons/icon-72x72.png',

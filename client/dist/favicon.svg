@@ -7,6 +7,6 @@
   </defs>
   <!-- Background circle -->
   <circle cx="32" cy="32" r="30" fill="url(#grad)"/>
-  <!-- Letter P for Perun -->
+  <!-- Letter P for Prpl -->
   <path d="M22 16h14c6.627 0 12 5.373 12 12s-5.373 12-12 12h-6v8h-8V16zm8 16h6c2.209 0 4-1.791 4-4s-1.791-4-4-4h-6v8z" fill="white"/>
 </svg>

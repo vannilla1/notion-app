@@ -6,6 +6,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -45,6 +48,55 @@ const tasksHelpTips = [
     description: 'V nastaveniach môžete prepojiť úlohy s Google Calendar pre automatickú synchronizáciu termínov.'
   }
 ];
+
+// Sortable wrapper for task cards
+function SortableTaskItem({ id, children }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: 'relative'
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      {children({ dragListeners: listeners, isDragging })}
+    </div>
+  );
+}
+
+// Sortable wrapper for subtasks
+function SortableSubtaskItem({ id, children }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      {children({ dragListeners: listeners, isDragging })}
+    </div>
+  );
+}
 
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
@@ -990,7 +1042,13 @@ function Tasks() {
     const isAssigned = isAssignedFilter(filter);
     const currentUserId = user?.id?.toString();
 
-    return subtasks.map(subtask => {
+    // Sort subtasks by order
+    const sortedSubtasks = [...subtasks].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    return (
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubtaskDragEnd(task, subtasks, e)}>
+        <SortableContext items={sortedSubtasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
+          {sortedSubtasks.map(subtask => {
       const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
       const isExpanded = expandedSubtasks[subtask.id];
       const childCounts = hasChildren ? countSubtasksRecursive(subtask.subtasks) : { total: 0, completed: 0 };
@@ -1004,8 +1062,11 @@ function Tasks() {
       const matchesFilter = matchesDueFilter || matchesNewFilter || matchesAssignedFilter;
 
       return (
-        <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
+        <SortableSubtaskItem key={subtask.id} id={subtask.id}>
+          {({ dragListeners, isDragging }) => (
+        <div className={`subtask-tree-item ${isDragging ? 'dragging' : ''}`} style={{ marginLeft: depth * 16 }}>
           <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}>
+            <span className="drag-handle subtask-drag-handle" {...dragListeners}>⠿</span>
             <div
               className="subtask-checkbox-styled"
               onClick={() => (!subtask.completed || user?.role === 'admin') && toggleSubtask(task, subtask)}
@@ -1251,8 +1312,13 @@ function Tasks() {
             </div>
           )}
         </div>
+          )}
+        </SortableSubtaskItem>
       );
-    });
+    })}
+        </SortableContext>
+      </DndContext>
+    );
   };
 
   const getPriorityColor = (priority) => {
@@ -1442,14 +1508,100 @@ function Tasks() {
     return true;
   });
 
-  // Sort tasks: incomplete first, completed at the end
+  // Sort tasks: incomplete first, then by order, completed at the end
   const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
     const aCompleted = a.completed === true;
     const bCompleted = b.completed === true;
     if (aCompleted && !bCompleted) return 1;
     if (!aCompleted && bCompleted) return -1;
+    // Within same completion status, sort by order
+    const orderA = a.order || 0;
+    const orderB = b.order || 0;
+    if (orderA !== orderB) return orderA - orderB;
     return 0;
   });
+
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+  );
+
+  // Handle task drag end
+  const handleTaskDragEnd = useCallback(async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = sortedFilteredTasks.findIndex(t => (t.id || t._id) === active.id);
+    const newIndex = sortedFilteredTasks.findIndex(t => (t.id || t._id) === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(sortedFilteredTasks, oldIndex, newIndex);
+
+    // Optimistic update
+    const updatedTasks = tasks.map(t => {
+      const newPos = reordered.findIndex(r => (r.id || r._id) === (t.id || t._id));
+      if (newPos !== -1) return { ...t, order: newPos };
+      return t;
+    });
+    setTasks(updatedTasks);
+
+    // Save to server
+    try {
+      const reorderData = reordered.map((t, idx) => ({
+        id: t.id || t._id,
+        order: idx,
+        source: t.source || 'global',
+        contactId: t.contactId || null
+      }));
+      await api.put('/tasks/reorder', { tasks: reorderData });
+    } catch (err) {
+      console.error('Reorder failed:', err);
+      fetchTasks(); // Rollback
+    }
+  }, [sortedFilteredTasks, tasks]);
+
+  // Handle subtask drag end
+  const handleSubtaskDragEnd = useCallback(async (task, parentSubtasks, event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = parentSubtasks.findIndex(s => s.id === active.id);
+    const newIndex = parentSubtasks.findIndex(s => s.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(parentSubtasks, oldIndex, newIndex);
+
+    // Optimistic update - rebuild subtasks array with new order
+    const updateSubtasksOrder = (subtasks, parentId) => {
+      return subtasks.map(s => {
+        const newPos = reordered.findIndex(r => r.id === s.id);
+        if (newPos !== -1) return { ...s, order: newPos };
+        return s;
+      });
+    };
+
+    setTasks(prev => prev.map(t => {
+      if ((t.id || t._id) === (task.id || task._id)) {
+        return { ...t, subtasks: updateSubtasksOrder(t.subtasks) };
+      }
+      return t;
+    }));
+
+    // Save to server
+    try {
+      const subtaskOrders = reordered.map((s, idx) => ({ id: s.id, order: idx }));
+      await api.put('/tasks/reorder-subtasks', {
+        taskId: task.id || task._id,
+        source: task.source || 'global',
+        contactId: task.contactId || null,
+        subtasks: subtaskOrders
+      });
+    } catch (err) {
+      console.error('Subtask reorder failed:', err);
+      fetchTasks();
+    }
+  }, [tasks]);
 
   const completedCount = tasks.filter(t => t.completed).length;
   const activeCount = tasks.filter(t => !t.completed).length;
@@ -1878,6 +2030,8 @@ function Tasks() {
                   <p>Vytvorte novú úlohu kliknutím na tlačidlo vyššie</p>
                 </div>
               ) : (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskDragEnd}>
+                  <SortableContext items={sortedFilteredTasks.map(t => t.id || t._id)} strategy={verticalListSortingStrategy}>
                 <div className="tasks-list">
                   {sortedFilteredTasks.map(task => {
                     // Check if main task matches assigned filter
@@ -1886,12 +2040,14 @@ function Tasks() {
                       (task.assignedTo || []).some(id => id?.toString() === currentUserId);
 
                     return (
+                    <SortableTaskItem key={task.id} id={task.id || task._id}>
+                      {({ dragListeners, isDragging }) => (
                     <div
-                      key={task.id}
                       ref={el => taskRefs.current[task.id] = el}
-                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''}`}
+                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''} ${isDragging ? 'dragging' : ''}`}
                     >
                       <div className="task-main">
+                        <span className="drag-handle" {...dragListeners}>⠿</span>
                         <div
                           className="task-checkbox-styled"
                           onClick={() => (!task.completed || user?.role === 'admin') && toggleTask(task)}
@@ -2125,8 +2281,12 @@ function Tasks() {
                         </div>
                       )}
                     </div>
+                      )}
+                    </SortableTaskItem>
                   )})}
                 </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </div>
           )}

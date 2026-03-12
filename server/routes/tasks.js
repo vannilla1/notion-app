@@ -158,13 +158,19 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     // Combine all tasks
     const allTasks = [...enrichedGlobalTasks, ...contactTasks];
 
-    // Sort: incomplete first, then by createdAt descending (newest first)
+    // Sort: incomplete first, then by custom order, then by createdAt descending
     allTasks.sort((a, b) => {
       // First sort by completed status (incomplete first)
       if (a.completed !== b.completed) {
         return a.completed ? 1 : -1;
       }
-      // Then sort by createdAt descending
+      // Then by custom order (lower order = higher position)
+      const orderA = a.order || 0;
+      const orderB = b.order || 0;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      // Fallback: by createdAt descending
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
@@ -638,6 +644,103 @@ router.get('/calendar/feed/:token', async (req, res) => {
   } catch (error) {
     logger.error('Calendar feed error', { error: error.message });
     res.status(500).send('Chyba pri generovaní kalendára');
+  }
+});
+
+// Reorder tasks (drag & drop)
+router.put('/reorder', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { tasks } = req.body; // [{ id, order, source, contactId }]
+    if (!Array.isArray(tasks)) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    const bulkOps = [];
+    const contactUpdates = {};
+
+    for (const item of tasks) {
+      if (item.source === 'global') {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: item.id, workspaceId: req.workspaceId },
+            update: { $set: { order: item.order } }
+          }
+        });
+      } else if (item.source === 'contact' && item.contactId) {
+        if (!contactUpdates[item.contactId]) {
+          contactUpdates[item.contactId] = [];
+        }
+        contactUpdates[item.contactId].push({ id: item.id, order: item.order });
+      }
+    }
+
+    if (bulkOps.length > 0) {
+      await Task.bulkWrite(bulkOps);
+    }
+
+    // Update contact task orders
+    for (const [contactId, taskOrders] of Object.entries(contactUpdates)) {
+      const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
+      if (contact && contact.tasks) {
+        for (const item of taskOrders) {
+          const task = contact.tasks.find(t => t.id === item.id);
+          if (task) task.order = item.order;
+        }
+        await contact.save();
+      }
+    }
+
+    res.json({ message: 'Poradie aktualizované' });
+  } catch (error) {
+    logger.error('Reorder tasks error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Reorder subtasks within a task (drag & drop)
+router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { taskId, source, contactId, subtasks } = req.body; // subtasks: [{ id, order }]
+    if (!taskId || !Array.isArray(subtasks)) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    const reorderSubtasksRecursive = (existingSubtasks, orderMap) => {
+      if (!existingSubtasks) return existingSubtasks;
+      for (const sub of existingSubtasks) {
+        if (orderMap[sub.id] !== undefined) {
+          sub.order = orderMap[sub.id];
+        }
+        if (sub.subtasks && sub.subtasks.length > 0) {
+          reorderSubtasksRecursive(sub.subtasks, orderMap);
+        }
+      }
+      return existingSubtasks;
+    };
+
+    const orderMap = {};
+    subtasks.forEach(s => { orderMap[s.id] = s.order; });
+
+    if (source === 'global') {
+      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+      reorderSubtasksRecursive(task.subtasks, orderMap);
+      task.markModified('subtasks');
+      await task.save();
+    } else if (source === 'contact' && contactId) {
+      const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
+      if (!contact) return res.status(404).json({ message: 'Kontakt nenájdený' });
+      const task = contact.tasks.find(t => t.id === taskId);
+      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+      reorderSubtasksRecursive(task.subtasks, orderMap);
+      contact.markModified('tasks');
+      await contact.save();
+    }
+
+    res.json({ message: 'Poradie podúloh aktualizované' });
+  } catch (error) {
+    logger.error('Reorder subtasks error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
