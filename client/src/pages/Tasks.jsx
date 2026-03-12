@@ -154,10 +154,6 @@ function Tasks() {
   const [duplicatingTask, setDuplicatingTask] = useState(null);
   const [duplicateContactIds, setDuplicateContactIds] = useState([]);
 
-  // Calendar export dropdown
-  const [showCalendarMenu, setShowCalendarMenu] = useState(false);
-  const calendarMenuRef = useRef(null);
-
   // Google Calendar notification
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
 
@@ -276,17 +272,6 @@ function Tasks() {
       navigate('/tasks', { replace: true });
     }
   }, [location.search, navigate]);
-
-  // Close calendar menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (calendarMenuRef.current && !calendarMenuRef.current.contains(event.target)) {
-        setShowCalendarMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // Helper function to get due date status class
   const getDueDateClass = (dueDate, completed) => {
@@ -1347,78 +1332,6 @@ function Tasks() {
     return new Date(dateString).toLocaleDateString('sk-SK');
   };
 
-  // Download ICS file (works with all calendar apps)
-  // options: { incremental: boolean, reset: boolean }
-  const downloadIcsFile = async (options = {}) => {
-    try {
-      const params = new URLSearchParams();
-      if (options.incremental) params.append('incremental', 'true');
-      if (options.reset) params.append('reset', 'true');
-
-      const url = `/api/tasks/export/calendar${params.toString() ? '?' + params.toString() : ''}`;
-      const response = await api.get(url, {
-        responseType: 'blob'
-      });
-      const blob = new Blob([response.data], { type: 'text/calendar;charset=utf-8' });
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = options.incremental ? 'prpl-crm-tasks-new.ics' : 'prpl-crm-tasks.ics';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(blobUrl);
-      document.body.removeChild(a);
-      setShowCalendarMenu(false);
-
-      if (options.incremental) {
-        alert('Stiahnuté iba nové úlohy, ktoré ešte neboli exportované.');
-      }
-    } catch (error) {
-      alert('Chyba pri exporte kalendára');
-    }
-  };
-
-  // Open Google Calendar import page
-  const openInGoogleCalendar = () => {
-    // Open Google Calendar import page directly
-    // User will need to download .ics file separately and import it there
-    window.open('https://calendar.google.com/calendar/r/settings/export', '_blank');
-
-    // Show instructions
-    alert('Google Calendar sa otvoril v novom tabe.\n\nPre import úloh:\n1. Kliknite na "Stiahnuť .ics súbor" v menu\n2. V Google Calendar kliknite na "Vybrať súbor"\n3. Vyberte stiahnutý súbor a importujte');
-
-    setShowCalendarMenu(false);
-  };
-
-  // Copy ICS URL for subscription (if available)
-  const showImportInstructions = () => {
-    const instructions = `Návod na import do rôznych kalendárov:
-
-📱 iOS / macOS (Apple Calendar):
-1. Stiahnite .ics súbor
-2. Otvorte súbor - automaticky sa otvorí v Kalendári
-3. Potvrďte import
-
-🖥️ Windows (Outlook):
-1. Stiahnite .ics súbor
-2. Dvojkliknite na súbor
-3. Outlook automaticky importuje udalosti
-
-🌐 Google Calendar (web):
-1. Stiahnite .ics súbor
-2. Otvorte calendar.google.com
-3. Nastavenia (⚙️) > Import a export
-4. Vyberte stiahnutý .ics súbor
-
-📅 Outlook (web):
-1. Stiahnite .ics súbor
-2. Otvorte outlook.com > Kalendár
-3. Pridať kalendár > Nahrať zo súboru`;
-
-    alert(instructions);
-    setShowCalendarMenu(false);
-  };
-
   // Helper to check if task or any subtask is assigned to user
   const isAssignedToUser = (task, userId) => {
     // Check main task
@@ -1654,40 +1567,6 @@ function Tasks() {
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />
-          <div className="calendar-export-dropdown" ref={calendarMenuRef}>
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowCalendarMenu(!showCalendarMenu)}
-              title="Exportovať termíny do kalendára"
-            >
-              📅 Export ▾
-            </button>
-            {showCalendarMenu && (
-              <div className="calendar-menu">
-                <button onClick={() => downloadIcsFile({ incremental: true })} className="calendar-menu-item">
-                  📥 Stiahnuť nové úlohy
-                  <span className="menu-hint">Iba ešte neexportované</span>
-                </button>
-                <button onClick={() => downloadIcsFile()} className="calendar-menu-item">
-                  📥 Stiahnuť všetky úlohy
-                  <span className="menu-hint">Kompletný export</span>
-                </button>
-                <button onClick={() => downloadIcsFile({ reset: true })} className="calendar-menu-item">
-                  🔄 Reset a stiahnuť všetko
-                  <span className="menu-hint">Vymaže históriu exportu</span>
-                </button>
-                <div className="calendar-menu-separator"></div>
-                <button onClick={openInGoogleCalendar} className="calendar-menu-item">
-                  🌐 Google Calendar
-                  <span className="menu-hint">Otvorí import stránku</span>
-                </button>
-                <button onClick={showImportInstructions} className="calendar-menu-item">
-                  ❓ Návod na import
-                  <span className="menu-hint">Pre všetky platformy</span>
-                </button>
-              </div>
-            )}
-          </div>
           <button
             className="btn btn-secondary btn-nav-contacts"
             onClick={() => navigate('/crm')}
