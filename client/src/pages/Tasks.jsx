@@ -21,32 +21,37 @@ const tasksHelpTips = [
   {
     icon: '📅',
     title: 'Termíny a priorita',
-    description: 'Každej úlohe môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny.'
+    description: 'Každej úlohe môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny — zelená (do 14 dní), oranžová (do 7 dní), červená (po termíne).'
   },
   {
     icon: '📝',
     title: 'Podúlohy',
-    description: 'Rozbaľte úlohu a pridajte podúlohy pre lepšiu organizáciu. Každá podúloha môže mať vlastný termín a poznámky.'
-  },
-  {
-    icon: '👤',
-    title: 'Priradenie úloh',
-    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu.'
-  },
-  {
-    icon: '🔍',
-    title: 'Filtrovanie',
-    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority.'
+    description: 'Rozbaľte úlohu a pridajte podúlohy pre lepšiu organizáciu. Podúlohy môžu mať vlastné podúlohy, termíny, poznámky a priradených používateľov. Kliknutím na názov podúlohy rozbalíte jej podúlohy.'
   },
   {
     icon: '✅',
     title: 'Dokončenie úlohy',
-    description: 'Kliknutím na checkbox označíte úlohu ako dokončenú. Dokončené úlohy sú zobrazené v sekcii "Dokončené".'
+    description: 'Kliknutím na checkbox označíte úlohu ako dokončenú. Pri dokončení hlavnej úlohy sa automaticky dokončia aj všetky jej podúlohy.'
+  },
+  {
+    icon: '👤',
+    title: 'Priradenie úloh',
+    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane push notifikáciu.'
+  },
+  {
+    icon: '🔍',
+    title: 'Filtrovanie',
+    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na podúlohy.'
+  },
+  {
+    icon: '↕️',
+    title: 'Preťahovanie úloh',
+    description: 'Poradie úloh a podúloh môžete meniť uchopením ikony ⠿ a pretiahnutím na požadované miesto.'
   },
   {
     icon: '📆',
-    title: 'Synchronizácia s kalendárom',
-    description: 'V nastaveniach môžete prepojiť úlohy s Google Calendar pre automatickú synchronizáciu termínov.'
+    title: 'Google synchronizácia',
+    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a úloh.'
   }
 ];
 

@@ -12,7 +12,7 @@ const dashboardHelpTips = [
   {
     icon: '📊',
     title: 'Prehľad štatistík',
-    description: 'Na ľavej strane vidíte prehľad vašich kontaktov a úloh. Kliknutím na štatistiku zobrazíte detailný zoznam.'
+    description: 'Na dashboarde vidíte prehľad vašich kontaktov a úloh. Kliknutím na štatistiku zobrazíte detailný zoznam.'
   },
   {
     icon: '👥',
@@ -27,7 +27,17 @@ const dashboardHelpTips = [
   {
     icon: '🔔',
     title: 'Notifikácie',
-    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami o zmenách, ktoré urobili ostatní členovia tímu.'
+    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami o zmenách, priradeniach a aktivitách členov tímu.'
+  },
+  {
+    icon: '🏢',
+    title: 'Pracovné prostredia',
+    description: 'Cez ikonu profilu v pravom hornom rohu môžete prepínať medzi pracovnými prostrediami alebo vytvoriť nové prostredie pre ďalšie odvetvie.'
+  },
+  {
+    icon: '📆',
+    title: 'Google synchronizácia',
+    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú synchronizáciu vašich termínov a úloh.'
   },
   {
     icon: '⚡',
