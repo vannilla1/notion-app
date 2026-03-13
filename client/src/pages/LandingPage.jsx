@@ -245,6 +245,12 @@ export default function LandingPage() {
                   </span>
                   Tímová spolupráca (max. 2 používatelia)
                 </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  1 pracovné prostredie
+                </li>
               </ul>
 
               <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
@@ -290,6 +296,12 @@ export default function LandingPage() {
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
                   2 používatelia v cene, každý ďalší {isYearly ? '99 €/rok' : '9,99 €/mes'}
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  Max. 10 pracovných prostredí
                 </li>
                 <li>
                   <span className="lp-pricing-check">
