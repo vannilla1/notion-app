@@ -18,6 +18,7 @@ function Login() {
     setLoading(true);
 
     try {
+      // API interceptor automatically retries on timeout/network errors (server cold start)
       if (isRegister) {
         await register(username, email, password);
       } else {
@@ -26,10 +27,8 @@ function Login() {
     } catch (err) {
       if (err.response?.data?.message) {
         setError(err.response.data.message);
-      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Server neodpovedá. Skúste to znova o chvíľu.');
-      } else if (err.code === 'ERR_NETWORK' || !err.response) {
-        setError('Chyba pripojenia k serveru. Skontrolujte internetové pripojenie.');
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout') || err.code === 'ERR_NETWORK' || !err.response) {
+        setError('Server sa nepodarilo prebudiť. Skúste to znova o 30 sekúnd.');
       } else {
         setError('Nastala neočakávaná chyba. Skúste to znova.');
       }

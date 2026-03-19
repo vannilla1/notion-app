@@ -25,19 +25,21 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token]);
 
-  const fetchUser = async (retries = 2) => {
+  // Keep-alive ping every 10 minutes to prevent Render from sleeping
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => {
+      api.get('/health').catch(() => {});
+    }, 10 * 60 * 1000); // 10 minutes
+    return () => clearInterval(interval);
+  }, [token]);
+
+  const fetchUser = async () => {
     try {
+      // API interceptor handles retries on timeout/network errors automatically
       const res = await api.get('/api/auth/me');
       setUser(res.data);
     } catch (error) {
-      // Retry on timeout (server cold-start on Render free tier)
-      const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
-      const isNetwork = error.code === 'ERR_NETWORK' || !error.response;
-      if ((isTimeout || isNetwork) && retries > 0) {
-        console.log(`Auth retry (${retries} left), server may be waking up...`);
-        await new Promise(r => setTimeout(r, 2000));
-        return fetchUser(retries - 1);
-      }
       console.error('Failed to fetch user:', error);
       localStorage.removeItem('token');
       setToken(null);
