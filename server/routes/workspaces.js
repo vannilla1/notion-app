@@ -371,7 +371,7 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
     const { memberId } = req.params;
     const { role } = req.body;
 
-    if (!['admin', 'member'].includes(role)) {
+    if (!['admin', 'manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
     }
 
