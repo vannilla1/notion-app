@@ -13,7 +13,7 @@ const workspaceMemberSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['owner', 'admin', 'manager', 'member'],
+    enum: ['owner', 'manager', 'member'],
     default: 'member'
   },
   invitedBy: {
@@ -57,9 +57,9 @@ workspaceMemberSchema.virtual('workspace', {
   justOne: true
 });
 
-// Check if user can perform admin actions
+// Check if user can perform admin actions (owner or manager)
 workspaceMemberSchema.methods.canAdmin = function() {
-  return this.role === 'owner' || this.role === 'admin';
+  return this.role === 'owner' || this.role === 'manager';
 };
 
 // Check if user is owner

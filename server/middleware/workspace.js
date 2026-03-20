@@ -81,7 +81,7 @@ const requireWorkspaceAdmin = async (req, res, next) => {
     // Check admin rights
     if (!req.workspaceMember.canAdmin()) {
       return res.status(403).json({
-        message: 'Nemáte oprávnenie na túto akciu. Vyžaduje sa rola admin alebo owner.'
+        message: 'Nemáte oprávnenie na túto akciu. Vyžaduje sa rola vlastník alebo manažér.'
       });
     }
 

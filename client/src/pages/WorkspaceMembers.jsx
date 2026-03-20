@@ -12,7 +12,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 function WorkspaceMembers() {
   const { user, logout, updateUser } = useAuth();
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, refreshCurrentWorkspace } = useWorkspace();
   const navigate = useNavigate();
 
   const [members, setMembers] = useState([]);
@@ -23,46 +23,29 @@ function WorkspaceMembers() {
   const [sending, setSending] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(null);
+  const [transferring, setTransferring] = useState(null);
 
-  // System users lookup (admin/manager only) - for system role info
-  const [systemUsers, setSystemUsers] = useState([]);
-  const [updatingRole, setUpdatingRole] = useState(null);
-  const [deletingUser, setDeletingUser] = useState(null);
-
-  const isAdmin = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin';
-  const isSystemAdmin = user?.role === 'admin';
-  const isSystemManager = user?.role === 'manager';
-  const canManageSystem = isSystemAdmin || isSystemManager;
+  const isOwner = currentWorkspace?.role === 'owner';
+  const canManage = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
 
   const fetchData = useCallback(async () => {
     try {
-      const promises = [
+      const [membersData, invitationsData] = await Promise.all([
         getWorkspaceMembers(),
-        isAdmin ? getInvitations().catch(() => []) : Promise.resolve([])
-      ];
-      // Fetch system users too if admin/manager
-      if (canManageSystem) {
-        promises.push(api.get('/api/auth/users').then(res => res.data).catch(() => []));
-      }
-      const [membersData, invitationsData, usersData] = await Promise.all(promises);
+        canManage ? getInvitations().catch(() => []) : Promise.resolve([])
+      ]);
       setMembers(membersData);
       setInvitations(invitationsData);
-      if (usersData) setSystemUsers(usersData);
     } catch (error) {
       console.error('Failed to fetch members:', error);
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, canManageSystem]);
+  }, [canManage]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // Get system role for a workspace member
-  const getSystemUser = (member) => {
-    return systemUsers.find(u => u.id === member.userId);
-  };
 
   // ===== Invitation handlers =====
   const handleSendInvite = async (e) => {
@@ -106,7 +89,7 @@ function WorkspaceMembers() {
     }
   };
 
-  const handleWsRoleChange = async (memberId, newRole) => {
+  const handleRoleChange = async (memberId, newRole) => {
     try {
       await updateMemberRole(memberId, newRole);
       fetchData();
@@ -134,66 +117,29 @@ function WorkspaceMembers() {
     }
   };
 
-  // ===== System role handlers =====
-  const handleSystemRoleChange = async (userId, newRole) => {
-    if (userId === user.id && newRole !== 'admin') {
-      if (!window.confirm('Naozaj chcete odstrániť svoje admin práva?')) return;
-    }
-    setUpdatingRole(userId);
-    try {
-      await api.put(`/api/auth/users/${userId}/role`, { role: newRole });
-      setSystemUsers(prev => prev.map(u =>
-        u.id === userId ? { ...u, role: newRole } : u
-      ));
-    } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri zmene role');
-    } finally {
-      setUpdatingRole(null);
-    }
-  };
+  // ===== Transfer ownership (owner only, to manager) =====
+  const handleTransferOwnership = async (member) => {
+    if (!window.confirm(
+      `Naozaj chcete previesť vlastníctvo prostredia na ${member.username}?\n\n` +
+      `Stanete sa Členom a ${member.username} sa stane Vlastníkom.\n` +
+      `Táto akcia je nevratná.`
+    )) return;
 
-  const handleDeleteUser = async (targetUser) => {
-    if (!window.confirm(`Naozaj chcete vymazať účet "${targetUser.username}"?\n\nTáto akcia je nevratná.`)) return;
-    setDeletingUser(targetUser.id);
+    setTransferring(member.userId);
     try {
-      await api.delete(`/api/auth/users/${targetUser.id}`);
-      setSystemUsers(prev => prev.filter(u => u.id !== targetUser.id));
+      await api.post(`/api/workspaces/current/transfer-ownership/${member.userId}`);
+      await refreshCurrentWorkspace();
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri mazaní používateľa');
+      alert(error.response?.data?.message || 'Chyba pri prevode vlastníctva');
     } finally {
-      setDeletingUser(null);
+      setTransferring(null);
     }
   };
 
-  const canDeleteUser = (sysUser) => {
-    if (!sysUser || sysUser.id === user.id) return false;
-    if (user.role === 'admin') return sysUser.role !== 'admin';
-    if (user.role === 'manager') return sysUser.role === 'user';
-    return false;
-  };
-
-  const getSystemRoleLabel = (role) => {
-    switch (role) {
-      case 'admin': return 'Admin';
-      case 'manager': return 'Manažér';
-      case 'user': return 'Používateľ';
-      default: return role;
-    }
-  };
-
-  const getSystemRoleColor = (role) => {
-    switch (role) {
-      case 'admin': return '#6366f1';
-      case 'manager': return '#f59e0b';
-      default: return '#64748b';
-    }
-  };
-
-  const getWsRoleBadge = (role) => {
+  const getRoleBadge = (role) => {
     switch (role) {
       case 'owner': return { label: 'Vlastník', color: '#f59e0b' };
-      case 'admin': return { label: 'Admin', color: '#6366f1' };
       case 'manager': return { label: 'Manažér', color: '#8b5cf6' };
       default: return { label: 'Člen', color: '#64748b' };
     }
@@ -241,8 +187,8 @@ function WorkspaceMembers() {
           </div>
         </div>
 
-        {/* Invite form */}
-        {isAdmin && (
+        {/* Invite form - owner & manager only */}
+        {canManage && (
           <div className="wm-invite-section">
             <h3 className="wm-section-title">Pozvať nového člena</h3>
             <form onSubmit={handleSendInvite} className="wm-invite-form">
@@ -261,7 +207,6 @@ function WorkspaceMembers() {
               >
                 <option value="member">Člen</option>
                 <option value="manager">Manažér</option>
-                <option value="admin">Admin</option>
               </select>
               <button type="submit" className="btn btn-primary" disabled={sending}>
                 {sending ? 'Odosielam...' : 'Pozvať'}
@@ -299,7 +244,7 @@ function WorkspaceMembers() {
         )}
 
         {/* Pending invitations */}
-        {isAdmin && invitations.length > 0 && (
+        {canManage && invitations.length > 0 && (
           <div className="wm-section">
             <h3 className="wm-section-title">Čakajúce pozvánky</h3>
             <div className="wm-list">
@@ -339,9 +284,7 @@ function WorkspaceMembers() {
           ) : (
             <div className="wm-list">
               {members.map(member => {
-                const wsBadge = getWsRoleBadge(member.role);
-                const sysUser = canManageSystem ? getSystemUser(member) : null;
-                const sysRoleColor = sysUser ? getSystemRoleColor(sysUser.role) : null;
+                const badge = getRoleBadge(member.role);
 
                 return (
                   <div key={member.id} className={`wm-member-card ${member.userId === user?.id ? 'wm-current-user' : ''}`}>
@@ -372,26 +315,37 @@ function WorkspaceMembers() {
                       {/* Role badge */}
                       <span
                         className="wm-role-badge"
-                        style={{ backgroundColor: wsBadge.color + '20', color: wsBadge.color }}
+                        style={{ backgroundColor: badge.color + '20', color: badge.color }}
                       >
-                        {wsBadge.label}
+                        {badge.label}
                       </span>
 
-                      {/* Role change */}
-                      {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
+                      {/* Role change - owner & manager can change non-owner roles */}
+                      {canManage && member.role !== 'owner' && member.userId !== user?.id && (
                         <select
                           value={member.role}
-                          onChange={(e) => handleWsRoleChange(member.id, e.target.value)}
+                          onChange={(e) => handleRoleChange(member.id, e.target.value)}
                           className="form-input wm-role-select-sm"
                         >
                           <option value="member">Člen</option>
                           <option value="manager">Manažér</option>
-                          <option value="admin">Admin</option>
                         </select>
                       )}
 
-                      {/* Remove from workspace / delete user */}
-                      {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
+                      {/* Transfer ownership - only owner can transfer to managers */}
+                      {isOwner && member.role === 'manager' && (
+                        <button
+                          className="btn btn-secondary btn-sm wm-transfer-btn"
+                          onClick={() => handleTransferOwnership(member)}
+                          disabled={transferring === member.userId}
+                          title="Previesť vlastníctvo"
+                        >
+                          {transferring === member.userId ? '...' : '👑 Previesť'}
+                        </button>
+                      )}
+
+                      {/* Remove from workspace */}
+                      {canManage && member.role !== 'owner' && member.userId !== user?.id && (
                         <button
                           className="btn-icon wm-remove-btn"
                           onClick={() => handleRemoveMember(member.id, member.username)}

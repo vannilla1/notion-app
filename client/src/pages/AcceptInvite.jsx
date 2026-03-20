@@ -78,7 +78,7 @@ function AcceptInvite() {
             {invitation?.workspaceName}
           </div>
           <p>Pozval vás: <strong>{invitation?.invitedBy}</strong></p>
-          <p>Rola: <strong>{invitation?.role === 'admin' ? 'Admin' : 'Člen'}</strong></p>
+          <p>Rola: <strong>{invitation?.role === 'manager' ? 'Manažér' : 'Člen'}</strong></p>
         </div>
 
         {success ? (

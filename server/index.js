@@ -227,6 +227,20 @@ server.listen(PORT, () => {
         logger.error('Failed to set pro plans', { error: err.message });
       }
 
+      // Migrate workspace members with 'admin' role to 'manager'
+      try {
+        const WorkspaceMember = require('./models/WorkspaceMember');
+        const migrated = await WorkspaceMember.updateMany(
+          { role: 'admin' },
+          { role: 'manager' }
+        );
+        if (migrated.modifiedCount > 0) {
+          logger.info(`Migrated ${migrated.modifiedCount} workspace members from admin to manager`);
+        }
+      } catch (err) {
+        logger.error('Failed to migrate admin roles', { error: err.message });
+      }
+
       // Defer schedulers - run after 30s to not compete with first requests
       setTimeout(() => {
         scheduleDueDateChecks();

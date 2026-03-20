@@ -371,7 +371,7 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
     const { memberId } = req.params;
     const { role } = req.body;
 
-    if (!['admin', 'manager', 'member'].includes(role)) {
+    if (!['manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
     }
 
@@ -510,8 +510,13 @@ router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requir
       return res.status(404).json({ message: 'Používateľ nie je členom tohto pracovného prostredia' });
     }
 
-    // Update roles
-    req.workspaceMember.role = 'admin';
+    // Only managers can become owners
+    if (newOwnerMembership.role !== 'manager') {
+      return res.status(400).json({ message: 'Vlastníctvo je možné previesť len na manažéra' });
+    }
+
+    // Update roles - old owner becomes member
+    req.workspaceMember.role = 'member';
     await req.workspaceMember.save();
 
     newOwnerMembership.role = 'owner';
@@ -611,7 +616,7 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
       workspaceId: req.workspaceId,
       email: normalizedEmail,
       invitedBy: req.user.id,
-      role: role === 'admin' ? 'admin' : 'member'
+      role: role === 'manager' ? 'manager' : 'member'
     });
     await invitation.save();
 
