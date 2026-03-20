@@ -211,44 +211,49 @@ function WorkspaceMembers() {
   };
 
   return (
-    <div className="tasks-page">
-      <div className="crm-layout">
-        <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <button className="btn btn-primary add-contact-btn" onClick={() => navigate('/app')}>
-            ← Späť na Dashboard
+    <div className="crm-container">
+      <header className="crm-header">
+        <div className="crm-header-left">
+          <button
+            className="btn-menu"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-label="Menu"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
           </button>
-          <div className="dashboard-stats">
-            <h3>Prostredie</h3>
-            <div className="stat-item">
-              <span className="stat-label">Názov</span>
-              <span className="stat-value" style={{ fontSize: '14px' }}>{currentWorkspace?.name || '—'}</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Členovia</span>
-              <span className="stat-value">{members.length}</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Pozvánky</span>
-              <span className="stat-value">{invitations.length}</span>
-            </div>
+          <h1 className="header-title-link" onClick={() => navigate('/app')}>Prpl CRM</h1>
+        </div>
+        <div className="crm-header-right">
+          <WorkspaceSwitcher />
+          <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
+        </div>
+      </header>
+
+      <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <button className="btn btn-primary add-contact-btn" onClick={() => navigate('/app')}>
+          ← Späť na Dashboard
+        </button>
+        <div className="dashboard-stats">
+          <h3>Prostredie</h3>
+          <div className="stat-item">
+            <span className="stat-label">Názov</span>
+            <span className="stat-value" style={{ fontSize: '14px' }}>{currentWorkspace?.name || '—'}</span>
           </div>
-        </aside>
+          <div className="stat-item">
+            <span className="stat-label">Členovia</span>
+            <span className="stat-value">{members.length}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Pozvánky</span>
+            <span className="stat-value">{invitations.length}</span>
+          </div>
+        </div>
+      </aside>
 
-        <main className="crm-main">
-          <header className="crm-header">
-            <div className="crm-header-left">
-              <button className="hamburger-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
-                <span></span><span></span><span></span>
-              </button>
-              <h1 className="header-title-link" onClick={() => navigate('/app')}>Prpl CRM</h1>
-            </div>
-            <div className="crm-header-right">
-              <WorkspaceSwitcher />
-              <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
-            </div>
-          </header>
-
-          <div className="workspace-members-content">
+      <main className="crm-main">
+        <div className="workspace-members-content">
             <h2 className="wm-title">Správa tímu</h2>
 
             {/* Tabs - show system tab only if admin/manager */}
@@ -504,9 +509,8 @@ function WorkspaceMembers() {
                 )}
               </div>
             )}
-          </div>
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }
