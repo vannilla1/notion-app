@@ -2062,7 +2062,7 @@ function Tasks() {
                               )}
                               {(task.contactName || task.contactNames?.length > 0) && (
                                 <span className="contact-badge">
-                                  👤 {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
+                                  🏷️ {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
                                 </span>
                               )}
                               {task.subtasks?.length > 0 && (
