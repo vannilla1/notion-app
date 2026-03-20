@@ -215,7 +215,7 @@ server.listen(PORT, () => {
       // Set Pro plan for team accounts (always ensure pro, regardless of current state)
       try {
         const User = require('./models/User');
-        const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+        const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
         for (const email of proEmails) {
           const u = await User.findOneAndUpdate(
             { email },

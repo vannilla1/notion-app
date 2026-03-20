@@ -176,7 +176,7 @@ router.post('/join', authenticateToken, async (req, res) => {
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
 
     // Team Pro emails bypass capacity check
-    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
     const isTeamPro = proEmails.includes(owner?.email?.toLowerCase()) || proEmails.includes(joiningUser?.email?.toLowerCase());
 
     if (!isTeamPro) {
@@ -604,7 +604,7 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
     // Team Pro emails bypass capacity check entirely
-    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
     const inviterUser = await User.findById(req.user.id);
     const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
 
@@ -771,7 +771,7 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
     // Team Pro emails bypass capacity check
-    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
     const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
 
     if (!isTeamPro) {
