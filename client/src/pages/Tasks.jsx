@@ -2061,7 +2061,15 @@ function Tasks() {
                                 </span>
                               )}
                               {(task.contactName || task.contactNames?.length > 0) && (
-                                <span className="contact-badge">
+                                <span
+                                  className="contact-badge contact-badge-clickable"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const cId = task.contactIds?.[0] || task.contactId;
+                                    if (cId) navigate(`/crm?expandContact=${cId}&_t=${Date.now()}`);
+                                  }}
+                                  title="Otvoriť kontakt"
+                                >
                                   🏷️ {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
                                 </span>
                               )}

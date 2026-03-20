@@ -1642,6 +1642,17 @@ body {
   gap: 4px;
 }
 
+.contact-badge-clickable {
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.contact-badge-clickable:hover {
+  background: var(--accent-color);
+  color: white;
+  transform: scale(1.05);
+}
+
 /* Tasks Page */
 .tasks-page {
   height: 100%;
