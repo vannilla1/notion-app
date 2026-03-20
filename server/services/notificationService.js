@@ -1,7 +1,10 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const PushSubscription = require('../models/PushSubscription');
+const APNsDevice = require('../models/APNsDevice');
 const webpush = require('web-push');
+const apn = require('apn');
+const path = require('path');
 const logger = require('../utils/logger');
 
 /**
@@ -57,6 +60,106 @@ const initializeVapid = () => {
 
 // Initialize VAPID on module load
 initializeVapid();
+
+// APNs provider
+let apnProvider = null;
+let apnConfigured = false;
+
+const initializeAPNs = () => {
+  if (apnConfigured) return true;
+
+  const keyPath = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
+  const keyId = process.env.APNS_KEY_ID;
+  const teamId = process.env.APNS_TEAM_ID;
+
+  if (keyId && teamId) {
+    try {
+      apnProvider = new apn.Provider({
+        token: {
+          key: keyPath,
+          keyId,
+          teamId
+        },
+        production: process.env.NODE_ENV === 'production'
+      });
+      apnConfigured = true;
+      logger.info('[APNs] Provider initialized', { keyId, teamId, production: process.env.NODE_ENV === 'production' });
+    } catch (err) {
+      logger.warn('[APNs] Provider initialization failed', { error: err.message });
+    }
+  } else {
+    logger.debug('[APNs] Not configured (missing APNS_KEY_ID or APNS_TEAM_ID)');
+  }
+  return apnConfigured;
+};
+
+// Initialize APNs on module load
+initializeAPNs();
+
+/**
+ * Send APNs push notification to iOS devices
+ */
+const sendAPNsNotification = async (userId, payload) => {
+  if (!apnConfigured || !apnProvider) return { sent: 0, failed: 0 };
+
+  const result = { sent: 0, failed: 0, removed: 0 };
+
+  try {
+    const devices = await APNsDevice.find({ userId });
+    if (devices.length === 0) return result;
+
+    const url = generateNotificationUrl(payload.type, payload.data);
+    const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
+
+    const notification = new apn.Notification();
+    notification.expiry = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+    notification.badge = 1;
+    notification.sound = 'default';
+    notification.alert = {
+      title: String(payload.title).slice(0, 100),
+      body: String(payload.body || payload.message || '').slice(0, 200)
+    };
+    notification.topic = 'sk.eperun.prplcrm';
+    notification.payload = {
+      url: baseUrl + url,
+      type: payload.type,
+      ...(payload.data || {})
+    };
+    notification.pushType = 'alert';
+
+    for (const device of devices) {
+      try {
+        const res = await apnProvider.send(notification, device.deviceToken);
+        if (res.sent.length > 0) {
+          result.sent++;
+          device.lastUsed = new Date();
+          await device.save();
+        }
+        if (res.failed.length > 0) {
+          result.failed++;
+          const failure = res.failed[0];
+          // Remove invalid tokens
+          if (failure.status === '410' || failure.response?.reason === 'Unregistered' || failure.response?.reason === 'BadDeviceToken') {
+            await APNsDevice.deleteOne({ _id: device._id });
+            result.removed++;
+            logger.info('[APNs] Removed invalid device', { reason: failure.response?.reason });
+          }
+        }
+      } catch (err) {
+        result.failed++;
+        logger.warn('[APNs] Send failed', { error: err.message });
+      }
+    }
+
+    if (result.sent > 0) {
+      logger.debug('[APNs] Notifications sent', { userId, ...result });
+    }
+  } catch (error) {
+    logger.error('[APNs] Error', { error: error.message, userId });
+  }
+
+  return result;
+};
 
 /**
  * Initialize the notification service with Socket.IO instance
@@ -245,12 +348,16 @@ const createNotification = async ({
     }
 
     // Send push notification (for background/closed app)
-    await sendPushNotification(userId, {
+    const pushPayload = {
       title: notification.title,
       body: notification.message,
       type: notification.type,
       data: notification.data
-    });
+    };
+    await sendPushNotification(userId, pushPayload);
+
+    // Send APNs push to iOS devices
+    await sendAPNsNotification(userId, pushPayload);
 
     return notification;
   } catch (error) {
@@ -334,6 +441,9 @@ const getNotificationTitle = (type, actorName, relatedName) => {
       return `Podúloha vymazaná: ${related || 'bez názvu'}`;
     case 'subtask.assigned':
       return `Priradená podúloha: ${related || 'bez názvu'}`;
+    case 'task.dueDate':
+    case 'subtask.dueDate':
+      return related || 'Blíži sa termín';
     default:
       return 'Nová notifikácia';
   }
@@ -669,6 +779,7 @@ module.exports = {
   getNotificationMessage,
   sendPushNotification,
   isVapidConfigured: () => vapidConfigured,
+  isAPNsConfigured: () => apnConfigured,
   getMetrics,
   resetMetrics
 };

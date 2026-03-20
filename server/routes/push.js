@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
+const APNsDevice = require('../models/APNsDevice');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const { isVapidConfigured, getMetrics, resetMetrics } = require('../services/notificationService');
@@ -310,6 +311,50 @@ router.post('/cleanup-subscriptions', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Cleanup] Error during manual cleanup', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ===== APNs (iOS) Device Registration =====
+
+// Register iOS device for push notifications
+router.post('/apns/register', authenticateToken, async (req, res) => {
+  try {
+    const { deviceToken } = req.body;
+    const userId = req.user.id;
+
+    if (!deviceToken || typeof deviceToken !== 'string' || deviceToken.length < 32) {
+      return res.status(400).json({ message: 'Invalid device token' });
+    }
+
+    const normalized = deviceToken.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+
+    await APNsDevice.findOneAndUpdate(
+      { deviceToken: normalized },
+      { userId, deviceToken: normalized, lastUsed: new Date() },
+      { upsert: true, new: true }
+    );
+
+    logger.info('[APNs] Device registered', { userId, tokenPrefix: normalized.substring(0, 8) });
+    res.json({ message: 'Device registered' });
+  } catch (error) {
+    logger.error('[APNs] Register error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Unregister iOS device
+router.post('/apns/unregister', authenticateToken, async (req, res) => {
+  try {
+    const { deviceToken } = req.body;
+    const normalized = (deviceToken || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+
+    await APNsDevice.deleteOne({ deviceToken: normalized, userId: req.user.id });
+
+    logger.info('[APNs] Device unregistered', { userId: req.user.id });
+    res.json({ message: 'Device unregistered' });
+  } catch (error) {
+    logger.error('[APNs] Unregister error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

@@ -24,6 +24,11 @@ const tasksHelpTips = [
     description: 'Každej úlohe môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny — zelená (do 14 dní), oranžová (do 7 dní), červená (po termíne).'
   },
   {
+    icon: '🔔',
+    title: 'Upozornenia na termíny',
+    description: 'Systém automaticky sleduje termíny úloh a podúloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší — vrátane push notifikácií na iOS.'
+  },
+  {
     icon: '📝',
     title: 'Podúlohy',
     description: 'Rozbaľte úlohu a pridajte podúlohy pre lepšiu organizáciu. Podúlohy môžu mať vlastné podúlohy, termíny, poznámky a priradených používateľov. Kliknutím na názov podúlohy rozbalíte jej podúlohy.'
@@ -36,17 +41,22 @@ const tasksHelpTips = [
   {
     icon: '👤',
     title: 'Priradenie úloh',
-    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane push notifikáciu.'
+    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu v aplikácii aj push notifikáciu na mobile.'
+  },
+  {
+    icon: '↕️',
+    title: 'Radenie úloh',
+    description: 'Úlohy sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené úlohy sa zobrazia na konci. Poradie môžete zmeniť aj pretiahnutím cez ikonu ⠿.'
+  },
+  {
+    icon: '📎',
+    title: 'Prílohy',
+    description: 'K úlohám a podúlohám môžete priložiť súbory (max. 5 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
   },
   {
     icon: '🔍',
     title: 'Filtrovanie',
     description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na podúlohy.'
-  },
-  {
-    icon: '↕️',
-    title: 'Preťahovanie úloh',
-    description: 'Poradie úloh a podúloh môžete meniť uchopením ikony ⠿ a pretiahnutím na požadované miesto.'
   },
   {
     icon: '📆',

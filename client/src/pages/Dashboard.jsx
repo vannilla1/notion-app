@@ -17,17 +17,17 @@ const dashboardHelpTips = [
   {
     icon: '👥',
     title: 'Kontakty podľa stavu',
-    description: 'Kontakty sú rozdelené podľa stavu: Aktívni, Čakajúci a Dokončení. Kliknutím na kategóriu zobrazíte zoznam.'
+    description: 'Kontakty sú radené podľa stavu: Nové a Aktívne prvé, Dokončené za nimi, Zrušené na konci — v rámci skupín abecedne. Kliknutím na kategóriu zobrazíte zoznam.'
   },
   {
     icon: '✅',
-    title: 'Úlohy na dnes',
-    description: 'V sekcii "Úlohy na dnes" vidíte úlohy s dnešným termínom. Môžete ich priamo označiť ako dokončené.'
+    title: 'Úlohy podľa priority',
+    description: 'Úlohy sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené úlohy sa zobrazujú na konci zoznamu.'
   },
   {
     icon: '🔔',
     title: 'Notifikácie',
-    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami o zmenách, priradeniach a aktivitách členov tímu.'
+    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na nové kontakty, úlohy, priradenia a blížiace sa termíny — aj ako push notifikácie na iOS.'
   },
   {
     icon: '🏢',

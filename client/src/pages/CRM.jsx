@@ -12,7 +12,7 @@ const crmHelpTips = [
   {
     icon: '👤',
     title: 'Vytvorenie kontaktu',
-    description: 'Kliknite na tlačidlo "+ Nový kontakt" pre pridanie nového kontaktu. Vyplňte meno, email, telefón, firmu a ďalšie údaje.'
+    description: 'Kliknite na tlačidlo "+ Nový kontakt" pre pridanie nového kontaktu. Vyplňte meno, email, telefón, firmu a ďalšie údaje. Všetci členovia tímu dostanú notifikáciu.'
   },
   {
     icon: '📋',
@@ -36,8 +36,8 @@ const crmHelpTips = [
   },
   {
     icon: '🏷️',
-    title: 'Filtrovanie podľa stavu',
-    description: 'V ľavom paneli môžete filtrovať kontakty podľa stavu: Všetky, Nové, Aktívne, Dokončené.'
+    title: 'Radenie a filtrovanie',
+    description: 'Kontakty sa radia podľa stavu: Nové a Aktívne sú prvé, Dokončené za nimi a Zrušené na konci — v rámci skupín abecedne. Filtrujte v ľavom paneli.'
   },
   {
     icon: '📝',

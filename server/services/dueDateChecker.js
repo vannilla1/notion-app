@@ -198,16 +198,23 @@ const checkDueDates = async () => {
             usersToNotify.add(task.createdBy.toString());
           }
 
-          // Send push notification to each user
+          // Send full notification (in-app + web push + APNs) to each user
           for (const userId of usersToNotify) {
             try {
-              await notificationService.sendPushNotification(userId, {
+              const notificationType = change.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
+              await notificationService.createNotification({
+                userId,
+                type: notificationType,
                 title: message.title,
-                body: message.body,
-                type: change.type === 'task' ? 'task-due-date-urgent' : 'subtask-due-date-urgent',
+                message: message.body,
+                actorName: 'Systém',
+                relatedType: change.type,
+                relatedId: change.type === 'task' ? task._id.toString() : change.subtask.id,
+                relatedName: change.type === 'task' ? task.title : change.subtask.title,
                 data: {
                   taskId: task._id.toString(),
-                  subtaskId: change.type === 'subtask' ? change.subtask.id : null
+                  subtaskId: change.type === 'subtask' ? change.subtask.id : null,
+                  contactId: task.contactId || null
                 }
               });
               notificationsSent++;
