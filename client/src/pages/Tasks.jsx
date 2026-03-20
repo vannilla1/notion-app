@@ -1064,7 +1064,14 @@ function Tasks() {
         <SortableSubtaskItem key={subtask.id} id={subtask.id}>
           {({ dragListeners, isDragging }) => (
         <div className={`subtask-tree-item ${isDragging ? 'dragging' : ''}`} style={{ marginLeft: depth * 16 }}>
-          <div className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}>
+          <div
+            className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}
+            onClick={(e) => {
+              if (e.target.closest('.subtask-checkbox-styled, .drag-handle, .subtask-actions, .btn-icon-sm, .subtask-edit-form-full')) return;
+              if (editingSubtask?.subtaskId === subtask.id) return;
+              if (hasChildren) toggleSubtaskExpanded(subtask.id);
+            }}
+          >
             <span className="drag-handle subtask-drag-handle" {...dragListeners}>⠿</span>
             <div
               className="subtask-checkbox-styled"
@@ -2068,7 +2075,12 @@ function Tasks() {
                       ref={el => taskRefs.current[task.id] = el}
                       className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''} ${isDragging ? 'dragging' : ''}`}
                     >
-                      <div className="task-main">
+                      <div className="task-main" onClick={(e) => {
+                        // Only expand if clicking on the main area, not on buttons/checkbox/drag handle
+                        if (e.target.closest('.task-checkbox-styled, .drag-handle, .task-actions, .btn-icon, .task-edit-form, .contact-badge-clickable')) return;
+                        if (editingTask === task.id) return;
+                        setExpandedTask(expandedTask === task.id ? null : task.id);
+                      }}>
                         <span className="drag-handle" {...dragListeners}>⠿</span>
                         <div
                           className="task-checkbox-styled"

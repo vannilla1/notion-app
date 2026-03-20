@@ -1507,6 +1507,11 @@ body {
   align-items: flex-start;
   gap: 14px;
   padding: 14px 16px;
+  cursor: pointer;
+}
+
+.subtask-item {
+  cursor: pointer;
 }
 
 .task-checkbox {
