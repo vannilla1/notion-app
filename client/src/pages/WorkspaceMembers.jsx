@@ -369,7 +369,7 @@ function WorkspaceMembers() {
                       </div>
                     </div>
                     <div className="wm-member-actions">
-                      {/* Workspace role badge */}
+                      {/* Role badge */}
                       <span
                         className="wm-role-badge"
                         style={{ backgroundColor: wsBadge.color + '20', color: wsBadge.color }}
@@ -377,47 +377,18 @@ function WorkspaceMembers() {
                         {wsBadge.label}
                       </span>
 
-                      {/* System role badge (visible for admin/manager) */}
-                      {sysUser && (
-                        <span
-                          className="wm-role-badge"
-                          style={{ backgroundColor: sysRoleColor + '20', color: sysRoleColor }}
-                          title="Systémová rola"
-                        >
-                          {getSystemRoleLabel(sysUser.role)}
-                        </span>
-                      )}
-
-                      {/* Workspace role change */}
+                      {/* Role change */}
                       {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
                         <select
                           value={member.role}
                           onChange={(e) => handleWsRoleChange(member.id, e.target.value)}
                           className="form-input wm-role-select-sm"
-                          title="Rola v prostredí"
                         >
                           <option value="member">Člen</option>
                           <option value="manager">Manažér</option>
                           <option value="admin">Admin</option>
                         </select>
                       )}
-
-                      {/* System role change (admin only) */}
-                      {isSystemAdmin && sysUser && member.userId !== user?.id && (
-                        <select
-                          value={sysUser.role}
-                          onChange={(e) => handleSystemRoleChange(sysUser.id, e.target.value)}
-                          disabled={updatingRole === sysUser.id}
-                          className="form-input wm-role-select-sm"
-                          title="Systémová rola"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="manager">Manažér</option>
-                          <option value="user">Používateľ</option>
-                        </select>
-                      )}
-
-                      {updatingRole === member.userId && <span className="wm-updating">...</span>}
 
                       {/* Remove from workspace / delete user */}
                       {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
@@ -427,16 +398,6 @@ function WorkspaceMembers() {
                           title="Odstrániť z prostredia"
                         >
                           ×
-                        </button>
-                      )}
-                      {sysUser && canDeleteUser(sysUser) && (
-                        <button
-                          className="btn-icon wm-remove-btn wm-delete-btn"
-                          onClick={() => handleDeleteUser(sysUser)}
-                          disabled={deletingUser === sysUser.id}
-                          title="Vymazať účet zo systému"
-                        >
-                          {deletingUser === sysUser.id ? '...' : '🗑️'}
                         </button>
                       )}
                     </div>
