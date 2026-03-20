@@ -1927,9 +1927,15 @@ function Tasks() {
                 <div className="loading">Načítavam...</div>
               ) : sortedFilteredTasks.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-state-icon">✓</div>
+                  <div className="empty-state-icon">📋</div>
                   <h2>Žiadne úlohy</h2>
-                  <p>Vytvorte novú úlohu kliknutím na tlačidlo vyššie</p>
+                  <p>Začnite pridaním vašej prvej úlohy</p>
+                  <button
+                    className="btn btn-primary empty-state-btn"
+                    onClick={() => setShowForm(true)}
+                  >
+                    + Nová úloha
+                  </button>
                 </div>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} autoScroll={false} onDragEnd={handleTaskDragEnd}>
