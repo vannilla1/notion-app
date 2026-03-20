@@ -1120,6 +1120,9 @@ function CRM() {
 
   // Memoize filtered contacts to prevent unnecessary recalculations
   const filteredContacts = useMemo(() => {
+    // Status sort priority: new/active first, completed second, cancelled last
+    const statusOrder = { new: 0, active: 0, completed: 1, cancelled: 2 };
+
     return contacts.filter(c => {
       // First apply status filter
       if (filter !== 'all' && c.status !== filter) return false;
@@ -1137,6 +1140,12 @@ function CRM() {
         return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || taskMatch;
       }
       return true;
+    }).sort((a, b) => {
+      // Sort by status group first, then alphabetically by name
+      const orderA = statusOrder[a.status] ?? 0;
+      const orderB = statusOrder[b.status] ?? 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return (a.name || '').localeCompare(b.name || '', 'sk');
     });
   }, [contacts, filter, searchQuery]);
 
