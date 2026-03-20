@@ -61,7 +61,7 @@ function WorkspaceMembers() {
 
   // Get system role for a workspace member
   const getSystemUser = (member) => {
-    return systemUsers.find(u => u.id === member.user?.id);
+    return systemUsers.find(u => u.id === member.userId);
   };
 
   // ===== Invitation handlers =====
@@ -194,6 +194,7 @@ function WorkspaceMembers() {
     switch (role) {
       case 'owner': return { label: 'Vlastník', color: '#f59e0b' };
       case 'admin': return { label: 'Admin', color: '#6366f1' };
+      case 'manager': return { label: 'Manažér', color: '#8b5cf6' };
       default: return { label: 'Člen', color: '#64748b' };
     }
   };
@@ -259,6 +260,7 @@ function WorkspaceMembers() {
                 className="form-input wm-role-select"
               >
                 <option value="member">Člen</option>
+                <option value="manager">Manažér</option>
                 <option value="admin">Admin</option>
               </select>
               <button type="submit" className="btn btn-primary" disabled={sending}>
@@ -342,28 +344,28 @@ function WorkspaceMembers() {
                 const sysRoleColor = sysUser ? getSystemRoleColor(sysUser.role) : null;
 
                 return (
-                  <div key={member.id} className={`wm-member-card ${member.user?.id === user?.id ? 'wm-current-user' : ''}`}>
+                  <div key={member.id} className={`wm-member-card ${member.userId === user?.id ? 'wm-current-user' : ''}`}>
                     <div className="wm-member-info">
-                      {member.user?.avatarData || member.user?.avatar ? (
+                      {member.avatar ? (
                         <img
-                          src={`${API_BASE_URL}/api/auth/avatar/${member.user.id}`}
-                          alt={member.user.username}
+                          src={`${API_BASE_URL}/api/auth/avatar/${member.userId}`}
+                          alt={member.username}
                           className="wm-member-avatar-img"
                         />
                       ) : (
                         <div
                           className="wm-member-avatar"
-                          style={{ backgroundColor: member.user?.color || '#6366f1' }}
+                          style={{ backgroundColor: member.color || '#6366f1' }}
                         >
-                          {member.user?.username?.charAt(0).toUpperCase() || '?'}
+                          {member.username?.charAt(0).toUpperCase() || '?'}
                         </div>
                       )}
                       <div className="wm-member-details">
                         <span className="wm-member-name">
-                          {member.user?.username || 'Neznámy'}
-                          {member.user?.id === user?.id && ' (vy)'}
+                          {member.username || 'Neznámy'}
+                          {member.userId === user?.id && ' (vy)'}
                         </span>
-                        <span className="wm-member-meta">{member.user?.email}</span>
+                        <span className="wm-member-meta">{member.email}</span>
                       </div>
                     </div>
                     <div className="wm-member-actions">
@@ -387,7 +389,7 @@ function WorkspaceMembers() {
                       )}
 
                       {/* Workspace role change */}
-                      {isAdmin && member.role !== 'owner' && member.user?.id !== user?.id && (
+                      {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
                         <select
                           value={member.role}
                           onChange={(e) => handleWsRoleChange(member.id, e.target.value)}
@@ -395,12 +397,13 @@ function WorkspaceMembers() {
                           title="Rola v prostredí"
                         >
                           <option value="member">Člen</option>
+                          <option value="manager">Manažér</option>
                           <option value="admin">Admin</option>
                         </select>
                       )}
 
                       {/* System role change (admin only) */}
-                      {isSystemAdmin && sysUser && member.user?.id !== user?.id && (
+                      {isSystemAdmin && sysUser && member.userId !== user?.id && (
                         <select
                           value={sysUser.role}
                           onChange={(e) => handleSystemRoleChange(sysUser.id, e.target.value)}
@@ -414,13 +417,13 @@ function WorkspaceMembers() {
                         </select>
                       )}
 
-                      {updatingRole === member.user?.id && <span className="wm-updating">...</span>}
+                      {updatingRole === member.userId && <span className="wm-updating">...</span>}
 
                       {/* Remove from workspace / delete user */}
-                      {isAdmin && member.role !== 'owner' && member.user?.id !== user?.id && (
+                      {isAdmin && member.role !== 'owner' && member.userId !== user?.id && (
                         <button
                           className="btn-icon wm-remove-btn"
-                          onClick={() => handleRemoveMember(member.id, member.user?.username)}
+                          onClick={() => handleRemoveMember(member.id, member.username)}
                           title="Odstrániť z prostredia"
                         >
                           ×
