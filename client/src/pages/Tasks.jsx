@@ -955,6 +955,24 @@ function Tasks() {
     }));
   };
 
+  // Recursively expand/collapse a subtask and all its children
+  const toggleSubtaskCascade = (subtask) => {
+    const isCurrentlyExpanded = expandedSubtasks[subtask.id];
+    const ids = [];
+    const collectIds = (st) => {
+      ids.push(st.id);
+      if (st.subtasks) st.subtasks.forEach(collectIds);
+    };
+    collectIds(subtask);
+    setExpandedSubtasks(prev => {
+      const next = { ...prev };
+      ids.forEach(id => {
+        next[id] = !isCurrentlyExpanded;
+      });
+      return next;
+    });
+  };
+
   // Count all subtasks recursively
   const countSubtasksRecursive = (subtasks) => {
     if (!subtasks || subtasks.length === 0) return { total: 0, completed: 0 };
@@ -1069,8 +1087,8 @@ function Tasks() {
             onClick={(e) => {
               if (e.target.closest('.subtask-checkbox-styled, .drag-handle, .subtask-actions, .btn-icon-sm, .subtask-edit-form-full, .subtask-expand-btn')) return;
               if (editingSubtask?.subtaskId === subtask.id) return;
-              // Open edit form on click (same as tasks)
-              startEditSubtask(task, subtask);
+              // Toggle cascade expand/collapse if has children
+              if (hasChildren) toggleSubtaskCascade(subtask);
             }}
           >
             <span className="drag-handle subtask-drag-handle" {...dragListeners}>⠿</span>
