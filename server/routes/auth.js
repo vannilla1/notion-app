@@ -390,6 +390,42 @@ router.post('/set-admin', authenticateToken, async (req, res) => {
   }
 });
 
+// Set subscription plan (admin only)
+router.post('/set-plan', authenticateToken, async (req, res) => {
+  try {
+    const { email, plan, secret } = req.body;
+    const ADMIN_SECRET = process.env.ADMIN_SECRET;
+
+    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+      return res.status(403).json({ message: 'Neplatný prístup' });
+    }
+
+    const currentUser = await User.findById(req.user.id);
+    if (currentUser.role !== 'admin') {
+      return res.status(403).json({ message: 'Neplatný prístup' });
+    }
+
+    if (!['trial', 'pro'].includes(plan)) {
+      return res.status(400).json({ message: 'Neplatný plán' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+
+    user.subscription = { plan };
+    await user.save();
+
+    logger.info('Plan set', { email, plan, setBy: req.user.id });
+
+    res.json({ message: `${email} bol nastavený na plán ${plan}`, success: true });
+  } catch (error) {
+    logger.error('Set plan error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // Delete user (admin can delete managers and users, manager can delete users)
 router.delete('/users/:userId', authenticateToken, async (req, res) => {
   try {
