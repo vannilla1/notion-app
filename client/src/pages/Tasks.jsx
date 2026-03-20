@@ -1067,9 +1067,10 @@ function Tasks() {
           <div
             className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}
             onClick={(e) => {
-              if (e.target.closest('.subtask-checkbox-styled, .drag-handle, .subtask-actions, .btn-icon-sm, .subtask-edit-form-full')) return;
+              if (e.target.closest('.subtask-checkbox-styled, .drag-handle, .subtask-actions, .btn-icon-sm, .subtask-edit-form-full, .subtask-expand-btn')) return;
               if (editingSubtask?.subtaskId === subtask.id) return;
-              if (hasChildren) toggleSubtaskExpanded(subtask.id);
+              // Open edit form on click (same as tasks)
+              startEditSubtask(task, subtask);
             }}
           >
             <span className="drag-handle subtask-drag-handle" {...dragListeners}>⠿</span>
@@ -1154,10 +1155,7 @@ function Tasks() {
               <>
                 <span
                   className="subtask-title"
-                  onClick={() => hasChildren && toggleSubtaskExpanded(subtask.id)}
-                  onDoubleClick={() => startEditSubtask(task, subtask)}
-                  title={hasChildren ? "Klikni pre rozbalenie, dvojklik pre úpravu" : "Dvojklik pre úpravu"}
-                  style={hasChildren ? { cursor: 'pointer' } : {}}
+                  title="Klikni pre úpravu"
                 >
                   {subtask.title}
                 </span>
