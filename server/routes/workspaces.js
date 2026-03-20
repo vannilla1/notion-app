@@ -630,8 +630,7 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     });
     await invitation.save();
 
-    // Get workspace name for response
-    const inviterUser = await User.findById(req.user.id);
+    // inviterUser already fetched above for capacity check
 
     logger.info('Invitation sent', {
       workspaceId: req.workspaceId,
