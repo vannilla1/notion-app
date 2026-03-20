@@ -1372,7 +1372,16 @@ function CRM() {
                 <div className="empty-state">
                   <div className="empty-state-icon">👥</div>
                   <h2>Žiadne kontakty</h2>
-                  <p>Vytvorte nový kontakt kliknutím na tlačidlo vyššie</p>
+                  <p>Začnite pridaním vášho prvého kontaktu</p>
+                  <button
+                    className="btn btn-primary empty-state-btn"
+                    onClick={() => {
+                      setShowForm(true);
+                      setSidebarOpen(true);
+                    }}
+                  >
+                    + Nový kontakt
+                  </button>
                 </div>
               ) : (
                 <div className="contacts-list">
