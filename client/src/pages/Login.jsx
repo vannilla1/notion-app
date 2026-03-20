@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { acceptInvitation } from '../api/workspaces';
 
 function Login() {
   const { login, register } = useAuth();
+  const { fetchWorkspaces } = useWorkspace();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(searchParams.get('register') === 'true');
@@ -33,6 +35,7 @@ function Login() {
       if (inviteToken) {
         try {
           await acceptInvitation(inviteToken);
+          await fetchWorkspaces();
         } catch (inviteErr) {
           console.log('Auto-accept invite failed:', inviteErr.response?.data?.message);
         }

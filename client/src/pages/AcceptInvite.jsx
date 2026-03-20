@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { getInvitationByToken, acceptInvitation } from '../api/workspaces';
 
 function AcceptInvite() {
   const { token } = useParams();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+  const { fetchWorkspaces } = useWorkspace();
 
   const [invitation, setInvitation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +36,7 @@ function AcceptInvite() {
     try {
       const result = await acceptInvitation(token);
       setSuccess(result.message);
+      await fetchWorkspaces();
       setTimeout(() => navigate('/app'), 2000);
     } catch (err) {
       setError(err.response?.data?.message || 'Chyba pri prijímaní pozvánky');
