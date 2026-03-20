@@ -77,3 +77,33 @@ export const deleteWorkspace = async () => {
   const response = await api.delete('/api/workspaces/current');
   return response.data;
 };
+
+// Send invitation
+export const sendInvitation = async (email, role) => {
+  const response = await api.post('/api/workspaces/current/invitations', { email, role });
+  return response.data;
+};
+
+// Get pending invitations
+export const getInvitations = async () => {
+  const response = await api.get('/api/workspaces/current/invitations');
+  return response.data;
+};
+
+// Cancel invitation
+export const cancelInvitation = async (invitationId) => {
+  const response = await api.delete(`/api/workspaces/current/invitations/${invitationId}`);
+  return response.data;
+};
+
+// Get invitation details by token (public)
+export const getInvitationByToken = async (token) => {
+  const response = await api.get(`/api/workspaces/invitation/${token}`);
+  return response.data;
+};
+
+// Accept invitation
+export const acceptInvitation = async (token) => {
+  const response = await api.post(`/api/workspaces/invitation/${token}/accept`);
+  return response.data;
+};

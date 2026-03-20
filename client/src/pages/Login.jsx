@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { acceptInvitation } from '../api/workspaces';
 
 function Login() {
   const { login, register } = useAuth();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(searchParams.get('register') === 'true');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const inviteToken = searchParams.get('invite');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +27,17 @@ function Login() {
         await register(username, email, password);
       } else {
         await login(email, password);
+      }
+
+      // If there's an invite token, accept it after login/register
+      if (inviteToken) {
+        try {
+          await acceptInvitation(inviteToken);
+        } catch (inviteErr) {
+          console.log('Auto-accept invite failed:', inviteErr.response?.data?.message);
+        }
+        navigate('/app');
+        return;
       }
     } catch (err) {
       if (err.response?.data?.message) {

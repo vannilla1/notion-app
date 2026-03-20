@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
+const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner } = require('../middleware/workspace');
@@ -553,6 +554,248 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
     res.json({ message: 'Pracovné prostredie bolo vymazané' });
   } catch (error) {
     logger.error('Delete workspace error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ==================== INVITATIONS ====================
+
+// Send invitation to email
+router.post('/current/invitations', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
+  try {
+    const { email, role } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email je povinný' });
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if user is already a member
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      const existingMember = await WorkspaceMember.findOne({
+        workspaceId: req.workspaceId,
+        userId: existingUser._id
+      });
+      if (existingMember) {
+        return res.status(400).json({ message: 'Tento používateľ je už členom tohto prostredia' });
+      }
+    }
+
+    // Check if pending invitation already exists
+    const existingInvite = await Invitation.findOne({
+      workspaceId: req.workspaceId,
+      email: normalizedEmail,
+      status: 'pending'
+    });
+    if (existingInvite) {
+      return res.status(400).json({ message: 'Pozvánka na tento email už bola odoslaná' });
+    }
+
+    // Check workspace capacity
+    const workspace = await Workspace.findById(req.workspaceId);
+    const owner = await User.findById(workspace.ownerId);
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
+
+    if (owner?.subscription?.plan === 'trial') {
+      if (memberCount >= 2) {
+        return res.status(400).json({ message: 'Skúšobná verzia umožňuje max. 2 členov. Upgradujte na Pro.' });
+      }
+    } else if (owner?.subscription?.plan === 'pro') {
+      const maxSeats = 2 + (workspace.paidSeats || 0);
+      if (memberCount >= maxSeats) {
+        return res.status(400).json({ message: `Workspace je plný (${memberCount}/${maxSeats}). Dokúpte ďalšie miesta.` });
+      }
+    }
+
+    // Create invitation
+    const invitation = new Invitation({
+      workspaceId: req.workspaceId,
+      email: normalizedEmail,
+      invitedBy: req.user.id,
+      role: role === 'admin' ? 'admin' : 'member'
+    });
+    await invitation.save();
+
+    // Get workspace name for response
+    const inviterUser = await User.findById(req.user.id);
+
+    logger.info('Invitation sent', {
+      workspaceId: req.workspaceId,
+      email: normalizedEmail,
+      invitedBy: req.user.id
+    });
+
+    res.json({
+      message: 'Pozvánka bola vytvorená',
+      invitation: {
+        id: invitation._id,
+        email: invitation.email,
+        role: invitation.role,
+        status: invitation.status,
+        token: invitation.token,
+        inviteLink: `${process.env.CLIENT_URL || 'https://perun-crm.onrender.com'}/invite/${invitation.token}`,
+        expiresAt: invitation.expiresAt,
+        invitedBy: inviterUser?.username || 'Neznámy'
+      }
+    });
+  } catch (error) {
+    logger.error('Send invitation error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Get all pending invitations for current workspace
+router.get('/current/invitations', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
+  try {
+    const invitations = await Invitation.find({
+      workspaceId: req.workspaceId,
+      status: 'pending'
+    }).populate('invitedBy', 'username');
+
+    res.json(invitations.map(inv => ({
+      id: inv._id,
+      email: inv.email,
+      role: inv.role,
+      status: inv.status,
+      invitedBy: inv.invitedBy?.username || 'Neznámy',
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt
+    })));
+  } catch (error) {
+    logger.error('Get invitations error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Cancel invitation
+router.delete('/current/invitations/:invitationId', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
+  try {
+    const invitation = await Invitation.findOneAndUpdate(
+      { _id: req.params.invitationId, workspaceId: req.workspaceId, status: 'pending' },
+      { status: 'cancelled' }
+    );
+    if (!invitation) {
+      return res.status(404).json({ message: 'Pozvánka nenájdená' });
+    }
+    res.json({ message: 'Pozvánka bola zrušená' });
+  } catch (error) {
+    logger.error('Cancel invitation error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Get invitation details by token (public - no auth needed for viewing)
+router.get('/invitation/:token', async (req, res) => {
+  try {
+    const invitation = await Invitation.findOne({
+      token: req.params.token,
+      status: 'pending'
+    }).populate('workspaceId', 'name color');
+
+    if (!invitation) {
+      return res.status(404).json({ message: 'Pozvánka nenájdená alebo vypršala' });
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      invitation.status = 'expired';
+      await invitation.save();
+      return res.status(410).json({ message: 'Pozvánka vypršala' });
+    }
+
+    const inviter = await User.findById(invitation.invitedBy, 'username');
+
+    res.json({
+      email: invitation.email,
+      role: invitation.role,
+      workspaceName: invitation.workspaceId?.name || 'Neznáme prostredie',
+      workspaceColor: invitation.workspaceId?.color || '#6366f1',
+      invitedBy: inviter?.username || 'Neznámy',
+      expiresAt: invitation.expiresAt
+    });
+  } catch (error) {
+    logger.error('Get invitation by token error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Accept invitation (authenticated user)
+router.post('/invitation/:token/accept', authenticateToken, async (req, res) => {
+  try {
+    const invitation = await Invitation.findOne({
+      token: req.params.token,
+      status: 'pending'
+    });
+
+    if (!invitation) {
+      return res.status(404).json({ message: 'Pozvánka nenájdená alebo vypršala' });
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      invitation.status = 'expired';
+      await invitation.save();
+      return res.status(410).json({ message: 'Pozvánka vypršala' });
+    }
+
+    // Check if already a member
+    const existingMember = await WorkspaceMember.findOne({
+      workspaceId: invitation.workspaceId,
+      userId: req.user.id
+    });
+    if (existingMember) {
+      invitation.status = 'accepted';
+      await invitation.save();
+      return res.json({ message: 'Už ste členom tohto prostredia', workspaceId: invitation.workspaceId });
+    }
+
+    // Check workspace capacity
+    const workspace = await Workspace.findById(invitation.workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ message: 'Pracovné prostredie už neexistuje' });
+    }
+
+    const owner = await User.findById(workspace.ownerId);
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
+
+    if (owner?.subscription?.plan === 'trial' && memberCount >= 2) {
+      return res.status(400).json({ message: 'Prostredie je plné. Vlastník musí upgradovať na Pro.' });
+    }
+    if (owner?.subscription?.plan === 'pro') {
+      const maxSeats = 2 + (workspace.paidSeats || 0);
+      if (memberCount >= maxSeats) {
+        // Allow if the joining user has Pro
+        const joiningUser = await User.findById(req.user.id);
+        if (joiningUser?.subscription?.plan !== 'pro') {
+          return res.status(400).json({ message: 'Prostredie je plné. Potrebujete Pro plán alebo vlastník musí dokúpiť miesta.' });
+        }
+      }
+    }
+
+    // Create membership
+    await WorkspaceMember.create({
+      workspaceId: invitation.workspaceId,
+      userId: req.user.id,
+      role: invitation.role,
+      invitedBy: invitation.invitedBy
+    });
+
+    // Switch user to the new workspace
+    await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: invitation.workspaceId });
+
+    // Mark invitation as accepted
+    invitation.status = 'accepted';
+    await invitation.save();
+
+    logger.info('Invitation accepted', {
+      workspaceId: invitation.workspaceId,
+      userId: req.user.id,
+      email: invitation.email
+    });
+
+    res.json({
+      message: `Boli ste pridaný do prostredia "${workspace.name}"`,
+      workspaceId: invitation.workspaceId
+    });
+  } catch (error) {
+    logger.error('Accept invitation error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

@@ -886,9 +886,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">📅</span>
             Synchronizácia kalendára
           </button>
+          <div className="user-menu-divider"></div>
+          <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/workspace/members'); }}>
+            <span className="menu-icon">👥</span>
+            Členovia prostredia
+          </button>
           {user?.role === 'admin' && (
             <>
-              <div className="user-menu-divider"></div>
               <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/admin'); }}>
                 <span className="menu-icon">⚙️</span>
                 Správa používateľov

@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
 import AdminPanel from './pages/AdminPanel';
+import WorkspaceMembers from './pages/WorkspaceMembers';
+import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import LandingPage from './pages/LandingPage';
 import NotificationToast from './components/NotificationToast';
@@ -211,6 +213,11 @@ function AppContent() {
           path="/admin"
           element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
         />
+        <Route
+          path="/workspace/members"
+          element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" />}
+        />
+        <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
       </Routes>
     </>
