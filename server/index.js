@@ -208,18 +208,23 @@ server.listen(PORT, () => {
   });
 
   // Connect to MongoDB in background - don't block server startup
-  connectDB().then(dbConnected => {
+  connectDB().then(async (dbConnected) => {
     if (!dbConnected) {
       logger.warn('MongoDB not connected. Some features may not work.');
     } else {
       // Set Pro plan for team accounts
-      const User = require('./models/User');
-      const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
-      for (const email of proEmails) {
-        await User.findOneAndUpdate(
-          { email, 'subscription.plan': { $ne: 'pro' } },
-          { 'subscription.plan': 'pro' }
-        ).then(u => u && logger.info(`Pro plan set for ${email}`));
+      try {
+        const User = require('./models/User');
+        const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
+        for (const email of proEmails) {
+          const u = await User.findOneAndUpdate(
+            { email, 'subscription.plan': { $ne: 'pro' } },
+            { 'subscription.plan': 'pro' }
+          );
+          if (u) logger.info(`Pro plan set for ${email}`);
+        }
+      } catch (err) {
+        logger.error('Failed to set pro plans', { error: err.message });
       }
 
       // Defer schedulers - run after 30s to not compete with first requests
