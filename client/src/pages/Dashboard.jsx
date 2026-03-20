@@ -125,10 +125,10 @@ function Dashboard() {
 
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'new': return 'Novy';
-      case 'active': return 'Aktivny';
-      case 'completed': return 'Dokonceny';
-      case 'cancelled': return 'Zruseny';
+      case 'new': return 'Nový';
+      case 'active': return 'Aktívny';
+      case 'completed': return 'Dokončený';
+      case 'cancelled': return 'Zrušený';
       default: return status;
     }
   };
@@ -216,32 +216,32 @@ function Dashboard() {
   const getDetailItems = () => {
     switch (detailView) {
       case 'contacts':
-        return { type: 'contacts', items: contacts, title: 'Vsetky kontakty' };
+        return { type: 'contacts', items: contacts, title: 'Všetky kontakty' };
       case 'active':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'active'), title: 'Aktivne kontakty' };
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'active'), title: 'Aktívne kontakty' };
       case 'new':
         return { type: 'contacts', items: contacts.filter(c => c.status === 'new'), title: 'Nove kontakty' };
       case 'completed-contacts':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'completed'), title: 'Dokoncene kontakty' };
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'completed'), title: 'Dokončené kontakty' };
       case 'cancelled':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'cancelled'), title: 'Zrusene kontakty' };
+        return { type: 'contacts', items: contacts.filter(c => c.status === 'cancelled'), title: 'Zrušené kontakty' };
       case 'tasks':
-        return { type: 'tasks', items: tasks, title: 'Vsetky ulohy' };
+        return { type: 'tasks', items: tasks, title: 'Všetky úlohy' };
       case 'pending':
-        return { type: 'tasks', items: tasks.filter(t => !t.completed), title: 'Nesplnene ulohy' };
+        return { type: 'tasks', items: tasks.filter(t => !t.completed), title: 'Nesplnené úlohy' };
       case 'completed':
-        return { type: 'tasks', items: tasks.filter(t => t.completed), title: 'Splnene ulohy' };
+        return { type: 'tasks', items: tasks.filter(t => t.completed), title: 'Splnené úlohy' };
       case 'contactTasks':
         if (selectedContact) {
-          return { type: 'tasks', items: getContactTasks(selectedContact), title: `Ulohy: ${selectedContact.name}` };
+          return { type: 'tasks', items: getContactTasks(selectedContact), title: `Úlohy: ${selectedContact.name}` };
         }
         return null;
       case 'priority-low':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'low' && !t.completed), title: 'Ulohy s nizkou prioritou' };
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'low' && !t.completed), title: 'Úlohy s nízkou prioritou' };
       case 'priority-medium':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'medium' && !t.completed), title: 'Ulohy so strednou prioritou' };
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'medium' && !t.completed), title: 'Úlohy so strednou prioritou' };
       case 'priority-high':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'high' && !t.completed), title: 'Ulohy s vysokou prioritou' };
+        return { type: 'tasks', items: tasks.filter(t => t.priority === 'high' && !t.completed), title: 'Úlohy s vysokou prioritou' };
       default:
         return null;
     }
@@ -532,7 +532,7 @@ function Dashboard() {
 
         <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
           <div className="dashboard-stats">
-            <h3>Prehlad</h3>
+            <h3>Prehľad</h3>
             <div
               className={`stat-item clickable ${detailView === 'contacts' ? 'active' : ''}`}
               onClick={() => setDetailView('contacts')}
@@ -544,32 +544,32 @@ function Dashboard() {
               className={`stat-item clickable ${detailView === 'active' ? 'active' : ''}`}
               onClick={() => setDetailView('active')}
             >
-              <span className="stat-label">Aktivnych</span>
+              <span className="stat-label">Aktívnych</span>
               <span className="stat-value">{activeContacts}</span>
             </div>
             <div
               className={`stat-item clickable ${detailView === 'tasks' ? 'active' : ''}`}
               onClick={() => setDetailView('tasks')}
             >
-              <span className="stat-label">Globalnych uloh</span>
+              <span className="stat-label">Globálnych úloh</span>
               <span className="stat-value">{tasks.length}</span>
             </div>
             <div
               className={`stat-item clickable ${detailView === 'pending' ? 'active' : ''}`}
               onClick={() => setDetailView('pending')}
             >
-              <span className="stat-label">Nesplnenych</span>
+              <span className="stat-label">Nesplnených</span>
               <span className="stat-value">{pendingTasks}</span>
             </div>
             <div
               className={`stat-item clickable ${detailView === 'completed' ? 'active' : ''}`}
               onClick={() => setDetailView('completed')}
             >
-              <span className="stat-label">Splnenych</span>
+              <span className="stat-label">Splnených</span>
               <span className="stat-value">{completedTasks}</span>
             </div>
 
-            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podla priority</h4>
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa priority</h4>
             <div
               className={`stat-item clickable priority-stat ${detailView === 'priority-high' ? 'active' : ''}`}
               onClick={() => setDetailView('priority-high')}
@@ -601,14 +601,14 @@ function Dashboard() {
               <span className="stat-value">{lowPriorityTasks}</span>
             </div>
 
-            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podla stavu kontaktu</h4>
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa stavu kontaktu</h4>
             <div
               className={`stat-item clickable priority-stat ${detailView === 'new' ? 'active' : ''}`}
               onClick={() => setDetailView('new')}
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#3B82F6' }}></span>
-                Novy
+                Nový
               </span>
               <span className="stat-value">{newContacts}</span>
             </div>
@@ -618,7 +618,7 @@ function Dashboard() {
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
-                Aktivny
+                Aktívny
               </span>
               <span className="stat-value">{activeContacts}</span>
             </div>
@@ -628,7 +628,7 @@ function Dashboard() {
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#6366F1' }}></span>
-                Dokonceny
+                Dokončený
               </span>
               <span className="stat-value">{completedContacts}</span>
             </div>
@@ -638,27 +638,27 @@ function Dashboard() {
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
-                Zruseny
+                Zrušený
               </span>
               <span className="stat-value">{cancelledContacts}</span>
             </div>
           </div>
 
           <div className="quick-actions">
-            <h3>Rychle akcie</h3>
+            <h3>Rýchle akcie</h3>
             <button
               className="btn btn-primary"
               onClick={() => navigate('/crm')}
               style={{ width: '100%', marginBottom: '8px' }}
             >
-              + Novy kontakt
+              + Nový kontakt
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => navigate('/tasks')}
               style={{ width: '100%' }}
             >
-              + Nova uloha
+              + Nová úloha
             </button>
           </div>
         </aside>
@@ -679,7 +679,7 @@ function Dashboard() {
               {detailData.items.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">📋</div>
-                  <h3>Ziadne polozky</h3>
+                  <h3>Žiadne položky</h3>
                 </div>
               ) : detailData.type === 'contacts' ? (
                 <div className="detail-list">
@@ -717,7 +717,7 @@ function Dashboard() {
                         </div>
                         {contactTasks.length > 0 && (
                           <div className="detail-item-badge">
-                            {completedContactTasks}/{contactTasks.length} uloh
+                            {completedContactTasks}/{contactTasks.length} úloh
                           </div>
                         )}
                         <div className="detail-item-arrow">→</div>
@@ -845,8 +845,8 @@ function Dashboard() {
             /* Main Dashboard View */
             <div className="dashboard-page">
               <div className="dashboard-header">
-                <h2>Vitajte, {user?.username || 'Pouzivatel'}</h2>
-                <p className="dashboard-subtitle">Prehlad vasich kontaktov a uloh</p>
+                <h2>Vitajte, {user?.username || 'Používateľ'}</h2>
+                <p className="dashboard-subtitle">Prehľad vašich kontaktov a úloh</p>
               </div>
 
               <div className="dashboard-grid">
@@ -858,13 +858,13 @@ function Dashboard() {
                       className="btn btn-secondary btn-sm"
                       onClick={(e) => { e.stopPropagation(); navigate('/crm'); }}
                     >
-                      Zobrazit vsetky
+                      Zobraziť všetky
                     </button>
                   </div>
 
                   {contacts.length === 0 ? (
                     <div className="empty-state-small">
-                      <p>Ziadne kontakty</p>
+                      <p>Žiadne kontakty</p>
                     </div>
                   ) : (
                     <div className="dashboard-contacts-list">
@@ -910,7 +910,7 @@ function Dashboard() {
                       })}
                       {contacts.length > 5 && (
                         <div className="show-more">
-                          + {contacts.length - 5} dalsich kontaktov
+                          + {contacts.length - 5} ďalších kontaktov
                         </div>
                       )}
                     </div>
@@ -920,18 +920,18 @@ function Dashboard() {
                 {/* Tasks Section */}
                 <div className="dashboard-section" onClick={() => setDetailView('pending')}>
                   <div className="section-header">
-                    <h3>Ulohy ({tasks.length})</h3>
+                    <h3>Úlohy ({tasks.length})</h3>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
                     >
-                      Zobrazit vsetky
+                      Zobraziť všetky
                     </button>
                   </div>
 
                   {tasks.length === 0 ? (
                     <div className="empty-state-small">
-                      <p>Ziadne ulohy</p>
+                      <p>Žiadne úlohy</p>
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
@@ -975,7 +975,7 @@ function Dashboard() {
                       ))}
                       {tasks.filter(t => !t.completed).length > 5 && (
                         <div className="show-more">
-                          + {tasks.filter(t => !t.completed).length - 5} dalsich uloh
+                          + {tasks.filter(t => !t.completed).length - 5} ďalších úloh
                         </div>
                       )}
 
@@ -985,7 +985,7 @@ function Dashboard() {
                           className="completed-summary"
                           onClick={(e) => { e.stopPropagation(); setDetailView('completed'); }}
                         >
-                          {completedTasks} splnenych uloh
+                          {completedTasks} splnených úloh
                         </div>
                       )}
                     </div>
@@ -996,7 +996,7 @@ function Dashboard() {
               {/* Recent Activity - Contacts with tasks */}
               <div className="dashboard-section full-width">
                 <div className="section-header">
-                  <h3>Kontakty s ulohami</h3>
+                  <h3>Kontakty s úlohami</h3>
                 </div>
                 <div className="contacts-with-tasks">
                   {contacts
@@ -1019,7 +1019,7 @@ function Dashboard() {
                             </div>
                             <div className="contact-tasks-name">{contact.name || 'Bez mena'}</div>
                             <span className="tasks-badge">
-                              {contactTasks.filter(t => t.completed).length}/{contactTasks.length} uloh
+                              {contactTasks.filter(t => t.completed).length}/{contactTasks.length} úloh
                             </span>
                           </div>
                           <div className="contact-tasks-list">
@@ -1031,13 +1031,13 @@ function Dashboard() {
                                 <span className="mini-task-check">{task.completed ? '✓' : '○'}</span>
                                 <span className="mini-task-title">{task.title}</span>
                                 {task.source === 'global' && (
-                                  <span className="mini-task-source">z Uloh</span>
+                                  <span className="mini-task-source">z Úloh</span>
                                 )}
                               </div>
                             ))}
                             {contactTasks.length > 3 && (
                               <div className="mini-task more">
-                                + {contactTasks.length - 3} dalsich
+                                + {contactTasks.length - 3} ďalších
                               </div>
                             )}
                           </div>
@@ -1046,7 +1046,7 @@ function Dashboard() {
                     })}
                   {contacts.filter(c => getContactTasks(c).length > 0).length === 0 && (
                     <div className="empty-state-small">
-                      <p>Ziadne kontakty s ulohami</p>
+                      <p>Žiadne kontakty s úlohami</p>
                     </div>
                   )}
                 </div>
