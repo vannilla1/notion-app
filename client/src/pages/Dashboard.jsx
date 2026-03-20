@@ -212,6 +212,16 @@ function Dashboard() {
   const mediumPriorityTasks = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const highPriorityTasks = tasks.filter(t => t.priority === 'high' && !t.completed).length;
 
+  // Sort tasks: incomplete first, then by priority (high→medium→low)
+  const sortTasks = (list) => [...list].sort((a, b) => {
+    const aCompleted = a.completed === true;
+    const bCompleted = b.completed === true;
+    if (aCompleted && !bCompleted) return 1;
+    if (!aCompleted && bCompleted) return -1;
+    const pri = { high: 0, medium: 1, low: 2 };
+    return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
+  });
+
   // Sort contacts: new/active first, completed second, cancelled last, alphabetically within groups
   const sortContacts = (list) => [...list].sort((a, b) => {
     const order = { new: 0, active: 0, completed: 1, cancelled: 2 };
@@ -234,22 +244,22 @@ function Dashboard() {
       case 'cancelled':
         return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'cancelled')), title: 'Zrušené kontakty' };
       case 'tasks':
-        return { type: 'tasks', items: tasks, title: 'Všetky úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks), title: 'Všetky úlohy' };
       case 'pending':
-        return { type: 'tasks', items: tasks.filter(t => !t.completed), title: 'Nesplnené úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => !t.completed)), title: 'Nesplnené úlohy' };
       case 'completed':
-        return { type: 'tasks', items: tasks.filter(t => t.completed), title: 'Splnené úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.completed)), title: 'Splnené úlohy' };
       case 'contactTasks':
         if (selectedContact) {
-          return { type: 'tasks', items: getContactTasks(selectedContact), title: `Úlohy: ${selectedContact.name}` };
+          return { type: 'tasks', items: sortTasks(getContactTasks(selectedContact)), title: `Úlohy: ${selectedContact.name}` };
         }
         return null;
       case 'priority-low':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'low' && !t.completed), title: 'Úlohy s nízkou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'low' && !t.completed)), title: 'Úlohy s nízkou prioritou' };
       case 'priority-medium':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'medium' && !t.completed), title: 'Úlohy so strednou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'medium' && !t.completed)), title: 'Úlohy so strednou prioritou' };
       case 'priority-high':
-        return { type: 'tasks', items: tasks.filter(t => t.priority === 'high' && !t.completed), title: 'Úlohy s vysokou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'high' && !t.completed)), title: 'Úlohy s vysokou prioritou' };
       default:
         return null;
     }
@@ -943,7 +953,10 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
-                      {tasks.filter(t => !t.completed).slice(0, 5).map(task => (
+                      {[...tasks].filter(t => !t.completed).sort((a, b) => {
+                        const pri = { high: 0, medium: 1, low: 2 };
+                        return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
+                      }).slice(0, 5).map(task => (
                         <div
                           key={task.id}
                           className="dashboard-task-item clickable-task"

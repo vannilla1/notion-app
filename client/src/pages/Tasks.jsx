@@ -1568,13 +1568,18 @@ function Tasks() {
     return true;
   });
 
-  // Sort tasks: incomplete first, then by order, completed at the end
+  // Sort tasks: incomplete first, then by priority (high→medium→low), then by order, completed at the end
+  const priorityOrder = { high: 0, medium: 1, low: 2 };
   const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
     const aCompleted = a.completed === true;
     const bCompleted = b.completed === true;
     if (aCompleted && !bCompleted) return 1;
     if (!aCompleted && bCompleted) return -1;
-    // Within same completion status, sort by order
+    // Within same completion status, sort by priority
+    const priA = priorityOrder[a.priority] ?? 1;
+    const priB = priorityOrder[b.priority] ?? 1;
+    if (priA !== priB) return priA - priB;
+    // Then by order
     const orderA = a.order || 0;
     const orderB = b.order || 0;
     if (orderA !== orderB) return orderA - orderB;
