@@ -24,7 +24,6 @@ function WorkspaceMembers() {
   const [sending, setSending] = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // System users state (admin/manager only)
   const [systemUsers, setSystemUsers] = useState([]);
@@ -211,17 +210,14 @@ function WorkspaceMembers() {
   };
 
   return (
-    <div className="crm-container">
+    <div className="wm-page">
       <header className="crm-header">
         <div className="crm-header-left">
           <button
-            className="btn-menu"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            aria-label="Menu"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/app')}
           >
-            <span></span>
-            <span></span>
-            <span></span>
+            ← Späť
           </button>
           <h1 className="header-title-link" onClick={() => navigate('/app')}>Prpl CRM</h1>
         </div>
@@ -243,30 +239,23 @@ function WorkspaceMembers() {
         </div>
       </header>
 
-      <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <button className="btn btn-primary add-contact-btn" onClick={() => navigate('/app')}>
-          ← Späť na Dashboard
-        </button>
-        <div className="dashboard-stats">
-          <h3>Prostredie</h3>
-          <div className="stat-item">
-            <span className="stat-label">Názov</span>
-            <span className="stat-value" style={{ fontSize: '14px' }}>{currentWorkspace?.name || '—'}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Členovia</span>
-            <span className="stat-value">{members.length}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Pozvánky</span>
-            <span className="stat-value">{invitations.length}</span>
+      <div className="workspace-members-content">
+        <div className="wm-header-info">
+          <h2 className="wm-title">Správa tímu</h2>
+          <div className="wm-stats-row">
+            <span className="wm-stat-chip">
+              {currentWorkspace?.name || '—'}
+            </span>
+            <span className="wm-stat-chip">
+              👥 {members.length} {members.length === 1 ? 'člen' : members.length < 5 ? 'členovia' : 'členov'}
+            </span>
+            {invitations.length > 0 && (
+              <span className="wm-stat-chip wm-stat-pending">
+                ✉ {invitations.length} {invitations.length === 1 ? 'pozvánka' : invitations.length < 5 ? 'pozvánky' : 'pozvánok'}
+              </span>
+            )}
           </div>
         </div>
-      </aside>
-
-      <main className="crm-main">
-        <div className="workspace-members-content">
-            <h2 className="wm-title">Správa tímu</h2>
 
             {/* Tabs - show system tab only if admin/manager */}
             {canManageSystem && (
@@ -521,8 +510,7 @@ function WorkspaceMembers() {
                 )}
               </div>
             )}
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

@@ -8271,17 +8271,57 @@ a.detail-value:hover {
 }
 
 /* ==================== Workspace Members Page ==================== */
+.wm-page {
+  min-height: 100vh;
+  background: var(--bg-secondary);
+}
+
+.wm-page .crm-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
 .workspace-members-content {
   padding: 24px;
   max-width: 800px;
   margin: 0 auto;
 }
 
+.wm-header-info {
+  margin-bottom: 24px;
+}
+
 .wm-title {
   font-size: 22px;
   font-weight: 700;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   color: var(--text-primary);
+}
+
+.wm-stats-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wm-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.wm-stat-pending {
+  background: #f59e0b10;
+  border-color: #f59e0b40;
+  color: #f59e0b;
 }
 
 .wm-tabs {
