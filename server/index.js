@@ -212,16 +212,17 @@ server.listen(PORT, () => {
     if (!dbConnected) {
       logger.warn('MongoDB not connected. Some features may not work.');
     } else {
-      // Set Pro plan for team accounts
+      // Set Pro plan for team accounts (always ensure pro, regardless of current state)
       try {
         const User = require('./models/User');
-        const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
+        const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
         for (const email of proEmails) {
           const u = await User.findOneAndUpdate(
-            { email, 'subscription.plan': { $ne: 'pro' } },
-            { 'subscription.plan': 'pro' }
+            { email },
+            { $set: { 'subscription.plan': 'pro', 'subscription.paidUntil': new Date('2099-12-31') } },
+            { new: true }
           );
-          if (u) logger.info(`Pro plan set for ${email}`);
+          if (u) logger.info(`Pro plan ensured for ${email} (plan: ${u.subscription?.plan})`);
         }
       } catch (err) {
         logger.error('Failed to set pro plans', { error: err.message });

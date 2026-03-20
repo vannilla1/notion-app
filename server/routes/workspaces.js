@@ -175,18 +175,21 @@ router.post('/join', authenticateToken, async (req, res) => {
     const owner = await User.findById(workspace.ownerId);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
 
-    if (owner?.subscription?.plan === 'trial') {
-      // Trial workspace: max 2 members
-      if (memberCount >= 2) {
-        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 2 používateľov v tíme. Pre neobmedzený prístup prejdite na Pro.' });
-      }
-    } else if (owner?.subscription?.plan === 'pro') {
-      // Pro workspace: 2 included + paidSeats extra
-      const maxSeats = 2 + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        // Workspace is full - check if joining user has their own Pro plan
-        if (joiningUser?.subscription?.plan !== 'pro') {
-          return res.status(403).json({ message: 'Pracovné prostredie je plné. Požiadajte vlastníka o pridanie ďalšieho miesta alebo si aktivujte Pro plán.' });
+    // Team Pro emails bypass capacity check
+    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase()) || proEmails.includes(joiningUser?.email?.toLowerCase());
+
+    if (!isTeamPro) {
+      if (owner?.subscription?.plan === 'trial') {
+        if (memberCount >= 2) {
+          return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 2 používateľov v tíme. Pre neobmedzený prístup prejdite na Pro.' });
+        }
+      } else if (owner?.subscription?.plan === 'pro') {
+        const maxSeats = 5 + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          if (joiningUser?.subscription?.plan !== 'pro') {
+            return res.status(403).json({ message: 'Pracovné prostredie je plné. Požiadajte vlastníka o pridanie ďalšieho miesta alebo si aktivujte Pro plán.' });
+          }
         }
       }
     }
@@ -600,14 +603,21 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     const owner = await User.findById(workspace.ownerId);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
-    if (owner?.subscription?.plan === 'trial') {
-      if (memberCount >= 2) {
-        return res.status(400).json({ message: 'Skúšobná verzia umožňuje max. 2 členov. Upgradujte na Pro.' });
-      }
-    } else if (owner?.subscription?.plan === 'pro') {
-      const maxSeats = 2 + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        return res.status(400).json({ message: `Workspace je plný (${memberCount}/${maxSeats}). Dokúpte ďalšie miesta.` });
+    // Team Pro emails bypass capacity check entirely
+    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const inviterUser = await User.findById(req.user.id);
+    const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
+
+    if (!isTeamPro) {
+      if (owner?.subscription?.plan === 'trial') {
+        if (memberCount >= 2) {
+          return res.status(400).json({ message: 'Skúšobná verzia umožňuje max. 2 členov. Upgradujte na Pro.' });
+        }
+      } else if (owner?.subscription?.plan === 'pro') {
+        const maxSeats = 5 + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          return res.status(400).json({ message: `Workspace je plný (${memberCount}/${maxSeats}). Dokúpte ďalšie miesta.` });
+        }
       }
     }
 
@@ -760,16 +770,21 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
     const owner = await User.findById(workspace.ownerId);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
-    if (owner?.subscription?.plan === 'trial' && memberCount >= 2) {
-      return res.status(400).json({ message: 'Prostredie je plné. Vlastník musí upgradovať na Pro.' });
-    }
-    if (owner?.subscription?.plan === 'pro') {
-      const maxSeats = 2 + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        // Allow if the joining user has Pro
-        const joiningUser = await User.findById(req.user.id);
-        if (joiningUser?.subscription?.plan !== 'pro') {
-          return res.status(400).json({ message: 'Prostredie je plné. Potrebujete Pro plán alebo vlastník musí dokúpiť miesta.' });
+    // Team Pro emails bypass capacity check
+    const proEmails = ['project.manager@eperun.sk', 'project.manazer@eperun.sk', 'martin.kosco@eperun.sk'];
+    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
+
+    if (!isTeamPro) {
+      if (owner?.subscription?.plan === 'trial' && memberCount >= 2) {
+        return res.status(400).json({ message: 'Prostredie je plné. Vlastník musí upgradovať na Pro.' });
+      }
+      if (owner?.subscription?.plan === 'pro') {
+        const maxSeats = 5 + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          const joiningUser = await User.findById(req.user.id);
+          if (joiningUser?.subscription?.plan !== 'pro') {
+            return res.status(400).json({ message: 'Prostredie je plné. Potrebujete Pro plán alebo vlastník musí dokúpiť miesta.' });
+          }
         }
       }
     }
