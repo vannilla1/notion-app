@@ -1,10 +1,22 @@
 const express = require('express');
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
+    const ext = file.originalname.toLowerCase().split('.').pop();
+    if (allowedExtensions.test(ext)) return cb(null, true);
+    cb(new Error('Nepovolený typ súboru'));
+  }
+});
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
@@ -2033,6 +2045,124 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ==================== FILE ATTACHMENTS ====================
+
+// Helper: find subtask recursively and return reference
+const findSubtaskById = (subtasks, subtaskId) => {
+  for (const s of subtasks) {
+    if (s.id === subtaskId) return s;
+    if (s.subtasks?.length) {
+      const found = findSubtaskById(s.subtasks, subtaskId);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+// Upload file to task
+router.post('/:taskId/files', authenticateToken, requireWorkspace, (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ message: 'Súbor je príliš veľký (max 5MB)' });
+      }
+      return res.status(400).json({ message: err.message });
+    }
+    if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
+
+    try {
+      const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
+      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+
+      const fileData = {
+        id: uuidv4(),
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        data: req.file.buffer.toString('base64'),
+        uploadedAt: new Date()
+      };
+
+      const subtaskId = req.query.subtaskId;
+      if (subtaskId) {
+        const subtask = findSubtaskById(task.subtasks, subtaskId);
+        if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+        if (!subtask.files) subtask.files = [];
+        subtask.files.push(fileData);
+        task.markModified('subtasks');
+      } else {
+        task.files.push(fileData);
+      }
+
+      await task.save();
+
+      const { data, ...fileMeta } = fileData;
+      res.json({ message: 'Súbor nahraný', file: fileMeta });
+    } catch (error) {
+      logger.error('Task file upload error', { error: error.message });
+      res.status(500).json({ message: 'Chyba pri nahrávaní súboru' });
+    }
+  });
+});
+
+// Download file from task
+router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
+    if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+
+    const subtaskId = req.query.subtaskId;
+    let file;
+
+    if (subtaskId) {
+      const subtask = findSubtaskById(task.subtasks, subtaskId);
+      if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+      file = (subtask.files || []).find(f => f.id === req.params.fileId);
+    } else {
+      file = task.files.find(f => f.id === req.params.fileId);
+    }
+
+    if (!file) return res.status(404).json({ message: 'Súbor nenájdený' });
+
+    const fileBuffer = Buffer.from(file.data, 'base64');
+    res.set({
+      'Content-Type': file.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Length': fileBuffer.length,
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    });
+    res.send(fileBuffer);
+  } catch (error) {
+    logger.error('Task file download error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri sťahovaní súboru' });
+  }
+});
+
+// Delete file from task
+router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
+    if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+
+    const subtaskId = req.query.subtaskId;
+
+    if (subtaskId) {
+      const subtask = findSubtaskById(task.subtasks, subtaskId);
+      if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+      subtask.files = (subtask.files || []).filter(f => f.id !== req.params.fileId);
+      task.markModified('subtasks');
+    } else {
+      task.files = task.files.filter(f => f.id !== req.params.fileId);
+    }
+
+    await task.save();
+    res.json({ message: 'Súbor vymazaný' });
+  } catch (error) {
+    logger.error('Task file delete error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní súboru' });
   }
 });
 

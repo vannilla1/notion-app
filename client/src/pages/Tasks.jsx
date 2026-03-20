@@ -154,6 +154,12 @@ function Tasks() {
   const [editSubtaskAssignedTo, setEditSubtaskAssignedTo] = useState([]);
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
+  // File attachment states
+  const [uploadingFile, setUploadingFile] = useState(null); // taskId or subtaskId being uploaded to
+  const taskFileInputRef = useRef(null);
+  const subtaskFileInputRef = useRef(null);
+  const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
+
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
@@ -1151,6 +1157,9 @@ function Tasks() {
                 {subtask.notes && (
                   <span className="subtask-notes-indicator" title={subtask.notes}>📝</span>
                 )}
+                {subtask.files?.length > 0 && (
+                  <span className="subtask-notes-indicator" title={`${subtask.files.length} príloha`}>📎{subtask.files.length > 1 ? subtask.files.length : ''}</span>
+                )}
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
                     {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
@@ -1181,6 +1190,14 @@ function Tasks() {
                 )}
                 <div className="subtask-actions">
                   <button
+                    onClick={() => triggerFileUpload(task.id || task._id, subtask.id)}
+                    className="btn-icon-sm"
+                    title="Pridať prílohu"
+                    disabled={uploadingFile === subtask.id}
+                  >
+                    {uploadingFile === subtask.id ? '⏳' : '📎'}
+                  </button>
+                  <button
                     onClick={() => {
                       setExpandedSubtasks(prev => ({ ...prev, [subtask.id]: true }));
                       setSubtaskInputs(prev => ({ ...prev, [subtask.id]: '' }));
@@ -1201,6 +1218,21 @@ function Tasks() {
           {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
             <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
               {subtask.notes}
+            </div>
+          )}
+
+          {/* Subtask files */}
+          {subtask.files?.length > 0 && (
+            <div className="subtask-files-list" style={{ marginLeft: depth * 16 + 24 }}>
+              {subtask.files.map(file => (
+                <div key={file.id} className="task-file-item task-file-item-sm">
+                  <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
+                  <span className="task-file-size">{formatFileSize(file.size)}</span>
+                  <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
+                  <button className="btn-icon-sm" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -1337,6 +1369,88 @@ function Tasks() {
   const formatDate = (dateString) => {
     if (!dateString) return '';
     return new Date(dateString).toLocaleDateString('sk-SK');
+  };
+
+  // File attachment handlers
+  const getFileIcon = (mimetype) => {
+    if (mimetype?.startsWith('image/')) return '🖼️';
+    if (mimetype?.includes('pdf')) return '📄';
+    if (mimetype?.includes('word') || mimetype?.includes('document')) return '📝';
+    if (mimetype?.includes('sheet') || mimetype?.includes('excel')) return '📊';
+    if (mimetype?.includes('presentation') || mimetype?.includes('powerpoint')) return '📽️';
+    if (mimetype?.startsWith('video/')) return '🎬';
+    if (mimetype?.startsWith('audio/')) return '🎵';
+    return '📎';
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const handleFileUpload = async (taskId, subtaskId, file) => {
+    const key = subtaskId || taskId;
+    setUploadingFile(key);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const url = subtaskId
+        ? `/api/tasks/${taskId}/files?subtaskId=${subtaskId}`
+        : `/api/tasks/${taskId}/files`;
+      await api.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+      await fetchTasks();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+    } finally {
+      setUploadingFile(null);
+    }
+  };
+
+  const handleFileDownload = async (taskId, fileId, fileName, subtaskId) => {
+    try {
+      const url = subtaskId
+        ? `/api/tasks/${taskId}/files/${fileId}/download?subtaskId=${subtaskId}`
+        : `/api/tasks/${taskId}/files/${fileId}/download`;
+      const response = await api.get(url, { responseType: 'blob' });
+      const link = document.createElement('a');
+      link.href = window.URL.createObjectURL(response.data);
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(link.href);
+    } catch (error) {
+      alert('Chyba pri sťahovaní súboru');
+    }
+  };
+
+  const handleFileDelete = async (taskId, fileId, subtaskId) => {
+    if (!window.confirm('Vymazať tento súbor?')) return;
+    try {
+      const url = subtaskId
+        ? `/api/tasks/${taskId}/files/${fileId}?subtaskId=${subtaskId}`
+        : `/api/tasks/${taskId}/files/${fileId}`;
+      await api.delete(url);
+      await fetchTasks();
+    } catch (error) {
+      alert('Chyba pri mazaní súboru');
+    }
+  };
+
+  const triggerFileUpload = (taskId, subtaskId) => {
+    setActiveFileTarget({ taskId, subtaskId });
+    setTimeout(() => {
+      const ref = subtaskId ? subtaskFileInputRef : taskFileInputRef;
+      ref.current?.click();
+    }, 0);
+  };
+
+  const onFileSelected = (e, isSubtask) => {
+    const file = e.target.files[0];
+    if (!file || !activeFileTarget) return;
+    handleFileUpload(activeFileTarget.taskId, activeFileTarget.subtaskId, file);
+    e.target.value = '';
   };
 
   // Helper to check if task or any subtask is assigned to user
@@ -2084,6 +2198,11 @@ function Tasks() {
                                   ✓ {countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total}
                                 </span>
                               )}
+                              {task.files?.length > 0 && (
+                                <span className="subtask-count" title={`${task.files.length} príloha`}>
+                                  📎 {task.files.length}
+                                </span>
+                              )}
                               {task.assignedUsers?.length > 0 && (
                                 <span className="assigned-users-badge">
                                   {task.assignedUsers.map(u => (
@@ -2116,6 +2235,33 @@ function Tasks() {
                           {task.description && (
                             <div className="task-description">{task.description}</div>
                           )}
+
+                          {/* Task file attachments */}
+                          <div className="task-files-section">
+                            <div className="task-files-header">
+                              <span>📎 Prílohy</span>
+                              <button
+                                className="btn btn-secondary btn-sm btn-attach"
+                                onClick={() => triggerFileUpload(task.id || task._id)}
+                                disabled={uploadingFile === (task.id || task._id)}
+                              >
+                                {uploadingFile === (task.id || task._id) ? '⏳' : '+'} Pridať
+                              </button>
+                            </div>
+                            {task.files?.length > 0 && (
+                              <div className="task-files-list">
+                                {task.files.map(file => (
+                                  <div key={file.id} className="task-file-item">
+                                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                                    <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
+                                    <span className="task-file-size">{formatFileSize(file.size)}</span>
+                                    <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+                                    <button className="btn-icon-sm" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
 
                           <div className="subtasks">
                             <div className="subtasks-header">Podulohy</div>
@@ -2258,6 +2404,10 @@ function Tasks() {
           </div>
         </div>
       )}
+
+      {/* Hidden file inputs */}
+      <input type="file" ref={taskFileInputRef} style={{ display: 'none' }} onChange={(e) => onFileSelected(e, false)} />
+      <input type="file" ref={subtaskFileInputRef} style={{ display: 'none' }} onChange={(e) => onFileSelected(e, true)} />
 
       {/* Help Guide */}
       <HelpGuide

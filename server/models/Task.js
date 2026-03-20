@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
+const fileSchema = new mongoose.Schema({
+  id: String,
+  originalName: String,
+  mimetype: String,
+  size: Number,
+  data: String, // Base64 encoded file data
+  uploadedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 // BUGFIX: Added priority field to subtask schema for consistency
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
@@ -11,6 +20,7 @@ const subtaskSchema = new mongoose.Schema({
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
   assignedTo: { type: [String], default: [] }, // Array of User IDs
+  files: { type: [fileSchema], default: [] },
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking
@@ -58,6 +68,7 @@ const taskSchema = new mongoose.Schema({
   },
   dueDate: String,
   subtasks: { type: [subtaskSchema], default: [] },
+  files: { type: [fileSchema], default: [] },
   createdBy: String,
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking

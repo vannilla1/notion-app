@@ -1793,6 +1793,84 @@ body {
   line-height: 1.6;
 }
 
+/* Task file attachments */
+.task-files-section {
+  margin-bottom: 12px;
+  padding: 8px 0;
+}
+
+.task-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.btn-attach {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+.task-files-list,
+.subtask-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.task-file-item:hover {
+  background: var(--border-color);
+}
+
+.task-file-item-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.task-file-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.task-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.task-file-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.subtask-files-list {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
 .subtasks-header {
   font-size: 11px;
   font-weight: 700;
