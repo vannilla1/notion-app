@@ -15,6 +15,7 @@ function AcceptInvite() {
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [alreadyAccepted, setAlreadyAccepted] = useState(false);
 
   useEffect(() => {
     const fetchInvitation = async () => {
@@ -22,15 +23,20 @@ function AcceptInvite() {
         const data = await getInvitationByToken(token);
         setInvitation(data);
       } catch (err) {
-        // If invitation was already accepted, redirect to the workspace
-        if (err.response?.data?.alreadyAccepted && err.response?.data?.workspaceId && isAuthenticated) {
-          try {
-            await switchWorkspace(err.response.data.workspaceId);
-          } catch { /* ignore */ }
-          navigate('/app');
-          return;
+        // If invitation was already accepted
+        if (err.response?.data?.alreadyAccepted) {
+          if (isAuthenticated && err.response?.data?.workspaceId) {
+            try {
+              await switchWorkspace(err.response.data.workspaceId);
+            } catch { /* ignore */ }
+            navigate('/app');
+            return;
+          }
+          setAlreadyAccepted(true);
+          setError(err.response?.data?.message);
+        } else {
+          setError(err.response?.data?.message || 'Pozvánka nenájdená alebo vypršala');
         }
-        setError(err.response?.data?.message || 'Pozvánka nenájdená alebo vypršala');
       } finally {
         setLoading(false);
       }
@@ -71,12 +77,18 @@ function AcceptInvite() {
     return (
       <div className="invite-page">
         <div className="invite-card">
-          <div className="invite-icon">❌</div>
-          <h2>Neplatná pozvánka</h2>
-          <p className="invite-error">{error}</p>
-          <Link to="/login" className="btn btn-primary" style={{ marginTop: '16px', display: 'inline-block' }}>
-            Prihlásiť sa
-          </Link>
+          <div className="invite-icon">{alreadyAccepted ? '✅' : '❌'}</div>
+          <h2>{alreadyAccepted ? 'Pozvánka prijatá' : 'Neplatná pozvánka'}</h2>
+          <p className={alreadyAccepted ? 'invite-success-text' : 'invite-error'}>{error}</p>
+          {alreadyAccepted ? (
+            <Link to="/login" className="btn btn-primary" style={{ marginTop: '16px', display: 'inline-block' }}>
+              Prihlásiť sa a pokračovať
+            </Link>
+          ) : (
+            <Link to="/login" className="btn btn-primary" style={{ marginTop: '16px', display: 'inline-block' }}>
+              Prihlásiť sa
+            </Link>
+          )}
         </div>
       </div>
     );
