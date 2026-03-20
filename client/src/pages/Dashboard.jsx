@@ -514,7 +514,7 @@ function Dashboard() {
             className="btn btn-secondary"
             onClick={() => navigate('/tasks')}
           >
-            Ulohy
+            Úlohy
           </button>
           <UserMenu
             user={user}
