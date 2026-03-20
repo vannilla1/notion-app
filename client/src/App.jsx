@@ -6,7 +6,6 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Tasks from './pages/Tasks';
-import AdminPanel from './pages/AdminPanel';
 import WorkspaceMembers from './pages/WorkspaceMembers';
 import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -208,10 +207,6 @@ function AppContent() {
         <Route
           path="/tasks"
           element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/admin"
-          element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
         />
         <Route
           path="/workspace/members"

@@ -889,16 +889,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           <div className="user-menu-divider"></div>
           <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/workspace/members'); }}>
             <span className="menu-icon">👥</span>
-            Členovia prostredia
+            Správa tímu
           </button>
-          {user?.role === 'admin' && (
-            <>
-              <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/admin'); }}>
-                <span className="menu-icon">⚙️</span>
-                Správa používateľov
-              </button>
-            </>
-          )}
           <div className="user-menu-divider"></div>
           <button className="user-menu-item logout" onClick={onLogout}>
             <span className="menu-icon">🚪</span>
