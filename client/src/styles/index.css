@@ -8324,69 +8324,23 @@ a.detail-value:hover {
   color: #f59e0b;
 }
 
-.wm-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 24px;
-  background: var(--bg-secondary);
-  padding: 4px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
-}
-
-.wm-tab {
-  flex: 1;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.wm-tab:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-
-.wm-tab.active {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.wm-system-description {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-bottom: 16px;
-  line-height: 1.5;
-}
-
 .wm-current-user {
   background: var(--accent-light) !important;
-}
-
-.wm-system-role-admin {
-  background: #6366f120;
-  color: #6366f1;
-}
-
-.wm-system-role-manager {
-  background: #f59e0b20;
-  color: #f59e0b;
-}
-
-.wm-system-role-user {
-  background: #64748b20;
-  color: #64748b;
 }
 
 .wm-updating {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.wm-delete-btn {
+  font-size: 12px;
+  color: var(--danger);
+  opacity: 0.6;
+}
+
+.wm-delete-btn:hover {
+  opacity: 1;
 }
 
 .wm-section-title {

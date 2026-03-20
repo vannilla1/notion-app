@@ -12,10 +12,9 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 function WorkspaceMembers() {
   const { user, logout, updateUser } = useAuth();
-  const { currentWorkspace, refreshCurrentWorkspace } = useWorkspace();
+  const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
 
-  // Workspace members state
   const [members, setMembers] = useState([]);
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -25,67 +24,52 @@ function WorkspaceMembers() {
   const [inviteResult, setInviteResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(null);
 
-  // System users state (admin/manager only)
+  // System users lookup (admin/manager only) - for system role info
   const [systemUsers, setSystemUsers] = useState([]);
-  const [systemLoading, setSystemLoading] = useState(false);
   const [updatingRole, setUpdatingRole] = useState(null);
   const [deletingUser, setDeletingUser] = useState(null);
-
-  // Active tab
-  const [activeTab, setActiveTab] = useState('workspace');
 
   const isAdmin = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin';
   const isSystemAdmin = user?.role === 'admin';
   const isSystemManager = user?.role === 'manager';
   const canManageSystem = isSystemAdmin || isSystemManager;
 
-  // Fetch workspace members & invitations
   const fetchData = useCallback(async () => {
     try {
-      const [membersData, invitationsData] = await Promise.all([
+      const promises = [
         getWorkspaceMembers(),
         isAdmin ? getInvitations().catch(() => []) : Promise.resolve([])
-      ]);
+      ];
+      // Fetch system users too if admin/manager
+      if (canManageSystem) {
+        promises.push(api.get('/api/auth/users').then(res => res.data).catch(() => []));
+      }
+      const [membersData, invitationsData, usersData] = await Promise.all(promises);
       setMembers(membersData);
       setInvitations(invitationsData);
+      if (usersData) setSystemUsers(usersData);
     } catch (error) {
       console.error('Failed to fetch members:', error);
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
-
-  // Fetch system users (admin/manager only)
-  const fetchSystemUsers = useCallback(async () => {
-    if (!canManageSystem) return;
-    setSystemLoading(true);
-    try {
-      const res = await api.get('/api/auth/users');
-      setSystemUsers(res.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    } finally {
-      setSystemLoading(false);
-    }
-  }, [canManageSystem]);
+  }, [isAdmin, canManageSystem]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  useEffect(() => {
-    if (activeTab === 'system' && canManageSystem && systemUsers.length === 0) {
-      fetchSystemUsers();
-    }
-  }, [activeTab, canManageSystem, fetchSystemUsers, systemUsers.length]);
+  // Get system role for a workspace member
+  const getSystemUser = (member) => {
+    return systemUsers.find(u => u.id === member.user?.id);
+  };
 
-  // ===== Workspace invitation handlers =====
+  // ===== Invitation handlers =====
   const handleSendInvite = async (e) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
     setSending(true);
     setInviteResult(null);
-
     try {
       const result = await sendInvitation(inviteEmail.trim(), inviteRole);
       setInviteResult({
@@ -150,12 +134,10 @@ function WorkspaceMembers() {
     }
   };
 
-  // ===== System user management handlers =====
+  // ===== System role handlers =====
   const handleSystemRoleChange = async (userId, newRole) => {
     if (userId === user.id && newRole !== 'admin') {
-      if (!window.confirm('Naozaj chcete odstrániť svoje admin práva? Túto akciu nebude možné vrátiť späť bez pomoci iného admina.')) {
-        return;
-      }
+      if (!window.confirm('Naozaj chcete odstrániť svoje admin práva?')) return;
     }
     setUpdatingRole(userId);
     try {
@@ -171,13 +153,12 @@ function WorkspaceMembers() {
   };
 
   const handleDeleteUser = async (targetUser) => {
-    if (!window.confirm(`Naozaj chcete vymazať účet používateľa "${targetUser.username}"?\n\nTáto akcia je nevratná a používateľ stratí prístup do systému.`)) {
-      return;
-    }
+    if (!window.confirm(`Naozaj chcete vymazať účet "${targetUser.username}"?\n\nTáto akcia je nevratná.`)) return;
     setDeletingUser(targetUser.id);
     try {
       await api.delete(`/api/auth/users/${targetUser.id}`);
       setSystemUsers(prev => prev.filter(u => u.id !== targetUser.id));
+      fetchData();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri mazaní používateľa');
     } finally {
@@ -185,10 +166,10 @@ function WorkspaceMembers() {
     }
   };
 
-  const canDeleteUser = (targetUser) => {
-    if (targetUser.id === user.id) return false;
-    if (user.role === 'admin') return targetUser.role !== 'admin';
-    if (user.role === 'manager') return targetUser.role === 'user';
+  const canDeleteUser = (sysUser) => {
+    if (!sysUser || sysUser.id === user.id) return false;
+    if (user.role === 'admin') return sysUser.role !== 'admin';
+    if (user.role === 'manager') return sysUser.role === 'user';
     return false;
   };
 
@@ -198,6 +179,14 @@ function WorkspaceMembers() {
       case 'manager': return 'Manažér';
       case 'user': return 'Používateľ';
       default: return role;
+    }
+  };
+
+  const getSystemRoleColor = (role) => {
+    switch (role) {
+      case 'admin': return '#6366f1';
+      case 'manager': return '#f59e0b';
+      default: return '#64748b';
     }
   };
 
@@ -223,16 +212,10 @@ function WorkspaceMembers() {
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />
-          <button
-            className="btn btn-secondary"
-            onClick={() => navigate('/crm')}
-          >
+          <button className="btn btn-secondary" onClick={() => navigate('/crm')}>
             Kontakty
           </button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => navigate('/tasks')}
-          >
+          <button className="btn btn-secondary" onClick={() => navigate('/tasks')}>
             Úlohy
           </button>
           <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
@@ -241,7 +224,7 @@ function WorkspaceMembers() {
 
       <div className="workspace-members-content">
         <div className="wm-header-info">
-          <h2 className="wm-title">Správa tímu</h2>
+          <h2 className="wm-title">Členovia prostredia</h2>
           <div className="wm-stats-row">
             <span className="wm-stat-chip">
               {currentWorkspace?.name || '—'}
@@ -257,259 +240,209 @@ function WorkspaceMembers() {
           </div>
         </div>
 
-            {/* Tabs - show system tab only if admin/manager */}
-            {canManageSystem && (
-              <div className="wm-tabs">
-                <button
-                  className={`wm-tab ${activeTab === 'workspace' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('workspace')}
-                >
-                  👥 Členovia prostredia
-                </button>
-                <button
-                  className={`wm-tab ${activeTab === 'system' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('system')}
-                >
-                  ⚙️ Systémoví používatelia
-                </button>
-              </div>
-            )}
+        {/* Invite form */}
+        {isAdmin && (
+          <div className="wm-invite-section">
+            <h3 className="wm-section-title">Pozvať nového člena</h3>
+            <form onSubmit={handleSendInvite} className="wm-invite-form">
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="Email používateľa..."
+                className="form-input"
+                required
+              />
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+                className="form-input wm-role-select"
+              >
+                <option value="member">Člen</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="submit" className="btn btn-primary" disabled={sending}>
+                {sending ? 'Odosielam...' : 'Pozvať'}
+              </button>
+            </form>
 
-            {/* ===== TAB: Workspace Members ===== */}
-            {activeTab === 'workspace' && (
-              <>
-                {/* Invite form */}
-                {isAdmin && (
-                  <div className="wm-invite-section">
-                    <h3 className="wm-section-title">Pozvať nového člena</h3>
-                    <form onSubmit={handleSendInvite} className="wm-invite-form">
+            {inviteResult && (
+              <div className={`wm-invite-result ${inviteResult.type}`}>
+                <span>{inviteResult.message}</span>
+                {inviteResult.link && (
+                  <div className="wm-invite-link-box">
+                    <span className="wm-invite-link-label">Odkaz na pozvánku:</span>
+                    <div className="wm-invite-link-row">
                       <input
-                        type="email"
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        placeholder="Email používateľa..."
-                        className="form-input"
-                        required
+                        type="text"
+                        value={inviteResult.link}
+                        readOnly
+                        className="form-input wm-invite-link-input"
                       />
-                      <select
-                        value={inviteRole}
-                        onChange={(e) => setInviteRole(e.target.value)}
-                        className="form-input wm-role-select"
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleCopyLink(inviteResult.link)}
                       >
-                        <option value="member">Člen</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                      <button type="submit" className="btn btn-primary" disabled={sending}>
-                        {sending ? 'Odosielam...' : 'Pozvať'}
+                        {copiedLink === inviteResult.link ? '✓ Skopírované' : 'Kopírovať'}
                       </button>
-                    </form>
-
-                    {inviteResult && (
-                      <div className={`wm-invite-result ${inviteResult.type}`}>
-                        <span>{inviteResult.message}</span>
-                        {inviteResult.link && (
-                          <div className="wm-invite-link-box">
-                            <span className="wm-invite-link-label">Odkaz na pozvánku:</span>
-                            <div className="wm-invite-link-row">
-                              <input
-                                type="text"
-                                value={inviteResult.link}
-                                readOnly
-                                className="form-input wm-invite-link-input"
-                              />
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => handleCopyLink(inviteResult.link)}
-                              >
-                                {copiedLink === inviteResult.link ? '✓ Skopírované' : 'Kopírovať'}
-                              </button>
-                            </div>
-                            <p className="wm-invite-link-hint">
-                              Pošlite tento odkaz pozvanému. Ak ešte nemá konto, zaregistruje sa a automaticky sa pridá do prostredia.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Pending invitations */}
-                {isAdmin && invitations.length > 0 && (
-                  <div className="wm-section">
-                    <h3 className="wm-section-title">Čakajúce pozvánky</h3>
-                    <div className="wm-list">
-                      {invitations.map(inv => (
-                        <div key={inv.id} className="wm-member-card">
-                          <div className="wm-member-info">
-                            <div className="wm-member-avatar wm-avatar-pending">✉</div>
-                            <div className="wm-member-details">
-                              <span className="wm-member-name">{inv.email}</span>
-                              <span className="wm-member-meta">
-                                Pozval: {inv.invitedBy} · {new Date(inv.createdAt).toLocaleDateString('sk-SK')}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="wm-member-actions">
-                            <span className="wm-role-badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b' }}>
-                              Čaká
-                            </span>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => handleCancelInvite(inv.id)}
-                            >
-                              Zrušiť
-                            </button>
-                          </div>
-                        </div>
-                      ))}
                     </div>
-                  </div>
-                )}
-
-                {/* Members list */}
-                <div className="wm-section">
-                  <h3 className="wm-section-title">Aktívni členovia ({members.length})</h3>
-                  {loading ? (
-                    <div className="loading">Načítavam...</div>
-                  ) : (
-                    <div className="wm-list">
-                      {members.map(member => {
-                        const badge = getWsRoleBadge(member.role);
-                        return (
-                          <div key={member.id} className="wm-member-card">
-                            <div className="wm-member-info">
-                              {member.user?.avatarData || member.user?.avatar ? (
-                                <img
-                                  src={`${API_BASE_URL}/api/auth/avatar/${member.user.id}`}
-                                  alt={member.user.username}
-                                  className="wm-member-avatar-img"
-                                />
-                              ) : (
-                                <div
-                                  className="wm-member-avatar"
-                                  style={{ backgroundColor: member.user?.color || '#6366f1' }}
-                                >
-                                  {member.user?.username?.charAt(0).toUpperCase() || '?'}
-                                </div>
-                              )}
-                              <div className="wm-member-details">
-                                <span className="wm-member-name">
-                                  {member.user?.username || 'Neznámy'}
-                                  {member.user?.id === user?.id && ' (vy)'}
-                                </span>
-                                <span className="wm-member-meta">{member.user?.email}</span>
-                              </div>
-                            </div>
-                            <div className="wm-member-actions">
-                              <span
-                                className="wm-role-badge"
-                                style={{ backgroundColor: badge.color + '20', color: badge.color }}
-                              >
-                                {badge.label}
-                              </span>
-                              {isAdmin && member.role !== 'owner' && member.user?.id !== user?.id && (
-                                <>
-                                  <select
-                                    value={member.role}
-                                    onChange={(e) => handleWsRoleChange(member.id, e.target.value)}
-                                    className="form-input wm-role-select-sm"
-                                  >
-                                    <option value="member">Člen</option>
-                                    <option value="admin">Admin</option>
-                                  </select>
-                                  <button
-                                    className="btn-icon wm-remove-btn"
-                                    onClick={() => handleRemoveMember(member.id, member.user?.username)}
-                                    title="Odstrániť"
-                                  >
-                                    ×
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {/* ===== TAB: System Users (admin/manager only) ===== */}
-            {activeTab === 'system' && canManageSystem && (
-              <div className="wm-section">
-                <p className="wm-system-description">
-                  {isSystemAdmin
-                    ? 'Spravujte systémové role všetkých používateľov. Admin má plný prístup, Manažér môže spravovať úlohy a kontakty, Používateľ môže pracovať s úlohami.'
-                    : 'Ako manažér môžete vymazať účty bežných používateľov.'
-                  }
-                </p>
-
-                {systemLoading ? (
-                  <div className="loading">Načítavam...</div>
-                ) : (
-                  <div className="wm-list">
-                    {systemUsers.map(u => (
-                      <div key={u.id} className={`wm-member-card ${u.id === user.id ? 'wm-current-user' : ''}`}>
-                        <div className="wm-member-info">
-                          {u.avatar ? (
-                            <img
-                              src={`${API_BASE_URL}/api/auth/avatar/${u.id}`}
-                              alt={u.username}
-                              className="wm-member-avatar-img"
-                            />
-                          ) : (
-                            <div
-                              className="wm-member-avatar"
-                              style={{ backgroundColor: u.color || '#6366f1' }}
-                            >
-                              {u.username.charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                          <div className="wm-member-details">
-                            <span className="wm-member-name">
-                              {u.username}
-                              {u.id === user.id && ' (vy)'}
-                            </span>
-                            <span className="wm-member-meta">{u.email}</span>
-                          </div>
-                        </div>
-                        <div className="wm-member-actions">
-                          <span className={`wm-role-badge wm-system-role-${u.role}`}>
-                            {getSystemRoleLabel(u.role)}
-                          </span>
-                          {isSystemAdmin && (
-                            <select
-                              value={u.role}
-                              onChange={(e) => handleSystemRoleChange(u.id, e.target.value)}
-                              disabled={updatingRole === u.id}
-                              className="form-input wm-role-select-sm"
-                            >
-                              <option value="admin">Admin</option>
-                              <option value="manager">Manažér</option>
-                              <option value="user">Používateľ</option>
-                            </select>
-                          )}
-                          {updatingRole === u.id && <span className="wm-updating">...</span>}
-                          {canDeleteUser(u) && (
-                            <button
-                              className="btn-icon wm-remove-btn"
-                              onClick={() => handleDeleteUser(u)}
-                              disabled={deletingUser === u.id}
-                              title="Vymazať používateľa"
-                            >
-                              {deletingUser === u.id ? '...' : '×'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                    <p className="wm-invite-link-hint">
+                      Pošlite tento odkaz pozvanému. Ak ešte nemá konto, zaregistruje sa a automaticky sa pridá do prostredia.
+                    </p>
                   </div>
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Pending invitations */}
+        {isAdmin && invitations.length > 0 && (
+          <div className="wm-section">
+            <h3 className="wm-section-title">Čakajúce pozvánky</h3>
+            <div className="wm-list">
+              {invitations.map(inv => (
+                <div key={inv.id} className="wm-member-card">
+                  <div className="wm-member-info">
+                    <div className="wm-member-avatar wm-avatar-pending">✉</div>
+                    <div className="wm-member-details">
+                      <span className="wm-member-name">{inv.email}</span>
+                      <span className="wm-member-meta">
+                        Pozval: {inv.invitedBy} · {new Date(inv.createdAt).toLocaleDateString('sk-SK')}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="wm-member-actions">
+                    <span className="wm-role-badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b' }}>
+                      Čaká
+                    </span>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleCancelInvite(inv.id)}
+                    >
+                      Zrušiť
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Members list */}
+        <div className="wm-section">
+          <h3 className="wm-section-title">Aktívni členovia ({members.length})</h3>
+          {loading ? (
+            <div className="loading">Načítavam...</div>
+          ) : (
+            <div className="wm-list">
+              {members.map(member => {
+                const wsBadge = getWsRoleBadge(member.role);
+                const sysUser = canManageSystem ? getSystemUser(member) : null;
+                const sysRoleColor = sysUser ? getSystemRoleColor(sysUser.role) : null;
+
+                return (
+                  <div key={member.id} className={`wm-member-card ${member.user?.id === user?.id ? 'wm-current-user' : ''}`}>
+                    <div className="wm-member-info">
+                      {member.user?.avatarData || member.user?.avatar ? (
+                        <img
+                          src={`${API_BASE_URL}/api/auth/avatar/${member.user.id}`}
+                          alt={member.user.username}
+                          className="wm-member-avatar-img"
+                        />
+                      ) : (
+                        <div
+                          className="wm-member-avatar"
+                          style={{ backgroundColor: member.user?.color || '#6366f1' }}
+                        >
+                          {member.user?.username?.charAt(0).toUpperCase() || '?'}
+                        </div>
+                      )}
+                      <div className="wm-member-details">
+                        <span className="wm-member-name">
+                          {member.user?.username || 'Neznámy'}
+                          {member.user?.id === user?.id && ' (vy)'}
+                        </span>
+                        <span className="wm-member-meta">{member.user?.email}</span>
+                      </div>
+                    </div>
+                    <div className="wm-member-actions">
+                      {/* Workspace role badge */}
+                      <span
+                        className="wm-role-badge"
+                        style={{ backgroundColor: wsBadge.color + '20', color: wsBadge.color }}
+                      >
+                        {wsBadge.label}
+                      </span>
+
+                      {/* System role badge (visible for admin/manager) */}
+                      {sysUser && (
+                        <span
+                          className="wm-role-badge"
+                          style={{ backgroundColor: sysRoleColor + '20', color: sysRoleColor }}
+                          title="Systémová rola"
+                        >
+                          {getSystemRoleLabel(sysUser.role)}
+                        </span>
+                      )}
+
+                      {/* Workspace role change */}
+                      {isAdmin && member.role !== 'owner' && member.user?.id !== user?.id && (
+                        <select
+                          value={member.role}
+                          onChange={(e) => handleWsRoleChange(member.id, e.target.value)}
+                          className="form-input wm-role-select-sm"
+                          title="Rola v prostredí"
+                        >
+                          <option value="member">Člen</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      )}
+
+                      {/* System role change (admin only) */}
+                      {isSystemAdmin && sysUser && member.user?.id !== user?.id && (
+                        <select
+                          value={sysUser.role}
+                          onChange={(e) => handleSystemRoleChange(sysUser.id, e.target.value)}
+                          disabled={updatingRole === sysUser.id}
+                          className="form-input wm-role-select-sm"
+                          title="Systémová rola"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="manager">Manažér</option>
+                          <option value="user">Používateľ</option>
+                        </select>
+                      )}
+
+                      {updatingRole === member.user?.id && <span className="wm-updating">...</span>}
+
+                      {/* Remove from workspace / delete user */}
+                      {isAdmin && member.role !== 'owner' && member.user?.id !== user?.id && (
+                        <button
+                          className="btn-icon wm-remove-btn"
+                          onClick={() => handleRemoveMember(member.id, member.user?.username)}
+                          title="Odstrániť z prostredia"
+                        >
+                          ×
+                        </button>
+                      )}
+                      {sysUser && canDeleteUser(sysUser) && (
+                        <button
+                          className="btn-icon wm-remove-btn wm-delete-btn"
+                          onClick={() => handleDeleteUser(sysUser)}
+                          disabled={deletingUser === sysUser.id}
+                          title="Vymazať účet zo systému"
+                        >
+                          {deletingUser === sysUser.id ? '...' : '🗑️'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
