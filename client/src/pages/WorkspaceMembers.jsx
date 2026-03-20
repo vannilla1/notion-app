@@ -228,13 +228,13 @@ function WorkspaceMembers() {
         <div className="crm-header-right">
           <WorkspaceSwitcher />
           <button
-            className="btn btn-secondary btn-nav-contacts"
+            className="btn btn-secondary"
             onClick={() => navigate('/crm')}
           >
             Kontakty
           </button>
           <button
-            className="btn btn-secondary btn-nav-tasks"
+            className="btn btn-secondary"
             onClick={() => navigate('/tasks')}
           >
             Úlohy
