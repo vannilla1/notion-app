@@ -212,19 +212,27 @@ function Dashboard() {
   const mediumPriorityTasks = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
   const highPriorityTasks = tasks.filter(t => t.priority === 'high' && !t.completed).length;
 
+  // Sort contacts: new/active first, completed second, cancelled last, alphabetically within groups
+  const sortContacts = (list) => [...list].sort((a, b) => {
+    const order = { new: 0, active: 0, completed: 1, cancelled: 2 };
+    const diff = (order[a.status] ?? 0) - (order[b.status] ?? 0);
+    if (diff !== 0) return diff;
+    return (a.name || '').localeCompare(b.name || '', 'sk');
+  });
+
   // Get items for detail view
   const getDetailItems = () => {
     switch (detailView) {
       case 'contacts':
-        return { type: 'contacts', items: contacts, title: 'Všetky kontakty' };
+        return { type: 'contacts', items: sortContacts(contacts), title: 'Všetky kontakty' };
       case 'active':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'active'), title: 'Aktívne kontakty' };
+        return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'active')), title: 'Aktívne kontakty' };
       case 'new':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'new'), title: 'Nove kontakty' };
+        return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'new')), title: 'Nove kontakty' };
       case 'completed-contacts':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'completed'), title: 'Dokončené kontakty' };
+        return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'completed')), title: 'Dokončené kontakty' };
       case 'cancelled':
-        return { type: 'contacts', items: contacts.filter(c => c.status === 'cancelled'), title: 'Zrušené kontakty' };
+        return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'cancelled')), title: 'Zrušené kontakty' };
       case 'tasks':
         return { type: 'tasks', items: tasks, title: 'Všetky úlohy' };
       case 'pending':
@@ -868,7 +876,7 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-contacts-list">
-                      {contacts.slice(0, 5).map(contact => {
+                      {sortContacts(contacts).slice(0, 5).map(contact => {
                         const contactTasks = getContactTasks(contact);
                         const completedContactTasks = contactTasks.filter(t => t.completed).length;
 
