@@ -8,7 +8,7 @@ function AcceptInvite() {
   const { token } = useParams();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
-  const { fetchWorkspaces } = useWorkspace();
+  const { fetchWorkspaces, switchWorkspace } = useWorkspace();
 
   const [invitation, setInvitation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,13 +22,21 @@ function AcceptInvite() {
         const data = await getInvitationByToken(token);
         setInvitation(data);
       } catch (err) {
+        // If invitation was already accepted, redirect to the workspace
+        if (err.response?.data?.alreadyAccepted && err.response?.data?.workspaceId && isAuthenticated) {
+          try {
+            await switchWorkspace(err.response.data.workspaceId);
+          } catch { /* ignore */ }
+          navigate('/app');
+          return;
+        }
         setError(err.response?.data?.message || 'Pozvánka nenájdená alebo vypršala');
       } finally {
         setLoading(false);
       }
     };
     fetchInvitation();
-  }, [token]);
+  }, [token, isAuthenticated, switchWorkspace, navigate]);
 
   const handleAccept = async () => {
     setAccepting(true);
@@ -36,7 +44,11 @@ function AcceptInvite() {
     try {
       const result = await acceptInvitation(token);
       setSuccess(result.message);
-      await fetchWorkspaces();
+      if (result.workspaceId) {
+        await switchWorkspace(result.workspaceId);
+      } else {
+        await fetchWorkspaces();
+      }
       setTimeout(() => navigate('/app'), 2000);
     } catch (err) {
       setError(err.response?.data?.message || 'Chyba pri prijímaní pozvánky');

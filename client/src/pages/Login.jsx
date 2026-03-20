@@ -6,7 +6,7 @@ import { acceptInvitation } from '../api/workspaces';
 
 function Login() {
   const { login, register } = useAuth();
-  const { fetchWorkspaces } = useWorkspace();
+  const { fetchWorkspaces, switchWorkspace } = useWorkspace();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(searchParams.get('register') === 'true');
@@ -34,10 +34,15 @@ function Login() {
       // If there's an invite token, accept it after login/register
       if (inviteToken) {
         try {
-          await acceptInvitation(inviteToken);
-          await fetchWorkspaces();
+          const result = await acceptInvitation(inviteToken);
+          if (result.workspaceId) {
+            await switchWorkspace(result.workspaceId);
+          } else {
+            await fetchWorkspaces();
+          }
         } catch (inviteErr) {
           console.log('Auto-accept invite failed:', inviteErr.response?.data?.message);
+          await fetchWorkspaces();
         }
         navigate('/app');
         return;

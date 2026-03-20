@@ -701,12 +701,23 @@ router.delete('/current/invitations/:invitationId', authenticateToken, requireWo
 router.get('/invitation/:token', async (req, res) => {
   try {
     const invitation = await Invitation.findOne({
-      token: req.params.token,
-      status: 'pending'
+      token: req.params.token
     }).populate('workspaceId', 'name color');
 
     if (!invitation) {
-      return res.status(404).json({ message: 'Pozvánka nenájdená alebo vypršala' });
+      return res.status(404).json({ message: 'Pozvánka nenájdená' });
+    }
+
+    if (invitation.status === 'accepted') {
+      return res.status(410).json({
+        message: 'Táto pozvánka už bola prijatá',
+        workspaceId: invitation.workspaceId?._id,
+        alreadyAccepted: true
+      });
+    }
+
+    if (invitation.status !== 'pending') {
+      return res.status(410).json({ message: 'Pozvánka už nie je platná' });
     }
 
     if (invitation.expiresAt < new Date()) {
