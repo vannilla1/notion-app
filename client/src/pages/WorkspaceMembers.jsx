@@ -227,6 +227,18 @@ function WorkspaceMembers() {
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />
+          <button
+            className="btn btn-secondary btn-nav-contacts"
+            onClick={() => navigate('/crm')}
+          >
+            Kontakty
+          </button>
+          <button
+            className="btn btn-secondary btn-nav-tasks"
+            onClick={() => navigate('/tasks')}
+          >
+            Úlohy
+          </button>
           <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
         </div>
       </header>
