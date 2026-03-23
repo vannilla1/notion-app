@@ -64,17 +64,7 @@ function Login() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-logo">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="48" height="48" rx="12" fill="url(#gradient)"/>
-            <path d="M14 16C14 14.8954 14.8954 14 16 14H32C33.1046 14 34 14.8954 34 16V32C34 33.1046 33.1046 34 32 34H16C14.8954 34 14 33.1046 14 32V16Z" fill="white" fillOpacity="0.9"/>
-            <path d="M18 20H30M18 24H26M18 28H22" stroke="#6366f1" strokeWidth="2" strokeLinecap="round"/>
-            <defs>
-              <linearGradient id="gradient" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#6366f1"/>
-                <stop offset="1" stopColor="#8b5cf6"/>
-              </linearGradient>
-            </defs>
-          </svg>
+          <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="48" height="48" style={{ borderRadius: '12px' }} />
         </div>
         <h1 className="login-title">
           {isRegister ? 'Vytvoriť účet' : 'Prpl CRM'}

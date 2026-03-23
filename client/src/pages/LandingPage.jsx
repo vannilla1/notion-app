@@ -24,17 +24,7 @@ export default function LandingPage() {
       <nav className={`lp-navbar ${scrolled ? 'scrolled' : ''}`}>
         <div className="lp-navbar-inner">
           <a href="#" className="lp-logo" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-            <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-              <rect width="48" height="48" rx="12" fill="url(#lp-grad)" />
-              <path d="M14 16C14 14.8954 14.8954 14 16 14H32C33.1046 14 34 14.8954 34 16V32C34 33.1046 33.1046 34 32 34H16C14.8954 34 14 33.1046 14 32V16Z" fill="white" fillOpacity="0.9" />
-              <path d="M18 20H30M18 24H26M18 28H22" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" />
-              <defs>
-                <linearGradient id="lp-grad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#6366f1" />
-                  <stop offset="1" stopColor="#8b5cf6" />
-                </linearGradient>
-              </defs>
-            </svg>
+            <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="32" height="32" style={{ borderRadius: '8px' }} />
             Prpl CRM
           </a>
 
@@ -378,17 +368,7 @@ export default function LandingPage() {
       <footer className="lp-footer">
         <div className="lp-footer-inner">
           <div className="lp-footer-left">
-            <svg width="24" height="24" viewBox="0 0 48 48" fill="none">
-              <rect width="48" height="48" rx="12" fill="url(#lp-grad2)" />
-              <path d="M14 16C14 14.8954 14.8954 14 16 14H32C33.1046 14 34 14.8954 34 16V32C34 33.1046 33.1046 34 32 34H16C14.8954 34 14 33.1046 14 32V16Z" fill="white" fillOpacity="0.9" />
-              <path d="M18 20H30M18 24H26M18 28H22" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" />
-              <defs>
-                <linearGradient id="lp-grad2" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#6366f1" />
-                  <stop offset="1" stopColor="#8b5cf6" />
-                </linearGradient>
-              </defs>
-            </svg>
+            <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="24" height="24" style={{ borderRadius: '6px' }} />
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">
