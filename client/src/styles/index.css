@@ -2004,6 +2004,27 @@ body {
   justify-content: center;
 }
 
+.ios-only {
+  display: none;
+}
+
+.ios-app .ios-only {
+  display: inline;
+}
+
+.ios-app .desktop-only {
+  display: none;
+}
+
+.ios-app .add-subtask-submit {
+  width: auto;
+  height: auto;
+  border-radius: var(--radius);
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .add-subtask-form .form-input.task-date-input {
   flex: 0 0 auto;
   width: 130px;

@@ -137,6 +137,7 @@ struct WebView: UIViewRepresentable {
             document.documentElement.style.setProperty('--sab', 'env(safe-area-inset-bottom)');
             document.documentElement.style.setProperty('--sal', 'env(safe-area-inset-left)');
             document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
+            document.body.classList.add('ios-app');
 
             // Extract auth token from localStorage and send to native
             (function() {
