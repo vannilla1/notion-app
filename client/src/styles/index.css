@@ -2016,6 +2016,10 @@ body {
   display: none;
 }
 
+.ios-app .header-logo-icon {
+  display: none;
+}
+
 .ios-app .add-subtask-submit {
   width: auto;
   height: auto;
