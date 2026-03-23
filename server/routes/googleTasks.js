@@ -328,14 +328,15 @@ router.get('/status', authenticateToken, async (req, res) => {
     let syncedCount = 0;
 
     if (user.googleTasks?.enabled) {
-      const globalTasks = await Task.find(
-        { completed: { $ne: true } },
+      const workspaceId = user.currentWorkspaceId;
+      const globalTasks = workspaceId ? await Task.find(
+        { workspaceId, completed: { $ne: true } },
         { _id: 1, subtasks: 1 }
-      ).lean();
-      const contacts = await Contact.find(
-        {},
+      ).lean() : [];
+      const contacts = workspaceId ? await Contact.find(
+        { workspaceId },
         { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1 }
-      ).lean();
+      ).lean() : [];
 
       // Count global tasks
       for (const task of globalTasks) {
@@ -544,15 +545,16 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    // Get all tasks with due dates - optimize query to only fetch needed fields
-    const globalTasks = await Task.find(
-      {},
+    // Get all tasks with due dates for current workspace
+    const workspaceId = user.currentWorkspaceId;
+    const globalTasks = workspaceId ? await Task.find(
+      { workspaceId },
       { _id: 1, title: 1, description: 1, dueDate: 1, completed: 1, modifiedAt: 1, updatedAt: 1, subtasks: 1 }
-    ).lean();
-    const contacts = await Contact.find(
-      {},
+    ).lean() : [];
+    const contacts = workspaceId ? await Contact.find(
+      { workspaceId },
       { name: 1, tasks: 1 }
-    ).lean();
+    ).lean() : [];
     logger.info('[Google Tasks] Fetched tasks from DB', {
       userId: req.user.id,
       globalTasks: globalTasks.length,
@@ -883,8 +885,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
         const crmTaskId = reverseMap.get(googleTask.id);
         if (!crmTaskId) continue;
 
-        // Check global tasks
-        const globalTask = await Task.findById(crmTaskId);
+        // Check global tasks (workspace-scoped)
+        const wsId = user.currentWorkspaceId;
+        const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
         if (globalTask && !globalTask.completed) {
           globalTask.completed = true;
           globalTask.modifiedAt = new Date().toISOString();
@@ -896,9 +899,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
           continue;
         }
 
-        // Check contact tasks
+        // Check contact tasks (workspace-scoped)
         if (!globalTask) {
-          const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+          const contacts = await Contact.find({ 'tasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
           for (const contact of contacts) {
             const taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
             if (taskIndex !== -1 && !contact.tasks[taskIndex].completed) {
@@ -916,9 +919,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
           }
         }
 
-        // Check subtasks - search in global tasks
+        // Check subtasks - search in global tasks (workspace-scoped)
         if (!globalTask) {
-          const allTasks = await Task.find({ 'subtasks.id': crmTaskId });
+          const allTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
           for (const parentTask of allTasks) {
             const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
             if (subtask && !subtask.completed) {
@@ -1037,9 +1040,10 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
     const tasksApi = await getTasksClient(user);
 
-    // Get all current task IDs - only fetch necessary fields
-    const globalTasks = await Task.find({}, { _id: 1 }).lean();
-    const contacts = await Contact.find({}, { 'tasks.id': 1 }).lean();
+    // Get all current task IDs for current workspace
+    const workspaceId = user.currentWorkspaceId;
+    const globalTasks = workspaceId ? await Task.find({ workspaceId }, { _id: 1 }).lean() : [];
+    const contacts = workspaceId ? await Contact.find({ workspaceId }, { 'tasks.id': 1 }).lean() : [];
 
     const currentTaskIds = new Set();
 
@@ -1357,8 +1361,9 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
       }
 
       // Try to find and update the task in CRM
-      // First check global tasks
-      const globalTask = await Task.findById(crmTaskId);
+      // First check global tasks (workspace-scoped)
+      const wsId = user.currentWorkspaceId;
+      const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
       if (globalTask) {
         if (globalTask.completed) {
           alreadyCompleted++;
@@ -1387,8 +1392,8 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
         continue;
       }
 
-      // Check contact tasks
-      const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+      // Check contact tasks (workspace-scoped)
+      const contacts = await Contact.find({ 'tasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
       for (const contact of contacts) {
         const taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
         if (taskIndex !== -1) {
@@ -1758,8 +1763,9 @@ const pollGoogleTasksCompleted = async () => {
           const crmTaskId = reverseMap.get(googleTask.id);
           if (!crmTaskId) continue;
 
-          // Global tasks
-          const globalTask = await Task.findById(crmTaskId);
+          // Global tasks (workspace-scoped)
+          const wsId = user.currentWorkspaceId;
+          const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
           if (globalTask && !globalTask.completed) {
             globalTask.completed = true;
             globalTask.modifiedAt = new Date().toISOString();
@@ -1771,9 +1777,9 @@ const pollGoogleTasksCompleted = async () => {
             continue;
           }
 
-          // Contact tasks
+          // Contact tasks (workspace-scoped)
           if (!globalTask) {
-            const contacts = await Contact.find({ 'tasks.id': crmTaskId });
+            const contacts = await Contact.find({ 'tasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
             for (const contact of contacts) {
               const idx = contact.tasks.findIndex(t => t.id === crmTaskId);
               if (idx !== -1 && !contact.tasks[idx].completed) {
@@ -1791,9 +1797,9 @@ const pollGoogleTasksCompleted = async () => {
             }
           }
 
-          // Subtasks in global tasks
+          // Subtasks in global tasks (workspace-scoped)
           if (!globalTask) {
-            const parentTasks = await Task.find({ 'subtasks.id': crmTaskId });
+            const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
             for (const parentTask of parentTasks) {
               const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
               if (subtask && !subtask.completed) {
