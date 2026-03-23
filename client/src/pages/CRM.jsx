@@ -1017,7 +1017,7 @@ function CRM() {
                     +
                   </button>
                   <button onClick={() => startEditSubtask(task, subtask)} className="btn-icon-sm" title="Upravit">✏️</button>
-                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm" title="Vymazat">×</button>
+                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm btn-delete" title="Vymazat">×</button>
                 </div>
               </>
             )}

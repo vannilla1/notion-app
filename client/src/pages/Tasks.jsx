@@ -1242,7 +1242,7 @@ function Tasks() {
                     +
                   </button>
                   <button onClick={() => startEditSubtask(task, subtask)} className="btn-icon-sm" title="Upravit">✏️</button>
-                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm" title="Vymazat">×</button>
+                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm btn-delete" title="Vymazat">×</button>
                 </div>
               </>
             )}
@@ -1264,7 +1264,7 @@ function Tasks() {
                   <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
                   <span className="task-file-size">{formatFileSize(file.size)}</span>
                   <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
-                  <button className="btn-icon-sm" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
+                  <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
                 </div>
               ))}
             </div>
@@ -2311,7 +2311,7 @@ function Tasks() {
                                     <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
                                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                                     <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
-                                    <button className="btn-icon-sm" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
+                                    <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
                                   </div>
                                 ))}
                               </div>
