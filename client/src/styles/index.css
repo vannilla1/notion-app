@@ -1967,7 +1967,7 @@ body {
 }
 
 .btn-icon-sm:hover {
-  background: var(--accent-light);
+  background: #e0e0ff;
   color: var(--accent-color);
 }
 
