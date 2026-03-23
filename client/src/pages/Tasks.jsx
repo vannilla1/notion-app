@@ -1314,7 +1314,7 @@ function Tasks() {
                 >
                   👤
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm" title="Uložiť podúlohu (Enter)">✓ Pridať</button>
+                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)">+</button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -2346,7 +2346,7 @@ function Tasks() {
                                   >
                                     👤
                                   </button>
-                                  <button type="submit" className="btn btn-primary btn-sm" title="Uložiť podúlohu (Enter)">✓ Pridať</button>
+                                  <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)">+</button>
                                 </form>
                                 {showSubtaskNotesInput[task.id] && (
                                   <textarea
