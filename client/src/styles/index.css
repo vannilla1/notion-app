@@ -4914,8 +4914,8 @@ a.detail-value:hover {
 }
 
 .btn.active {
-  background: var(--accent-color);
-  color: white;
+  background: #e0e0ff;
+  color: var(--accent-color);
 }
 
 /* Due date legend */

@@ -1054,7 +1054,7 @@ function CRM() {
                 />
                 <button
                   type="button"
-                  className={`btn btn-secondary btn-sm ${subtaskDueDates[subtask.id] ? 'active' : ''}`}
+                  className={`btn btn-secondary btn-sm ${showSubtaskDateInput[subtask.id] ? 'active' : ''}`}
                   onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
                   title="Termín"
                 >

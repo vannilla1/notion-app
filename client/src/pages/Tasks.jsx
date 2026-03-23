@@ -1294,7 +1294,7 @@ function Tasks() {
                 />
                 <button
                   type="button"
-                  className={`btn btn-secondary btn-sm ${subtaskDueDates[subtask.id] ? 'active' : ''}`}
+                  className={`btn btn-secondary btn-sm ${showSubtaskDateInput[subtask.id] ? 'active' : ''}`}
                   onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
                   title="Termín"
                 >
@@ -2337,7 +2337,7 @@ function Tasks() {
                                   />
                                   <button
                                     type="button"
-                                    className={`btn btn-secondary btn-sm ${subtaskDueDates[task.id] ? 'active' : ''}`}
+                                    className={`btn btn-secondary btn-sm ${showSubtaskDateInput[task.id] ? 'active' : ''}`}
                                     onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
                                     title="Termín"
                                   >
