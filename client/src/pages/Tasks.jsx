@@ -1498,15 +1498,15 @@ function Tasks() {
     e.target.value = '';
   };
 
-  // Helper to check if task or any subtask is assigned to user
+  // Helper to check if task or any uncompleted subtask is assigned to user
   const isAssignedToUser = (task, userId) => {
-    // Check main task
-    if ((task.assignedTo || []).some(id => id?.toString() === userId)) return true;
-    // Check subtasks recursively
+    // Check main task (only if not completed)
+    if (!task.completed && (task.assignedTo || []).some(id => id?.toString() === userId)) return true;
+    // Check subtasks recursively (only uncompleted)
     const checkSubtasks = (subtasks) => {
       if (!subtasks) return false;
       for (const sub of subtasks) {
-        if ((sub.assignedTo || []).some(id => id?.toString() === userId)) return true;
+        if (!sub.completed && (sub.assignedTo || []).some(id => id?.toString() === userId)) return true;
         if (sub.subtasks && checkSubtasks(sub.subtasks)) return true;
       }
       return false;
