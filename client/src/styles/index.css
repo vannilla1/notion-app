@@ -1973,12 +1973,17 @@ body {
 
 .add-subtask-form {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 12px;
 }
 
 .add-subtask-form .form-input {
   flex: 1;
+}
+
+.add-subtask-form .btn {
+  flex: 0 0 auto;
 }
 
 .add-subtask-form .form-input.task-date-input {
