@@ -1314,7 +1314,7 @@ function Tasks() {
                 >
                   👤
                 </button>
-                <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                <button type="submit" className="btn btn-primary btn-sm" style={{ minWidth: '70px' }}>Uložiť</button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1334,7 +1334,7 @@ function Tasks() {
                     setSubtaskAssignedTo(prev => ({ ...prev, [subtask.id]: [] }));
                   }}
                 >
-                  ×
+                  Zrušiť
                 </button>
               </form>
               {showSubtaskNotesInput[subtask.id] && (
@@ -2346,7 +2346,7 @@ function Tasks() {
                                   >
                                     👤
                                   </button>
-                                  <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                                  <button type="submit" className="btn btn-primary btn-sm" style={{ minWidth: '70px' }}>Uložiť</button>
                                 </form>
                                 {showSubtaskNotesInput[task.id] && (
                                   <textarea

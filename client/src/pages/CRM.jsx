@@ -1066,7 +1066,7 @@ function CRM() {
                 >
                   📝
                 </button>
-                <button type="submit" className="btn btn-secondary btn-sm">+</button>
+                <button type="submit" className="btn btn-primary btn-sm" style={{ minWidth: '70px' }}>Uložiť</button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1079,7 +1079,7 @@ function CRM() {
                     setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
                   }}
                 >
-                  ×
+                  Zrušiť
                 </button>
               </form>
               {showSubtaskNotesInput[subtask.id] && (
