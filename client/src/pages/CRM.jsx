@@ -87,6 +87,7 @@ function CRM() {
   const [subtaskInputs, setSubtaskInputs] = useState({});
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [subtaskNotes, setSubtaskNotes] = useState({});
+  const [showSubtaskDateInput, setShowSubtaskDateInput] = useState({});
   const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
@@ -1051,13 +1052,14 @@ function CRM() {
                   className="form-input form-input-sm"
                   autoFocus
                 />
-                <input
-                  type="date"
-                  value={subtaskDueDates[subtask.id] || ''}
-                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  className="form-input form-input-sm task-date-input"
-                  title="Termín podúlohy"
-                />
+                <button
+                  type="button"
+                  className={`btn btn-secondary btn-sm ${subtaskDueDates[subtask.id] ? 'active' : ''}`}
+                  onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
+                  title="Termín"
+                >
+                  📅
+                </button>
                 <button
                   type="button"
                   className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
@@ -1076,12 +1078,22 @@ function CRM() {
                       delete newInputs[subtask.id];
                       return newInputs;
                     });
+                    setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: false }));
                     setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
                   }}
                 >
                   Zrušiť
                 </button>
               </form>
+              {showSubtaskDateInput[subtask.id] && (
+                <input
+                  type="date"
+                  value={subtaskDueDates[subtask.id] || ''}
+                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                  className="form-input form-input-sm"
+                  autoFocus
+                />
+              )}
               {showSubtaskNotesInput[subtask.id] && (
                 <textarea
                   value={subtaskNotes[subtask.id] || ''}

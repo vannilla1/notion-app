@@ -155,6 +155,7 @@ function Tasks() {
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
   const [subtaskNotes, setSubtaskNotes] = useState({});
   const [subtaskAssignedTo, setSubtaskAssignedTo] = useState({});
+  const [showSubtaskDateInput, setShowSubtaskDateInput] = useState({});
   const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
   const [showSubtaskAssignInput, setShowSubtaskAssignInput] = useState({});
   const [editingSubtask, setEditingSubtask] = useState(null);
@@ -1291,13 +1292,14 @@ function Tasks() {
                   className="form-input form-input-sm"
                   autoFocus
                 />
-                <input
-                  type="date"
-                  value={subtaskDueDates[subtask.id] || ''}
-                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  className="form-input form-input-sm task-date-input"
-                  title="Termín podúlohy"
-                />
+                <button
+                  type="button"
+                  className={`btn btn-secondary btn-sm ${subtaskDueDates[subtask.id] ? 'active' : ''}`}
+                  onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
+                  title="Termín"
+                >
+                  📅
+                </button>
                 <button
                   type="button"
                   className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
@@ -1329,6 +1331,7 @@ function Tasks() {
                       delete newDates[subtask.id];
                       return newDates;
                     });
+                    setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: false }));
                     setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
                     setShowSubtaskAssignInput(prev => ({ ...prev, [subtask.id]: false }));
                     setSubtaskAssignedTo(prev => ({ ...prev, [subtask.id]: [] }));
@@ -1337,6 +1340,15 @@ function Tasks() {
                   Zrušiť
                 </button>
               </form>
+              {showSubtaskDateInput[subtask.id] && (
+                <input
+                  type="date"
+                  value={subtaskDueDates[subtask.id] || ''}
+                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                  className="form-input form-input-sm"
+                  autoFocus
+                />
+              )}
               {showSubtaskNotesInput[subtask.id] && (
                 <textarea
                   value={subtaskNotes[subtask.id] || ''}
@@ -2323,13 +2335,14 @@ function Tasks() {
                                     placeholder="Pridať podúlohu..."
                                     className="form-input form-input-sm"
                                   />
-                                  <input
-                                    type="date"
-                                    value={subtaskDueDates[task.id] || ''}
-                                    onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    className="form-input form-input-sm task-date-input"
-                                    title="Termín podúlohy"
-                                  />
+                                  <button
+                                    type="button"
+                                    className={`btn btn-secondary btn-sm ${subtaskDueDates[task.id] ? 'active' : ''}`}
+                                    onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                    title="Termín"
+                                  >
+                                    📅
+                                  </button>
                                   <button
                                     type="button"
                                     className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[task.id] ? 'active' : ''}`}
@@ -2348,6 +2361,15 @@ function Tasks() {
                                   </button>
                                   <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)">+</button>
                                 </form>
+                                {showSubtaskDateInput[task.id] && (
+                                  <input
+                                    type="date"
+                                    value={subtaskDueDates[task.id] || ''}
+                                    onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                    className="form-input form-input-sm"
+                                    autoFocus
+                                  />
+                                )}
                                 {showSubtaskNotesInput[task.id] && (
                                   <textarea
                                     value={subtaskNotes[task.id] || ''}
