@@ -518,7 +518,7 @@ function Dashboard() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link active" onClick={closeDetailView}>Prpl CRM</h1>
+          <h1 className="header-title-link active" onClick={closeDetailView}><img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM</h1>
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />

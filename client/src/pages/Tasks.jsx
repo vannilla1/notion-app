@@ -1734,7 +1734,7 @@ function Tasks() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link" onClick={() => navigate('/app')}>Prpl CRM</h1>
+          <h1 className="header-title-link" onClick={() => navigate('/app')}><img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM</h1>
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />
