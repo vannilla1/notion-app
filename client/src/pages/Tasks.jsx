@@ -789,6 +789,7 @@ function Tasks() {
         completed: !task.completed,
         source: task.source
       });
+      await fetchTasks();
     } catch (error) {
       console.error('Failed to toggle task:', error);
     }
