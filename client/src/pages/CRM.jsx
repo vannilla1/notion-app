@@ -17,12 +17,12 @@ const crmHelpTips = [
   {
     icon: '📋',
     title: 'Detail kontaktu',
-    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s úlohami, poznámkami a súbormi.'
+    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s projektami, poznámkami a súbormi.'
   },
   {
     icon: '✏️',
     title: 'Úprava kontaktu',
-    description: 'V rozbalenom detaile kliknite na ikonu ceruzky pre úpravu údajov kontaktu. Dvojklik na podúlohu otvorí jej editáciu.'
+    description: 'V rozbalenom detaile kliknite na ikonu ceruzky pre úpravu údajov kontaktu. Dvojklik na úlohu otvorí jej editáciu.'
   },
   {
     icon: '📎',
@@ -41,8 +41,8 @@ const crmHelpTips = [
   },
   {
     icon: '📝',
-    title: 'Úlohy kontaktu',
-    description: 'Každý kontakt má vlastné úlohy s podúlohami. Pri dokončení hlavnej úlohy sa automaticky dokončia všetky podúlohy.'
+    title: 'Projekty kontaktu',
+    description: 'Každý kontakt má vlastné projekty s úlohami. Pri dokončení hlavného projektu sa automaticky dokončia všetky úlohy.'
   }
 ];
 
@@ -574,7 +574,7 @@ function CRM() {
     } catch (error) {
       console.error('Duplicate error:', error);
       console.error('Error response:', error.response?.data);
-      alert(error.response?.data?.message || 'Chyba pri duplikovaní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri duplikovaní projektu');
     }
   };
 
@@ -616,13 +616,13 @@ function CRM() {
       setTaskDueDates(prev => ({ ...prev, [contact.id]: '' }));
       await fetchContacts();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
     }
   };
 
   const toggleTask = async (contact, task) => {
     if (!task.completed) {
-      if (!window.confirm(`Naozaj chcete označiť úlohu "${task.title}" ako dokončenú?`)) return;
+      if (!window.confirm(`Naozaj chcete označiť projekt "${task.title}" ako dokončený?`)) return;
     }
     try {
       if (task.source === 'global') {
@@ -645,7 +645,7 @@ function CRM() {
   };
 
   const deleteTask = async (contact, task) => {
-    if (!window.confirm(`Naozaj chcete vymazať úlohu "${task.title}"?`)) return;
+    if (!window.confirm(`Naozaj chcete vymazať projekt "${task.title}"?`)) return;
     try {
       // Default to 'contact' source if not specified
       const source = task.source || 'contact';
@@ -657,7 +657,7 @@ function CRM() {
         // Contact embedded task
         if (!contact.id || !task.id) {
           console.error('Missing required IDs for delete task:', { contactId: contact.id, taskId: task.id });
-          alert('Chyba: Chýbajúce údaje pre vymazanie úlohy');
+          alert('Chyba: Chýbajúce údaje pre vymazanie projektu');
           return;
         }
         await api.delete(`/api/contacts/${contact.id}/tasks/${task.id}`);
@@ -665,7 +665,7 @@ function CRM() {
       }
     } catch (error) {
       console.error('Failed to delete task:', error);
-      alert('Chyba pri mazaní úlohy');
+      alert('Chyba pri mazaní projektu');
     }
   };
 
@@ -702,7 +702,7 @@ function CRM() {
       setEditTaskDueDate('');
       setEditTaskDescription('');
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladaní projektu');
     }
   };
 
@@ -785,13 +785,13 @@ function CRM() {
       setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
       setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
+      alert(error.response?.data?.message || 'Chyba pri vytvarani ulohy');
     }
   };
 
   const toggleSubtask = async (task, subtask) => {
     if (!subtask.completed) {
-      if (!window.confirm(`Naozaj chcete označiť podúlohu "${subtask.title}" ako dokončenú?`)) return;
+      if (!window.confirm(`Naozaj chcete označiť úlohu "${subtask.title}" ako dokončenú?`)) return;
     }
     try {
       // Default to 'contact' source if not specified
@@ -815,12 +815,12 @@ function CRM() {
       }
     } catch (error) {
       console.error('Failed to toggle subtask:', error);
-      alert('Chyba pri aktualizácii podúlohy');
+      alert('Chyba pri aktualizácii úlohy');
     }
   };
 
   const deleteSubtask = async (task, subtask) => {
-    if (!window.confirm(`Naozaj chcete vymazať podúlohu "${subtask.title}"?`)) return;
+    if (!window.confirm(`Naozaj chcete vymazať úlohu "${subtask.title}"?`)) return;
     try {
       // Default to 'contact' source if not specified
       const source = task.source || 'contact';
@@ -830,7 +830,7 @@ function CRM() {
       } else {
         if (!task.contactId || !task.id || !subtask.id) {
           console.error('Missing required IDs:', { contactId: task.contactId, taskId: task.id, subtaskId: subtask.id });
-          alert('Chyba: Chýbajúce údaje pre vymazanie podúlohy');
+          alert('Chyba: Chýbajúce údaje pre vymazanie úlohy');
           return;
         }
         await api.delete(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`);
@@ -838,7 +838,7 @@ function CRM() {
       }
     } catch (error) {
       console.error('Failed to delete subtask:', error);
-      alert('Chyba pri mazaní podúlohy');
+      alert('Chyba pri mazaní úlohy');
     }
   };
 
@@ -880,7 +880,7 @@ function CRM() {
       setEditSubtaskNotes('');
       setEditSubtaskDueDate('');
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
     }
   };
 
@@ -957,7 +957,7 @@ function CRM() {
                     onChange={(e) => setEditSubtaskTitle(e.target.value)}
                     className="form-input form-input-sm"
                     autoFocus
-                    placeholder="Názov podúlohy"
+                    placeholder="Názov úlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -966,7 +966,7 @@ function CRM() {
                     value={editSubtaskDueDate}
                     onChange={(e) => setEditSubtaskDueDate(e.target.value)}
                     className="form-input form-input-sm task-date-input"
-                    title="Termín podúlohy"
+                    title="Termín úlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -1012,7 +1012,7 @@ function CRM() {
                       setSubtaskInputs(prev => ({ ...prev, [subtask.id]: '' }));
                     }}
                     className="btn-icon-sm btn-add-child"
-                    title="Pridat podulohu"
+                    title="Pridat ulohu"
                   >
                     +
                   </button>
@@ -1048,7 +1048,7 @@ function CRM() {
                   type="text"
                   value={subtaskInputs[subtask.id] || ''}
                   onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Nová podúloha..."
+                  placeholder="Nová úloha..."
                   className="form-input form-input-sm"
                   autoFocus
                 />
@@ -1068,7 +1068,7 @@ function CRM() {
                 >
                   📝
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
+                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1098,7 +1098,7 @@ function CRM() {
                 <textarea
                   value={subtaskNotes[subtask.id] || ''}
                   onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Poznámka k podúlohe..."
+                  placeholder="Poznámka k úlohe..."
                   className="form-input form-input-sm subtask-notes-input"
                   rows={2}
                 />
@@ -1191,7 +1191,7 @@ function CRM() {
             className="btn btn-secondary btn-nav-tasks"
             onClick={() => navigate('/tasks')}
           >
-            Úlohy
+            Projekty
           </button>
           <UserMenu
             user={user}
@@ -1624,7 +1624,7 @@ function CRM() {
                               className="btn btn-primary contact-tasks-btn"
                               onClick={() => navigate(`/tasks?contactId=${contact.id}`)}
                             >
-                              ✓ Zobraziť úlohy ({getContactTasks(contact).length})
+                              ✓ Zobraziť projekty ({getContactTasks(contact).length})
                             </button>
                           </div>
                         </div>
@@ -1643,14 +1643,14 @@ function CRM() {
         <div className="modal-overlay" onClick={closeDuplicateModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Duplikovať úlohu</h3>
+              <h3>Duplikovať projekt</h3>
               <button className="modal-close" onClick={closeDuplicateModal}>×</button>
             </div>
             <div className="modal-body">
               <p className="duplicate-info">
-                Duplikuje sa úloha: <strong>{duplicatingTask.title}</strong>
+                Duplikuje sa projekt: <strong>{duplicatingTask.title}</strong>
                 {duplicatingTask.subtasks?.length > 0 && (
-                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} podúloh)</span>
+                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} úloh)</span>
                 )}
               </p>
 

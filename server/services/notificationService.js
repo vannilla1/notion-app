@@ -422,25 +422,25 @@ const getNotificationTitle = (type, actorName, relatedName) => {
     case 'contact.deleted':
       return `Kontakt vymazaný: ${related || 'bez názvu'}`;
     case 'task.created':
-      return `Nová úloha: ${related || 'bez názvu'}`;
+      return `Nový projekt: ${related || 'bez názvu'}`;
     case 'task.updated':
-      return `Úloha upravená: ${related || 'bez názvu'}`;
+      return `Projekt upravený: ${related || 'bez názvu'}`;
     case 'task.completed':
-      return `Úloha dokončená: ${related || 'bez názvu'}`;
+      return `Projekt dokončený: ${related || 'bez názvu'}`;
     case 'task.deleted':
-      return `Úloha vymazaná: ${related || 'bez názvu'}`;
+      return `Projekt vymazaný: ${related || 'bez názvu'}`;
     case 'task.assigned':
-      return `Priradená úloha: ${related || 'bez názvu'}`;
+      return `Priradený projekt: ${related || 'bez názvu'}`;
     case 'subtask.created':
-      return `Nová podúloha: ${related || 'bez názvu'}`;
+      return `Nová úloha: ${related || 'bez názvu'}`;
     case 'subtask.updated':
-      return `Podúloha upravená: ${related || 'bez názvu'}`;
+      return `Úloha upravená: ${related || 'bez názvu'}`;
     case 'subtask.completed':
-      return `Podúloha dokončená: ${related || 'bez názvu'}`;
+      return `Úloha dokončená: ${related || 'bez názvu'}`;
     case 'subtask.deleted':
-      return `Podúloha vymazaná: ${related || 'bez názvu'}`;
+      return `Úloha vymazaná: ${related || 'bez názvu'}`;
     case 'subtask.assigned':
-      return `Priradená podúloha: ${related || 'bez názvu'}`;
+      return `Priradená úloha: ${related || 'bez názvu'}`;
     case 'task.dueDate':
     case 'subtask.dueDate':
       return related || 'Blíži sa termín';
@@ -466,44 +466,44 @@ const getNotificationMessage = (type, actorName, data = {}) => {
       return `${actor} vymazal tento kontakt`;
     case 'task.created':
       return contactName
-        ? `${actor} vytvoril úlohu pre kontakt "${contactName}"`
-        : `${actor} vytvoril novú úlohu`;
+        ? `${actor} vytvoril projekt pre kontakt "${contactName}"`
+        : `${actor} vytvoril nový projekt`;
     case 'task.updated':
       return contactName
-        ? `${actor} upravil úlohu v kontakte "${contactName}"`
-        : `${actor} upravil túto úlohu`;
+        ? `${actor} upravil projekt v kontakte "${contactName}"`
+        : `${actor} upravil tento projekt`;
     case 'task.completed':
       return contactName
-        ? `${actor} dokončil úlohu v kontakte "${contactName}"`
-        : `${actor} dokončil túto úlohu`;
+        ? `${actor} dokončil projekt v kontakte "${contactName}"`
+        : `${actor} dokončil tento projekt`;
     case 'task.deleted':
       return contactName
-        ? `${actor} vymazal úlohu z kontaktu "${contactName}"`
-        : `${actor} vymazal túto úlohu`;
+        ? `${actor} vymazal projekt z kontaktu "${contactName}"`
+        : `${actor} vymazal tento projekt`;
     case 'task.assigned':
       return contactName
-        ? `${actor} vám priradil úlohu v kontakte "${contactName}"`
-        : `${actor} vám priradil túto úlohu`;
+        ? `${actor} vám priradil projekt v kontakte "${contactName}"`
+        : `${actor} vám priradil tento projekt`;
     case 'subtask.created':
       return taskTitle
-        ? `${actor} pridal podúlohu k úlohe "${taskTitle}"`
-        : `${actor} pridal novú podúlohu`;
+        ? `${actor} pridal úlohu k projektu "${taskTitle}"`
+        : `${actor} pridal novú úlohu`;
     case 'subtask.updated':
       return taskTitle
-        ? `${actor} upravil podúlohu v úlohe "${taskTitle}"`
-        : `${actor} upravil podúlohu`;
+        ? `${actor} upravil úlohu v projekte "${taskTitle}"`
+        : `${actor} upravil úlohu`;
     case 'subtask.completed':
       return taskTitle
-        ? `${actor} dokončil podúlohu v úlohe "${taskTitle}"`
-        : `${actor} dokončil podúlohu`;
+        ? `${actor} dokončil úlohu v projekte "${taskTitle}"`
+        : `${actor} dokončil úlohu`;
     case 'subtask.deleted':
       return taskTitle
-        ? `${actor} vymazal podúlohu z úlohy "${taskTitle}"`
-        : `${actor} vymazal podúlohu`;
+        ? `${actor} vymazal úlohu z projektu "${taskTitle}"`
+        : `${actor} vymazal úlohu`;
     case 'subtask.assigned':
       return taskTitle
-        ? `${actor} vám priradil podúlohu v úlohe "${taskTitle}"`
-        : `${actor} vám priradil túto podúlohu`;
+        ? `${actor} vám priradil úlohu v projekte "${taskTitle}"`
+        : `${actor} vám priradil túto úlohu`;
     default:
       return '';
   }

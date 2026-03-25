@@ -29,7 +29,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
       setNewTaskTitle('');
       await refreshContact();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
     }
   };
 
@@ -45,7 +45,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
   };
 
   const deleteTask = async (taskId) => {
-    if (!window.confirm('Vymazať túto úlohu?')) return;
+    if (!window.confirm('Vymazať tento projekt?')) return;
     try {
       await api.delete(`/api/contacts/${contactId}/tasks/${taskId}`);
       await refreshContact();
@@ -66,7 +66,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
       setSubtaskInputs(prev => ({ ...prev, [taskId]: '' }));
       await refreshContact();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní podúlohy');
+      alert(error.response?.data?.message || 'Chyba pri vytváraní úlohy');
     }
   };
 
@@ -105,7 +105,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
       setEditSubtaskTitle('');
       await refreshContact();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní podúlohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
     }
   };
 
@@ -130,7 +130,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
       setEditingTask(null);
       await refreshContact();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladaní projektu');
     }
   };
 
@@ -162,7 +162,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
   return (
     <div className="task-list">
       <div className="task-header">
-        <h3>Úlohy ({completedCount}/{tasks.length})</h3>
+        <h3>Projekty ({completedCount}/{tasks.length})</h3>
       </div>
 
       <form onSubmit={addTask} className="add-task-form">
@@ -170,7 +170,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
           type="text"
           value={newTaskTitle}
           onChange={(e) => setNewTaskTitle(e.target.value)}
-          placeholder="Pridať novú úlohu..."
+          placeholder="Pridať nový projekt..."
           className="form-input"
         />
         <button type="submit" className="btn btn-primary">+</button>
@@ -178,7 +178,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
 
       <div className="tasks">
         {tasks.length === 0 ? (
-          <div className="no-tasks">Žiadne úlohy</div>
+          <div className="no-tasks">Žiadne projekty</div>
         ) : (
           tasks.map(task => (
             <div key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
@@ -264,7 +264,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
                   )}
 
                   <div className="subtasks">
-                    <div className="subtasks-header">Podúlohy</div>
+                    <div className="subtasks-header">Úlohy</div>
 
                     {task.subtasks?.map(subtask => (
                       <div key={subtask.id} className={`subtask-item ${subtask.completed ? 'completed' : ''}`}>
@@ -341,7 +341,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
                         type="text"
                         value={subtaskInputs[task.id] || ''}
                         onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                        placeholder="Pridať podúlohu..."
+                        placeholder="Pridať úlohu..."
                         className="form-input form-input-sm"
                       />
                       <button type="submit" className="btn btn-secondary btn-sm">+</button>

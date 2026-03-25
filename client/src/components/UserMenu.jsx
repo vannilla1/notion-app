@@ -548,10 +548,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleRemoveDuplicatesGoogleTasks = async () => {
-    if (!confirm('Vymazať VŠETKY úlohy z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Synchronizovať" pre opätovné vytvorenie úloh.')) return;
+    if (!confirm('Vymazať VŠETKY projekty z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Synchronizovať" pre opätovné vytvorenie projektov.')) return;
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('Mažem zoznam úloh z Google Tasks...');
+      setGoogleTasksMessage('Mažem zoznam projektov z Google Tasks...');
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
@@ -564,7 +564,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleTasksStatus();
     } catch (error) {
       console.error('Error removing tasks:', error);
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní úloh';
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní projektov';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasksMessageType('error');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -577,13 +577,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       return;
     }
 
-    if (!confirm(`Naozaj chcete vymazať všetky úlohy obsahujúce "${searchTerm}" z Google Tasks?`)) {
+    if (!confirm(`Naozaj chcete vymazať všetky projekty obsahujúce "${searchTerm}" z Google Tasks?`)) {
       return;
     }
 
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage(`Hľadám a mažem úlohy s "${searchTerm}"...`);
+      setGoogleTasksMessage(`Hľadám a mažem projekty s "${searchTerm}"...`);
       const token = localStorage.getItem('token');
       const response = await axios.post(`${API_URL}/google-tasks/delete-by-search`,
         { searchTerm },
@@ -1131,7 +1131,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         className="btn btn-secondary"
                         onClick={handleCleanupGoogleCalendar}
                         disabled={googleCalendar.syncing}
-                        title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúcu úlohu"
+                        title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúci projekt"
                       >
                         Vycistit stare
                       </button>
@@ -1165,11 +1165,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 )}
               </div>
 
-              {/* Google Tasks - Úlohy s odškrtávaním */}
+              {/* Google Tasks - Projekty s odškrtávaním */}
               <div className="calendar-section google-tasks-section" style={{ marginTop: '24px' }}>
-                <h3>✅ Google Tasks (Úlohy s odškrtávaním)</h3>
+                <h3>✅ Google Tasks (Projekty s odškrtávaním)</h3>
                 <p className="section-description">
-                  Synchronizácia do Google Tasks. Úlohy sa dajú <strong>odškrtnúť</strong> priamo v kalendári.
+                  Synchronizácia do Google Tasks. Projekty sa dajú <strong>odškrtnúť</strong> priamo v kalendári.
                 </p>
 
                 {googleTasks.loading ? (
@@ -1201,12 +1201,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         </div>
                         {googleTasks.pendingTasks.pending > 0 && (
                           <div style={{ color: '#B45309', fontWeight: '500' }}>
-                            ⏳ Čaká na synchronizáciu: {googleTasks.pendingTasks.pending} úloh
+                            ⏳ Čaká na synchronizáciu: {googleTasks.pendingTasks.pending} projektov
                           </div>
                         )}
                         {googleTasks.pendingTasks.pending === 0 && (
                           <div style={{ color: '#059669', fontWeight: '500' }}>
-                            ✅ Všetky úlohy sú synchronizované
+                            ✅ Všetky projekty sú synchronizované
                           </div>
                         )}
                       </div>
@@ -1248,7 +1248,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         </div>
                         {googleTasks.pendingTasks && googleTasks.pendingTasks.pending > 0 && (
                           <div style={{ marginTop: '8px', color: '#6B7280', fontSize: '12px', fontStyle: 'italic' }}>
-                            Tip: Ak kvóta nestačí, zvyšné úlohy sa dosyncujú zajtra automaticky pri ďalšej synchronizácii.
+                            Tip: Ak kvóta nestačí, zvyšné projekty sa dosyncujú zajtra automaticky pri ďalšej synchronizácii.
                           </div>
                         )}
                       </div>
@@ -1266,7 +1266,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         className="btn btn-secondary"
                         onClick={handleRemoveDuplicatesGoogleTasks}
                         disabled={googleTasks.syncing}
-                        title="Vymaže všetky úlohy z Google Tasks a vytvorí čistý zoznam. Potom spustite Synchronizovať."
+                        title="Vymaže všetky projekty z Google Tasks a vytvorí čistý zoznam. Potom spustite Synchronizovať."
                         style={{ background: '#e67e22', color: 'white', border: 'none' }}
                       >
                         🧹 Vymazať a obnoviť
@@ -1322,7 +1322,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       Pripojiť Google Tasks
                     </button>
                     <p className="calendar-note" style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                      Úlohy sa zobrazia v Google Tasks a na bočnom paneli Google Calendar.
+                      Projekty sa zobrazia v Google Tasks a na bočnom paneli Google Calendar.
                     </p>
                   </div>
                 )}

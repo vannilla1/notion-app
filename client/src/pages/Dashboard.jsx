@@ -12,7 +12,7 @@ const dashboardHelpTips = [
   {
     icon: '📊',
     title: 'Prehľad štatistík',
-    description: 'Na dashboarde vidíte prehľad vašich kontaktov a úloh. Kliknutím na štatistiku zobrazíte detailný zoznam.'
+    description: 'Na dashboarde vidíte prehľad vašich kontaktov a projektov. Kliknutím na štatistiku zobrazíte detailný zoznam.'
   },
   {
     icon: '👥',
@@ -21,13 +21,13 @@ const dashboardHelpTips = [
   },
   {
     icon: '✅',
-    title: 'Úlohy podľa priority',
-    description: 'Úlohy sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené úlohy sa zobrazujú na konci zoznamu.'
+    title: 'Projekty podľa priority',
+    description: 'Projekty sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené projekty sa zobrazujú na konci zoznamu.'
   },
   {
     icon: '🔔',
     title: 'Notifikácie',
-    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na nové kontakty, úlohy, priradenia a blížiace sa termíny — aj ako push notifikácie na iOS.'
+    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na nové kontakty, projekty, priradenia a blížiace sa termíny — aj ako push notifikácie na iOS.'
   },
   {
     icon: '🏢',
@@ -37,12 +37,12 @@ const dashboardHelpTips = [
   {
     icon: '📆',
     title: 'Google synchronizácia',
-    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú synchronizáciu vašich termínov a úloh.'
+    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú synchronizáciu vašich termínov a projektov.'
   },
   {
     icon: '⚡',
     title: 'Rýchla navigácia',
-    description: 'Pomocou tlačidiel "Kontakty" a "Úlohy" v hlavičke sa rýchlo prepnete na detailné zobrazenie.'
+    description: 'Pomocou tlačidiel "Kontakty" a "Projekty" v hlavičke sa rýchlo prepnete na detailné zobrazenie.'
   }
 ];
 
@@ -244,22 +244,22 @@ function Dashboard() {
       case 'cancelled':
         return { type: 'contacts', items: sortContacts(contacts.filter(c => c.status === 'cancelled')), title: 'Zrušené kontakty' };
       case 'tasks':
-        return { type: 'tasks', items: sortTasks(tasks), title: 'Všetky úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks), title: 'Všetky projekty' };
       case 'pending':
-        return { type: 'tasks', items: sortTasks(tasks.filter(t => !t.completed)), title: 'Nesplnené úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => !t.completed)), title: 'Nesplnené projekty' };
       case 'completed':
-        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.completed)), title: 'Splnené úlohy' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.completed)), title: 'Splnené projekty' };
       case 'contactTasks':
         if (selectedContact) {
-          return { type: 'tasks', items: sortTasks(getContactTasks(selectedContact)), title: `Úlohy: ${selectedContact.name}` };
+          return { type: 'tasks', items: sortTasks(getContactTasks(selectedContact)), title: `Projekty: ${selectedContact.name}` };
         }
         return null;
       case 'priority-low':
-        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'low' && !t.completed)), title: 'Úlohy s nízkou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'low' && !t.completed)), title: 'Projekty s nízkou prioritou' };
       case 'priority-medium':
-        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'medium' && !t.completed)), title: 'Úlohy so strednou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'medium' && !t.completed)), title: 'Projekty so strednou prioritou' };
       case 'priority-high':
-        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'high' && !t.completed)), title: 'Úlohy s vysokou prioritou' };
+        return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'high' && !t.completed)), title: 'Projekty s vysokou prioritou' };
       default:
         return null;
     }
@@ -304,13 +304,13 @@ function Dashboard() {
       setEditingTask(null);
       setEditForm({});
     } catch (error) {
-      alert('Chyba pri ukladaní úlohy');
+      alert('Chyba pri ukladaní projekty');
     }
   };
 
   const toggleTaskComplete = async (task) => {
     if (!task.completed) {
-      if (!window.confirm(`Označiť úlohu "${task.title}" ako dokončenú?`)) return;
+      if (!window.confirm(`Označiť projekt "${task.title}" ako dokončenú?`)) return;
     }
     try {
       if (task.source === 'contact' && task.contactId) {
@@ -320,7 +320,7 @@ function Dashboard() {
       }
       await fetchData();
     } catch (error) {
-      alert('Chyba pri aktualizácii úlohy');
+      alert('Chyba pri aktualizácii projekty');
     }
   };
 
@@ -353,7 +353,7 @@ function Dashboard() {
       setEditingSubtask(null);
       setSubtaskEditForm({});
     } catch (error) {
-      alert('Chyba pri ukladaní podúlohy');
+      alert('Chyba pri ukladaní úlohy');
     }
   };
 
@@ -369,7 +369,7 @@ function Dashboard() {
       }
       await fetchData();
     } catch (error) {
-      alert('Chyba pri aktualizácii podúlohy');
+      alert('Chyba pri aktualizácii úlohy');
     }
   };
 
@@ -436,7 +436,7 @@ function Dashboard() {
                   value={subtaskEditForm.title}
                   onChange={(e) => setSubtaskEditForm({ ...subtaskEditForm, title: e.target.value })}
                   className="form-input"
-                  placeholder="Názov podúlohy"
+                  placeholder="Názov úlohy"
                   autoFocus
                 />
                 <div className="subtask-edit-row">
@@ -532,7 +532,7 @@ function Dashboard() {
             className="btn btn-secondary"
             onClick={() => navigate('/tasks')}
           >
-            Úlohy
+            Projekty
           </button>
           <UserMenu
             user={user}
@@ -569,7 +569,7 @@ function Dashboard() {
               className={`stat-item clickable ${detailView === 'tasks' ? 'active' : ''}`}
               onClick={() => setDetailView('tasks')}
             >
-              <span className="stat-label">Globálnych úloh</span>
+              <span className="stat-label">Globálnych projektov</span>
               <span className="stat-value">{tasks.length}</span>
             </div>
             <div
@@ -676,7 +676,7 @@ function Dashboard() {
               onClick={() => navigate('/tasks')}
               style={{ width: '100%' }}
             >
-              + Nová úloha
+              + Nová projekt
             </button>
           </div>
         </aside>
@@ -735,7 +735,7 @@ function Dashboard() {
                         </div>
                         {contactTasks.length > 0 && (
                           <div className="detail-item-badge">
-                            {completedContactTasks}/{contactTasks.length} úloh
+                            {completedContactTasks}/{contactTasks.length} projektov
                           </div>
                         )}
                         <div className="detail-item-arrow">→</div>
@@ -760,7 +760,7 @@ function Dashboard() {
                             value={editForm.title}
                             onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                             className="form-input"
-                            placeholder="Názov úlohy"
+                            placeholder="Názov projekty"
                             autoFocus
                           />
                           <textarea
@@ -845,7 +845,7 @@ function Dashboard() {
                           {expandedTask === task.id && task.subtasks?.length > 0 && (
                             <div className="dashboard-subtasks-container">
                               <div className="subtasks-header">
-                                Podúlohy ({countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total})
+                                Úlohy ({countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total})
                               </div>
                               <div className="subtask-tree">
                                 {renderDashboardSubtasks(task, task.subtasks, 0)}
@@ -864,7 +864,7 @@ function Dashboard() {
             <div className="dashboard-page">
               <div className="dashboard-header">
                 <h2>Vitajte, {user?.username || 'Používateľ'}</h2>
-                <p className="dashboard-subtitle">Prehľad vašich kontaktov a úloh</p>
+                <p className="dashboard-subtitle">Prehľad vašich kontaktov a projektov</p>
               </div>
 
               <div className="dashboard-grid">
@@ -938,7 +938,7 @@ function Dashboard() {
                 {/* Tasks Section */}
                 <div className="dashboard-section" onClick={() => setDetailView('pending')}>
                   <div className="section-header">
-                    <h3>Úlohy ({tasks.length})</h3>
+                    <h3>Projekty ({tasks.length})</h3>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={(e) => { e.stopPropagation(); navigate('/tasks'); }}
@@ -949,7 +949,7 @@ function Dashboard() {
 
                   {tasks.length === 0 ? (
                     <div className="empty-state-small">
-                      <p>Žiadne úlohy</p>
+                      <p>Žiadne projekty</p>
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
@@ -996,7 +996,7 @@ function Dashboard() {
                       ))}
                       {tasks.filter(t => !t.completed).length > 5 && (
                         <div className="show-more">
-                          + {tasks.filter(t => !t.completed).length - 5} ďalších úloh
+                          + {tasks.filter(t => !t.completed).length - 5} ďalších projektov
                         </div>
                       )}
 
@@ -1006,7 +1006,7 @@ function Dashboard() {
                           className="completed-summary"
                           onClick={(e) => { e.stopPropagation(); setDetailView('completed'); }}
                         >
-                          {completedTasks} splnených úloh
+                          {completedTasks} splnených projektov
                         </div>
                       )}
                     </div>
@@ -1017,7 +1017,7 @@ function Dashboard() {
               {/* Recent Activity - Contacts with tasks */}
               <div className="dashboard-section full-width">
                 <div className="section-header">
-                  <h3>Kontakty s úlohami</h3>
+                  <h3>Kontakty s projektami</h3>
                 </div>
                 <div className="contacts-with-tasks">
                   {contacts
@@ -1040,7 +1040,7 @@ function Dashboard() {
                             </div>
                             <div className="contact-tasks-name">{contact.name || 'Bez mena'}</div>
                             <span className="tasks-badge">
-                              {contactTasks.filter(t => t.completed).length}/{contactTasks.length} úloh
+                              {contactTasks.filter(t => t.completed).length}/{contactTasks.length} projektov
                             </span>
                           </div>
                           <div className="contact-tasks-list">
@@ -1052,7 +1052,7 @@ function Dashboard() {
                                 <span className="mini-task-check">{task.completed ? '✓' : '○'}</span>
                                 <span className="mini-task-title">{task.title}</span>
                                 {task.source === 'global' && (
-                                  <span className="mini-task-source">z Úloh</span>
+                                  <span className="mini-task-source">z Projektov</span>
                                 )}
                               </div>
                             ))}
@@ -1067,7 +1067,7 @@ function Dashboard() {
                     })}
                   {contacts.filter(c => getContactTasks(c).length > 0).length === 0 && (
                     <div className="empty-state-small">
-                      <p>Žiadne kontakty s úlohami</p>
+                      <p>Žiadne kontakty s projektami</p>
                     </div>
                   )}
                 </div>

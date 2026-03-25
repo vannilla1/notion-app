@@ -120,7 +120,7 @@ export const useTaskOperations = () => {
       const res = await api.get('/api/tasks');
       return res.data;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri načítaní úloh';
+      const message = err.response?.data?.message || 'Chyba pri načítaní projektov';
       setError(message);
       throw err;
     } finally {
@@ -137,7 +137,7 @@ export const useTaskOperations = () => {
       const res = await api.post(`/api/contacts/${contactId}/tasks`, taskData);
       return res.data;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri vytváraní úlohy';
+      const message = err.response?.data?.message || 'Chyba pri vytváraní projektu';
       setError(message);
       throw err;
     }
@@ -155,7 +155,7 @@ export const useTaskOperations = () => {
       const res = await api.put(url, updateData);
       return res.data;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri ukladaní úlohy';
+      const message = err.response?.data?.message || 'Chyba pri ukladaní projektu';
       setError(message);
       throw err;
     }
@@ -180,7 +180,7 @@ export const useTaskOperations = () => {
       await api.delete(url);
       return true;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri mazaní úlohy';
+      const message = err.response?.data?.message || 'Chyba pri mazaní projektu';
       setError(message);
       throw err;
     }
@@ -198,7 +198,7 @@ export const useTaskOperations = () => {
       const res = await api.post(url, subtaskData);
       return res.data;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri vytváraní podúlohy';
+      const message = err.response?.data?.message || 'Chyba pri vytváraní úlohy';
       setError(message);
       throw err;
     }
@@ -216,7 +216,7 @@ export const useTaskOperations = () => {
       const res = await api.put(url, { completed: !currentCompleted });
       return res.data;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri aktualizácii podúlohy';
+      const message = err.response?.data?.message || 'Chyba pri aktualizácii úlohy';
       setError(message);
       throw err;
     }
@@ -234,7 +234,7 @@ export const useTaskOperations = () => {
       await api.delete(url);
       return true;
     } catch (err) {
-      const message = err.response?.data?.message || 'Chyba pri mazaní podúlohy';
+      const message = err.response?.data?.message || 'Chyba pri mazaní úlohy';
       setError(message);
       throw err;
     }

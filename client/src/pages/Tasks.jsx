@@ -15,53 +15,53 @@ import { CSS } from '@dnd-kit/utilities';
 const tasksHelpTips = [
   {
     icon: '➕',
-    title: 'Vytvorenie úlohy',
-    description: 'Kliknite na "+ Nová úloha" pre vytvorenie novej úlohy. Môžete ju priradiť ku kontaktu alebo vytvoriť globálnu úlohu.'
+    title: 'Vytvorenie projektu',
+    description: 'Kliknite na "+ Nový projekt" pre vytvorenie nového projektu. Môžete ho priradiť ku kontaktu alebo vytvoriť globálny projekt.'
   },
   {
     icon: '📅',
     title: 'Termíny a priorita',
-    description: 'Každej úlohe môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny — zelená (do 14 dní), oranžová (do 7 dní), červená (po termíne).'
+    description: 'Každému projektu môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny — zelená (do 14 dní), oranžová (do 7 dní), červená (po termíne).'
   },
   {
     icon: '🔔',
     title: 'Upozornenia na termíny',
-    description: 'Systém automaticky sleduje termíny úloh a podúloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší — vrátane push notifikácií na iOS.'
+    description: 'Systém automaticky sleduje termíny projektov a úloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší — vrátane push notifikácií na iOS.'
   },
   {
     icon: '📝',
-    title: 'Podúlohy',
-    description: 'Rozbaľte úlohu a pridajte podúlohy pre lepšiu organizáciu. Podúlohy môžu mať vlastné podúlohy, termíny, poznámky a priradených používateľov. Kliknutím na názov podúlohy rozbalíte jej podúlohy.'
+    title: 'Úlohy',
+    description: 'Rozbaľte projekt a pridajte úlohy pre lepšiu organizáciu. Úlohy môžu mať vlastné úlohy, termíny, poznámky a priradených používateľov. Kliknutím na názov úlohy rozbalíte jej úlohy.'
   },
   {
     icon: '✅',
-    title: 'Dokončenie úlohy',
-    description: 'Kliknutím na checkbox označíte úlohu ako dokončenú. Pri dokončení hlavnej úlohy sa automaticky dokončia aj všetky jej podúlohy.'
+    title: 'Dokončenie projektu',
+    description: 'Kliknutím na checkbox označíte projekt ako dokončený. Pri dokončení hlavného projektu sa automaticky dokončia aj všetky jeho úlohy.'
   },
   {
     icon: '👤',
-    title: 'Priradenie úloh',
-    description: 'Úlohy a podúlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu v aplikácii aj push notifikáciu na mobile.'
+    title: 'Priradenie projektov',
+    description: 'Projekty a úlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu v aplikácii aj push notifikáciu na mobile.'
   },
   {
     icon: '↕️',
-    title: 'Radenie úloh',
-    description: 'Úlohy sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené úlohy sa zobrazia na konci. Poradie môžete zmeniť aj pretiahnutím cez ikonu ⠿.'
+    title: 'Radenie projektov',
+    description: 'Projekty sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené projekty sa zobrazia na konci. Poradie môžete zmeniť aj pretiahnutím cez ikonu ⠿.'
   },
   {
     icon: '📎',
     title: 'Prílohy',
-    description: 'K úlohám a podúlohám môžete priložiť súbory (max. 5 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
+    description: 'K projektom a úlohám môžete priložiť súbory (max. 5 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
   },
   {
     icon: '🔍',
     title: 'Filtrovanie',
-    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na podúlohy.'
+    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na úlohy.'
   },
   {
     icon: '📆',
     title: 'Google synchronizácia',
-    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a úloh.'
+    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a projektov.'
   }
 ];
 
@@ -264,7 +264,7 @@ function Tasks() {
       if (googleTasksStatus === 'connected') {
         setGoogleCalendarNotification({
           type: 'success',
-          message: 'Google Tasks bol úspešne pripojený! Úlohy sa budú automaticky synchronizovať.'
+          message: 'Google Tasks bol úspešne pripojený! Projekty sa budú automaticky synchronizovať.'
         });
       } else if (googleTasksStatus === 'error') {
         setGoogleCalendarNotification({
@@ -776,13 +776,13 @@ function Tasks() {
       });
       setShowForm(false);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
     }
   };
 
   const toggleTask = async (task) => {
     if (!task.completed) {
-      if (!window.confirm(`Naozaj chcete označiť úlohu "${task.title}" ako dokončenú?`)) return;
+      if (!window.confirm(`Naozaj chcete označiť projekt "${task.title}" ako dokončený?`)) return;
     }
     try {
       await api.put(`/api/tasks/${task.id}`, {
@@ -795,13 +795,13 @@ function Tasks() {
   };
 
   const deleteTask = async (task) => {
-    if (!window.confirm(`Naozaj chcete vymazať úlohu "${task.title}"?`)) return;
+    if (!window.confirm(`Naozaj chcete vymazať projekt "${task.title}"?`)) return;
     try {
       await api.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
       await fetchTasks();
     } catch (error) {
       console.error('Failed to delete task:', error);
-      alert('Chyba pri mazaní úlohy');
+      alert('Chyba pri mazaní projektu');
     }
   };
 
@@ -827,7 +827,7 @@ function Tasks() {
       });
       closeDuplicateModal();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri duplikovaní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri duplikovaní projektu');
     }
   };
 
@@ -862,7 +862,7 @@ function Tasks() {
       await fetchTasks();
       setEditingTask(null);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní úlohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladaní projektu');
     }
   };
 
@@ -893,13 +893,13 @@ function Tasks() {
       setShowSubtaskAssignInput(prev => ({ ...prev, [inputKey]: false }));
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytvarani podulohy');
+      alert(error.response?.data?.message || 'Chyba pri vytvarani ulohy');
     }
   };
 
   const toggleSubtask = async (task, subtask) => {
     if (!subtask.completed) {
-      if (!window.confirm(`Naozaj chcete označiť podúlohu "${subtask.title}" ako dokončenú?`)) return;
+      if (!window.confirm(`Naozaj chcete označiť úlohu "${subtask.title}" ako dokončenú?`)) return;
     }
     try {
       await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
@@ -913,7 +913,7 @@ function Tasks() {
   };
 
   const deleteSubtask = async (task, subtask) => {
-    if (!window.confirm(`Naozaj chcete vymazať podúlohu "${subtask.title}"?`)) return;
+    if (!window.confirm(`Naozaj chcete vymazať úlohu "${subtask.title}"?`)) return;
     try {
       await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=${task.source || 'global'}`);
       await fetchTasks();
@@ -947,7 +947,7 @@ function Tasks() {
       setEditSubtaskAssignedTo([]);
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladani podulohy');
+      alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
     }
   };
 
@@ -1131,7 +1131,7 @@ function Tasks() {
                     onChange={(e) => setEditSubtaskTitle(e.target.value)}
                     className="form-input form-input-sm"
                     autoFocus
-                    placeholder="Názov podúlohy"
+                    placeholder="Názov úlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -1140,7 +1140,7 @@ function Tasks() {
                     value={editSubtaskDueDate}
                     onChange={(e) => setEditSubtaskDueDate(e.target.value)}
                     className="form-input form-input-sm task-date-input"
-                    title="Termín podúlohy"
+                    title="Termín úlohy"
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -1237,7 +1237,7 @@ function Tasks() {
                       setSubtaskInputs(prev => ({ ...prev, [subtask.id]: '' }));
                     }}
                     className="btn-icon-sm btn-add-child"
-                    title="Pridat podulohu"
+                    title="Pridat ulohu"
                   >
                     +
                   </button>
@@ -1288,7 +1288,7 @@ function Tasks() {
                   type="text"
                   value={subtaskInputs[subtask.id] || ''}
                   onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Nová podúloha..."
+                  placeholder="Nová úloha..."
                   className="form-input form-input-sm"
                   autoFocus
                 />
@@ -1316,7 +1316,7 @@ function Tasks() {
                 >
                   👤
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
+                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1353,7 +1353,7 @@ function Tasks() {
                 <textarea
                   value={subtaskNotes[subtask.id] || ''}
                   onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Poznámka k podúlohe..."
+                  placeholder="Poznámka k úlohe..."
                   className="form-input form-input-sm subtask-notes-input"
                   rows={2}
                 />
@@ -1779,7 +1779,7 @@ function Tasks() {
               setSidebarOpen(false);
             }}
           >
-            + Nová úloha
+            + Nový projekt
           </button>
 
           <div className="dashboard-stats">
@@ -1788,7 +1788,7 @@ function Tasks() {
               className={`stat-item clickable ${filter === 'all' ? 'active' : ''}`}
               onClick={() => setFilter('all')}
             >
-              <span className="stat-label">Celkom úloh</span>
+              <span className="stat-label">Celkom projektov</span>
               <span className="stat-value">{tasks.length}</span>
             </div>
             <div
@@ -1919,7 +1919,7 @@ function Tasks() {
         <main className="crm-main">
           {showForm ? (
             <div className="contact-form-container">
-              <h2>Nová úloha</h2>
+              <h2>Nový projekt</h2>
               <form onSubmit={createTask} className="contact-form">
                 <div className="contact-form-grid">
                   <div className="form-group full-width">
@@ -1928,7 +1928,7 @@ function Tasks() {
                       type="text"
                       value={newTaskForm.title}
                       onChange={(e) => setNewTaskForm({ ...newTaskForm, title: e.target.value })}
-                      placeholder="Názov úlohy"
+                      placeholder="Názov projektu"
                       className="form-input"
                       required
                     />
@@ -1938,7 +1938,7 @@ function Tasks() {
                     <textarea
                       value={newTaskForm.description}
                       onChange={(e) => setNewTaskForm({ ...newTaskForm, description: e.target.value })}
-                      placeholder="Popis úlohy..."
+                      placeholder="Popis projektu..."
                       className="form-input"
                       rows={3}
                     />
@@ -2026,7 +2026,7 @@ function Tasks() {
                     Zrušiť
                   </button>
                   <button type="submit" className="btn btn-primary">
-                    Vytvoriť úlohu
+                    Vytvoriť projekt
                   </button>
                 </div>
               </form>
@@ -2037,7 +2037,7 @@ function Tasks() {
               {contactFilter && (
                 <div className="contact-filter-banner">
                   <span>
-                    Úlohy pre kontakt: <strong>{contacts.find(c => c.id === contactFilter)?.name || 'Načítavam...'}</strong>
+                    Projekty pre kontakt: <strong>{contacts.find(c => c.id === contactFilter)?.name || 'Načítavam...'}</strong>
                   </span>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -2048,11 +2048,11 @@ function Tasks() {
                 </div>
               )}
               <div className="tasks-header">
-                <h2>Zoznam úloh ({sortedFilteredTasks.length})</h2>
+                <h2>Zoznam projektov ({sortedFilteredTasks.length})</h2>
                 <div className="search-box">
                   <input
                     type="text"
-                    placeholder="Hľadať úlohu..."
+                    placeholder="Hľadať projekt..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="search-input"
@@ -2092,13 +2092,13 @@ function Tasks() {
               ) : sortedFilteredTasks.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">📋</div>
-                  <h2>Žiadne úlohy</h2>
-                  <p>Začnite pridaním vašej prvej úlohy</p>
+                  <h2>Žiadne projekty</h2>
+                  <p>Začnite pridaním vášho prvého projektu</p>
                   <button
                     className="btn btn-primary empty-state-btn"
                     onClick={() => setShowForm(true)}
                   >
-                    + Nová úloha
+                    + Nový projekt
                   </button>
                 </div>
               ) : (
@@ -2319,7 +2319,7 @@ function Tasks() {
                           </div>
 
                           <div className="subtasks">
-                            <div className="subtasks-header">Podulohy</div>
+                            <div className="subtasks-header">Úlohy</div>
 
                             <div className="subtask-tree">
                               {renderSubtasks(task, task.subtasks, 0)}
@@ -2332,7 +2332,7 @@ function Tasks() {
                                     type="text"
                                     value={subtaskInputs[task.id] || ''}
                                     onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    placeholder="Pridať podúlohu..."
+                                    placeholder="Pridať úlohu..."
                                     className="form-input form-input-sm"
                                   />
                                   <button
@@ -2359,7 +2359,7 @@ function Tasks() {
                                   >
                                     👤
                                   </button>
-                                  <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť podúlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
+                                  <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                                 </form>
                                 {showSubtaskDateInput[task.id] && (
                                   <input
@@ -2374,7 +2374,7 @@ function Tasks() {
                                   <textarea
                                     value={subtaskNotes[task.id] || ''}
                                     onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    placeholder="Poznámka k podúlohe..."
+                                    placeholder="Poznámka k úlohe..."
                                     className="form-input form-input-sm subtask-notes-input"
                                     rows={2}
                                   />
@@ -2425,14 +2425,14 @@ function Tasks() {
         <div className="modal-overlay" onClick={closeDuplicateModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Duplikovať úlohu</h3>
+              <h3>Duplikovať projekt</h3>
               <button className="modal-close" onClick={closeDuplicateModal}>×</button>
             </div>
             <div className="modal-body">
               <p className="duplicate-info">
-                Duplikuje sa úloha: <strong>{duplicatingTask.title}</strong>
+                Duplikuje sa projekt: <strong>{duplicatingTask.title}</strong>
                 {duplicatingTask.subtasks?.length > 0 && (
-                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} podúloh)</span>
+                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} úloh)</span>
                 )}
               </p>
 
@@ -2477,7 +2477,7 @@ function Tasks() {
       {/* Help Guide */}
       <HelpGuide
         section="tasks"
-        title="Správa úloh"
+        title="Správa projektov"
         tips={tasksHelpTips}
       />
     </div>

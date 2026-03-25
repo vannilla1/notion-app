@@ -36,39 +36,39 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
   const messages = {
     'success-warning': {
       title: '⚠️ Blíži sa termín',
-      body: `Úloha "${title}" má termín do 7 dní (${formattedDate})`
+      body: `Projekt "${title}" má termín do 7 dní (${formattedDate})`
     },
     'warning-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
+      body: `Projekt "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'danger-overdue': {
       title: '❗ Termín vypršal',
-      body: `Úloha "${title}" je po termíne (${formattedDate})!`
+      body: `Projekt "${title}" je po termíne (${formattedDate})!`
     },
     'success-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
+      body: `Projekt "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'success-overdue': {
       title: '❗ Termín vypršal',
-      body: `Úloha "${title}" je po termíne (${formattedDate})!`
+      body: `Projekt "${title}" je po termíne (${formattedDate})!`
     },
     'warning-overdue': {
       title: '❗ Termín vypršal',
-      body: `Úloha "${title}" je po termíne (${formattedDate})!`
+      body: `Projekt "${title}" je po termíne (${formattedDate})!`
     },
     'null-warning': {
       title: '⚠️ Blíži sa termín',
-      body: `Úloha "${title}" má termín do 7 dní (${formattedDate})`
+      body: `Projekt "${title}" má termín do 7 dní (${formattedDate})`
     },
     'null-danger': {
       title: '🔴 Urgentný termín',
-      body: `Úloha "${title}" má termín do 3 dní (${formattedDate})!`
+      body: `Projekt "${title}" má termín do 3 dní (${formattedDate})!`
     },
     'null-overdue': {
       title: '❗ Termín vypršal',
-      body: `Úloha "${title}" je po termíne (${formattedDate})!`
+      body: `Projekt "${title}" je po termíne (${formattedDate})!`
     }
   };
 

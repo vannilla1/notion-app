@@ -262,7 +262,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, async (req
     const { title, description, dueDate, priority, assignedTo } = req.body;
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ message: 'Názov úlohy je povinný' });
+      return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
 
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
@@ -382,7 +382,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     const { title, parentSubtaskId, dueDate, notes, priority } = req.body;
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ message: 'Nazov podulohy je povinny' });
+      return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
@@ -404,7 +404,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     if (user?.subscription?.plan === 'trial') {
       const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
       if (countSubtasks(contact.tasks[taskIndex].subtasks) >= 10) {
-        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 podúloh na úlohu. Pre neobmedzený prístup prejdite na Pro.' });
+        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 úloh na projekt. Pre neobmedzený prístup prejdite na Pro.' });
       }
     }
 

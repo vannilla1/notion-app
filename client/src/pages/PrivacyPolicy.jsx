@@ -28,8 +28,8 @@ export default function PrivacyPolicy() {
         <ul style={{ paddingLeft: '20px' }}>
           <li><strong>Registračné údaje</strong> — email, používateľské meno, heslo (uložené v hashovanej forme)</li>
           <li><strong>Kontaktné údaje</strong> — mená, telefónne čísla, emaily a poznámky kontaktov, ktoré si sám vytvoríte</li>
-          <li><strong>Úlohy</strong> — názvy, termíny, popisy a stavy úloh a podúloh</li>
-          <li><strong>Google účet</strong> — pri pripojení Google Tasks ukladáme prístupové tokeny na synchronizáciu úloh. Neukladáme vaše heslo ku Google účtu.</li>
+          <li><strong>Projekty</strong> — názvy, termíny, popisy a stavy projektov a úloh</li>
+          <li><strong>Google účet</strong> — pri pripojení Google Tasks ukladáme prístupové tokeny na synchronizáciu projektov. Neukladáme vaše heslo ku Google účtu.</li>
         </ul>
       </section>
 
@@ -37,10 +37,10 @@ export default function PrivacyPolicy() {
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>3. Ako údaje používame</h2>
         <p>Vaše údaje používame výlučne na:</p>
         <ul style={{ paddingLeft: '20px' }}>
-          <li>Poskytovanie funkcií aplikácie (správa kontaktov, úloh, synchronizácia)</li>
+          <li>Poskytovanie funkcií aplikácie (správa kontaktov, projektov, synchronizácia)</li>
           <li>Autentifikáciu a zabezpečenie vášho účtu</li>
           <li>Odosielanie push notifikácií (ak ich povolíte)</li>
-          <li>Synchronizáciu úloh s Google Tasks (ak túto funkciu povolíte)</li>
+          <li>Synchronizáciu projektov s Google Tasks (ak túto funkciu povolíte)</li>
         </ul>
         <p>Vaše údaje <strong>nepredávame</strong> tretím stranám a nepoužívame ich na reklamu.</p>
       </section>
@@ -48,8 +48,8 @@ export default function PrivacyPolicy() {
       <section style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>4. Google API</h2>
         <p>
-          Aplikácia využíva Google Tasks API na synchronizáciu úloh. Pri pripojení Google účtu
-          požadujeme prístup len k vašim úlohám v Google Tasks (scope: <code>tasks</code>).
+          Aplikácia využíva Google Tasks API na synchronizáciu projektov. Pri pripojení Google účtu
+          požadujeme prístup len k vašim projektom v Google Tasks (scope: <code>tasks</code>).
           Nemáme prístup k vašim emailom, kontaktom, kalendáru ani iným dátam Google účtu.
         </p>
         <p>

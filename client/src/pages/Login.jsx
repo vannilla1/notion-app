@@ -71,8 +71,8 @@ function Login() {
         </h1>
         <p className="login-subtitle">
           {isRegister
-            ? 'Zaregistrujte sa a začnite spravovať kontakty a úlohy'
-            : 'Spravujte kontakty, úlohy a tímovú spoluprácu na jednom mieste'}
+            ? 'Zaregistrujte sa a začnite spravovať kontakty a projekty'
+            : 'Spravujte kontakty, projekty a tímovú spoluprácu na jednom mieste'}
         </p>
 
         {error && <div className="error-message">{error}</div>}

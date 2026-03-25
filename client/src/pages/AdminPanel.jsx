@@ -137,7 +137,7 @@ function AdminPanel() {
           <h2>Správa používateľov</h2>
           <p className="admin-description">
             {user.role === 'admin'
-              ? 'Spravujte role používateľov v systéme. Admin má plný prístup, Manažér môže spravovať úlohy a kontakty, Používateľ môže pracovať s úlohami.'
+              ? 'Spravujte role používateľov v systéme. Admin má plný prístup, Manažér môže spravovať projekty a kontakty, Používateľ môže pracovať s projektmi.'
               : 'Ako manažér môžete vymazať účty bežných používateľov.'
             }
           </p>

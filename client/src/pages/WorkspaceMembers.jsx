@@ -163,7 +163,7 @@ function WorkspaceMembers() {
             Kontakty
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/tasks')}>
-            Úlohy
+            Projekty
           </button>
           <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
         </div>

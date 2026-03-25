@@ -64,10 +64,10 @@ export default function LandingPage() {
             <span>&#10024;</span> 7 dní zadarmo na vyskúšanie
           </div>
           <h1 className="lp-hero-title">
-            Spravujte kontakty a úlohy<br />na jednom mieste
+            Spravujte kontakty a projekty<br />na jednom mieste
           </h1>
           <p className="lp-hero-subtitle">
-            Moderný CRM systém pre správu kontaktov, úloh a tímovej spolupráce.
+            Moderný CRM systém pre správu kontaktov, projektov a tímovej spolupráce.
             Jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
@@ -107,9 +107,9 @@ export default function LandingPage() {
                   <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                 </svg>
               </div>
-              <h3 className="lp-feature-title">Úlohy a podúlohy</h3>
+              <h3 className="lp-feature-title">Projekty a úlohy</h3>
               <p className="lp-feature-desc">
-                Vytvárajte úlohy, pridávajte podúlohy, nastavujte termíny a sledujte priebeh plnenia.
+                Vytvárajte projekty, pridávajte úlohy, nastavujte termíny a sledujte priebeh plnenia.
               </p>
             </div>
 
@@ -121,7 +121,7 @@ export default function LandingPage() {
               </div>
               <h3 className="lp-feature-title">Google Tasks sync</h3>
               <p className="lp-feature-desc">
-                Prepojte svoje Google úlohy a majte všetko synchronizované na jednom mieste v reálnom čase.
+                Prepojte svoje Google projekty a majte všetko synchronizované na jednom mieste v reálnom čase.
               </p>
             </div>
 
@@ -215,7 +215,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Max. 10 úloh a podúloh na kontakt
+                  Max. 10 projektov a úloh na kontakt
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -279,7 +279,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Neobmedzené úlohy a podúlohy
+                  Neobmedzené projekty a úlohy
                 </li>
                 <li>
                   <span className="lp-pricing-check">

@@ -294,7 +294,7 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
     ical += 'PRODID:-//Prpl CRM//Task Calendar//SK\r\n';
     ical += 'CALSCALE:GREGORIAN\r\n';
     ical += 'METHOD:PUBLISH\r\n';
-    ical += 'X-WR-CALNAME:Prpl CRM Úlohy\r\n';
+    ical += 'X-WR-CALNAME:Prpl CRM Projekty\r\n';
 
     const now = new Date();
     const dtstamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -584,7 +584,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
     ical += 'PRODID:-//Prpl CRM//Task Calendar//SK\r\n';
     ical += 'CALSCALE:GREGORIAN\r\n';
     ical += 'METHOD:PUBLISH\r\n';
-    ical += 'X-WR-CALNAME:Prpl CRM - Úlohy\r\n';
+    ical += 'X-WR-CALNAME:Prpl CRM - Projekty\r\n';
     ical += 'X-WR-TIMEZONE:Europe/Bratislava\r\n';
     ical += 'REFRESH-INTERVAL;VALUE=DURATION:PT15M\r\n'; // Suggest 15 min refresh
     ical += 'X-PUBLISHED-TTL:PT15M\r\n';
@@ -735,7 +735,7 @@ router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req,
 
     if (source === 'global') {
       const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
-      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+      if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
       reorderSubtasksRecursive(task.subtasks, orderMap);
       task.markModified('subtasks');
       await task.save();
@@ -743,13 +743,13 @@ router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req,
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       if (!contact) return res.status(404).json({ message: 'Kontakt nenájdený' });
       const task = contact.tasks.find(t => t.id === taskId);
-      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+      if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
       reorderSubtasksRecursive(task.subtasks, orderMap);
       contact.markModified('tasks');
       await contact.save();
     }
 
-    res.json({ message: 'Poradie podúloh aktualizované' });
+    res.json({ message: 'Poradie úloh aktualizované' });
   } catch (error) {
     logger.error('Reorder subtasks error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
@@ -816,7 +816,7 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ message: 'Názov úlohy je povinný' });
+      return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
 
     // Support both old contactId (single) and new contactIds (array)
@@ -892,7 +892,7 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
 
       // Check trial limit: max 10 tasks per contact
       if (isTrial && contact.tasks && contact.tasks.length >= 10) {
-        return res.status(403).json({ message: `Skúšobná verzia umožňuje max. 10 úloh na kontakt. Pre neobmedzený prístup prejdite na Pro.` });
+        return res.status(403).json({ message: `Skúšobná verzia umožňuje max. 10 projektov na kontakt. Pre neobmedzený prístup prejdite na Pro.` });
       }
 
       // Create new embedded task for this contact
@@ -954,7 +954,7 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
       res.status(201).json({
         createdCount: createdTasks.length,
         tasks: createdTasks,
-        message: `Úloha bola vytvorená v ${createdTasks.length} kontaktoch`
+        message: `Projekt bol vytvorený v ${createdTasks.length} kontaktoch`
       });
     }
   } catch (error) {
@@ -1511,7 +1511,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, async (req, r
     res.status(201).json({
       duplicatedCount: duplicatedTasks.length,
       tasks: duplicatedTasks,
-      message: `Úloha bola duplikovaná do ${duplicatedTasks.length} kontaktov`
+      message: `Projekt bol duplikovaný do ${duplicatedTasks.length} kontaktov`
     });
   } catch (error) {
     logger.error('Duplicate task error', { error: error.message });
@@ -1528,7 +1528,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ message: 'Nazov podulohy je povinny' });
+      return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
     // BUGFIX: Added priority field support for subtasks
@@ -2075,7 +2075,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, (req, res) =>
 
     try {
       const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-      if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+      if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
 
       const fileData = {
         id: uuidv4(),
@@ -2089,7 +2089,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, (req, res) =>
       const subtaskId = req.query.subtaskId;
       if (subtaskId) {
         const subtask = findSubtaskById(task.subtasks, subtaskId);
-        if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+        if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
         if (!subtask.files) subtask.files = [];
         subtask.files.push(fileData);
         task.markModified('subtasks');
@@ -2112,14 +2112,14 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, (req, res) =>
 router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-    if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+    if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
 
     const subtaskId = req.query.subtaskId;
     let file;
 
     if (subtaskId) {
       const subtask = findSubtaskById(task.subtasks, subtaskId);
-      if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
       file = (subtask.files || []).find(f => f.id === req.params.fileId);
     } else {
       file = task.files.find(f => f.id === req.params.fileId);
@@ -2145,13 +2145,13 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
 router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-    if (!task) return res.status(404).json({ message: 'Úloha nenájdená' });
+    if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
 
     const subtaskId = req.query.subtaskId;
 
     if (subtaskId) {
       const subtask = findSubtaskById(task.subtasks, subtaskId);
-      if (!subtask) return res.status(404).json({ message: 'Podúloha nenájdená' });
+      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
       subtask.files = (subtask.files || []).filter(f => f.id !== req.params.fileId);
       task.markModified('subtasks');
     } else {
