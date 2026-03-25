@@ -17,7 +17,7 @@ const isValidObjectId = (id) => {
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-tasks/callback';
+const GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'https://perun-crm.onrender.com/api/google-tasks/callback';
 
 // Validate OAuth configuration at startup
 const isOAuthConfigured = () => {
