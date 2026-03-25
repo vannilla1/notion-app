@@ -80,6 +80,16 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
+// Helper: check if all subtasks are completed (recursive)
+const allSubtasksCompleted = (subtasks) => {
+  if (!subtasks || subtasks.length === 0) return false;
+  for (const sub of subtasks) {
+    if (!sub.completed) return false;
+    if (sub.subtasks && sub.subtasks.length > 0 && !allSubtasksCompleted(sub.subtasks)) return false;
+  }
+  return true;
+};
+
 // Helper function to populate assigned users info
 const populateAssignedUsers = async (assignedToIds) => {
   if (!assignedToIds || assignedToIds.length === 0) return [];
@@ -1786,6 +1796,16 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
                 notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
               }
 
+              // Auto-complete project when all subtasks are done
+              if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
+                contact.tasks[taskIndex].completed = true;
+                contact.markModified('tasks');
+                await contact.save();
+                io.emit('contact-updated', contactToPlainObject(contact));
+                io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+                logger.info('[Auto-complete] Project auto-completed (contact)', { taskId: req.params.taskId });
+              }
+
               return res.json(updated);
             }
           }
@@ -1835,6 +1855,15 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
         if (newlyAssigned.length > 0) {
           logger.debug('[Subtask Update Global] Sending assignment notification', { newlyAssigned });
           notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user);
+        }
+
+        // Auto-complete project when all subtasks are done
+        if (completed === true && !task.completed && allSubtasksCompleted(task.subtasks)) {
+          task.completed = true;
+          task.markModified('subtasks');
+          await task.save();
+          io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+          logger.info('[Auto-complete] Project auto-completed (global)', { taskId: task._id.toString() });
         }
 
         return res.json(updated);
@@ -1891,6 +1920,16 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
             if (newlyAssigned.length > 0) {
               logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
               notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+            }
+
+            // Auto-complete project when all subtasks are done
+            if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
+              contact.tasks[taskIndex].completed = true;
+              contact.markModified('tasks');
+              await contact.save();
+              io.emit('contact-updated', contactToPlainObject(contact));
+              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+              logger.info('[Auto-complete] Project auto-completed (fallback contact)', { taskId: req.params.taskId });
             }
 
             return res.json(updated);
