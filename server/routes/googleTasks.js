@@ -201,7 +201,7 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 router.get('/callback', async (req, res) => {
   const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
 
-  logger.debug('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
+  logger.info('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state, query: JSON.stringify(req.query) });
 
   try {
     const { code, state: userId } = req.query;
