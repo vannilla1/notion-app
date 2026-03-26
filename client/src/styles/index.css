@@ -8814,11 +8814,13 @@ a.detail-value:hover {
 
 .calendar-cell {
   min-height: 100px;
+  min-width: 0;
   padding: 4px;
   border-right: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
   position: relative;
   background: var(--bg-card);
+  overflow: hidden;
 }
 
 .calendar-cell:nth-child(7n) {
@@ -8923,26 +8925,39 @@ a.detail-value:hover {
 /* Calendar mobile */
 @media (max-width: 768px) {
   .calendar-view {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    overflow: hidden;
+    padding-bottom: 80px;
   }
 
   .calendar-grid {
-    min-width: 350px;
+    width: 100%;
+    table-layout: fixed;
   }
 
   .calendar-cell {
-    min-height: 70px;
-    padding: 2px;
+    min-height: 55px;
+    padding: 1px;
+    overflow: hidden;
   }
 
   .calendar-items {
-    max-height: 50px;
+    max-height: 40px;
+    overflow: hidden;
   }
 
   .calendar-item {
-    font-size: 9px;
+    font-size: 7px;
     padding: 1px 2px;
+    line-height: 1.2;
+    border-left-width: 2px;
+  }
+
+  .calendar-item-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
   }
 
   .calendar-month-label {
@@ -8951,55 +8966,23 @@ a.detail-value:hover {
   }
 
   .calendar-day-header {
-    font-size: 11px;
-    padding: 4px 2px;
+    font-size: 10px;
+    padding: 4px 1px;
+  }
+
+  .calendar-day-number {
+    font-size: 10px;
   }
 
   .calendar-item-sub {
     display: none;
   }
 
+  .calendar-nav {
+    padding: 0 4px;
+  }
+
   .tasks-header-top {
     flex-wrap: wrap;
   }
-}
-
-/* iOS app specific calendar fixes */
-.ios-app .calendar-view {
-  padding-bottom: 80px;
-}
-
-.ios-app .calendar-cell {
-  min-height: 65px;
-}
-
-.ios-app .calendar-item {
-  font-size: 8px;
-  padding: 1px 2px;
-  line-height: 1.2;
-}
-
-.ios-app .calendar-item-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ios-app .calendar-items {
-  max-height: 45px;
-  overflow: hidden;
-}
-
-.ios-app .calendar-day-number {
-  font-size: 11px;
-}
-
-.ios-app .calendar-nav {
-  padding: 0 4px;
-}
-
-.ios-app .calendar-month-label {
-  font-size: 16px;
-  min-width: 130px;
 }
