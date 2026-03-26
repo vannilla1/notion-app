@@ -8922,8 +8922,17 @@ a.detail-value:hover {
 
 /* Calendar mobile */
 @media (max-width: 768px) {
+  .calendar-view {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .calendar-grid {
+    min-width: 350px;
+  }
+
   .calendar-cell {
-    min-height: 60px;
+    min-height: 70px;
     padding: 2px;
   }
 
@@ -8953,4 +8962,44 @@ a.detail-value:hover {
   .tasks-header-top {
     flex-wrap: wrap;
   }
+}
+
+/* iOS app specific calendar fixes */
+.ios-app .calendar-view {
+  padding-bottom: 80px;
+}
+
+.ios-app .calendar-cell {
+  min-height: 65px;
+}
+
+.ios-app .calendar-item {
+  font-size: 8px;
+  padding: 1px 2px;
+  line-height: 1.2;
+}
+
+.ios-app .calendar-item-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-app .calendar-items {
+  max-height: 45px;
+  overflow: hidden;
+}
+
+.ios-app .calendar-day-number {
+  font-size: 11px;
+}
+
+.ios-app .calendar-nav {
+  padding: 0 4px;
+}
+
+.ios-app .calendar-month-label {
+  font-size: 16px;
+  min-width: 130px;
 }
