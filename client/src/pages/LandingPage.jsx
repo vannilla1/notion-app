@@ -30,7 +30,8 @@ export default function LandingPage() {
 
           <ul className="lp-nav-links">
             <li><a href="#funkcie" onClick={(e) => { e.preventDefault(); scrollTo('funkcie'); }}>Funkcie</a></li>
-            <li><a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cennik</a></li>
+            <li><a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a></li>
+            <li><a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>FAQ</a></li>
             <li><a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a></li>
           </ul>
 
@@ -47,7 +48,8 @@ export default function LandingPage() {
         <div className="lp-mobile-menu-content" onClick={(e) => e.stopPropagation()}>
           <button className="lp-mobile-close" onClick={() => setMobileMenuOpen(false)}>&times;</button>
           <a href="#funkcie" onClick={(e) => { e.preventDefault(); scrollTo('funkcie'); }}>Funkcie</a>
-          <a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cennik</a>
+          <a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a>
+          <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>FAQ</a>
           <a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a>
           <Link to="/login" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</Link>
         </div>
@@ -373,6 +375,72 @@ export default function LandingPage() {
           <p style={{ textAlign: 'center', fontSize: '13px', color: '#94a3b8', marginTop: '24px' }}>
             Všetky ceny sú vrátane DPH.
           </p>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="lp-faq" id="faq">
+        <div className="lp-section">
+          <div className="lp-section-header">
+            <span className="lp-section-accent" />
+            <h2 className="lp-section-title">Časté otázky</h2>
+            <p className="lp-section-subtitle">
+              Všetko, čo potrebujete vedieť o Prpl CRM
+            </p>
+          </div>
+
+          <div className="lp-faq-list">
+            <details className="lp-faq-item">
+              <summary>Čo je pracovné prostredie (workspace)?</summary>
+              <p>Pracovné prostredie je zdieľaný priestor, kde tím spolupracuje na kontaktoch, projektoch a úlohách. Každé prostredie má vlastné dáta, členov a nastavenia. Zakladateľ prostredia určuje jeho limity podľa svojho plánu.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Ako fungujú limity používateľov v pracovnom prostredí?</summary>
+              <p>Limity sa riadia podľa plánu <strong>zakladateľa</strong> (vlastníka) pracovného prostredia:</p>
+              <ul>
+                <li><strong>Free:</strong> max. 2 používatelia</li>
+                <li><strong>Tím:</strong> max. 10 používateľov</li>
+                <li><strong>Pro:</strong> neobmedzený počet používateľov</li>
+              </ul>
+              <p>Plán členov, ktorí sa pripájajú, neovplyvňuje kapacitu — rozhoduje vždy plán vlastníka.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Môžem sa pripojiť do workspace s vyšším plánom, ak mám Free účet?</summary>
+              <p>Áno. Ak vás vlastník s plánom Tím alebo Pro pozve do svojho prostredia, pripojíte sa bez obmedzení. Váš Free plán ovplyvňuje len prostredia, ktoré <strong>vy</strong> vytvoríte.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Čo sa stane, ak vlastník downgraduje svoj plán?</summary>
+              <p>Ak vlastník prejde na nižší plán a počet členov prekračuje nový limit, pracovné prostredie sa prepne do <strong>režimu len na čítanie</strong>. Existujúce dáta zostanú zachované, ale vytváranie nových kontaktov, projektov a úloh bude zablokované, kým vlastník neupgraduje späť alebo neodstráni členov pod limit.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Koľko pracovných prostredí môžem vytvoriť?</summary>
+              <p>Závisí od vášho plánu:</p>
+              <ul>
+                <li><strong>Free:</strong> 1 pracovné prostredie</li>
+                <li><strong>Tím:</strong> 2 pracovné prostredia</li>
+                <li><strong>Pro:</strong> neobmedzený počet</li>
+              </ul>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Je Free plán naozaj zadarmo navždy?</summary>
+              <p>Áno. Free plán je trvalý, bez časového obmedzenia a bez nutnosti zadávať platobnú kartu. Môžete ho používať tak dlho, ako chcete.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Môžem kedykoľvek upgradovať alebo downgradovať?</summary>
+              <p>Áno. Plán môžete zmeniť kedykoľvek. Pri upgrade sa nové limity prejavia okamžite. Pri downgrade sa existujúce dáta zachovajú, ale ak prekročíte limity nového plánu, vytváranie nového obsahu bude obmedzené.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Funguje synchronizácia s Google Calendar a Google Tasks?</summary>
+              <p>Áno, vo všetkých plánoch vrátane Free. Synchronizácia je obojsmerná a v reálnom čase — zmeny v Prpl CRM sa prejavia v Google a naopak.</p>
+            </details>
+          </div>
         </div>
       </section>
 
