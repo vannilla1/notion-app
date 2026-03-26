@@ -233,7 +233,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Tímová spolupráca (max. 2 používatelia)
+                  Tímová spolupráca (max. 1 používateľ)
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -264,7 +264,7 @@ export default function LandingPage() {
               {!isYearly && (
                 <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo <strong style={{ color: '#6366f1', fontWeight: 700 }}>99 € ročne</strong> (<strong style={{ color: '#10B981', fontWeight: 700 }}>ušetríte 17%</strong>)</p>
               )}
-              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 2 používateľov. Každý ďalší: {isYearly ? '99 €/rok' : '9,99 €/mesiac'}.</p>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 1 používateľa. Každý ďalší: {isYearly ? '99 €/rok' : '9,99 €/mesiac'}.</p>
 
               <div className="lp-pricing-divider" />
 
@@ -285,7 +285,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  2 používatelia v cene, každý ďalší {isYearly ? '99 €/rok' : '9,99 €/mes'}
+                  Každý ďalší používateľ: {isYearly ? '99 €/rok' : '9,99 €/mes'}
                 </li>
                 <li>
                   <span className="lp-pricing-check">
