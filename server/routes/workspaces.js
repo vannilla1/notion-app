@@ -46,8 +46,9 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
     const owner = await User.findById(req.workspace.ownerId);
     const paidSeats = req.workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const memberLimitsMap = { free: 1, trial: 1, team: 3, pro: 5 };
-    const maxMembers = (memberLimitsMap[ownerPlan] || 1) + paidSeats;
+    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
+    const baseLimit = memberLimitsMap[ownerPlan] || 2;
+    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
 
     res.json({
       id: req.workspace._id,
@@ -182,11 +183,13 @@ router.post('/join', authenticateToken, async (req, res) => {
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const memberLimits = { free: 1, trial: 1, team: 3, pro: 5 };
-      const baseSeatLimit = memberLimits[ownerPlan] || 1;
-      const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        return res.status(403).json({ message: `Váš plán umožňuje max. ${baseSeatLimit} používateľov v tíme. Pre viac členov prejdite na vyšší plán.` });
+      const memberLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
+      const baseSeatLimit = memberLimits[ownerPlan] || 2;
+      if (baseSeatLimit !== Infinity) {
+        const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          return res.status(403).json({ message: `Váš plán umožňuje max. ${baseSeatLimit} používateľov v tíme. Pre viac členov prejdite na vyšší plán.` });
+        }
       }
     }
 
@@ -311,13 +314,14 @@ router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (re
 
     const owner = await User.findById(req.workspace.ownerId);
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const seatLimits = { free: 1, trial: 1, team: 3, pro: 5 };
+    const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
+    const baseLimit = seatLimits[ownerPlan] || 2;
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     res.json({
       paidSeats: Math.floor(paidSeats),
-      includedSeats: seatLimits[ownerPlan] || 1,
-      maxMembers: (seatLimits[ownerPlan] || 1) + Math.floor(paidSeats),
+      includedSeats: baseLimit === Infinity ? 'unlimited' : baseLimit,
+      maxMembers: baseLimit === Infinity ? 'unlimited' : baseLimit + Math.floor(paidSeats),
       memberCount
     });
   } catch (error) {
@@ -609,10 +613,13 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 1, trial: 1, team: 3, pro: 5 };
-      const maxSeats = (seatLimits[ownerPlan] || 1) + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        return res.status(400).json({ message: `Váš plán umožňuje max. ${seatLimits[ownerPlan] || 1} členov. Pre viac členov prejdite na vyšší plán.` });
+      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
+      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      if (baseSeatLimit !== Infinity) {
+        const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          return res.status(400).json({ message: `Váš plán umožňuje max. ${baseSeatLimit} členov. Pre viac členov prejdite na vyšší plán.` });
+        }
       }
     }
 
@@ -781,10 +788,13 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 1, trial: 1, team: 3, pro: 5 };
-      const maxSeats = (seatLimits[ownerPlan] || 1) + (workspace.paidSeats || 0);
-      if (memberCount >= maxSeats) {
-        return res.status(400).json({ message: `Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.` });
+      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
+      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      if (baseSeatLimit !== Infinity) {
+        const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
+        if (memberCount >= maxSeats) {
+          return res.status(400).json({ message: `Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.` });
+        }
       }
     }
 

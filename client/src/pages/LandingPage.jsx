@@ -233,7 +233,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  1 používateľ
+                  Max. 2 používatelia
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -284,7 +284,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Max. 3 používatelia
+                  Max. 10 používateľov
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -342,7 +342,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Každý ďalší používateľ: {isYearly ? '99 €/rok' : '9,99 €/mes'}
+                  Neobmedzený počet používateľov
                 </li>
                 <li>
                   <span className="lp-pricing-check">
