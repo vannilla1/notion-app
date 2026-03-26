@@ -114,6 +114,126 @@ function SortableSubtaskItem({ id, children }) {
   );
 }
 
+// Calendar View Component
+function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass, onTaskClick, loading }) {
+  const year = calendarMonth.getFullYear();
+  const month = calendarMonth.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDayOfWeek = (firstDay.getDay() + 6) % 7; // Monday = 0
+  const daysInMonth = lastDay.getDate();
+
+  const monthNames = ['Január', 'Február', 'Marec', 'Apríl', 'Máj', 'Jún', 'Júl', 'August', 'September', 'Október', 'November', 'December'];
+  const dayNames = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
+
+  // Collect all items with dueDates (tasks + subtasks)
+  const collectDueDateItems = (taskList) => {
+    const items = [];
+    for (const task of taskList) {
+      if (task.dueDate) {
+        items.push({
+          id: task.id,
+          title: task.title,
+          dueDate: task.dueDate,
+          completed: task.completed,
+          type: 'task',
+          task
+        });
+      }
+      // Collect subtask dueDates recursively
+      const collectSubtasks = (subtasks, parentTask) => {
+        if (!subtasks) return;
+        for (const sub of subtasks) {
+          if (sub.dueDate) {
+            items.push({
+              id: sub.id,
+              title: sub.title,
+              dueDate: sub.dueDate,
+              completed: sub.completed,
+              type: 'subtask',
+              task: parentTask
+            });
+          }
+          if (sub.subtasks) collectSubtasks(sub.subtasks, parentTask);
+        }
+      };
+      collectSubtasks(task.subtasks, task);
+    }
+    return items;
+  };
+
+  const allItems = collectDueDateItems(tasks);
+
+  // Group items by day
+  const itemsByDay = {};
+  for (const item of allItems) {
+    const d = new Date(item.dueDate);
+    if (d.getFullYear() === year && d.getMonth() === month) {
+      const day = d.getDate();
+      if (!itemsByDay[day]) itemsByDay[day] = [];
+      itemsByDay[day].push(item);
+    }
+  }
+
+  const today = new Date();
+  const isToday = (day) => today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+
+  const prevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
+  const nextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
+  const goToday = () => setCalendarMonth(new Date());
+
+  // Build calendar grid
+  const cells = [];
+  // Empty cells before first day
+  for (let i = 0; i < startDayOfWeek; i++) {
+    cells.push(null);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(d);
+  }
+
+  if (loading) return <div className="loading">Načítavam...</div>;
+
+  return (
+    <div className="calendar-view">
+      <div className="calendar-nav">
+        <button className="btn btn-secondary btn-sm" onClick={prevMonth}>◀</button>
+        <span className="calendar-month-label">{monthNames[month]} {year}</span>
+        <button className="btn btn-secondary btn-sm" onClick={nextMonth}>▶</button>
+        <button className="btn btn-secondary btn-sm calendar-today-btn" onClick={goToday}>Dnes</button>
+      </div>
+      <div className="calendar-grid">
+        {dayNames.map(name => (
+          <div key={name} className="calendar-day-header">{name}</div>
+        ))}
+        {cells.map((day, idx) => (
+          <div key={idx} className={`calendar-cell ${day ? '' : 'empty'} ${day && isToday(day) ? 'today' : ''}`}>
+            {day && (
+              <>
+                <span className="calendar-day-number">{day}</span>
+                <div className="calendar-items">
+                  {(itemsByDay[day] || []).map(item => (
+                    <div
+                      key={item.id}
+                      className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
+                      onClick={() => onTaskClick(item.task)}
+                      title={`${item.type === 'subtask' ? '↳ ' : ''}${item.title}`}
+                    >
+                      {item.type === 'subtask' && <span className="calendar-item-sub">↳</span>}
+                      <span className="calendar-item-title">{item.title}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
@@ -125,6 +245,8 @@ function Tasks() {
   const [filter, setFilter] = useState('all');
   const [contactFilter, setContactFilter] = useState(null); // Filter by specific contact
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -2069,7 +2191,25 @@ function Tasks() {
                 </div>
               )}
               <div className="tasks-header">
-                <h2>Zoznam projektov ({sortedFilteredTasks.length})</h2>
+                <div className="tasks-header-top">
+                  <h2>{viewMode === 'list' ? `Zoznam projektov (${sortedFilteredTasks.length})` : 'Kalendár termínov'}</h2>
+                  <div className="view-toggle">
+                    <button
+                      className={`view-toggle-btn ${viewMode === 'list' ? 'active' : ''}`}
+                      onClick={() => setViewMode('list')}
+                      title="Zoznam"
+                    >
+                      ☰
+                    </button>
+                    <button
+                      className={`view-toggle-btn ${viewMode === 'calendar' ? 'active' : ''}`}
+                      onClick={() => setViewMode('calendar')}
+                      title="Kalendár"
+                    >
+                      📅
+                    </button>
+                  </div>
+                </div>
                 <div className="search-box">
                   <input
                     type="text"
@@ -2108,7 +2248,23 @@ function Tasks() {
                 </div>
               </div>
 
-              {loading ? (
+              {viewMode === 'calendar' ? (
+                <CalendarView
+                  tasks={sortedFilteredTasks}
+                  calendarMonth={calendarMonth}
+                  setCalendarMonth={setCalendarMonth}
+                  getDueDateClass={getDueDateClass}
+                  onTaskClick={(task) => {
+                    setViewMode('list');
+                    setExpandedTask(task.id);
+                    setTimeout(() => {
+                      const el = document.querySelector(`[data-task-id="${task.id}"]`);
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 100);
+                  }}
+                  loading={loading}
+                />
+              ) : loading ? (
                 <div className="loading">Načítavam...</div>
               ) : sortedFilteredTasks.length === 0 ? (
                 <div className="empty-state">
