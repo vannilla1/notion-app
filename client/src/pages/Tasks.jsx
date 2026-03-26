@@ -116,44 +116,28 @@ function SortableSubtaskItem({ id, children }) {
 
 // Calendar View Component
 function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass, onTaskClick, loading }) {
+  const [calendarMode, setCalendarMode] = useState('month'); // 'month', 'week', 'day'
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
 
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startDayOfWeek = (firstDay.getDay() + 6) % 7; // Monday = 0
-  const daysInMonth = lastDay.getDate();
-
   const monthNames = ['Január', 'Február', 'Marec', 'Apríl', 'Máj', 'Jún', 'Júl', 'August', 'September', 'Október', 'November', 'December'];
   const dayNames = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
+  const dayNamesFull = ['Pondelok', 'Utorok', 'Streda', 'Štvrtok', 'Piatok', 'Sobota', 'Nedeľa'];
 
   // Collect all items with dueDates (tasks + subtasks)
   const collectDueDateItems = (taskList) => {
     const items = [];
     for (const task of taskList) {
       if (task.dueDate) {
-        items.push({
-          id: task.id,
-          title: task.title,
-          dueDate: task.dueDate,
-          completed: task.completed,
-          type: 'task',
-          task
-        });
+        items.push({ id: task.id, title: task.title, dueDate: task.dueDate, completed: task.completed, type: 'task', task });
       }
-      // Collect subtask dueDates recursively
       const collectSubtasks = (subtasks, parentTask) => {
         if (!subtasks) return;
         for (const sub of subtasks) {
           if (sub.dueDate) {
-            items.push({
-              id: sub.id,
-              title: sub.title,
-              dueDate: sub.dueDate,
-              completed: sub.completed,
-              type: 'subtask',
-              task: parentTask
-            });
+            items.push({ id: sub.id, title: sub.title, dueDate: sub.dueDate, completed: sub.completed, type: 'subtask', task: parentTask });
           }
           if (sub.subtasks) collectSubtasks(sub.subtasks, parentTask);
         }
@@ -165,71 +149,214 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
   const allItems = collectDueDateItems(tasks);
 
-  // Group items by day
-  const itemsByDay = {};
-  for (const item of allItems) {
-    const d = new Date(item.dueDate);
-    if (d.getFullYear() === year && d.getMonth() === month) {
-      const day = d.getDate();
-      if (!itemsByDay[day]) itemsByDay[day] = [];
-      itemsByDay[day].push(item);
-    }
-  }
-
   const today = new Date();
-  const isToday = (day) => today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+  today.setHours(0, 0, 0, 0);
 
-  const prevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
-  const nextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
-  const goToday = () => setCalendarMonth(new Date());
+  const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 
-  // Build calendar grid
-  const cells = [];
-  // Empty cells before first day
-  for (let i = 0; i < startDayOfWeek; i++) {
-    cells.push(null);
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push(d);
-  }
+  const getItemsForDate = (date) => {
+    return allItems.filter(item => {
+      const d = new Date(item.dueDate);
+      return isSameDay(d, date);
+    });
+  };
+
+  // Get Monday of the week containing selectedDate
+  const getWeekStart = (date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = (day === 0 ? -6 : 1) - day;
+    d.setDate(d.getDate() + diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  // Navigation
+  const navigateCalendar = (dir) => {
+    if (calendarMode === 'month') {
+      setCalendarMonth(new Date(year, month + dir, 1));
+    } else if (calendarMode === 'week') {
+      const newDate = new Date(selectedDate);
+      newDate.setDate(newDate.getDate() + dir * 7);
+      setSelectedDate(newDate);
+      setCalendarMonth(new Date(newDate.getFullYear(), newDate.getMonth(), 1));
+    } else {
+      const newDate = new Date(selectedDate);
+      newDate.setDate(newDate.getDate() + dir);
+      setSelectedDate(newDate);
+      setCalendarMonth(new Date(newDate.getFullYear(), newDate.getMonth(), 1));
+    }
+  };
+
+  const goToday = () => {
+    const now = new Date();
+    setSelectedDate(now);
+    setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+  };
+
+  // Get navigation label
+  const getNavLabel = () => {
+    if (calendarMode === 'month') {
+      return `${monthNames[month]} ${year}`;
+    } else if (calendarMode === 'week') {
+      const weekStart = getWeekStart(selectedDate);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const startStr = `${weekStart.getDate()}.${weekStart.getMonth() + 1}.`;
+      const endStr = `${weekEnd.getDate()}.${weekEnd.getMonth() + 1}.${weekEnd.getFullYear()}`;
+      return `${startStr} – ${endStr}`;
+    } else {
+      const dayIdx = (selectedDate.getDay() + 6) % 7;
+      return `${dayNamesFull[dayIdx]} ${selectedDate.getDate()}. ${monthNames[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+    }
+  };
 
   if (loading) return <div className="loading">Načítavam...</div>;
 
-  return (
-    <div className="calendar-view">
-      <div className="calendar-nav">
-        <button className="btn btn-secondary btn-sm" onClick={prevMonth}>◀</button>
-        <span className="calendar-month-label">{monthNames[month]} {year}</span>
-        <button className="btn btn-secondary btn-sm" onClick={nextMonth}>▶</button>
-        <button className="btn btn-secondary btn-sm calendar-today-btn" onClick={goToday}>Dnes</button>
-      </div>
+  // --- MONTH VIEW ---
+  const renderMonth = () => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDayOfWeek = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = lastDay.getDate();
+
+    const itemsByDay = {};
+    for (const item of allItems) {
+      const d = new Date(item.dueDate);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        const day = d.getDate();
+        if (!itemsByDay[day]) itemsByDay[day] = [];
+        itemsByDay[day].push(item);
+      }
+    }
+
+    const cells = [];
+    for (let i = 0; i < startDayOfWeek; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+    return (
       <div className="calendar-grid">
         {dayNames.map(name => (
           <div key={name} className="calendar-day-header">{name}</div>
         ))}
         {cells.map((day, idx) => (
-          <div key={idx} className={`calendar-cell ${day ? '' : 'empty'} ${day && isToday(day) ? 'today' : ''}`}>
+          <div
+            key={idx}
+            className={`calendar-cell ${day ? '' : 'empty'} ${day && new Date(year, month, day).getTime() === today.getTime() ? 'today' : ''}`}
+            onClick={() => { if (day) { setSelectedDate(new Date(year, month, day)); setCalendarMode('day'); } }}
+          >
             {day && (
               <>
                 <span className="calendar-day-number">{day}</span>
                 <div className="calendar-items">
-                  {(itemsByDay[day] || []).map(item => (
+                  {(itemsByDay[day] || []).slice(0, 3).map(item => (
                     <div
                       key={item.id}
                       className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-                      onClick={() => onTaskClick(item.task)}
+                      onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
                       title={`${item.type === 'subtask' ? '↳ ' : ''}${item.title}`}
                     >
                       {item.type === 'subtask' && <span className="calendar-item-sub">↳</span>}
                       <span className="calendar-item-title">{item.title}</span>
                     </div>
                   ))}
+                  {(itemsByDay[day] || []).length > 3 && (
+                    <div className="calendar-more">+{(itemsByDay[day] || []).length - 3} ďalších</div>
+                  )}
                 </div>
               </>
             )}
           </div>
         ))}
       </div>
+    );
+  };
+
+  // --- WEEK VIEW ---
+  const renderWeek = () => {
+    const weekStart = getWeekStart(selectedDate);
+
+    return (
+      <div className="calendar-week-view">
+        {Array.from({ length: 7 }, (_, i) => {
+          const date = new Date(weekStart);
+          date.setDate(date.getDate() + i);
+          const items = getItemsForDate(date);
+          const isCurrentDay = isSameDay(date, today);
+
+          return (
+            <div
+              key={i}
+              className={`calendar-week-day ${isCurrentDay ? 'today' : ''}`}
+              onClick={() => { setSelectedDate(date); setCalendarMode('day'); }}
+            >
+              <div className="calendar-week-day-header">
+                <span className="calendar-week-day-name">{dayNames[i]}</span>
+                <span className={`calendar-week-day-number ${isCurrentDay ? 'today' : ''}`}>{date.getDate()}.{date.getMonth() + 1}.</span>
+              </div>
+              <div className="calendar-week-items">
+                {items.map(item => (
+                  <div
+                    key={item.id}
+                    className={`calendar-week-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
+                    onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
+                  >
+                    {item.type === 'subtask' && <span className="calendar-item-sub">↳ </span>}
+                    <span className="calendar-week-item-title">{item.title}</span>
+                  </div>
+                ))}
+                {items.length === 0 && <div className="calendar-week-empty">Žiadne termíny</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // --- DAY VIEW ---
+  const renderDay = () => {
+    const items = getItemsForDate(selectedDate);
+
+    return (
+      <div className="calendar-day-view">
+        {items.length === 0 && <div className="calendar-day-empty">Žiadne termíny na tento deň</div>}
+        {items.map(item => (
+          <div
+            key={item.id}
+            className={`calendar-day-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
+            onClick={() => onTaskClick(item.task)}
+          >
+            <div className="calendar-day-item-header">
+              <span className="calendar-day-item-type">{item.type === 'subtask' ? '↳ Úloha' : 'Projekt'}</span>
+              {item.completed && <span className="calendar-day-item-done">✅</span>}
+            </div>
+            <span className="calendar-day-item-title">{item.title}</span>
+            {item.task && item.type === 'subtask' && (
+              <span className="calendar-day-item-parent">z: {item.task.title}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="calendar-view">
+      <div className="calendar-nav">
+        <button className="btn btn-secondary btn-sm" onClick={() => navigateCalendar(-1)}>◀</button>
+        <span className="calendar-month-label">{getNavLabel()}</span>
+        <button className="btn btn-secondary btn-sm" onClick={() => navigateCalendar(1)}>▶</button>
+        <button className="btn btn-secondary btn-sm calendar-today-btn" onClick={goToday}>Dnes</button>
+      </div>
+      <div className="calendar-mode-toggle">
+        <button className={`btn btn-sm ${calendarMode === 'month' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCalendarMode('month')}>Mesiac</button>
+        <button className={`btn btn-sm ${calendarMode === 'week' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCalendarMode('week')}>Týždeň</button>
+        <button className={`btn btn-sm ${calendarMode === 'day' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCalendarMode('day')}>Deň</button>
+      </div>
+      {calendarMode === 'month' && renderMonth()}
+      {calendarMode === 'week' && renderWeek()}
+      {calendarMode === 'day' && renderDay()}
     </div>
   );
 }
