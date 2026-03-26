@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
-const { requireWorkspace } = require('../middleware/workspace');
+const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
 const notificationService = require('../services/notificationService');
@@ -138,7 +138,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 });
 
 // Create contact
-router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
@@ -260,7 +260,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 // ==================== TASKS ====================
 
 // Add task to contact
-router.post('/:contactId/tasks', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { title, description, dueDate, priority, assignedTo } = req.body;
 
@@ -380,7 +380,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
 });
 
 // Add subtask to task
-router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { title, parentSubtaskId, dueDate, notes, priority } = req.body;
 
@@ -557,7 +557,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 // ==================== FILE UPLOAD ====================
 
 // Upload file to contact (stored in MongoDB as Base64)
-router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
   upload.single('file')(req, res, async (err) => {
     try {
       // Handle multer errors

@@ -122,8 +122,45 @@ const requireWorkspaceOwner = async (req, res, next) => {
   }
 };
 
+/**
+ * Middleware to enforce workspace plan limits.
+ * Blocks content creation (POST) when workspace exceeds member limit for owner's plan.
+ * Allows read (GET), update (PUT/PATCH), and delete (DELETE) operations.
+ * Must be used AFTER requireWorkspace.
+ */
+const enforceWorkspaceLimits = async (req, res, next) => {
+  try {
+    // Only block content creation
+    if (req.method !== 'POST') return next();
+
+    const owner = await User.findById(req.workspace.ownerId);
+    const ownerPlan = owner?.subscription?.plan || 'free';
+
+    // Pro has no member limits
+    if (ownerPlan === 'pro') return next();
+
+    const memberLimits = { free: 2, trial: 2, team: 10 };
+    const baseLimit = memberLimits[ownerPlan] || 2;
+    const maxMembers = baseLimit + (req.workspace.paidSeats || 0);
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
+
+    if (memberCount > maxMembers) {
+      return res.status(403).json({
+        message: `Pracovné prostredie prekračuje limit členov pre plán "${ownerPlan}" (${memberCount}/${maxMembers}). Vytváranie nového obsahu je zablokované. Vlastník musí upgradovať plán alebo odstrániť členov.`,
+        code: 'WORKSPACE_OVER_LIMIT'
+      });
+    }
+
+    next();
+  } catch (error) {
+    logger.error('Enforce workspace limits error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+};
+
 module.exports = {
   requireWorkspace,
   requireWorkspaceAdmin,
-  requireWorkspaceOwner
+  requireWorkspaceOwner,
+  enforceWorkspaceLimits
 };

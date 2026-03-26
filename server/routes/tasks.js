@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
-const { requireWorkspace } = require('../middleware/workspace');
+const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
@@ -820,7 +820,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 };
 
 // Create task - creates independent embedded tasks in each selected contact
-router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -1409,7 +1409,7 @@ const duplicateSubtasksRecursive = (subtasks) => {
 };
 
 // Duplicate task with new contact assignment - creates independent embedded tasks in each contact
-router.post('/:id/duplicate', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { contactIds, source } = req.body;
     const io = req.app.get('io');
@@ -1535,7 +1535,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, async (req, r
 // ==================== SUBTASKS (RECURSIVE) ====================
 
 // Add subtask to task (global or from contact)
-router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { title, source, parentSubtaskId, dueDate, notes, priority, assignedTo } = req.body;
     const io = req.app.get('io');
@@ -2105,7 +2105,7 @@ const findSubtaskById = (subtasks, subtaskId) => {
 };
 
 // Upload file to task
-router.post('/:taskId/files', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
   upload.single('file')(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {

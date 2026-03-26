@@ -50,6 +50,8 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
     const baseLimit = memberLimitsMap[ownerPlan] || 2;
     const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
 
+    const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
+
     res.json({
       id: req.workspace._id,
       name: req.workspace.name,
@@ -63,6 +65,8 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
       memberCount,
       paidSeats,
       maxMembers,
+      ownerPlan,
+      isOverLimit,
       createdAt: req.workspace.createdAt
     });
   } catch (error) {
