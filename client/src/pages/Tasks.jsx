@@ -51,7 +51,7 @@ const tasksHelpTips = [
   {
     icon: '📎',
     title: 'Prílohy',
-    description: 'K projektom a úlohám môžete priložiť súbory (max. 5 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
+    description: 'K projektom a úlohám môžete priložiť súbory (max. 10 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
   },
   {
     icon: '🔍',

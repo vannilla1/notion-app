@@ -141,8 +141,8 @@ export const PROFILE_COLORS = [
 
 // File size limits (in bytes)
 export const FILE_SIZE_LIMITS = {
-  AVATAR: 5 * 1024 * 1024,      // 5MB
-  CONTACT_FILE: 5 * 1024 * 1024  // 5MB
+  AVATAR: 5 * 1024 * 1024,       // 5MB
+  CONTACT_FILE: 10 * 1024 * 1024  // 10MB
 };
 
 // Allowed file types for avatars
