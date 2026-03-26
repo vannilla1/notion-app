@@ -31,7 +31,7 @@ export default function LandingPage() {
           <ul className="lp-nav-links">
             <li><a href="#funkcie" onClick={(e) => { e.preventDefault(); scrollTo('funkcie'); }}>Funkcie</a></li>
             <li><a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a></li>
-            <li><a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>FAQ</a></li>
+            <li><a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a></li>
             <li><a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a></li>
           </ul>
 
@@ -49,7 +49,7 @@ export default function LandingPage() {
           <button className="lp-mobile-close" onClick={() => setMobileMenuOpen(false)}>&times;</button>
           <a href="#funkcie" onClick={(e) => { e.preventDefault(); scrollTo('funkcie'); }}>Funkcie</a>
           <a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a>
-          <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>FAQ</a>
+          <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a>
           <a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a>
           <Link to="/login" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</Link>
         </div>
