@@ -430,6 +430,21 @@ function Tasks() {
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
 
   // Define fetch functions early so they can be used in useEffects
+  const exportTasksCsv = () => {
+    const token = localStorage.getItem('token');
+    fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(response => response.blob())
+      .then(blob => {
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = 'projekty.csv';
+        link.click();
+      })
+      .catch(() => alert('Chyba pri exporte'));
+  };
+
   const fetchTasks = useCallback(async () => {
     try {
       const res = await api.get('/api/tasks');
@@ -2334,6 +2349,14 @@ function Tasks() {
                       title="Kalendár"
                     >
                       📅
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={exportTasksCsv}
+                      title="Exportovať do CSV"
+                      style={{ marginLeft: '8px' }}
+                    >
+                      📥 CSV
                     </button>
                   </div>
                 </div>

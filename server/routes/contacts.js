@@ -120,6 +120,54 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+// Export contacts to CSV
+router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId },
+      { 'files.data': 0, 'tasks.files.data': 0 }
+    ).sort({ name: 1 }).lean();
+
+    const escCsv = (val) => {
+      if (val == null) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const statusMap = { new: 'Nový', active: 'Aktívny', completed: 'Dokončený', cancelled: 'Zrušený' };
+
+    const headers = ['Meno', 'Email', 'Telefón', 'Firma', 'Web', 'Stav', 'Poznámky', 'Počet projektov', 'Dokončené projekty', 'Vytvorený'];
+    const rows = contacts.map(c => {
+      const taskCount = (c.tasks || []).length;
+      const completedTasks = (c.tasks || []).filter(t => t.completed).length;
+      return [
+        escCsv(c.name),
+        escCsv(c.email),
+        escCsv(c.phone),
+        escCsv(c.company),
+        escCsv(c.website),
+        escCsv(statusMap[c.status] || c.status),
+        escCsv(c.notes),
+        taskCount,
+        completedTasks,
+        escCsv(c.createdAt ? new Date(c.createdAt).toLocaleDateString('sk-SK') : '')
+      ].join(',');
+    });
+
+    const bom = '\uFEFF';
+    const csv = bom + headers.join(',') + '\n' + rows.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="kontakty.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri exporte' });
+  }
+});
+
 // Get single contact
 router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {

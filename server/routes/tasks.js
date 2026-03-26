@@ -202,6 +202,90 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+// Export tasks to CSV - MUST be before /:id route
+router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    // Get global tasks
+    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).sort({ createdAt: -1 }).lean();
+
+    // Get contact tasks
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId },
+      { 'files.data': 0, 'tasks.files.data': 0 }
+    ).lean();
+
+    const escCsv = (val) => {
+      if (val == null) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const priorityMap = { low: 'Nízka', medium: 'Stredná', high: 'Vysoká' };
+
+    const headers = ['Názov', 'Popis', 'Stav', 'Priorita', 'Termín', 'Kontakt', 'Typ', 'Počet úloh', 'Dokončené úlohy', 'Vytvorený'];
+    const rows = [];
+
+    // Global tasks
+    for (const task of globalTasks) {
+      const contactNames = [];
+      if (task.contactIds?.length > 0) {
+        for (const cId of task.contactIds) {
+          const c = contacts.find(ct => ct._id.toString() === cId.toString());
+          if (c) contactNames.push(c.name);
+        }
+      }
+      const subtaskCount = (task.subtasks || []).length;
+      const completedSubtasks = (task.subtasks || []).filter(s => s.completed).length;
+
+      rows.push([
+        escCsv(task.title),
+        escCsv(task.description),
+        task.completed ? 'Dokončený' : 'Aktívny',
+        escCsv(priorityMap[task.priority] || task.priority),
+        escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+        escCsv(contactNames.join(', ')),
+        'Globálny',
+        subtaskCount,
+        completedSubtasks,
+        escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+      ].join(','));
+    }
+
+    // Contact tasks
+    for (const contact of contacts) {
+      for (const task of (contact.tasks || [])) {
+        const subtaskCount = (task.subtasks || []).length;
+        const completedSubtasks = (task.subtasks || []).filter(s => s.completed).length;
+
+        rows.push([
+          escCsv(task.title),
+          escCsv(task.description),
+          task.completed ? 'Dokončený' : 'Aktívny',
+          escCsv(priorityMap[task.priority] || task.priority),
+          escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+          escCsv(contact.name),
+          'Kontaktový',
+          subtaskCount,
+          completedSubtasks,
+          escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+        ].join(','));
+      }
+    }
+
+    const bom = '\uFEFF';
+    const csv = bom + headers.join(',') + '\n' + rows.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="projekty.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri exporte' });
+  }
+});
+
 // Export tasks to iCal format - MUST be before /:id route
 // Query params:
 //   - incremental=true: only export tasks not previously exported

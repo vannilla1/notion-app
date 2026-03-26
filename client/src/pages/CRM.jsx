@@ -453,6 +453,21 @@ function CRM() {
       .catch(err => alert('Chyba pri sťahovaní súboru'));
   };
 
+  const exportContactsCsv = () => {
+    const token = localStorage.getItem('token');
+    fetch(`${api.defaults.baseURL}/api/contacts/export/csv`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(response => response.blob())
+      .then(blob => {
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = 'kontakty.csv';
+        link.click();
+      })
+      .catch(() => alert('Chyba pri exporte'));
+  };
+
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -1367,6 +1382,7 @@ function CRM() {
             <div className="contacts-page">
               <div className="contacts-header">
                 <h2>Zoznam kontaktov ({filteredContacts.length})</h2>
+                <button className="btn btn-secondary btn-sm" onClick={exportContactsCsv} title="Exportovať do CSV">📥 CSV</button>
                 <div className="search-box">
                   <input
                     type="text"
