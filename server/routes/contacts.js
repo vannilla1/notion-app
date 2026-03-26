@@ -142,12 +142,15 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
-    // Check trial limit
+    // Check plan contact limit
     const user = await User.findById(req.user.id);
-    if (user?.subscription?.plan === 'trial') {
+    const plan = user?.subscription?.plan || 'free';
+    const contactLimits = { free: 5, trial: 5, team: 25, pro: Infinity };
+    const maxContacts = contactLimits[plan] || 5;
+    if (maxContacts !== Infinity) {
       const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
-      if (contactCount >= 5) {
-        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 5 kontaktov. Pre neobmedzený prístup prejdite na Pro.' });
+      if (contactCount >= maxContacts) {
+        return res.status(403).json({ message: `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.` });
       }
     }
 
@@ -399,12 +402,15 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    // Check trial limit: max 10 subtasks per task
+    // Check plan limit for subtasks per task
     const user = await User.findById(req.user.id);
-    if (user?.subscription?.plan === 'trial') {
+    const plan = user?.subscription?.plan || 'free';
+    const subtaskLimits = { free: 10, trial: 10, team: 25, pro: Infinity };
+    const maxSubtasks = subtaskLimits[plan] || 10;
+    if (maxSubtasks !== Infinity) {
       const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
-      if (countSubtasks(contact.tasks[taskIndex].subtasks) >= 10) {
-        return res.status(403).json({ message: 'Skúšobná verzia umožňuje max. 10 úloh na projekt. Pre neobmedzený prístup prejdite na Pro.' });
+      if (countSubtasks(contact.tasks[taskIndex].subtasks) >= maxSubtasks) {
+        return res.status(403).json({ message: `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.` });
       }
     }
 

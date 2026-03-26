@@ -41,8 +41,8 @@ const userSchema = new mongoose.Schema({
   },
   // Subscription / plan
   subscription: {
-    plan: { type: String, enum: ['trial', 'pro'], default: 'trial' },
-    trialEndsAt: { type: Date, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+    plan: { type: String, enum: ['free', 'team', 'pro', 'trial'], default: 'free' },
+    trialEndsAt: { type: Date, default: null },
     paidUntil: { type: Date, default: null }
   },
   // Current active workspace

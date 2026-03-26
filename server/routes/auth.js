@@ -405,7 +405,7 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
-    if (!['trial', 'pro'].includes(plan)) {
+    if (!['free', 'team', 'pro', 'trial'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
     }
 

@@ -228,6 +228,17 @@ server.listen(PORT, () => {
         logger.error('Failed to set pro plans', { error: err.message });
       }
 
+      // Migrate trial users to free plan
+      try {
+        const migrated = await User.updateMany(
+          { 'subscription.plan': 'trial' },
+          { $set: { 'subscription.plan': 'free' } }
+        );
+        if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} trial users to free plan`);
+      } catch (err) {
+        logger.error('Failed to migrate trial users', { error: err.message });
+      }
+
       // Migrate workspace members with 'admin' role to 'manager'
       try {
         const WorkspaceMember = require('./models/WorkspaceMember');

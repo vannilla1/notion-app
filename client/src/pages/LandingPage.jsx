@@ -61,7 +61,7 @@ export default function LandingPage() {
 
         <div className="lp-hero-content">
           <div className="lp-hero-badge">
-            <span>&#10024;</span> 7 dní zadarmo na vyskúšanie
+            <span>&#10024;</span> Zadarmo, navždy — bez platobnej karty
           </div>
           <h1 className="lp-hero-title">
             Spravujte kontakty a projekty<br />na jednom mieste
@@ -192,10 +192,10 @@ export default function LandingPage() {
           </div>
 
           <div className="lp-pricing-cards">
-            {/* Free Trial */}
+            {/* Free */}
             <div className="lp-pricing-card">
-              <h3 className="lp-pricing-name">Začiatok</h3>
-              <p className="lp-pricing-desc">Vyskúšajte CRM zadarmo na 7 dní</p>
+              <h3 className="lp-pricing-name">Free</h3>
+              <p className="lp-pricing-desc">Zadarmo, navždy</p>
 
               <div className="lp-pricing-price">
                 <span className="lp-pricing-amount">0 €</span>
@@ -233,7 +233,7 @@ export default function LandingPage() {
                   <span className="lp-pricing-check">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </span>
-                  Tímová spolupráca (max. 1 používateľ)
+                  1 používateľ
                 </li>
                 <li>
                   <span className="lp-pricing-check">
@@ -244,7 +244,64 @@ export default function LandingPage() {
               </ul>
 
               <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
-                Začať skúšobnú dobu
+                Začať zadarmo
+              </Link>
+            </div>
+
+            {/* Tím */}
+            <div className="lp-pricing-card">
+              <h3 className="lp-pricing-name">Tím</h3>
+              <p className="lp-pricing-desc">Pre malé tímy a firmy</p>
+
+              <div className="lp-pricing-price">
+                <span className="lp-pricing-amount">{isYearly ? '49 €' : '4,99 €'}</span>
+                <span className="lp-pricing-period">/ {isYearly ? 'rok' : 'mesiac'}</span>
+              </div>
+              {isYearly && (
+                <p className="lp-pricing-yearly-note">tj. 4,08 € / mesiac</p>
+              )}
+              {!isYearly && (
+                <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo <strong style={{ color: '#6366f1', fontWeight: 700 }}>49 € ročne</strong> (<strong style={{ color: '#10B981', fontWeight: 700 }}>ušetríte 18%</strong>)</p>
+              )}
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 1 používateľa. Každý ďalší: {isYearly ? '49 €/rok' : '4,99 €/mesiac'}.</p>
+
+              <div className="lp-pricing-divider" />
+
+              <ul className="lp-pricing-features">
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  Max. 25 kontaktov
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  Max. 25 projektov a úloh na kontakt
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  Max. 3 používatelia
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  2 pracovné prostredia
+                </li>
+                <li>
+                  <span className="lp-pricing-check">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </span>
+                  Každý ďalší používateľ: {isYearly ? '49 €/rok' : '4,99 €/mes'}
+                </li>
+              </ul>
+
+              <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
+                Začať s Tímom
               </Link>
             </div>
 
@@ -252,7 +309,7 @@ export default function LandingPage() {
             <div className="lp-pricing-card featured">
               <span className="lp-pricing-badge">Odporúčané</span>
               <h3 className="lp-pricing-name">Pro</h3>
-              <p className="lp-pricing-desc">Pre profesionálov a tímy</p>
+              <p className="lp-pricing-desc">Pre profesionálov a veľké tímy</p>
 
               <div className="lp-pricing-price">
                 <span className="lp-pricing-amount">{isYearly ? '99 €' : '9,99 €'}</span>
