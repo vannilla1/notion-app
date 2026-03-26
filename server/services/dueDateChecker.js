@@ -77,6 +77,100 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
 };
 
 /**
+ * Check if a custom reminder should fire for a task/subtask
+ * Returns reminder info if it should fire, null otherwise
+ */
+const checkReminder = (item) => {
+  if (!item.dueDate || !item.reminder || item.reminderSent || item.completed) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(item.dueDate);
+  due.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+
+  // Fire reminder when days remaining <= reminder days and not overdue yet
+  if (diffDays >= 0 && diffDays <= item.reminder) {
+    return {
+      daysRemaining: diffDays,
+      reminderDays: item.reminder,
+      dueDate: item.dueDate
+    };
+  }
+  return null;
+};
+
+/**
+ * Get reminder message
+ */
+const getReminderMessage = (title, dueDate, daysRemaining) => {
+  const formattedDate = new Date(dueDate).toLocaleDateString('sk-SK');
+  if (daysRemaining === 0) {
+    return {
+      title: '🔔 Pripomienka: dnes je termín',
+      body: `Projekt "${title}" má termín dnes (${formattedDate})`
+    };
+  }
+  if (daysRemaining === 1) {
+    return {
+      title: '🔔 Pripomienka: zajtra je termín',
+      body: `Projekt "${title}" má termín zajtra (${formattedDate})`
+    };
+  }
+  return {
+    title: `🔔 Pripomienka: termín o ${daysRemaining} dní`,
+    body: `Projekt "${title}" má termín ${formattedDate} (zostáva ${daysRemaining} dní)`
+  };
+};
+
+/**
+ * Process subtasks recursively and collect reminder triggers
+ */
+const processSubtaskReminders = (subtasks, taskId, reminders = []) => {
+  if (!subtasks || subtasks.length === 0) return reminders;
+
+  for (const subtask of subtasks) {
+    if (subtask.completed) continue;
+
+    const reminderInfo = checkReminder(subtask);
+    if (reminderInfo) {
+      reminders.push({
+        type: 'subtask',
+        subtask,
+        taskId,
+        ...reminderInfo
+      });
+    }
+
+    if (subtask.subtasks && subtask.subtasks.length > 0) {
+      processSubtaskReminders(subtask.subtasks, taskId, reminders);
+    }
+  }
+
+  return reminders;
+};
+
+/**
+ * Mark subtask reminders as sent recursively
+ */
+const markSubtaskRemindersSent = (subtasks) => {
+  if (!subtasks || subtasks.length === 0) return subtasks;
+
+  return subtasks.map(subtask => {
+    const reminderInfo = checkReminder(subtask);
+    const updated = subtask.toObject ? subtask.toObject() : { ...subtask };
+    if (reminderInfo) {
+      updated.reminderSent = true;
+    }
+    if (updated.subtasks && updated.subtasks.length > 0) {
+      updated.subtasks = markSubtaskRemindersSent(updated.subtasks);
+    }
+    return updated;
+  });
+};
+
+/**
  * Process subtasks recursively and collect urgency changes
  */
 const processSubtasks = (subtasks, taskId, changes = []) => {
@@ -137,12 +231,14 @@ const checkDueDates = async () => {
   try {
     logger.info('[DueDateChecker] Starting due date check...');
 
-    // Get all incomplete tasks with due dates
+    // Get all incomplete tasks with due dates or reminders
     const tasks = await Task.find({
       completed: false,
       $or: [
         { dueDate: { $exists: true, $ne: null } },
-        { 'subtasks.dueDate': { $exists: true, $ne: null } }
+        { 'subtasks.dueDate': { $exists: true, $ne: null } },
+        { reminder: { $exists: true, $ne: null } },
+        { 'subtasks.reminder': { $exists: true, $ne: null } }
       ]
     });
 
@@ -229,11 +325,77 @@ const checkDueDates = async () => {
         }
       }
 
-      // Update stored urgency levels
-      if (changes.length > 0) {
+      // --- Custom reminders ---
+      const reminders = [];
+
+      // Check main task reminder
+      const taskReminder = checkReminder(task);
+      if (taskReminder) {
+        reminders.push({ type: 'task', task, ...taskReminder });
+      }
+
+      // Check subtask reminders
+      processSubtaskReminders(task.subtasks, task._id, reminders);
+
+      // Send reminder notifications
+      for (const rem of reminders) {
+        const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
+        const message = getReminderMessage(title, rem.dueDate, rem.daysRemaining);
+
+        const usersToNotify = new Set();
+        if (task.assignedTo && task.assignedTo.length > 0) {
+          task.assignedTo.forEach(userId => usersToNotify.add(userId.toString()));
+        }
+        if (task.createdBy) {
+          usersToNotify.add(task.createdBy.toString());
+        }
+
+        for (const userId of usersToNotify) {
+          try {
+            const notificationType = rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
+            await notificationService.createNotification({
+              userId,
+              type: notificationType,
+              title: message.title,
+              message: message.body,
+              actorName: 'Systém',
+              relatedType: rem.type,
+              relatedId: rem.type === 'task' ? task._id.toString() : rem.subtask.id,
+              relatedName: title,
+              data: {
+                taskId: task._id.toString(),
+                subtaskId: rem.type === 'subtask' ? rem.subtask.id : null,
+                contactId: task.contactId || null
+              }
+            });
+            notificationsSent++;
+          } catch (err) {
+            logger.error('[DueDateChecker] Failed to send reminder', {
+              error: err.message,
+              userId,
+              taskId: task._id
+            });
+          }
+        }
+      }
+
+      // Update stored urgency levels and mark reminders as sent
+      const needsUpdate = changes.length > 0 || reminders.length > 0;
+      if (needsUpdate) {
         const currentTaskLevel = getUrgencyLevel(task.dueDate);
         task.lastUrgencyLevel = currentTaskLevel;
         task.subtasks = updateSubtaskUrgencyLevels(task.subtasks);
+
+        // Mark task reminder as sent
+        if (taskReminder) {
+          task.reminderSent = true;
+        }
+
+        // Mark subtask reminders as sent
+        if (reminders.some(r => r.type === 'subtask')) {
+          task.subtasks = markSubtaskRemindersSent(task.subtasks);
+        }
+
         await task.save();
         tasksUpdated++;
       }

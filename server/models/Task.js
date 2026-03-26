@@ -24,6 +24,8 @@ const subtaskSchema = new mongoose.Schema({
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking
+  reminder: { type: Number, default: null }, // Days before dueDate to send reminder (null = no reminder)
+  reminderSent: { type: Boolean, default: false }, // Whether reminder was already sent
   order: { type: Number, default: 0 }
 }, { _id: false });
 
@@ -72,6 +74,8 @@ const taskSchema = new mongoose.Schema({
   createdBy: String,
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking
+  reminder: { type: Number, default: null }, // Days before dueDate to send reminder (null = no reminder)
+  reminderSent: { type: Boolean, default: false }, // Whether reminder was already sent
   order: { type: Number, default: 0 }
 }, {
   timestamps: true,

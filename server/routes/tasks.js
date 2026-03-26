@@ -822,7 +822,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo } = req.body;
+    const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo, reminder } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -858,7 +858,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         assignedTo: assignedTo || [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
         createdBy: req.user.username,
-        modifiedAt: new Date().toISOString() // Set on creation for "new" filter
+        modifiedAt: new Date().toISOString(),
+        reminder: reminder !== '' && reminder != null ? Number(reminder) : null,
+        reminderSent: false
       });
 
       await task.save();
@@ -919,7 +921,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         assignedTo: assignedTo || [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
         createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString() // Set on creation for "new" filter
+        modifiedAt: new Date().toISOString(),
+        reminder: reminder !== '' && reminder != null ? Number(reminder) : null,
+        reminderSent: false
       };
 
       // Ensure tasks array exists
@@ -1000,7 +1004,7 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed, contactId, contactIds, source, assignedTo } = req.body;
+    const { title, description, dueDate, priority, completed, contactId, contactIds, source, assignedTo, reminder } = req.body;
     const io = req.app.get('io');
 
     // If source is 'contact', update in contacts
@@ -1035,6 +1039,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               updatedSubtasks = markAllSubtasksCompleted(updatedSubtasks);
             }
 
+            const newReminder = reminder !== undefined ? (reminder !== '' && reminder != null ? Number(reminder) : null) : task.reminder;
+            const reminderChanged = newReminder !== task.reminder || (dueDate !== undefined && dueDate !== task.dueDate);
+
             contact.tasks[taskIndex] = {
               ...task,
               id: task.id,
@@ -1046,7 +1053,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
               subtasks: updatedSubtasks,
               createdAt: task.createdAt,
-              modifiedAt: new Date().toISOString()
+              modifiedAt: new Date().toISOString(),
+              reminder: newReminder,
+              reminderSent: reminderChanged ? false : (task.reminderSent || false)
             };
             contact.markModified('tasks');
             await contact.save();
@@ -1143,12 +1152,21 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
       task.title = title !== undefined ? title : task.title;
       task.description = description !== undefined ? description : task.description;
+      const oldDueDate = task.dueDate;
       task.dueDate = dueDate !== undefined ? dueDate : task.dueDate;
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
       task.contactIds = finalContactIds;
       task.assignedTo = assignedTo !== undefined ? assignedTo : task.assignedTo;
       task.modifiedAt = new Date().toISOString();
+
+      // Handle reminder
+      if (reminder !== undefined) {
+        const newReminder = reminder !== '' && reminder != null ? Number(reminder) : null;
+        const reminderChanged = newReminder !== task.reminder || (dueDate !== undefined && dueDate !== oldDueDate);
+        task.reminder = newReminder;
+        if (reminderChanged) task.reminderSent = false;
+      }
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
         task.subtasks = req.body.subtasks;

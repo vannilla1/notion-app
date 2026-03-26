@@ -26,7 +26,7 @@ const tasksHelpTips = [
   {
     icon: '🔔',
     title: 'Upozornenia na termíny',
-    description: 'Systém automaticky sleduje termíny projektov a úloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší — vrátane push notifikácií na iOS.'
+    description: 'Systém automaticky sleduje termíny projektov a úloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší. Pri nastavení termínu si môžete zvoliť vlastnú pripomienku (v deň termínu, 1, 3, 7 alebo 14 dní pred). Funguje aj cez push notifikácie na iOS.'
   },
   {
     icon: '📝',
@@ -143,7 +143,8 @@ function Tasks() {
     dueDate: '',
     priority: 'medium',
     contactIds: [],
-    assignedTo: []
+    assignedTo: [],
+    reminder: ''
   });
 
   // Edit states
@@ -772,7 +773,8 @@ function Tasks() {
         dueDate: '',
         priority: 'medium',
         contactIds: [],
-        assignedTo: []
+        assignedTo: [],
+        reminder: ''
       });
       setShowForm(false);
     } catch (error) {
@@ -845,6 +847,7 @@ function Tasks() {
       priority: task.priority || 'medium',
       contactIds: taskContactIds,
       assignedTo: task.assignedTo || [],
+      reminder: task.reminder != null ? String(task.reminder) : '',
       source: task.source
     });
   };
@@ -1949,10 +1952,27 @@ function Tasks() {
                     <input
                       type="date"
                       value={newTaskForm.dueDate}
-                      onChange={(e) => setNewTaskForm({ ...newTaskForm, dueDate: e.target.value })}
+                      onChange={(e) => setNewTaskForm({ ...newTaskForm, dueDate: e.target.value, reminder: e.target.value ? newTaskForm.reminder : '' })}
                       className="form-input"
                     />
                   </div>
+                  {newTaskForm.dueDate && (
+                    <div className="form-group">
+                      <label>🔔 Pripomenúť</label>
+                      <select
+                        value={newTaskForm.reminder}
+                        onChange={(e) => setNewTaskForm({ ...newTaskForm, reminder: e.target.value })}
+                        className="form-input"
+                      >
+                        <option value="">Bez pripomienky</option>
+                        <option value="0">V deň termínu</option>
+                        <option value="1">1 deň pred</option>
+                        <option value="3">3 dni pred</option>
+                        <option value="7">7 dní pred</option>
+                        <option value="14">14 dní pred</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
                     <label>Priorita</label>
                     <select
@@ -2156,7 +2176,7 @@ function Tasks() {
                               <input
                                 type="date"
                                 value={editForm.dueDate}
-                                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
+                                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value, reminder: e.target.value ? editForm.reminder : '' })}
                                 className="form-input"
                               />
                               <select
@@ -2169,6 +2189,23 @@ function Tasks() {
                                 <option value="high">Vysoká</option>
                               </select>
                             </div>
+                            {editForm.dueDate && (
+                              <div className="task-edit-row">
+                                <select
+                                  value={editForm.reminder || ''}
+                                  onChange={(e) => setEditForm({ ...editForm, reminder: e.target.value })}
+                                  className="form-input"
+                                  title="Pripomienka pred termínom"
+                                >
+                                  <option value="">🔔 Bez pripomienky</option>
+                                  <option value="0">🔔 V deň termínu</option>
+                                  <option value="1">🔔 1 deň pred</option>
+                                  <option value="3">🔔 3 dni pred</option>
+                                  <option value="7">🔔 7 dní pred</option>
+                                  <option value="14">🔔 14 dní pred</option>
+                                </select>
+                              </div>
+                            )}
                             <div className="form-group">
                               <label>Kontakty</label>
                               <div className="multi-select-contacts compact">
@@ -2234,6 +2271,7 @@ function Tasks() {
                               {task.dueDate && (
                                 <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
                                   {getDueDateClass(task.dueDate, task.completed) === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
+                                  {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
                                 </span>
                               )}
                               {(task.contactName || task.contactNames?.length > 0) && (
