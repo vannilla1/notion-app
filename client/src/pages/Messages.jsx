@@ -235,7 +235,11 @@ function Messages() {
     <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
-          <button className="menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
+          <button className="btn-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
           <h1 className="header-title-link" onClick={() => navigate('/app')}>
             <img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM
           </h1>
