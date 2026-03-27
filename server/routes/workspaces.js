@@ -182,7 +182,7 @@ router.post('/join', authenticateToken, async (req, res) => {
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
 
     // Team Pro emails bypass capacity check
-    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
     const isTeamPro = proEmails.includes(owner?.email?.toLowerCase()) || proEmails.includes(joiningUser?.email?.toLowerCase());
 
     if (!isTeamPro) {
@@ -558,11 +558,15 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
       { currentWorkspaceId: null }
     );
 
+    // Delete workspace data (contacts, tasks, invitations)
+    const Contact = require('../models/Contact');
+    const Task = require('../models/Task');
+    await Contact.deleteMany({ workspaceId });
+    await Task.deleteMany({ workspaceId });
+    await Invitation.deleteMany({ workspaceId });
+
     // Delete workspace
     await Workspace.deleteOne({ _id: workspaceId });
-
-    // Note: Contacts and Tasks are NOT deleted - they become orphaned
-    // In production, you might want to delete them too or archive them
 
     logger.info('Workspace deleted', { workspaceId, userId: req.user.id });
 
@@ -611,7 +615,7 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
     // Team Pro emails bypass capacity check entirely
-    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
     const inviterUser = await User.findById(req.user.id);
     const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
 
@@ -787,7 +791,7 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
     // Team Pro emails bypass capacity check
-    const proEmails = ['project.manager@eperun.sk', 'martin.kosco@eperun.sk'];
+    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
     const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
 
     if (!isTeamPro) {

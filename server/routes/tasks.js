@@ -216,7 +216,11 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
 
     const escCsv = (val) => {
       if (val == null) return '';
-      const str = String(val);
+      let str = String(val);
+      // CSV injection protection: prefix dangerous characters
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return '"' + str.replace(/"/g, '""') + '"';
       }
@@ -290,10 +294,10 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
 // Query params:
 //   - incremental=true: only export tasks not previously exported
 //   - reset=true: reset export history and export all tasks
-router.get('/export/calendar', authenticateToken, async (req, res) => {
+router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { incremental, reset } = req.query;
-    const userId = req.user.userId;
+    const userId = req.user.id;
 
     // Get user to check previously exported task IDs
     const user = await User.findById(userId);
@@ -304,12 +308,12 @@ router.get('/export/calendar', authenticateToken, async (req, res) => {
       exportedTaskIds = [];
     }
 
-    // Only fetch contacts with tasks, exclude files.data
+    // Only fetch contacts with tasks for current workspace, exclude files.data
     const contacts = await Contact.find(
-      { tasks: { $exists: true, $ne: [] } },
+      { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
       { name: 1, tasks: 1 }
     ).lean();
-    const globalTasks = await Task.find({}).lean();
+    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).lean();
     const events = [];
     const newExportedIds = [];
 
@@ -565,13 +569,14 @@ router.get('/calendar/feed/:token', async (req, res) => {
       return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
     }
 
-    // Get all tasks - only fetch necessary fields, exclude files
+    // Get tasks only from user's current workspace
+    const workspaceFilter = user.currentWorkspaceId ? { workspaceId: user.currentWorkspaceId } : {};
     const globalTasks = await Task.find(
-      { dueDate: { $exists: true, $ne: null } },
+      { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
       { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
     ).lean();
     const contacts = await Contact.find(
-      { 'tasks.dueDate': { $exists: true } },
+      { ...workspaceFilter, 'tasks.dueDate': { $exists: true } },
       { name: 1, tasks: 1 }
     ).lean();
 

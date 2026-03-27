@@ -86,21 +86,6 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
-// Helper to strip file data from contacts (too large for list views)
-const stripFileData = (contact) => {
-  const result = { ...contact, id: contact._id.toString() };
-  if (result.files && result.files.length > 0) {
-    result.files = result.files.map(f => ({
-      id: f.id,
-      originalName: f.originalName,
-      mimetype: f.mimetype,
-      size: f.size,
-      uploadedAt: f.uploadedAt
-    }));
-  }
-  return result;
-};
-
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
@@ -130,7 +115,11 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
 
     const escCsv = (val) => {
       if (val == null) return '';
-      const str = String(val);
+      let str = String(val);
+      // CSV injection protection: prefix dangerous characters
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return '"' + str.replace(/"/g, '""') + '"';
       }
@@ -611,7 +600,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       // Handle multer errors
       if (err) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 5MB.' });
+          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 10MB.' });
         }
         return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
       }
