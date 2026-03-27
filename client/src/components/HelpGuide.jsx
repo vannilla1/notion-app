@@ -252,14 +252,15 @@ const HelpGuide = ({ section, tips, title, children }) => {
           box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 767px) {
           .help-guide-modal {
             max-height: 90vh;
             margin: 10px;
           }
 
           .help-guide-btn {
-            bottom: 80px;
+            bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+            z-index: 999;
           }
         }
       `}</style>
