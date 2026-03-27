@@ -60,6 +60,14 @@ function Messages() {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
 
   // Sidebar
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Stats for sidebar
+  const receivedMessages = messages;
+  const pendingMessages = messages.filter(m => m.status === 'pending');
+  const approvedMessages = messages.filter(m => m.status === 'approved');
+  const rejectedMessages = messages.filter(m => m.status === 'rejected');
+  const commentedMessages = messages.filter(m => m.status === 'commented');
 
   useEffect(() => { fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
@@ -234,6 +242,11 @@ function Messages() {
     <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
+          <button className="btn-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
           <h1 className="header-title-link" onClick={() => navigate('/app')}>
             <img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM
           </h1>
@@ -247,6 +260,76 @@ function Messages() {
       </header>
 
       <div className="crm-content">
+        <div
+          className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
+          onClick={() => setSidebarOpen(false)}
+        />
+        <aside className={`crm-sidebar ${sidebarOpen ? 'open' : ''}`}>
+          <button
+            className="btn btn-primary add-contact-btn"
+            onClick={() => {
+              setShowForm(true);
+              setSidebarOpen(false);
+            }}
+          >
+            + Nová správa
+          </button>
+
+          <div className="dashboard-stats">
+            <h3>Prehľad</h3>
+            <div
+              className={`stat-item clickable ${statusFilter === 'all' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('all'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">Celkom správ</span>
+              <span className="stat-value">{receivedMessages.length}</span>
+            </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa stavu</h4>
+            <div
+              className={`stat-item clickable priority-stat ${statusFilter === 'pending' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('pending'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#F59E0B' }}></span>
+                Čaká
+              </span>
+              <span className="stat-value">{pendingMessages.length}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${statusFilter === 'approved' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('approved'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Schválené
+              </span>
+              <span className="stat-value">{approvedMessages.length}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${statusFilter === 'rejected' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('rejected'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Zamietnuté
+              </span>
+              <span className="stat-value">{rejectedMessages.length}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${statusFilter === 'commented' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('commented'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#6366F1' }}></span>
+                Komentované
+              </span>
+              <span className="stat-value">{commentedMessages.length}</span>
+            </div>
+          </div>
+        </aside>
+
+        <main className="crm-main">
         <div className="messages-container" style={{ padding: '20px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
@@ -333,6 +416,7 @@ function Messages() {
             />
           )}
         </div>
+      </main>
       </div>
 
       {/* New message modal */}
