@@ -9298,14 +9298,11 @@ a.detail-value:hover {
     left: 0;
     right: 0;
     z-index: 1000;
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border-color);
+    background: linear-gradient(180deg, #f0eeff 0%, #f8f7ff 100%);
+    border-top: 1px solid rgba(99, 102, 241, 0.12);
     padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
     align-items: stretch;
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-    background: var(--bg-primary, #ffffff);
   }
 
   .bottom-nav-tab {
