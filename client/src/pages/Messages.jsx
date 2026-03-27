@@ -60,7 +60,6 @@ function Messages() {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
 
   // Sidebar
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => { fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
@@ -235,11 +234,6 @@ function Messages() {
     <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
-          <button className="btn-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Menu">
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
           <h1 className="header-title-link" onClick={() => navigate('/app')}>
             <img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM
           </h1>
@@ -253,8 +247,6 @@ function Messages() {
       </header>
 
       <div className="crm-content">
-        <div className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`} onClick={() => setSidebarOpen(false)} />
-
         <div className="messages-container" style={{ padding: '20px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
