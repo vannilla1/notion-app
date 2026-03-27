@@ -8,7 +8,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 
 const messagesHelpTips = [
-  { icon: '📨', title: 'Odkazy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie alebo žiadosti.' },
+  { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie alebo žiadosti.' },
   { icon: '🟡', title: 'Typy odkazov', description: 'Schválenie (žltá) — vyžaduje rozhodnutie. Informácia (modrá) — len na prečítanie. Žiadosť (oranžová) — prosba o akciu. Návrh (zelená) — diskusia.' },
   { icon: '✅', title: 'Akcie príjemcu', description: 'Prijaté odkazy môžete schváliť, zamietnuť alebo komentovať. Po schválení/zamietnutí sa stav nedá zmeniť.' },
   { icon: '📎', title: 'Prílohy', description: 'Ku každému odkazu môžete priložiť súbor do 10MB — dokumenty, obrázky, PDF.' },
@@ -332,17 +332,12 @@ function Messages() {
         <main className="crm-main">
         <div className="messages-container" style={{ padding: '20px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 600 }}>✉️ Odkazy</h2>
-              {pendingCount > 0 && (
-                <span style={{ background: 'var(--danger)', color: 'white', borderRadius: '10px', padding: '2px 8px', fontSize: '12px', fontWeight: 600 }}>{pendingCount}</span>
-              )}
-              <HelpGuide tips={messagesHelpTips} />
-            </div>
-            <button className="btn btn-primary" onClick={() => setShowForm(true)} style={{ fontSize: '14px' }}>
-              + Nový odkaz
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600 }}>✉️ Správy</h2>
+            {pendingCount > 0 && (
+              <span style={{ background: 'var(--danger)', color: 'white', borderRadius: '10px', padding: '2px 8px', fontSize: '12px', fontWeight: 600 }}>{pendingCount}</span>
+            )}
+            <HelpGuide tips={messagesHelpTips} />
           </div>
 
           {/* Tabs */}
@@ -424,7 +419,7 @@ function Messages() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) { setShowForm(false); resetForm(); } }}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflow: 'auto', boxShadow: 'var(--shadow-xl)' }}>
-            <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Nový odkaz</h3>
+            <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Nová správa</h3>
             <form onSubmit={handleSubmit}>
               {/* Recipient */}
               <div style={{ marginBottom: '12px' }}>
