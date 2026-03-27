@@ -291,7 +291,7 @@ function Messages() {
           </div>
 
           {/* Status filter */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {['all', 'pending', 'approved', 'rejected', 'commented'].map(s => (
               <button
                 key={s}
@@ -300,7 +300,7 @@ function Messages() {
                   padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
                   background: statusFilter === s ? 'var(--accent-color)' : 'var(--bg-card)',
                   color: statusFilter === s ? 'white' : 'var(--text-secondary)',
-                  cursor: 'pointer', fontSize: '12px'
+                  cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
                 }}
               >
                 {s === 'all' ? 'Všetky' : statusConfig[s]?.label || s}
