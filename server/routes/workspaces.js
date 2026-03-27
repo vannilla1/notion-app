@@ -558,11 +558,13 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
       { currentWorkspaceId: null }
     );
 
-    // Delete workspace data (contacts, tasks, invitations)
+    // Delete workspace data (contacts, tasks, messages, invitations)
     const Contact = require('../models/Contact');
     const Task = require('../models/Task');
+    const Message = require('../models/Message');
     await Contact.deleteMany({ workspaceId });
     await Task.deleteMany({ workspaceId });
+    await Message.deleteMany({ workspaceId });
     await Invitation.deleteMany({ workspaceId });
 
     // Delete workspace

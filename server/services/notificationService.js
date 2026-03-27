@@ -203,6 +203,13 @@ const generateNotificationUrl = (type, data = {}) => {
     return url;
   }
 
+  // Message notifications -> /messages
+  if (type?.startsWith('message') && data.messageId) {
+    const url = `/messages?highlight=${data.messageId}`;
+    logger.debug('[NotificationService] Generated message URL', { url });
+    return url;
+  }
+
   logger.warn('[NotificationService] No URL match, returning /', { type, data });
   return '/';
 };

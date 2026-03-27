@@ -19,6 +19,7 @@ const { startGoogleTasksPolling } = require('./routes/googleTasks');
 const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
 const workspaceRoutes = require('./routes/workspaces');
+const messageRoutes = require('./routes/messages');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
@@ -102,6 +103,7 @@ app.use('/api/google-tasks', googleTasksRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/workspaces', workspaceRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);

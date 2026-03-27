@@ -24,7 +24,13 @@ const notificationSchema = new mongoose.Schema({
       'subtask.updated',
       'subtask.completed',
       'subtask.deleted',
-      'subtask.assigned'
+      'subtask.assigned',
+      'task.dueDate',
+      'subtask.dueDate',
+      'message.created',
+      'message.approved',
+      'message.rejected',
+      'message.commented'
     ],
     required: true
   },
@@ -47,7 +53,7 @@ const notificationSchema = new mongoose.Schema({
   // Related entity
   relatedType: {
     type: String,
-    enum: ['contact', 'task', 'subtask']
+    enum: ['contact', 'task', 'subtask', 'message']
   },
   relatedId: String,
   relatedName: String,

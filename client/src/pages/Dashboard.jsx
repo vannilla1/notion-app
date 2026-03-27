@@ -534,6 +534,12 @@ function Dashboard() {
           >
             Projekty
           </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate('/messages')}
+          >
+            ✉ Správy
+          </button>
           <UserMenu
             user={user}
             onLogout={logout}
@@ -674,9 +680,16 @@ function Dashboard() {
             <button
               className="btn btn-secondary"
               onClick={() => navigate('/tasks')}
+              style={{ width: '100%', marginBottom: '8px' }}
+            >
+              + Nový projekt
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate('/messages')}
               style={{ width: '100%' }}
             >
-              + Nová projekt
+              ✉ Správy
             </button>
           </div>
         </aside>

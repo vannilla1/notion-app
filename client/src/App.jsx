@@ -9,6 +9,7 @@ import Tasks from './pages/Tasks';
 import WorkspaceMembers from './pages/WorkspaceMembers';
 import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import Messages from './pages/Messages';
 import LandingPage from './pages/LandingPage';
 import NotificationToast from './components/NotificationToast';
 import WorkspaceSetup from './components/WorkspaceSetup';
@@ -211,6 +212,10 @@ function AppContent() {
         <Route
           path="/workspace/members"
           element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/messages"
+          element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
         />
         <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
