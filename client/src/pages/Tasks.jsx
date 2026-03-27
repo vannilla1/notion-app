@@ -266,8 +266,12 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                       onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
                       title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
                     >
-                      {item.type === 'subtask' && <span className="calendar-item-sub">↳</span>}
-                      <span className="calendar-item-title">{item.type === 'subtask' ? `${item.task.title}: ${item.title}` : item.title}</span>
+                      <div className="calendar-item-body">
+                        {item.type === 'subtask' && (
+                          <span className="calendar-item-project-badge">{item.task.title}</span>
+                        )}
+                        <span className="calendar-item-title">{item.title}</span>
+                      </div>
                     </div>
                   ))}
                   {(itemsByDay[day] || []).length > 3 && (
@@ -311,10 +315,12 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     className={`calendar-week-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
                     onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
                   >
-                    {item.type === 'subtask' && <span className="calendar-item-sub">↳ </span>}
-                    <span className="calendar-week-item-title">
-                      {item.type === 'subtask' ? `${item.task.title}: ${item.title}` : item.title}
-                    </span>
+                    <div className="calendar-week-item-content">
+                      {item.type === 'subtask' && (
+                        <span className="calendar-week-item-project">{item.task.title}</span>
+                      )}
+                      <span className="calendar-week-item-title">{item.title}</span>
+                    </div>
                   </div>
                 ))}
                 {items.length === 0 && <div className="calendar-week-empty">Žiadne termíny</div>}

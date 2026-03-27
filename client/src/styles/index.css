@@ -8869,12 +8869,10 @@ a.detail-value:hover {
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   transition: opacity 0.2s;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 2px;
 }
 
@@ -8920,6 +8918,48 @@ a.detail-value:hover {
 .calendar-item-title {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Body wrapper inside month-view calendar item (stacks badge + title vertically) */
+.calendar-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0px;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+}
+
+/* Project badge in month view for subtasks */
+.calendar-item-project-badge {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: block;
+  line-height: 1.2;
+}
+
+/* Week view: project name as subtitle */
+.calendar-week-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.calendar-week-item-project {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 
 /* Calendar grid scroll wrapper — allows horizontal scroll on iOS */
