@@ -12,6 +12,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import Messages from './pages/Messages';
 import LandingPage from './pages/LandingPage';
 import NotificationToast from './components/NotificationToast';
+import BottomNav from './components/BottomNav';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 
@@ -191,6 +192,7 @@ function AppContent() {
   return (
     <>
       {isAuthenticated && <NotificationToast />}
+      {isAuthenticated && <BottomNav />}
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route

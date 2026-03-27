@@ -9281,3 +9281,88 @@ a.detail-value:hover {
   color: var(--text-secondary);
   font-style: italic;
 }
+
+/* ========================================
+   Bottom Navigation (mobile iOS-style tab bar)
+   ======================================== */
+
+.bottom-nav {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-color);
+    padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around;
+    align-items: stretch;
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    .bottom-nav {
+      background: rgba(30, 41, 59, 0.92);
+      border-top-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .bottom-nav-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex: 1;
+    padding: 6px 4px 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 0.15s ease;
+  }
+
+  .bottom-nav-tab:active {
+    opacity: 0.6;
+  }
+
+  .bottom-nav-icon {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .bottom-nav-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.01em;
+  }
+
+  .bottom-nav-tab.active .bottom-nav-label {
+    color: var(--accent-color);
+    font-weight: 600;
+  }
+
+  .bottom-nav-tab.active .bottom-nav-icon {
+    transform: scale(1.1);
+  }
+
+  /* Hide header nav buttons on mobile — bottom nav replaces them */
+  .crm-header-right .btn-secondary {
+    display: none !important;
+  }
+
+  /* Add bottom padding to prevent content being hidden behind bottom nav */
+  .crm-layout {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+}
