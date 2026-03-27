@@ -59,6 +59,16 @@ const tasksHelpTips = [
     description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na úlohy.'
   },
   {
+    icon: '🗓️',
+    title: 'Kalendárový pohľad',
+    description: 'Prepnite na pohľad kalendára tlačidlom 📅 vpravo hore. Vyberte si mesačný, týždenný alebo denný prehľad. Kliknutím na deň v mesačnom pohľade zobrazíte detailný denný pohľad. Na mobile sa kalendár dá horizontálne posúvať.'
+  },
+  {
+    icon: '📥',
+    title: 'Export do CSV',
+    description: 'Kliknite na "📥 CSV" vedľa prepínača pohľadu pre stiahnutie všetkých projektov a úloh do tabuľkového súboru. Súbor sa otvorí v Exceli alebo Google Sheets so správnymi diakritikami.'
+  },
+  {
     icon: '📆',
     title: 'Google synchronizácia',
     description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a projektov.'
@@ -254,10 +264,10 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                       key={item.id}
                       className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
                       onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
-                      title={`${item.type === 'subtask' ? '↳ ' : ''}${item.title}`}
+                      title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
                     >
                       {item.type === 'subtask' && <span className="calendar-item-sub">↳</span>}
-                      <span className="calendar-item-title">{item.title}</span>
+                      <span className="calendar-item-title">{item.type === 'subtask' ? `${item.task.title}: ${item.title}` : item.title}</span>
                     </div>
                   ))}
                   {(itemsByDay[day] || []).length > 3 && (
@@ -302,7 +312,9 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
                   >
                     {item.type === 'subtask' && <span className="calendar-item-sub">↳ </span>}
-                    <span className="calendar-week-item-title">{item.title}</span>
+                    <span className="calendar-week-item-title">
+                      {item.type === 'subtask' ? `${item.task.title}: ${item.title}` : item.title}
+                    </span>
                   </div>
                 ))}
                 {items.length === 0 && <div className="calendar-week-empty">Žiadne termíny</div>}
@@ -354,7 +366,11 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
         <button className={`btn btn-sm ${calendarMode === 'week' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCalendarMode('week')}>Týždeň</button>
         <button className={`btn btn-sm ${calendarMode === 'day' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCalendarMode('day')}>Deň</button>
       </div>
-      {calendarMode === 'month' && renderMonth()}
+      {calendarMode === 'month' && (
+        <div className="calendar-grid-scroll">
+          {renderMonth()}
+        </div>
+      )}
       {calendarMode === 'week' && renderWeek()}
       {calendarMode === 'day' && renderDay()}
     </div>

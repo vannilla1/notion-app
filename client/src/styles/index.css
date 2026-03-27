@@ -8922,17 +8922,27 @@ a.detail-value:hover {
   text-overflow: ellipsis;
 }
 
+/* Calendar grid scroll wrapper — allows horizontal scroll on iOS */
+.calendar-grid-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.calendar-grid {
+  min-width: 560px;
+}
+
 /* Calendar mobile */
 @media (max-width: 768px) {
   .calendar-view {
     width: 100%;
-    overflow: hidden;
+    overflow: visible;
     padding-bottom: 80px;
   }
 
   .calendar-grid {
-    width: 100%;
-    table-layout: fixed;
+    min-width: 490px;
   }
 
   .calendar-cell {

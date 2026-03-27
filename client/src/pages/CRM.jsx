@@ -43,6 +43,16 @@ const crmHelpTips = [
     icon: '📝',
     title: 'Projekty kontaktu',
     description: 'Každý kontakt má vlastné projekty s úlohami. Pri dokončení hlavného projektu sa automaticky dokončia všetky úlohy.'
+  },
+  {
+    icon: '📥',
+    title: 'Export kontaktov do CSV',
+    description: 'Kliknite na "📥 CSV" v hlavičke zoznamu pre stiahnutie všetkých kontaktov do tabuľkového súboru. Obsahuje meno, email, telefón, firmu, stav a počet projektov. Súbor sa otvorí v Exceli alebo Google Sheets.'
+  },
+  {
+    icon: '🔔',
+    title: 'Pripomienky termínov',
+    description: 'Pri nastavení termínu projektu alebo úlohy si vyberte vlastnú pripomienku (v deň termínu, 1, 3, 7 alebo 14 dní pred). Systém vás upozorní push notifikáciou.'
   }
 ];
 
