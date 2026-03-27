@@ -9325,8 +9325,21 @@ a.detail-value:hover {
   }
 
   .bottom-nav-icon {
-    font-size: 22px;
     line-height: 1;
+    color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bottom-nav-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .bottom-nav-tab.active .bottom-nav-icon {
+    color: #ffffff;
+    transform: scale(1.1);
   }
 
   .bottom-nav-label {
@@ -9339,10 +9352,6 @@ a.detail-value:hover {
   .bottom-nav-tab.active .bottom-nav-label {
     color: #ffffff;
     font-weight: 600;
-  }
-
-  .bottom-nav-tab.active .bottom-nav-icon {
-    transform: scale(1.1);
   }
 
 
