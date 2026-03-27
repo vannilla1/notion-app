@@ -9305,15 +9305,7 @@ a.detail-value:hover {
     align-items: stretch;
     -webkit-backdrop-filter: blur(20px);
     backdrop-filter: blur(20px);
-    background: rgba(255, 255, 255, 0.92);
-  }
-
-  /* Dark mode support */
-  @media (prefers-color-scheme: dark) {
-    .bottom-nav {
-      background: rgba(30, 41, 59, 0.92);
-      border-top-color: rgba(255, 255, 255, 0.08);
-    }
+    background: var(--bg-primary, #ffffff);
   }
 
   .bottom-nav-tab {
@@ -9362,7 +9354,7 @@ a.detail-value:hover {
   }
 
   /* Add bottom padding to prevent content being hidden behind bottom nav */
-  .crm-layout {
+  .crm-container {
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
   }
 }

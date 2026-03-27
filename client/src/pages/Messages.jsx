@@ -232,7 +232,7 @@ function Messages() {
   const isRecipient = (msg) => msg.toUserId === user.id || msg.toUserId?._id === user.id;
 
   return (
-    <div className="crm-layout">
+    <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
           <button className="menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
