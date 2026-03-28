@@ -2,9 +2,11 @@ const express = require('express');
 const { google } = require('googleapis');
 const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
+const { requireWorkspace } = require('../middleware/workspace');
 const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -474,7 +476,7 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 // Maximum sync time: 10 minutes to allow large syncs to complete
 const SYNC_TIMEOUT = 600000;
 
-router.post('/sync', authenticateToken, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   const forceSync = req.body.force === true;
   const syncStartTime = Date.now();
   logger.info('[Google Tasks] Sync started', { userId: req.user.id, forceSync });
@@ -545,8 +547,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
       }
     }
 
-    // Get all tasks with due dates for current workspace
-    const workspaceId = user.currentWorkspaceId;
+    // Get all tasks for the workspace from which the sync was triggered
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
     const globalTasks = workspaceId ? await Task.find(
       { workspaceId },
       { _id: 1, title: 1, description: 1, dueDate: 1, completed: 1, modifiedAt: 1, updatedAt: 1, subtasks: 1 }
@@ -886,7 +888,7 @@ router.post('/sync', authenticateToken, async (req, res) => {
         if (!crmTaskId) continue;
 
         // Check global tasks (workspace-scoped)
-        const wsId = user.currentWorkspaceId;
+        const wsId = req.workspaceId || user.currentWorkspaceId;
         const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
         if (globalTask && !globalTask.completed) {
           globalTask.completed = true;
@@ -1564,11 +1566,21 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       return;
     }
 
-    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate });
+    // Determine workspace scope — only sync for members of the task's workspace
+    const workspaceId = taskData.workspaceId?.toString();
+    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId });
 
     try {
-    // Find all users with Google Tasks enabled
-    const users = await User.find({ 'googleTasks.enabled': true });
+    // Find users with Google Tasks enabled — filtered by workspace membership
+    let users;
+    if (workspaceId) {
+      const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const memberUserIds = members.map(m => m.userId);
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true });
+    } else {
+      // Fallback: no workspace context (shouldn't happen, but safe)
+      users = await User.find({ 'googleTasks.enabled': true });
+    }
 
     if (users.length === 0) {
       return;
@@ -1889,12 +1901,30 @@ const pollGoogleTasksChanges = async () => {
           continue;
         }
 
-        const wsId = user.currentWorkspaceId;
+        // Get workspace IDs where this user is a member (for scoped lookup)
+        const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+        const userWorkspaceIds = memberships.map(m => m.workspaceId);
         let updated = 0;
 
         for (const googleTask of allGoogleTasks) {
           const crmTaskId = reverseMap.get(googleTask.id);
           if (!crmTaskId) continue;
+
+          // Find the actual task to get its workspaceId (instead of using currentWorkspaceId)
+          let wsId = null;
+          const task = await Task.findById(crmTaskId, 'workspaceId').lean();
+          if (task) {
+            wsId = task.workspaceId;
+          } else {
+            // Check contacts
+            const contact = await Contact.findOne({ 'tasks.id': crmTaskId }, 'workspaceId').lean();
+            if (contact) wsId = contact.workspaceId;
+          }
+
+          // Only sync if task belongs to a workspace where the user is a member
+          if (wsId && !userWorkspaceIds.some(wId => wId.toString() === wsId.toString())) {
+            continue;
+          }
 
           const changed = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
           if (changed) updated++;

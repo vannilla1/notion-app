@@ -2,9 +2,11 @@ const express = require('express');
 const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
+const { requireWorkspace } = require('../middleware/workspace');
 const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -391,7 +393,9 @@ const processCalendarChanges = async (user) => {
     }
 
     let updated = 0;
-    const wsId = user.currentWorkspaceId;
+    // Get workspace IDs where this user is a member (for scoped lookup)
+    const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+    const userWorkspaceIds = memberships.map(m => m.workspaceId);
 
     for (const event of allEvents) {
       const crmTaskId = reverseMap.get(event.id);
@@ -403,17 +407,14 @@ const processCalendarChanges = async (user) => {
       // Strip the completion prefix "✓ " from event title to get clean title
       let newTitle = (event.summary || '').replace(/^✓\s*/, '').trim();
 
-      // Find the CRM task
-      let task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+      // Find the CRM task — look it up to get its actual workspaceId
+      let task = await Task.findById(crmTaskId);
       let contact = null;
       let taskIndex = -1;
 
       if (!task) {
         // Search in contacts
-        contact = await Contact.findOne({
-          'tasks.id': crmTaskId,
-          ...(wsId ? { workspaceId: wsId } : {})
-        });
+        contact = await Contact.findOne({ 'tasks.id': crmTaskId });
         if (contact) {
           taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
           if (taskIndex !== -1) task = contact.tasks[taskIndex];
@@ -421,6 +422,12 @@ const processCalendarChanges = async (user) => {
       }
 
       if (!task) continue; // Task no longer exists in CRM
+
+      // Verify the task's workspace is one where this user is a member
+      const taskWsId = (task.workspaceId || contact?.workspaceId)?.toString();
+      if (taskWsId && !userWorkspaceIds.some(wId => wId.toString() === taskWsId)) {
+        continue; // Task belongs to a workspace where user is not a member
+      }
 
       if (isDeleted) {
         // Event was deleted in Google Calendar — don't delete the CRM task,
@@ -582,7 +589,7 @@ const ensureCalendarWatches = async () => {
 // ==================== SYNC ROUTES ====================
 
 // Sync all tasks to Google Calendar
-router.post('/sync', authenticateToken, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
@@ -592,8 +599,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Get tasks with due dates for user's workspace
-    const workspaceId = user.currentWorkspaceId;
+    // Get tasks for the workspace from which the sync was triggered
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
     const globalTasks = workspaceId ? await Task.find({ workspaceId }) : [];
     const contacts = workspaceId ? await Contact.find({ workspaceId }) : [];
 
@@ -996,17 +1003,27 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       return;
     }
 
-    console.log(`[Auto-sync Calendar] Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action})`);
+    // Determine workspace scope — only sync for members of the task's workspace
+    const workspaceId = taskData.workspaceId?.toString();
+    console.log(`[Auto-sync Calendar] Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action}, workspace: ${workspaceId || 'none'})`);
 
-    // Find all users with Google Calendar enabled
-    const users = await User.find({ 'googleCalendar.enabled': true });
+    // Find users with Google Calendar enabled — filtered by workspace membership
+    let users;
+    if (workspaceId) {
+      const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const memberUserIds = members.map(m => m.userId);
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true });
+    } else {
+      // Fallback: no workspace context
+      users = await User.find({ 'googleCalendar.enabled': true });
+    }
 
     if (users.length === 0) {
-      console.log('[Auto-sync Calendar] No users with Google Calendar connected');
+      console.log('[Auto-sync Calendar] No workspace members with Google Calendar connected');
       return;
     }
 
-    console.log(`[Auto-sync Calendar] Found ${users.length} users with Google Calendar connected`);
+    console.log(`[Auto-sync Calendar] Found ${users.length} workspace members with Google Calendar connected`);
 
     for (const user of users) {
       try {
