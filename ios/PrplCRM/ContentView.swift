@@ -172,8 +172,9 @@ struct WebView: UIViewRepresentable {
         )
         config.userContentController.addUserScript(script)
 
-        // Store reference for deep link navigation
+        // Store reference for deep link navigation + start foreground observer
         context.coordinator.webView = webView
+        context.coordinator.startForegroundObserver()
 
         webView.load(URLRequest(url: url))
         return webView
@@ -198,9 +199,34 @@ struct WebView: UIViewRepresentable {
         var parent: WebView
         weak var webView: WKWebView?
         private var hasFinishedInitialLoad = false
+        private var didOpenExternalAuth = false
 
         init(_ parent: WebView) {
             self.parent = parent
+        }
+
+        /// Start observing foreground events (called after webView is assigned)
+        func startForegroundObserver() {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appWillEnterForeground),
+                name: UIApplication.willEnterForegroundNotification,
+                object: nil
+            )
+        }
+
+        @objc private func appWillEnterForeground() {
+            // If we opened Safari for OAuth, reload WebView when user returns
+            if didOpenExternalAuth {
+                didOpenExternalAuth = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.webView?.reload()
+                }
+            }
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
         }
 
         // Handle messages from JavaScript (auth token)
@@ -296,6 +322,15 @@ struct WebView: UIViewRepresentable {
 
             let host = url.host ?? ""
             let isInternal = host.isEmpty || host.contains("perun-crm.onrender.com") || host.contains("localhost")
+
+            // Google blocks OAuth in WKWebView — must open in Safari
+            let isGoogleAuth = host.contains("accounts.google.com") || host.contains("accounts.youtube.com")
+            if isGoogleAuth {
+                didOpenExternalAuth = true
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
 
             if isInternal {
                 // Block landing page — redirect to /app
