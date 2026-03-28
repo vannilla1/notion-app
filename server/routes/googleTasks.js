@@ -713,9 +713,11 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       });
     }
 
-    // Process tasks with adaptive concurrency and retry on rate limit
-    const CONCURRENCY = 15; // Balance between speed and rate limits
-    const MAX_RETRIES = 3;
+    // Process tasks sequentially in batches to avoid Google rate limits
+    // Google Tasks API has a per-minute rate limit (~200 req/min for mutations)
+    const BATCH_SIZE = 40; // Process 40 tasks per batch
+    const BATCH_DELAY = 3000; // 3 second pause between batches
+    const MAX_RETRIES = 5;
     const SAVE_INTERVAL = 50; // Save progress every 50 completed tasks
     let taskIndex = 0;
     let completedSinceLastSave = 0;
@@ -723,7 +725,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     // Combine tasks - updates first (more important)
     const allTasksToProcess = [...tasksToUpdate, ...tasksToCreate];
 
-    logger.info('[Google Tasks] Processing tasks', { userId: req.user.id, total: allTasksToProcess.length, concurrency: CONCURRENCY });
+    logger.info('[Google Tasks] Processing tasks', { userId: req.user.id, total: allTasksToProcess.length, batchSize: BATCH_SIZE });
 
     // Sleep helper
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -768,8 +770,9 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         } catch (error) {
           const code = error.code || error.response?.status;
           if ((code === 429 || code === 403) && attempt < MAX_RETRIES) {
-            // Exponential backoff: 1s, 2s, 4s
-            const delay = Math.pow(2, attempt) * 1000;
+            // Aggressive exponential backoff: 3s, 6s, 12s, 24s, 48s
+            const delay = Math.pow(2, attempt) * 3000;
+            logger.debug('[Google Tasks] Rate limited, waiting', { taskId: task.id, attempt: attempt + 1, delay });
             await sleep(delay);
             continue;
           }
@@ -782,9 +785,8 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       }
     };
 
-    // Run with concurrency pool - process results immediately as they complete
-    const executing = new Set();
     let successCount = 0;
+    let consecutiveRateLimits = 0;
 
     // Process a single result immediately
     const handleResult = (result) => {
@@ -794,6 +796,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
         successCount++;
         completedSinceLastSave++;
+        consecutiveRateLimits = 0; // Reset on success
         if (result.action === 'created' || result.action === 'recreated') {
           synced++;
         } else {
@@ -801,50 +804,74 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         }
       } else if (result.error === 'rate_limit') {
         rateLimitCount++;
-        skipped++;
+        errors++;
+        consecutiveRateLimits++;
       } else {
         errors++;
+        consecutiveRateLimits = 0;
       }
     };
 
     // Periodic save to prevent data loss on timeout
-    const saveProgressIfNeeded = async () => {
-      if (completedSinceLastSave >= SAVE_INTERVAL) {
-        try {
-          await user.save();
-          logger.info('[Google Tasks] Progress saved', { synced, updated, successCount });
-          completedSinceLastSave = 0;
-        } catch (saveErr) {
-          logger.error('[Google Tasks] Progress save failed', { error: saveErr.message });
-        }
+    const saveProgress = async () => {
+      try {
+        await user.save();
+        logger.info('[Google Tasks] Progress saved', { synced, updated, successCount });
+        completedSinceLastSave = 0;
+      } catch (saveErr) {
+        logger.error('[Google Tasks] Progress save failed', { error: saveErr.message });
       }
     };
 
-    for (const task of allTasksToProcess) {
+    // Process in batches with delays between them
+    for (let batchStart = 0; batchStart < allTasksToProcess.length; batchStart += BATCH_SIZE) {
       // Check timeout
       if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
-        skipped += allTasksToProcess.length - taskIndex;
-        logger.warn('[Google Tasks] Timeout reached', { processed: taskIndex, total: allTasksToProcess.length });
+        skipped += allTasksToProcess.length - batchStart;
+        logger.warn('[Google Tasks] Timeout reached', { processed: batchStart, total: allTasksToProcess.length });
         break;
       }
 
-      const promise = processTask(task).then(result => {
-        executing.delete(promise);
-        handleResult(result);
-        return result;
-      });
-      executing.add(promise);
-      taskIndex++;
+      // If we hit many consecutive rate limits, increase delay significantly
+      if (consecutiveRateLimits >= 10) {
+        logger.warn('[Google Tasks] Too many rate limits, pausing 30s', { consecutiveRateLimits });
+        await sleep(30000);
+        consecutiveRateLimits = 0;
+      }
 
-      // When pool is full, wait for one to finish and save if needed
-      if (executing.size >= CONCURRENCY) {
-        await Promise.race(executing);
-        await saveProgressIfNeeded();
+      const batch = allTasksToProcess.slice(batchStart, batchStart + BATCH_SIZE);
+
+      // Process batch sequentially (one at a time) to respect rate limits
+      for (const task of batch) {
+        if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+          skipped++;
+          continue;
+        }
+        const result = await processTask(task);
+        handleResult(result);
+        taskIndex++;
+
+        // Small delay between individual requests (100ms) to stay under rate limit
+        await sleep(100);
+      }
+
+      // Save progress after each batch
+      if (completedSinceLastSave > 0) {
+        await saveProgress();
+      }
+
+      // Pause between batches (if more batches remain)
+      if (batchStart + BATCH_SIZE < allTasksToProcess.length) {
+        logger.info('[Google Tasks] Batch complete, pausing', {
+          processed: Math.min(batchStart + BATCH_SIZE, allTasksToProcess.length),
+          total: allTasksToProcess.length,
+          synced,
+          updated,
+          errors
+        });
+        await sleep(BATCH_DELAY);
       }
     }
-
-    // Wait for remaining tasks
-    const remaining = await Promise.all(executing);
 
     incrementQuota(user, successCount);
 
