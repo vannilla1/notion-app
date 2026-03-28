@@ -29,6 +29,25 @@ function AppContent() {
     }
   }, [isAuthenticated]);
 
+  // Block background scroll when any modal is open (fixes iOS scroll-through)
+  useEffect(() => {
+    let scrollY = 0;
+    const observer = new MutationObserver(() => {
+      const hasModal = document.querySelector('.modal-overlay');
+      if (hasModal && !document.body.classList.contains('modal-open')) {
+        scrollY = window.scrollY;
+        document.body.classList.add('modal-open');
+        document.body.style.top = `-${scrollY}px`;
+      } else if (!hasModal && document.body.classList.contains('modal-open')) {
+        document.body.classList.remove('modal-open');
+        document.body.style.top = '';
+        window.scrollTo(0, scrollY);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   // Handle URL query params for deep linking from push notifications
   // Store pending navigation while not authenticated
   useEffect(() => {
