@@ -124,6 +124,7 @@ struct WebView: UIViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = true
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 99/255, green: 102/255, blue: 241/255, alpha: 1)
 
