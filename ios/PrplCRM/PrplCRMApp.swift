@@ -8,7 +8,7 @@ struct PrplCRMApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .environmentObject(appDelegate.pushManager)
         }
     }
