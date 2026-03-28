@@ -341,26 +341,32 @@ function Messages() {
           </div>
 
           {/* Tabs */}
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '0' }}>
+          <div style={{ display: 'flex', gap: '0', marginBottom: '12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '3px', border: '1px solid var(--border-color)' }}>
             <button
               onClick={() => { setTab('received'); setSelectedMessage(null); }}
               style={{
-                padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 500,
-                borderBottom: tab === 'received' ? '2px solid var(--accent-color)' : '2px solid transparent',
-                color: tab === 'received' ? 'var(--accent-color)' : 'var(--text-secondary)'
+                flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                borderRadius: 'calc(var(--radius-md) - 2px)',
+                background: tab === 'received' ? 'var(--accent-color)' : 'transparent',
+                color: tab === 'received' ? 'white' : 'var(--text-secondary)',
+                transition: 'all 0.2s ease',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              Prijaté {pendingCount > 0 && tab !== 'received' && <span style={{ color: 'var(--danger)' }}>({pendingCount})</span>}
+              📥 Prijaté {pendingCount > 0 && <span style={{ background: tab === 'received' ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white', borderRadius: '10px', padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>{pendingCount}</span>}
             </button>
             <button
               onClick={() => { setTab('sent'); setSelectedMessage(null); }}
               style={{
-                padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 500,
-                borderBottom: tab === 'sent' ? '2px solid var(--accent-color)' : '2px solid transparent',
-                color: tab === 'sent' ? 'var(--accent-color)' : 'var(--text-secondary)'
+                flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                borderRadius: 'calc(var(--radius-md) - 2px)',
+                background: tab === 'sent' ? 'var(--accent-color)' : 'transparent',
+                color: tab === 'sent' ? 'white' : 'var(--text-secondary)',
+                transition: 'all 0.2s ease',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              Odoslané
+              📤 Odoslané
             </button>
           </div>
 
