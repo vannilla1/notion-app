@@ -1,5 +1,46 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="96" fill="#6366F1"/>
-  <path d="M256 128C185.3 128 128 185.3 128 256C128 326.7 185.3 384 256 384C326.7 384 384 326.7 384 256C384 185.3 326.7 128 256 128ZM256 352C203.1 352 160 308.9 160 256C160 203.1 203.1 160 256 160C308.9 160 352 203.1 352 256C352 308.9 308.9 352 256 352Z" fill="white"/>
-  <circle cx="256" cy="256" r="48" fill="white"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5b6af0"/>
+      <stop offset="40%" stop-color="#7c5ce6"/>
+      <stop offset="100%" stop-color="#a855d8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="256" cy="256" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.15)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- Center glow -->
+  <circle cx="256" cy="256" r="210" fill="url(#glow)"/>
+
+  <!-- Dotted orbital ring -->
+  <circle cx="256" cy="256" r="184" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="5" stroke-dasharray="17,22"/>
+
+  <!-- Sparkle stars at cardinal positions -->
+  <path d="M256 60 L260 76 L272 80 L260 84 L256 100 L252 84 L240 80 L252 76Z" fill="rgba(255,255,255,0.9)"/>
+  <path d="M440 252 L444 268 L456 272 L444 276 L440 292 L436 276 L424 272 L436 268Z" fill="rgba(255,255,255,0.7)"/>
+  <path d="M256 416 L260 432 L272 436 L260 440 L256 456 L252 440 L240 436 L252 432Z" fill="rgba(255,255,255,0.8)"/>
+  <path d="M60 244 L64 260 L76 264 L64 268 L60 284 L56 268 L44 264 L56 260Z" fill="rgba(255,255,255,0.7)"/>
+
+  <!-- Diagonal sparkles -->
+  <path d="M392 100 L395 112 L404 115 L395 118 L392 130 L389 118 L380 115 L389 112Z" fill="rgba(255,255,255,0.6)"/>
+  <path d="M408 176 L410 184 L416 186 L410 188 L408 196 L406 188 L400 186 L406 184Z" fill="rgba(255,255,255,0.5)"/>
+  <path d="M108 388 L110 396 L116 398 L110 400 L108 408 L106 400 L100 398 L106 396Z" fill="rgba(255,255,255,0.5)"/>
+
+  <!-- Glow dots on orbital ring -->
+  <circle cx="256" cy="72" r="14" fill="rgba(255,255,255,0.8)"/>
+  <circle cx="440" cy="256" r="12" fill="rgba(255,255,255,0.6)"/>
+  <circle cx="256" cy="440" r="12" fill="rgba(255,255,255,0.7)"/>
+  <circle cx="72" cy="256" r="12" fill="rgba(255,255,255,0.6)"/>
+  <circle cx="380" cy="110" r="9" fill="rgba(255,255,255,0.5)"/>
+  <circle cx="110" cy="380" r="9" fill="rgba(255,255,255,0.5)"/>
+  <circle cx="386" cy="386" r="7" fill="rgba(255,255,255,0.4)"/>
+  <circle cx="126" cy="126" r="7" fill="rgba(255,255,255,0.4)"/>
+
+  <!-- Letter P -->
+  <text x="256" y="344" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="240" fill="white" letter-spacing="-4">P</text>
 </svg>
