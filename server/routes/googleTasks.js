@@ -893,8 +893,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
           globalTask.modifiedAt = new Date().toISOString();
           await globalTask.save();
           completedFromGoogle++;
-          if (io) {
-            io.emit('task-updated', { ...globalTask.toObject(), id: globalTask._id.toString(), source: 'global' });
+          if (io && globalTask.workspaceId) {
+            io.to(`workspace-${globalTask.workspaceId}`).emit('task-updated', { ...globalTask.toObject(), id: globalTask._id.toString(), source: 'global' });
           }
           continue;
         }
@@ -910,9 +910,9 @@ router.post('/sync', authenticateToken, async (req, res) => {
               contact.markModified('tasks');
               await contact.save();
               completedFromGoogle++;
-              if (io) {
-                io.emit('contact-updated', contact.toObject());
-                io.emit('task-updated', { ...contact.tasks[taskIndex], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+              if (io && contact.workspaceId) {
+                io.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+                io.to(`workspace-${contact.workspaceId}`).emit('task-updated', { ...contact.tasks[taskIndex], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
               }
               break;
             }
@@ -929,8 +929,8 @@ router.post('/sync', authenticateToken, async (req, res) => {
               parentTask.markModified('subtasks');
               await parentTask.save();
               completedFromGoogle++;
-              if (io) {
-                io.emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
+              if (io && parentTask.workspaceId) {
+                io.to(`workspace-${parentTask.workspaceId}`).emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
               }
               break;
             }
@@ -1382,8 +1382,8 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
         });
 
         // Emit socket event
-        if (io) {
-          io.emit('task-updated', {
+        if (io && globalTask.workspaceId) {
+          io.to(`workspace-${globalTask.workspaceId}`).emit('task-updated', {
             ...globalTask.toObject(),
             id: globalTask._id.toString(),
             source: 'global'
@@ -1416,9 +1416,9 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
           });
 
           // Emit socket events
-          if (io) {
-            io.emit('contact-updated', contact.toObject());
-            io.emit('task-updated', {
+          if (io && contact.workspaceId) {
+            io.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+            io.to(`workspace-${contact.workspaceId}`).emit('task-updated', {
               ...contact.tasks[taskIndex],
               contactId: contact._id.toString(),
               contactName: contact.name,

@@ -25,6 +25,7 @@ const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
+const WorkspaceMember = require('./models/WorkspaceMember');
 const logger = require('./utils/logger');
 const { initSentry } = require('./utils/sentry');
 
@@ -131,11 +132,22 @@ app.use((err, req, res, next) => {
 // Socket.io for real-time collaboration
 io.use(authenticateSocket);
 
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   logger.socket('connected', socket.user.id, socket.user.username);
 
   // Join user's personal room for private updates
   socket.join(`user-${socket.user.id}`);
+
+  // Join all workspace rooms the user belongs to
+  try {
+    const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
+    for (const m of memberships) {
+      socket.join(`workspace-${m.workspaceId}`);
+    }
+    logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
+  } catch (err) {
+    logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
+  }
 
   socket.on('join-page', (pageId) => {
     socket.join(`page-${pageId}`);

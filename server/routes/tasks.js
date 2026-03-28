@@ -966,7 +966,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       taskObj.assignedTo = (task.assignedTo || []).map(id => id.toString());
       taskObj.assignedUsers = assignedUsers;
 
-      io.emit('task-created', taskObj);
+      io.to(`workspace-${req.workspaceId}`).emit('task-created', taskObj);
 
       // Auto-sync to Google Calendar
       autoSyncToGoogle(taskObj, 'create');
@@ -1031,12 +1031,12 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     // Emit updates for all affected contacts
     for (const contact of updatedContacts) {
-      io.emit('contact-updated', contactToPlainObject(contact));
+      io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
     }
 
     // Emit task-created for each new task so Tasks view updates in real-time
     for (const task of createdTasks) {
-      io.emit('task-created', task);
+      io.to(`workspace-${req.workspaceId}`).emit('task-created', task);
       // Auto-sync to Google Calendar
       autoSyncToGoogle(task, 'create');
 
@@ -1149,7 +1149,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
             const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
             const taskData = taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
@@ -1157,7 +1157,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               source: 'contact',
               assignedUsers
             });
-            io.emit('task-updated', taskData);
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
 
             // Auto-sync to Google Calendar
             autoSyncToGoogle(taskData, 'update');
@@ -1287,7 +1287,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         assignedUsers
       });
 
-      io.emit('task-updated', taskData);
+      io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
 
       // Auto-sync to Google Calendar
       autoSyncToGoogle(taskData, 'update');
@@ -1355,7 +1355,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          io.emit('contact-updated', contactToPlainObject(contact));
+          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
           const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
           const taskData = taskToPlainObject(contact.tasks[taskIndex], {
             contactId: contact._id.toString(),
@@ -1363,7 +1363,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             source: 'contact',
             assignedUsers
           });
-          io.emit('task-updated', taskData);
+          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
 
           // Auto-sync to Google Calendar
           autoSyncToGoogle(taskData, 'update');
@@ -1430,8 +1430,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-deleted', { id: req.params.id, source: 'contact' });
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
             // Auto-delete from Google Calendar
             autoDeleteFromGoogle(req.params.id);
@@ -1449,7 +1449,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Try to delete from global tasks first
     const task = await Task.findByIdAndDelete(req.params.id);
     if (task) {
-      io.emit('task-deleted', { id: req.params.id, source: 'global' });
+      io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'global' });
 
       // Auto-delete from Google Calendar
       autoDeleteFromGoogle(req.params.id);
@@ -1471,8 +1471,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           contact.markModified('tasks');
           await contact.save();
 
-          io.emit('contact-updated', contactToPlainObject(contact));
-          io.emit('task-deleted', { id: req.params.id, source: 'contact' });
+          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+          io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
           // Auto-delete from Google Calendar
           autoDeleteFromGoogle(req.params.id);
@@ -1583,7 +1583,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
       taskObj.contactName = null;
       taskObj.source = 'global';
 
-      io.emit('task-created', taskObj);
+      io.to(`workspace-${req.workspaceId}`).emit('task-created', taskObj);
 
       return res.status(201).json({ duplicatedCount: 1, tasks: [taskObj] });
     }
@@ -1625,7 +1625,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     // Emit updates for all affected contacts
     for (const contact of updatedContacts) {
-      io.emit('contact-updated', contactToPlainObject(contact));
+      io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
     }
 
     res.status(201).json({
@@ -1703,8 +1703,8 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
@@ -1745,7 +1745,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
         task.markModified('subtasks');
         await task.save();
 
-        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+        io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
         // Auto-sync subtask to Google
         autoSyncToGoogle({
@@ -1783,8 +1783,8 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
@@ -1866,8 +1866,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
@@ -1911,8 +1911,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
                 contact.tasks[taskIndex].completed = true;
                 contact.markModified('tasks');
                 await contact.save();
-                io.emit('contact-updated', contactToPlainObject(contact));
-                io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+                io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+                io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
                 logger.info('[Auto-complete] Project auto-completed (contact)', { taskId: req.params.taskId });
               }
 
@@ -1932,7 +1932,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
         task.markModified('subtasks');
         await task.save();
 
-        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+        io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
         // Auto-sync subtask to Google
         autoSyncToGoogle({
@@ -1972,7 +1972,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           task.completed = true;
           task.markModified('subtasks');
           await task.save();
-          io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
           logger.info('[Auto-complete] Project auto-completed (global)', { taskId: task._id.toString() });
         }
 
@@ -1992,8 +1992,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
@@ -2037,8 +2037,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               contact.tasks[taskIndex].completed = true;
               contact.markModified('tasks');
               await contact.save();
-              io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
               logger.info('[Auto-complete] Project auto-completed (fallback contact)', { taskId: req.params.taskId });
             }
 
@@ -2102,8 +2102,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
               contact.markModified('tasks');
               await contact.save();
 
-              io.emit('contact-updated', contactToPlainObject(contact));
-              io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
                 contactId: contact._id.toString(),
                 contactName: contact.name,
                 source: 'contact'
@@ -2142,7 +2142,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
         task.markModified('subtasks');
         await task.save();
 
-        io.emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+        io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
 
         // Send notifications for deleted subtask and all nested subtasks
         await sendDeleteNotifications(deletedSubtask, task);
@@ -2165,8 +2165,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
             contact.markModified('tasks');
             await contact.save();
 
-            io.emit('contact-updated', contactToPlainObject(contact));
-            io.emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'

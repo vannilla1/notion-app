@@ -2,12 +2,14 @@ const mongoose = require('mongoose');
 const notificationService = require('../services/notificationService');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const WorkspaceMember = require('../models/WorkspaceMember');
 
 describe('NotificationService', () => {
   let mockIo;
   let testUser1;
   let testUser2;
   let testUser3;
+  let testWorkspaceId;
 
   beforeEach(async () => {
     // Create mock Socket.IO
@@ -16,6 +18,8 @@ describe('NotificationService', () => {
       emit: jest.fn()
     };
     notificationService.initialize(mockIo);
+
+    testWorkspaceId = new mongoose.Types.ObjectId();
 
     // Create test users
     testUser1 = await User.create({
@@ -35,6 +39,13 @@ describe('NotificationService', () => {
       email: 'test3@test.com',
       password: 'hashedpassword123'
     });
+
+    // Add all users to the same workspace
+    await WorkspaceMember.create([
+      { workspaceId: testWorkspaceId, userId: testUser1._id, role: 'owner' },
+      { workspaceId: testWorkspaceId, userId: testUser2._id, role: 'member' },
+      { workspaceId: testWorkspaceId, userId: testUser3._id, role: 'member' }
+    ]);
   });
 
   describe('getNotificationTitle', () => {
@@ -184,14 +195,15 @@ describe('NotificationService', () => {
   });
 
   describe('notifyAllExcept', () => {
-    it('should notify all users except the actor', async () => {
+    it('should notify all workspace members except the actor', async () => {
       const notifications = await notificationService.notifyAllExcept(
         testUser1._id,
         {
           type: 'contact.created',
           title: 'Nový kontakt od user1',
           actorName: 'testuser1'
-        }
+        },
+        testWorkspaceId
       );
 
       // Should notify user2 and user3, but not user1
@@ -202,10 +214,22 @@ describe('NotificationService', () => {
       expect(recipientIds).toContain(testUser3._id.toString());
       expect(recipientIds).not.toContain(testUser1._id.toString());
     });
+
+    it('should return empty if no workspaceId provided', async () => {
+      const notifications = await notificationService.notifyAllExcept(
+        testUser1._id,
+        {
+          type: 'contact.created',
+          title: 'Test',
+          actorName: 'testuser1'
+        }
+      );
+      expect(notifications).toHaveLength(0);
+    });
   });
 
   describe('notifyContactChange', () => {
-    it('should notify all except actor for contact changes', async () => {
+    it('should notify workspace members except actor for contact changes', async () => {
       const contact = {
         _id: new mongoose.Types.ObjectId(),
         name: 'Firma ABC'
@@ -219,7 +243,8 @@ describe('NotificationService', () => {
       const notifications = await notificationService.notifyContactChange(
         'contact.created',
         contact,
-        actor
+        actor,
+        testWorkspaceId
       );
 
       expect(notifications).toHaveLength(2);
@@ -235,10 +260,24 @@ describe('NotificationService', () => {
       const notifications = await notificationService.notifyContactChange(
         'contact.deleted',
         contact,
-        actor
+        actor,
+        testWorkspaceId
       );
 
       expect(notifications[0].title).toBe('Peter vymazal kontakt: Test');
+    });
+
+    it('should return empty without workspaceId', async () => {
+      const contact = { _id: new mongoose.Types.ObjectId(), name: 'Test' };
+      const actor = { _id: testUser1._id, username: 'Peter' };
+
+      const notifications = await notificationService.notifyContactChange(
+        'contact.created',
+        contact,
+        actor
+      );
+
+      expect(notifications).toHaveLength(0);
     });
   });
 

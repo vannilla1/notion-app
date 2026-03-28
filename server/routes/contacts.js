@@ -217,10 +217,10 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     const io = req.app.get('io');
     const contactData = contactToPlainObject(contact);
-    io.emit('contact-created', contactData);
+    io.to(`workspace-${req.workspaceId}`).emit('contact-created', contactData);
 
-    // Send notification to all users except creator
-    notificationService.notifyContactChange('contact.created', contact, req.user);
+    // Send notification to workspace members except creator
+    notificationService.notifyContactChange('contact.created', contact, req.user, req.workspaceId);
 
     res.status(201).json(contactData);
   } catch (error) {
@@ -255,10 +255,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     const io = req.app.get('io');
     const contactData = contactToPlainObject(contact);
-    io.emit('contact-updated', contactData);
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactData);
 
-    // Send notification to all users except updater
-    notificationService.notifyContactChange('contact.updated', contact, req.user);
+    // Send notification to workspace members except updater
+    notificationService.notifyContactChange('contact.updated', contact, req.user, req.workspaceId);
 
     res.json(contactData);
   } catch (error) {
@@ -283,10 +283,10 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     await Contact.findByIdAndDelete(req.params.id);
 
     const io = req.app.get('io');
-    io.emit('contact-deleted', { id: req.params.id });
+    io.to(`workspace-${req.workspaceId}`).emit('contact-deleted', { id: req.params.id });
 
-    // Send notification to all users except deleter
-    notificationService.notifyContactChange('contact.deleted', contactData, req.user);
+    // Send notification to workspace members except deleter
+    notificationService.notifyContactChange('contact.deleted', contactData, req.user, req.workspaceId);
 
     res.json({ message: 'Contact deleted' });
   } catch (error) {
@@ -330,7 +330,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(task);
   } catch (error) {
@@ -377,7 +377,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
@@ -407,7 +407,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -493,7 +493,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.status(201).json(subtask);
   } catch (error) {
@@ -545,7 +545,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.json(found.parent[found.index]);
   } catch (error) {
@@ -583,7 +583,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
@@ -631,7 +631,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       const io = req.app.get('io');
       if (io) {
-        io.emit('contact-updated', contactToPlainObject(contact));
+        io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
       }
 
       // Don't send the data field back to client (too large)
@@ -701,7 +701,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
     await contact.save();
 
     const io = req.app.get('io');
-    io.emit('contact-updated', contactToPlainObject(contact));
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
     res.json({ message: 'File deleted' });
   } catch (error) {

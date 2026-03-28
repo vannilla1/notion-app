@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
 const webpush = require('web-push');
@@ -401,15 +402,24 @@ const notifyUsers = async (userIds, notificationData) => {
 };
 
 /**
- * Notify all users except the actor
+ * Notify all workspace members except the actor
+ * @param {string} excludeUserId - User ID to exclude (the actor)
+ * @param {string} workspaceId - Workspace ID to filter members
+ * @param {Object} notificationData - Notification payload
  */
-const notifyAllExcept = async (excludeUserId, notificationData) => {
+const notifyAllExcept = async (excludeUserId, notificationData, workspaceId) => {
   try {
-    const users = await User.find({ _id: { $ne: excludeUserId } }, '_id').lean();
-    const userIds = users.map(u => u._id.toString());
+    if (!workspaceId) {
+      logger.warn('[NotificationService] notifyAllExcept called without workspaceId, skipping');
+      return [];
+    }
+    const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+    const userIds = members
+      .map(m => m.userId.toString())
+      .filter(id => id !== excludeUserId?.toString());
     return await notifyUsers(userIds, notificationData);
   } catch (error) {
-    logger.error('[NotificationService] Error notifying all users', { error: error.message });
+    logger.error('[NotificationService] Error notifying workspace members', { error: error.message, workspaceId });
     return [];
   }
 };
@@ -518,8 +528,13 @@ const getNotificationMessage = (type, actorName, data = {}) => {
 
 /**
  * Helper to create contact notification
+ * @param {string} type - Notification type
+ * @param {Object} contact - Contact object
+ * @param {Object} actor - User who performed the action
+ * @param {string} workspaceId - Workspace ID to filter recipients
+ * @param {boolean} excludeActorId - Whether to exclude the actor from recipients
  */
-const notifyContactChange = async (type, contact, actor, excludeActorId = true) => {
+const notifyContactChange = async (type, contact, actor, workspaceId, excludeActorId = true) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, contact.name);
   const message = getNotificationMessage(type, actorName, {});
@@ -536,11 +551,16 @@ const notifyContactChange = async (type, contact, actor, excludeActorId = true) 
     data: { contactId: contact._id?.toString() || contact.id }
   };
 
+  if (!workspaceId) {
+    logger.warn('[NotificationService] notifyContactChange called without workspaceId, skipping');
+    return [];
+  }
+
   if (excludeActorId && actor) {
-    return await notifyAllExcept(actor._id || actor.id, notificationData);
+    return await notifyAllExcept(actor._id || actor.id, notificationData, workspaceId);
   } else {
-    const users = await User.find({}, '_id').lean();
-    return await notifyUsers(users.map(u => u._id.toString()), notificationData);
+    const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+    return await notifyUsers(members.map(m => m.userId.toString()), notificationData);
   }
 };
 
