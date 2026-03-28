@@ -2025,9 +2025,6 @@ body {
   display: none;
 }
 
-.ios-app .crm-header {
-  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
-}
 
 .ios-app .add-subtask-submit {
   width: auto;
@@ -5034,7 +5031,7 @@ a.detail-value:hover {
 /* Safe area support for iPhone X and newer */
 @supports (padding: env(safe-area-inset-bottom)) {
   .crm-header {
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
   }
   
   .crm-sidebar {
