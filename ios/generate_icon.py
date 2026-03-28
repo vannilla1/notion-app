@@ -93,34 +93,33 @@ def create_icon():
         draw.ellipse([nx - ns//2, ny - ns//2, nx + ns//2, ny + ns//2],
                      fill=(255, 255, 255, 180))
 
-    # === Central monogram "P" — clean geometric ===
+    # === Central monogram "P" — clean, sharp, bold ===
 
     # P stem — thick rounded bar
-    stem_w = 100
-    stem_x = cx - 120
-    stem_top = cy - 340
-    stem_bot = cy + 340
+    stem_w = 120
+    stem_x = cx - 140
+    stem_top = cy - 360
+    stem_bot = cy + 360
     draw.rounded_rectangle(
         [stem_x, stem_top, stem_x + stem_w, stem_bot],
         radius=stem_w // 2,
-        fill=(255, 255, 255, 245)
+        fill=(255, 255, 255, 255)
     )
 
     # P bowl — thick arc using ellipse outlines
     bowl_cx = stem_x + stem_w - 10
-    bowl_cy = stem_top + 280
-    bowl_w = 340
-    bowl_h = 300
-    arc_thickness = 95
+    bowl_cy = stem_top + 300
+    bowl_w = 380
+    bowl_h = 320
+    arc_thickness = 115
 
     # Draw P bowl as thick arc (right half of ellipse)
-    # Outer ellipse
     outer = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     outer_draw = ImageDraw.Draw(outer)
     outer_draw.ellipse(
         [bowl_cx - bowl_w, bowl_cy - bowl_h,
          bowl_cx + bowl_w, bowl_cy + bowl_h],
-        fill=(255, 255, 255, 245)
+        fill=(255, 255, 255, 255)
     )
 
     # Cut inner ellipse
@@ -141,18 +140,6 @@ def create_icon():
 
     img = Image.alpha_composite(img, outer)
     draw = ImageDraw.Draw(img)
-
-    # === Three data lines (CRM/list symbol) ===
-    lines_x = cx + 80
-    lines_y = cy + 100
-    line_specs = [(200, 12, 160), (160, 12, 120), (110, 12, 80)]
-    for i, (length, height, opacity) in enumerate(line_specs):
-        y = lines_y + i * 50
-        draw.rounded_rectangle(
-            [lines_x, y, lines_x + length, y + height],
-            radius=height // 2,
-            fill=(255, 255, 255, opacity)
-        )
 
     # === Sparkle accents ===
     def draw_sparkle(x, y, size, alpha):
