@@ -2762,11 +2762,33 @@ body {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
+.user-menu-trigger .user-menu-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  min-width: 0;
+}
+
 .user-menu-trigger .user-name {
   font-size: 14px;
   font-weight: 600;
   color: white;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.user-menu-trigger .user-email {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
 }
 
 .user-menu-trigger .dropdown-arrow {
@@ -3190,12 +3212,12 @@ body {
 
 /* User Menu responsive */
 @media (max-width: 768px) {
-  .user-menu-trigger .user-name {
+  .user-menu-trigger .user-email {
     display: none;
   }
 
   .user-menu-trigger {
-    padding: 4px 10px 4px 4px;
+    padding: 4px 12px 4px 4px;
   }
 
   .user-menu-dropdown {
@@ -6948,11 +6970,11 @@ a.detail-value:hover {
 
   .user-avatar,
   .user-avatar-img {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
   }
 
-  .user-name {
+  .user-menu-trigger .user-email {
     display: none;
   }
 
@@ -8201,8 +8223,8 @@ a.detail-value:hover {
   }
 
   .user-menu-trigger {
-    padding: 4px 10px 4px 4px !important;
-    gap: 6px !important;
+    padding: 4px 12px 4px 4px !important;
+    gap: 8px !important;
     background: rgba(255, 255, 255, 0.15) !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
     border-radius: 50px !important;
@@ -8214,14 +8236,37 @@ a.detail-value:hover {
 
   .user-menu-trigger .user-avatar,
   .user-menu-trigger .user-avatar-img {
-    width: 32px !important;
-    height: 32px !important;
+    width: 34px !important;
+    height: 34px !important;
     border-radius: 50% !important;
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35) !important;
   }
 
+  .user-menu-trigger .user-menu-info {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
   .user-menu-trigger .user-name {
-    display: none !important;
+    display: block !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: white !important;
+    max-width: 120px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .user-menu-trigger .user-email {
+    display: block !important;
+    font-size: 10px !important;
+    color: rgba(255, 255, 255, 0.6) !important;
+    max-width: 120px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
 
   /* Keep dropdown arrow visible so user knows it's clickable */

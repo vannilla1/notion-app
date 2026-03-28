@@ -768,7 +768,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             {getInitials(user?.username)}
           </div>
         )}
-        <span className="user-name">{user?.username}</span>
+        <div className="user-menu-info">
+          <span className="user-name">{user?.username}</span>
+          <span className="user-email">{user?.email}</span>
+        </div>
         <span className="dropdown-arrow">{isOpen ? '▲' : '▼'}</span>
       </button>
 
