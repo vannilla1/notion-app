@@ -2723,47 +2723,56 @@ body {
 .user-menu-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
+  gap: 10px;
+  padding: 5px 14px 5px 5px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50px;
   cursor: pointer;
-  transition: var(--transition);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .user-menu-trigger:hover {
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .user-menu-trigger .user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
 .user-menu-trigger .user-avatar-img {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
   object-fit: cover;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
 .user-menu-trigger .user-name {
   font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
+  font-weight: 600;
+  color: white;
+  letter-spacing: 0.01em;
 }
 
 .user-menu-trigger .dropdown-arrow {
-  font-size: 10px;
-  color: var(--text-secondary);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.7);
+  transition: transform 0.2s ease;
 }
 
 .user-menu-dropdown {
@@ -3186,7 +3195,7 @@ body {
   }
 
   .user-menu-trigger {
-    padding: 6px 8px;
+    padding: 4px 10px 4px 4px;
   }
 
   .user-menu-dropdown {
@@ -8192,17 +8201,23 @@ a.detail-value:hover {
   }
 
   .user-menu-trigger {
-    padding: 4px 8px !important;
-    gap: 4px !important;
+    padding: 4px 10px 4px 4px !important;
+    gap: 6px !important;
     background: rgba(255, 255, 255, 0.15) !important;
-    border-radius: var(--radius) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 50px !important;
     display: flex !important;
     align-items: center !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
   }
 
-  .user-menu-trigger .user-avatar {
-    width: 26px !important;
-    height: 26px !important;
+  .user-menu-trigger .user-avatar,
+  .user-menu-trigger .user-avatar-img {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35) !important;
   }
 
   .user-menu-trigger .user-name {
@@ -8213,8 +8228,8 @@ a.detail-value:hover {
   .user-menu-trigger .dropdown-arrow {
     display: inline !important;
     font-size: 8px !important;
-    color: white !important;
-    margin-left: 2px !important;
+    color: rgba(255, 255, 255, 0.7) !important;
+    margin-left: 0 !important;
   }
 
   /* Hide workspace switcher on mobile - it causes overlap with header title */
