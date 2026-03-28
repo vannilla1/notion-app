@@ -2038,7 +2038,7 @@ function Tasks() {
             className="btn btn-secondary"
             onClick={() => navigate('/messages')}
           >
-            ✉ Správy
+            Správy
           </button>
           <UserMenu
             user={user}

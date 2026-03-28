@@ -538,7 +538,7 @@ function Dashboard() {
             className="btn btn-secondary"
             onClick={() => navigate('/messages')}
           >
-            ✉ Správy
+            Správy
           </button>
           <UserMenu
             user={user}
@@ -689,7 +689,7 @@ function Dashboard() {
               onClick={() => navigate('/messages')}
               style={{ width: '100%' }}
             >
-              ✉ Správy
+              Správy
             </button>
           </div>
         </aside>
