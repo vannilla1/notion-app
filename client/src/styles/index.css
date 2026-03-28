@@ -2025,6 +2025,10 @@ body {
   display: none;
 }
 
+.ios-app .crm-header {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+}
+
 .ios-app .add-subtask-submit {
   width: auto;
   height: auto;
