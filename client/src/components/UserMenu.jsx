@@ -1090,7 +1090,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
-              {/* Push Notifications */}
+              {/* Push Notifications — hidden in native iOS app (uses APNs instead) */}
+              {!document.body.classList.contains('ios-app') && (
               <div className="calendar-section push-notifications-section">
                 <h3>🔔 Push notifikácie</h3>
                 <p className="section-description">
@@ -1098,6 +1099,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 </p>
                 <PushNotificationToggle />
               </div>
+              )}
 
               {/* Google Calendar - Okamžitá synchronizácia */}
               <div className="calendar-section google-calendar-section">
