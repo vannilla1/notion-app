@@ -1711,13 +1711,134 @@ const autoDeleteTaskFromGoogleTasks = async (taskId) => {
   await autoSyncTaskToGoogleTasks({ id: taskId }, 'delete');
 };
 
-// ==================== BACKGROUND POLLING: Google Tasks → CRM ====================
-// Polls Google Tasks every 60s for completed tasks and syncs back to CRM
+// ==================== BACKGROUND POLLING: Google Tasks ↔ CRM ====================
+// Polls Google Tasks every 30s for ALL changes and syncs bidirectionally
 
 let pollingInterval = null;
 let pollingIo = null; // Socket.IO instance for emitting updates
 
-const pollGoogleTasksCompleted = async () => {
+/**
+ * Apply a single Google Task change to the CRM (completion, title, due date).
+ * Returns true if a CRM task was updated.
+ */
+const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
+  const isCompleted = googleTask.status === 'completed';
+  const googleTitle = (googleTask.title || '').trim();
+  // Google Tasks due is RFC3339 date string like "2026-03-28T00:00:00.000Z"
+  const googleDue = googleTask.due ? googleTask.due.split('T')[0] : null;
+  const isDeleted = googleTask.deleted === true;
+
+  // Try global task first
+  let task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+  let contact = null;
+  let taskIndex = -1;
+
+  if (!task) {
+    // Search in contacts
+    contact = await Contact.findOne({
+      'tasks.id': crmTaskId,
+      ...(wsId ? { workspaceId: wsId } : {})
+    });
+    if (contact) {
+      taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+      if (taskIndex !== -1) task = contact.tasks[taskIndex];
+    }
+  }
+
+  if (!task) {
+    // Check subtasks in global tasks
+    const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+    for (const parentTask of parentTasks) {
+      const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
+      if (subtask) {
+        let changed = false;
+        if (isCompleted && !subtask.completed) {
+          subtask.completed = true;
+          changed = true;
+        }
+        if (changed) {
+          parentTask.markModified('subtasks');
+          await parentTask.save();
+          if (pollingIo && parentTask.workspaceId) {
+            pollingIo.to(`workspace-${parentTask.workspaceId}`).emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Deleted in Google — remove mapping (don't delete CRM task)
+  if (isDeleted) return false;
+
+  // Compare and apply changes
+  let changed = false;
+  const crmDue = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
+
+  // Completion
+  if (isCompleted && !task.completed) {
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].completed = true;
+    else task.completed = true;
+    changed = true;
+  } else if (!isCompleted && task.completed) {
+    // Un-completed in Google
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].completed = false;
+    else task.completed = false;
+    changed = true;
+  }
+
+  // Title
+  if (googleTitle && googleTitle !== task.title) {
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].title = googleTitle;
+    else task.title = googleTitle;
+    changed = true;
+  }
+
+  // Due date
+  if (googleDue && googleDue !== crmDue) {
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = new Date(googleDue);
+    else task.dueDate = new Date(googleDue);
+    changed = true;
+  } else if (!googleDue && crmDue) {
+    // Due date removed in Google
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = null;
+    else task.dueDate = null;
+    changed = true;
+  }
+
+  if (changed) {
+    const now = new Date().toISOString();
+    if (contact && taskIndex !== -1) {
+      contact.tasks[taskIndex].modifiedAt = now;
+      contact.markModified('tasks');
+      await contact.save();
+      if (pollingIo && contact.workspaceId) {
+        pollingIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+        pollingIo.to(`workspace-${contact.workspaceId}`).emit('task-updated', {
+          ...contact.tasks[taskIndex],
+          contactId: contact._id.toString(),
+          contactName: contact.name,
+          source: 'contact'
+        });
+      }
+    } else {
+      task.modifiedAt = now;
+      await task.save();
+      if (pollingIo && task.workspaceId) {
+        pollingIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
+          ...task.toObject(),
+          id: task._id.toString(),
+          source: 'global'
+        });
+      }
+    }
+  }
+
+  return changed;
+};
+
+const pollGoogleTasksChanges = async () => {
   try {
     const users = await User.find({ 'googleTasks.enabled': true });
     if (users.length === 0) return;
@@ -1728,28 +1849,7 @@ const pollGoogleTasksCompleted = async () => {
         const taskListId = user.googleTasks.taskListId;
         if (!taskListId) continue;
 
-        // Fetch completed tasks from Google
-        let completedGoogleTasks = [];
-        let pageToken = null;
-        do {
-          const response = await tasksApi.tasks.list({
-            tasklist: taskListId,
-            maxResults: 100,
-            showCompleted: true,
-            showHidden: true,
-            pageToken
-          });
-          if (response.data.items) {
-            completedGoogleTasks = completedGoogleTasks.concat(
-              response.data.items.filter(t => t.status === 'completed')
-            );
-          }
-          pageToken = response.data.nextPageToken;
-        } while (pageToken);
-
-        if (completedGoogleTasks.length === 0) continue;
-
-        // Build reverse map
+        // Build reverse map: googleTaskId → crmTaskId
         const reverseMap = new Map();
         if (user.googleTasks.syncedTaskIds) {
           for (const [crmId, googleId] of user.googleTasks.syncedTaskIds.entries()) {
@@ -1757,67 +1857,55 @@ const pollGoogleTasksCompleted = async () => {
           }
         }
 
+        let allGoogleTasks = [];
+        let pageToken = null;
+
+        do {
+          const params = {
+            tasklist: taskListId,
+            maxResults: 100,
+            showCompleted: true,
+            showDeleted: true,
+            showHidden: true,
+            pageToken
+          };
+
+          // Use updatedMin to only get recently changed tasks (last 2 minutes for 30s polling)
+          if (user.googleTasks.lastSyncAt) {
+            params.updatedMin = new Date(user.googleTasks.lastSyncAt.getTime() - 30000).toISOString();
+          }
+
+          const response = await tasksApi.tasks.list(params);
+          if (response.data.items) {
+            allGoogleTasks = allGoogleTasks.concat(response.data.items);
+          }
+          pageToken = response.data.nextPageToken;
+        } while (pageToken);
+
+        if (allGoogleTasks.length === 0) {
+          // Update lastSyncAt even if no changes
+          user.googleTasks.lastSyncAt = new Date();
+          await user.save();
+          continue;
+        }
+
+        const wsId = user.currentWorkspaceId;
         let updated = 0;
 
-        for (const googleTask of completedGoogleTasks) {
+        for (const googleTask of allGoogleTasks) {
           const crmTaskId = reverseMap.get(googleTask.id);
           if (!crmTaskId) continue;
 
-          // Global tasks (workspace-scoped)
-          const wsId = user.currentWorkspaceId;
-          const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
-          if (globalTask && !globalTask.completed) {
-            globalTask.completed = true;
-            globalTask.modifiedAt = new Date().toISOString();
-            await globalTask.save();
-            updated++;
-            if (pollingIo) {
-              pollingIo.emit('task-updated', { ...globalTask.toObject(), id: globalTask._id.toString(), source: 'global' });
-            }
-            continue;
-          }
-
-          // Contact tasks (workspace-scoped)
-          if (!globalTask) {
-            const contacts = await Contact.find({ 'tasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
-            for (const contact of contacts) {
-              const idx = contact.tasks.findIndex(t => t.id === crmTaskId);
-              if (idx !== -1 && !contact.tasks[idx].completed) {
-                contact.tasks[idx].completed = true;
-                contact.tasks[idx].modifiedAt = new Date().toISOString();
-                contact.markModified('tasks');
-                await contact.save();
-                updated++;
-                if (pollingIo) {
-                  pollingIo.emit('contact-updated', contact.toObject());
-                  pollingIo.emit('task-updated', { ...contact.tasks[idx], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
-                }
-                break;
-              }
-            }
-          }
-
-          // Subtasks in global tasks (workspace-scoped)
-          if (!globalTask) {
-            const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
-            for (const parentTask of parentTasks) {
-              const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
-              if (subtask && !subtask.completed) {
-                subtask.completed = true;
-                parentTask.markModified('subtasks');
-                await parentTask.save();
-                updated++;
-                if (pollingIo) {
-                  pollingIo.emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
-                }
-                break;
-              }
-            }
-          }
+          const changed = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
+          if (changed) updated++;
         }
 
+        // Update last sync timestamp
+        user.googleTasks.lastSyncAt = new Date();
+        await user.save();
+
         if (updated > 0) {
-          logger.info('[Google Tasks Poll] Synced completed tasks from Google', { userId: user._id, updated });
+          logger.info('[Google Tasks Poll] Synced changes from Google', { userId: user._id, updated, total: allGoogleTasks.length });
         }
       } catch (userErr) {
         // Token errors are expected for inactive users - just skip
@@ -1833,11 +1921,11 @@ const pollGoogleTasksCompleted = async () => {
 
 const startGoogleTasksPolling = (io) => {
   pollingIo = io;
-  // Poll every 60 seconds
-  pollingInterval = setInterval(pollGoogleTasksCompleted, 60000);
+  // Poll every 30 seconds for near-realtime bidirectional sync
+  pollingInterval = setInterval(pollGoogleTasksChanges, 30000);
   // Run first poll after 15 seconds (let server stabilize)
-  setTimeout(pollGoogleTasksCompleted, 15000);
-  logger.info('[Google Tasks Poll] Background polling started (60s interval)');
+  setTimeout(pollGoogleTasksChanges, 15000);
+  logger.info('[Google Tasks Poll] Bidirectional polling started (30s interval)');
 };
 
 const stopGoogleTasksPolling = () => {

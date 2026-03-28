@@ -81,7 +81,13 @@ const userSchema = new mongoose.Schema({
     calendarId: { type: String, default: 'primary' },
     enabled: { type: Boolean, default: false },
     connectedAt: { type: Date, default: null },
-    syncedTaskIds: { type: Map, of: String, default: new Map() } // taskId -> googleEventId
+    syncedTaskIds: { type: Map, of: String, default: new Map() }, // taskId -> googleEventId
+    // Watch channel for push notifications (Google → CRM)
+    watchChannelId: { type: String, default: null },
+    watchResourceId: { type: String, default: null },
+    watchExpiry: { type: Date, default: null },
+    // Sync token for incremental event list (only changed events since last sync)
+    syncToken: { type: String, default: null }
   },
   // Google Tasks integration
   googleTasks: {
@@ -97,7 +103,9 @@ const userSchema = new mongoose.Schema({
     lastSyncAt: { type: Date, default: null },
     // Daily quota tracking (resets at midnight UTC)
     quotaUsedToday: { type: Number, default: 0 },
-    quotaResetDate: { type: Date, default: null }
+    quotaResetDate: { type: Date, default: null },
+    // Sync token for incremental task list (only changes since last poll)
+    syncToken: { type: String, default: null }
   }
 }, {
   timestamps: true,

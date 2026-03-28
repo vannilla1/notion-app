@@ -1,11 +1,16 @@
 const express = require('express');
 const { google } = require('googleapis');
+const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Store io instance for webhook-triggered socket events
+let calendarIo = null;
 
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -171,12 +176,17 @@ router.get('/callback', async (req, res) => {
     };
 
     await user.save();
-    console.log('[Google Calendar] User connected successfully', {
+    logger.info('[Google Calendar] User connected successfully', {
       userId,
       username: user.username,
       hasRefreshToken: !!user.googleCalendar.refreshToken,
       tokenExpiry: user.googleCalendar.tokenExpiry
     });
+
+    // Start watching for calendar changes (Google → CRM push notifications)
+    startCalendarWatch(user).catch(err =>
+      logger.warn('[Google Calendar] Watch setup failed on connect', { error: err.message })
+    );
 
     // Redirect back to app with success
     res.redirect(`${baseUrl}/tasks?google_calendar=connected`);
@@ -219,6 +229,9 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       }
     }
 
+    // Stop watching for changes
+    await stopCalendarWatch(user);
+
     user.googleCalendar = {
       accessToken: null,
       refreshToken: null,
@@ -226,7 +239,11 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       calendarId: 'primary',
       enabled: false,
       connectedAt: null,
-      syncedTaskIds: new Map()
+      syncedTaskIds: new Map(),
+      watchChannelId: null,
+      watchResourceId: null,
+      watchExpiry: null,
+      syncToken: null
     };
 
     await user.save();
@@ -237,6 +254,332 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Chyba pri odpájaní' });
   }
 });
+
+// ==================== WEBHOOK (Google → CRM) ====================
+
+const WEBHOOK_BASE_URL = process.env.API_BASE_URL || 'https://perun-crm-api.onrender.com';
+const WATCH_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (Google max)
+
+/**
+ * Start watching a user's Google Calendar for changes.
+ * Creates a push notification channel so Google sends us a POST when events change.
+ */
+const startCalendarWatch = async (user) => {
+  try {
+    const calendar = await getCalendarClient(user);
+    const channelId = uuidv4();
+
+    const res = await calendar.events.watch({
+      calendarId: user.googleCalendar.calendarId || 'primary',
+      resource: {
+        id: channelId,
+        type: 'web_hook',
+        address: `${WEBHOOK_BASE_URL}/api/google-calendar/webhook`,
+        expiration: String(Date.now() + WATCH_EXPIRY_MS)
+      }
+    });
+
+    user.googleCalendar.watchChannelId = channelId;
+    user.googleCalendar.watchResourceId = res.data.resourceId;
+    user.googleCalendar.watchExpiry = new Date(Number(res.data.expiration));
+    await user.save();
+
+    logger.info('[Calendar Watch] Channel created', {
+      userId: user._id,
+      channelId,
+      expiry: user.googleCalendar.watchExpiry
+    });
+    return true;
+  } catch (err) {
+    logger.error('[Calendar Watch] Failed to create channel', {
+      userId: user._id,
+      error: err.message
+    });
+    return false;
+  }
+};
+
+/**
+ * Stop watching a user's calendar (cleanup old channel).
+ */
+const stopCalendarWatch = async (user) => {
+  if (!user.googleCalendar.watchChannelId || !user.googleCalendar.watchResourceId) return;
+
+  try {
+    const calendar = await getCalendarClient(user);
+    await calendar.channels.stop({
+      resource: {
+        id: user.googleCalendar.watchChannelId,
+        resourceId: user.googleCalendar.watchResourceId
+      }
+    });
+    logger.info('[Calendar Watch] Channel stopped', { userId: user._id });
+  } catch (err) {
+    // 404 = already expired/stopped, that's fine
+    if (err.code !== 404) {
+      logger.warn('[Calendar Watch] Error stopping channel', { error: err.message });
+    }
+  }
+
+  user.googleCalendar.watchChannelId = null;
+  user.googleCalendar.watchResourceId = null;
+  user.googleCalendar.watchExpiry = null;
+};
+
+/**
+ * Process calendar changes for a user using incremental sync (syncToken).
+ * Called when Google sends us a push notification.
+ */
+const processCalendarChanges = async (user) => {
+  try {
+    const calendar = await getCalendarClient(user);
+    const calendarId = user.googleCalendar.calendarId || 'primary';
+
+    let params = { calendarId, singleEvents: true, maxResults: 250 };
+    if (user.googleCalendar.syncToken) {
+      params.syncToken = user.googleCalendar.syncToken;
+    } else {
+      // First sync: get events from last 30 days to establish token
+      params.timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    let allEvents = [];
+    let nextPageToken = null;
+    let newSyncToken = null;
+
+    do {
+      if (nextPageToken) params.pageToken = nextPageToken;
+
+      let response;
+      try {
+        response = await calendar.events.list(params);
+      } catch (err) {
+        // 410 Gone = syncToken expired, do full re-sync
+        if (err.code === 410) {
+          logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id });
+          user.googleCalendar.syncToken = null;
+          await user.save();
+          return processCalendarChanges(user); // recursive call without syncToken
+        }
+        throw err;
+      }
+
+      allEvents.push(...(response.data.items || []));
+      nextPageToken = response.data.nextPageToken;
+      newSyncToken = response.data.nextSyncToken;
+    } while (nextPageToken);
+
+    // Save new sync token
+    if (newSyncToken) {
+      user.googleCalendar.syncToken = newSyncToken;
+      await user.save();
+    }
+
+    if (allEvents.length === 0) return;
+
+    logger.info('[Calendar Webhook] Processing changes', {
+      userId: user._id,
+      eventCount: allEvents.length
+    });
+
+    // Build reverse map: googleEventId → crmTaskId
+    const reverseMap = new Map();
+    if (user.googleCalendar.syncedTaskIds) {
+      for (const [crmId, googleId] of user.googleCalendar.syncedTaskIds.entries()) {
+        reverseMap.set(googleId, crmId);
+      }
+    }
+
+    let updated = 0;
+    const wsId = user.currentWorkspaceId;
+
+    for (const event of allEvents) {
+      const crmTaskId = reverseMap.get(event.id);
+      if (!crmTaskId) continue; // Not a CRM-synced event
+
+      // Determine what changed
+      const isDeleted = event.status === 'cancelled';
+      const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
+      // Strip the completion prefix "✓ " from event title to get clean title
+      let newTitle = (event.summary || '').replace(/^✓\s*/, '').trim();
+
+      // Find the CRM task
+      let task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+      let contact = null;
+      let taskIndex = -1;
+
+      if (!task) {
+        // Search in contacts
+        contact = await Contact.findOne({
+          'tasks.id': crmTaskId,
+          ...(wsId ? { workspaceId: wsId } : {})
+        });
+        if (contact) {
+          taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+          if (taskIndex !== -1) task = contact.tasks[taskIndex];
+        }
+      }
+
+      if (!task) continue; // Task no longer exists in CRM
+
+      if (isDeleted) {
+        // Event was deleted in Google Calendar — don't delete the CRM task,
+        // just remove the mapping so next sync recreates it
+        const userToSave = await User.findById(user._id);
+        if (userToSave) {
+          userToSave.googleCalendar.syncedTaskIds.delete(crmTaskId);
+          await userToSave.save();
+        }
+        logger.debug('[Calendar Webhook] Event deleted in Google, removed mapping', { crmTaskId });
+        continue;
+      }
+
+      // Check if due date changed
+      let changed = false;
+      const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
+
+      if (newDueDate && newDueDate !== taskDueDate) {
+        if (contact && taskIndex !== -1) {
+          contact.tasks[taskIndex].dueDate = new Date(newDueDate);
+          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+          changed = true;
+        } else if (task._id) {
+          task.dueDate = new Date(newDueDate);
+          task.modifiedAt = new Date().toISOString();
+          changed = true;
+        }
+      }
+
+      // Check if title changed
+      if (newTitle && newTitle !== task.title) {
+        if (contact && taskIndex !== -1) {
+          contact.tasks[taskIndex].title = newTitle;
+          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+          changed = true;
+        } else if (task._id) {
+          task.title = newTitle;
+          task.modifiedAt = new Date().toISOString();
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        if (contact) {
+          contact.markModified('tasks');
+          await contact.save();
+          if (calendarIo && contact.workspaceId) {
+            calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+          }
+        } else {
+          await task.save();
+          if (calendarIo && task.workspaceId) {
+            calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
+              ...task.toObject(),
+              id: task._id.toString(),
+              source: 'global'
+            });
+          }
+        }
+        updated++;
+      }
+    }
+
+    if (updated > 0) {
+      logger.info('[Calendar Webhook] Applied changes to CRM', { userId: user._id, updated });
+    }
+  } catch (err) {
+    logger.error('[Calendar Webhook] Error processing changes', {
+      userId: user._id,
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Webhook endpoint — Google POSTs here when calendar events change.
+ * No auth needed (Google sends channel ID headers for verification).
+ */
+router.post('/webhook', async (req, res) => {
+  // Respond 200 immediately — Google requires fast response
+  res.status(200).end();
+
+  const channelId = req.headers['x-goog-channel-id'];
+  const resourceState = req.headers['x-goog-resource-state'];
+
+  if (!channelId) return;
+
+  // 'sync' = initial confirmation, 'exists' = changes available
+  if (resourceState === 'sync') {
+    logger.debug('[Calendar Webhook] Sync confirmation received', { channelId });
+    return;
+  }
+
+  if (resourceState !== 'exists') return;
+
+  try {
+    // Find user by watch channel ID
+    const user = await User.findOne({ 'googleCalendar.watchChannelId': channelId });
+    if (!user) {
+      logger.warn('[Calendar Webhook] No user found for channel', { channelId });
+      return;
+    }
+
+    await processCalendarChanges(user);
+  } catch (err) {
+    logger.error('[Calendar Webhook] Error', { error: err.message, channelId });
+  }
+});
+
+/**
+ * Renew all expiring watch channels.
+ * Should be called periodically (e.g., every 6 hours via cron or setInterval).
+ */
+const renewCalendarWatches = async () => {
+  try {
+    // Find users whose watch expires in the next 24 hours
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const users = await User.find({
+      'googleCalendar.enabled': true,
+      'googleCalendar.watchExpiry': { $lt: soon, $ne: null }
+    });
+
+    for (const user of users) {
+      await stopCalendarWatch(user);
+      await startCalendarWatch(user);
+    }
+
+    if (users.length > 0) {
+      logger.info('[Calendar Watch] Renewed channels', { count: users.length });
+    }
+  } catch (err) {
+    logger.error('[Calendar Watch] Renewal error', { error: err.message });
+  }
+};
+
+// Also set up watch for users who don't have one yet
+const ensureCalendarWatches = async () => {
+  try {
+    const users = await User.find({
+      'googleCalendar.enabled': true,
+      $or: [
+        { 'googleCalendar.watchChannelId': null },
+        { 'googleCalendar.watchChannelId': { $exists: false } }
+      ]
+    });
+
+    for (const user of users) {
+      await startCalendarWatch(user);
+    }
+
+    if (users.length > 0) {
+      logger.info('[Calendar Watch] Set up new watches', { count: users.length });
+    }
+  } catch (err) {
+    logger.error('[Calendar Watch] Setup error', { error: err.message });
+  }
+};
+
+// ==================== SYNC ROUTES ====================
 
 // Sync all tasks to Google Calendar
 router.post('/sync', authenticateToken, async (req, res) => {
@@ -528,40 +871,6 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
       }
     }
 
-    // Second, search for and delete events with "test" in name using query search
-    try {
-      // Use query search to find events with "test" in the title
-      const eventsResponse = await calendar.events.list({
-        calendarId: user.googleCalendar.calendarId,
-        q: 'test',
-        maxResults: 500,
-        singleEvents: true
-      });
-
-      const events = eventsResponse.data.items || [];
-      console.log(`Found ${events.length} events matching 'test' query`);
-
-      for (const event of events) {
-        // Double check the title contains "test"
-        const title = (event.summary || '').toLowerCase();
-        if (title.includes('test')) {
-          try {
-            await calendar.events.delete({
-              calendarId: user.googleCalendar.calendarId,
-              eventId: event.id
-            });
-            deleted++;
-            console.log(`Deleted test event: ${event.summary} (${event.id})`);
-          } catch (e) {
-            console.log(`Failed to delete event ${event.id}:`, e.message);
-            errors++;
-          }
-        }
-      }
-    } catch (e) {
-      console.log('Error listing events:', e.message);
-    }
-
     await user.save();
 
     res.json({
@@ -812,6 +1121,22 @@ const autoDeleteTaskFromCalendar = async (taskId) => {
   await autoSyncTaskToCalendar({ id: taskId }, 'delete');
 };
 
+/**
+ * Initialize Calendar webhook system with Socket.IO and start periodic renewal.
+ */
+const initializeCalendarWebhooks = (io) => {
+  calendarIo = io;
+
+  // Set up watches for all connected users who don't have one
+  setTimeout(() => ensureCalendarWatches(), 20000);
+
+  // Renew expiring watches every 6 hours
+  setInterval(() => renewCalendarWatches(), 6 * 60 * 60 * 1000);
+
+  logger.info('[Calendar Watch] Webhook system initialized');
+};
+
 module.exports = router;
 module.exports.autoSyncTaskToCalendar = autoSyncTaskToCalendar;
 module.exports.autoDeleteTaskFromCalendar = autoDeleteTaskFromCalendar;
+module.exports.initializeCalendarWebhooks = initializeCalendarWebhooks;
