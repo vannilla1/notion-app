@@ -140,6 +140,11 @@ struct WebView: UIViewRepresentable {
             document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
             document.body.classList.add('ios-app');
 
+            // Force header padding for status bar - inject CSS directly
+            var iosStyle = document.createElement('style');
+            iosStyle.textContent = '.crm-header { padding-top: calc(env(safe-area-inset-top, 59px) + 16px) !important; }';
+            document.head.appendChild(iosStyle);
+
             // Extract auth token from localStorage and send to native
             (function() {
                 try {
@@ -214,14 +219,19 @@ struct WebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // Inject actual safe area inset values from native
-            if let window = webView.window {
-                let top = window.safeAreaInsets.top
-                let bottom = window.safeAreaInsets.bottom
-                let js = """
-                document.documentElement.style.setProperty('--safe-area-top', '\(Int(top))px');
-                document.documentElement.style.setProperty('--safe-area-bottom', '\(Int(bottom))px');
-                """
-                webView.evaluateJavaScript(js, completionHandler: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let window = webView.window {
+                    let top = window.safeAreaInsets.top
+                    let bottom = window.safeAreaInsets.bottom
+                    let js = """
+                    document.documentElement.style.setProperty('--safe-area-top', '\(Int(top))px');
+                    document.documentElement.style.setProperty('--safe-area-bottom', '\(Int(bottom))px');
+                    var s = document.getElementById('ios-safe-area-style');
+                    if (!s) { s = document.createElement('style'); s.id = 'ios-safe-area-style'; document.head.appendChild(s); }
+                    s.textContent = '.crm-header { padding-top: \(Int(top) + 16)px !important; }';
+                    """
+                    webView.evaluateJavaScript(js, completionHandler: nil)
+                }
             }
 
             if !hasFinishedInitialLoad {
