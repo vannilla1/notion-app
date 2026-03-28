@@ -5029,6 +5029,11 @@ a.detail-value:hover {
 /* ==================== ENHANCED MOBILE STYLES FOR IPHONE ==================== */
 
 /* Safe area support for iPhone X and newer */
+/* Native iOS app injects --safe-area-top/--safe-area-bottom via Swift */
+.ios-app .crm-header {
+  padding-top: calc(var(--safe-area-top, 0px) + 16px);
+}
+
 @supports (padding: env(safe-area-inset-bottom)) {
   .crm-header {
     padding-top: calc(env(safe-area-inset-top, 0px) + 16px);

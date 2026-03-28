@@ -213,6 +213,17 @@ struct WebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Inject actual safe area inset values from native
+            if let window = webView.window {
+                let top = window.safeAreaInsets.top
+                let bottom = window.safeAreaInsets.bottom
+                let js = """
+                document.documentElement.style.setProperty('--safe-area-top', '\(Int(top))px');
+                document.documentElement.style.setProperty('--safe-area-bottom', '\(Int(bottom))px');
+                """
+                webView.evaluateJavaScript(js, completionHandler: nil)
+            }
+
             if !hasFinishedInitialLoad {
                 hasFinishedInitialLoad = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
