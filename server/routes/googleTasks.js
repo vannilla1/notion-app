@@ -331,17 +331,25 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
 
     if (user.googleTasks?.enabled) {
       const workspaceId = req.workspaceId || user.currentWorkspaceId;
+      const userId = req.user.id.toString();
+      const isUserTask = (task) => {
+        const assignedTo = task.assignedTo || [];
+        if (assignedTo.length === 0) return true;
+        return assignedTo.some(id => id && id.toString() === userId);
+      };
+
       const globalTasks = workspaceId ? await Task.find(
         { workspaceId, completed: { $ne: true } },
-        { _id: 1, subtasks: 1 }
+        { _id: 1, subtasks: 1, assignedTo: 1 }
       ).lean() : [];
       const contacts = workspaceId ? await Contact.find(
         { workspaceId },
-        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1 }
+        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1 }
       ).lean() : [];
 
-      // Count global tasks
+      // Count global tasks — only unassigned or assigned to this user
       for (const task of globalTasks) {
+        if (!isUserTask(task)) continue;
         totalTasks++;
         const taskId = task._id.toString();
         const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
@@ -356,11 +364,11 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
         }
       }
 
-      // Count contact tasks
+      // Count contact tasks — only unassigned or assigned to this user
       for (const contact of contacts) {
         if (contact.tasks) {
           for (const task of contact.tasks) {
-            if (!task.completed) {
+            if (!task.completed && isUserTask(task)) {
               totalTasks++;
               const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
               if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
@@ -549,10 +557,23 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     // Get all tasks for the workspace from which the sync was triggered
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
+    const userId = req.user.id.toString(); // Convert ObjectId to string for comparison
+
+    // Only sync tasks assigned to this user (or unassigned tasks)
+    const isUserTask = (task) => {
+      const assignedTo = task.assignedTo || [];
+      if (assignedTo.length === 0) return true;
+      return assignedTo.some(id => id && id.toString() === userId);
+    };
+    const isUserContactTask = (task) => {
+      const assignedTo = task.assignedTo || [];
+      if (assignedTo.length === 0) return true;
+      return assignedTo.some(id => id && id.toString() === userId);
+    };
 
     const globalTasks = workspaceId ? await Task.find(
       { workspaceId },
-      { _id: 1, title: 1, description: 1, dueDate: 1, completed: 1, modifiedAt: 1, updatedAt: 1, subtasks: 1 }
+      { _id: 1, title: 1, description: 1, dueDate: 1, completed: 1, modifiedAt: 1, updatedAt: 1, subtasks: 1, assignedTo: 1 }
     ).lean() : [];
     const contacts = workspaceId ? await Contact.find(
       { workspaceId },
@@ -571,9 +592,9 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const tasksToSync = [];
 
-    // Collect global tasks from workspace
+    // Collect global tasks — only unassigned or assigned to this user
     for (const task of globalTasks) {
-      if (!task.completed) {
+      if (!task.completed && isUserTask(task)) {
         tasksToSync.push({
           id: task._id.toString(),
           title: task.title,
@@ -587,11 +608,11 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       }
     }
 
-    // Collect contact tasks from workspace
+    // Collect contact tasks — only unassigned or assigned to this user
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
-          if (!task.completed) {
+          if (!task.completed && isUserContactTask(task)) {
             tasksToSync.push({
               id: task.id,
               title: task.title,
@@ -1611,6 +1632,12 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     } else {
       // Fallback: no workspace context (shouldn't happen, but safe)
       users = await User.find({ 'googleTasks.enabled': true });
+    }
+
+    // Filter by assignedTo: if task is assigned, only sync for assigned users
+    const assignedTo = (taskData.assignedTo || []).map(id => id?.toString()).filter(Boolean);
+    if (assignedTo.length > 0) {
+      users = users.filter(u => assignedTo.includes(u._id.toString()));
     }
 
     if (users.length === 0) {
