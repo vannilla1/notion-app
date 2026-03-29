@@ -600,10 +600,24 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     });
 
     const tasksToSync = [];
+    let debugCompleted = 0;
+    let debugNotUserTask = 0;
 
     // Collect global tasks — only tasks assigned to or created by this user
     for (const task of globalTasks) {
-      if (!task.completed && isUserTask(task)) {
+      if (task.completed) { debugCompleted++; continue; }
+      if (!isUserTask(task)) {
+        debugNotUserTask++;
+        logger.info('[Google Tasks] Task filtered out by isUserTask', {
+          taskId: task._id.toString(),
+          title: task.title,
+          assignedTo: (task.assignedTo || []).map(id => id?.toString()),
+          assignedToLength: (task.assignedTo || []).length,
+          userId: userId
+        });
+        continue;
+      }
+      if (true) {
         tasksToSync.push({
           id: task._id.toString(),
           title: task.title,
@@ -713,7 +727,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       if (unchanged > 0 && skipped === 0) {
         msg = `Všetky úlohy sú aktuálne (${unchanged} synchronizovaných)`;
       } else if (unchanged === 0 && skipped === 0) {
-        msg = `Žiadne úlohy na synchronizáciu (workspace: ${workspaceId}, DB úloh: ${globalTasks.length}, kontaktových úloh: ${contactTaskCount}, po filtroch: ${tasksToSync.length})`;
+        msg = `Žiadne úlohy (ws: ${workspaceId}, DB: ${globalTasks.length}, dokončených: ${debugCompleted}, assignedTo filter: ${debugNotUserTask}, výsledok: ${tasksToSync.length})`;
       } else {
         msg = `Žiadne zmeny (${unchanged} aktuálnych, ${skipped} preskočených)`;
       }
