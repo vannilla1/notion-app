@@ -341,15 +341,11 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
         { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1 }
       ).lean() : [];
 
-      // Helper: check if task belongs to this user
+      // Helper: check if task should sync for this user
       const isUserTask = (task) => {
         const assignedTo = task.assignedTo || [];
-        const taskOwnerId = task.userId?.toString();
-        if (assignedTo.length > 0) {
-          return assignedTo.some(id => id.toString() === userId);
-        }
-        if (taskOwnerId && taskOwnerId !== userId) return false;
-        return true;
+        if (assignedTo.length === 0) return true;
+        return assignedTo.some(id => id.toString() === userId);
       };
       const isUserContactTask = (task) => {
         const assignedTo = task.assignedTo || [];
@@ -569,24 +565,18 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
     const userId = req.user.id;
 
-    // Helper: check if a task belongs to this user (assigned to them, created by them, or unassigned)
+    // Helper: check if a task should sync for this user
+    // Only filter when assignedTo is explicitly set — unassigned tasks sync to all workspace members
     const isUserTask = (task) => {
       const assignedTo = task.assignedTo || [];
-      // task.userId is ObjectId (creator), createdBy is username string (not useful for ID comparison)
-      const taskOwnerId = task.userId?.toString();
-      // If someone is assigned, only sync if user is in assignedTo
-      if (assignedTo.length > 0) {
-        return assignedTo.some(id => id.toString() === userId);
-      }
-      // Unassigned: sync if user created it, or if no owner info (legacy tasks)
-      if (taskOwnerId && taskOwnerId !== userId) return false;
-      return true;
+      if (assignedTo.length === 0) return true; // Unassigned = sync for all members
+      return assignedTo.some(id => id.toString() === userId);
     };
 
     // Helper for contact tasks (assignedTo is string array of user IDs)
     const isUserContactTask = (task) => {
       const assignedTo = task.assignedTo || [];
-      if (assignedTo.length === 0) return true; // Unassigned = sync for everyone
+      if (assignedTo.length === 0) return true;
       return assignedTo.includes(userId);
     };
 
@@ -1640,8 +1630,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     // Determine workspace scope — only sync for members of the task's workspace
     const workspaceId = taskData.workspaceId?.toString();
     const assignedTo = taskData.assignedTo || [];
-    const taskOwnerId = taskData.userId?.toString(); // ObjectId of creator
-    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId, assignedTo, taskOwnerId });
+    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId, assignedTo });
 
     try {
     // Find users with Google Tasks enabled — filtered by workspace membership
@@ -1655,15 +1644,12 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       users = await User.find({ 'googleTasks.enabled': true });
     }
 
-    // Filter users: only sync to users who are assigned to the task, created it, or if unassigned
+    // Filter users: only sync to assigned users when assignedTo is set
+    // Unassigned tasks sync to all workspace members
     if (assignedTo.length > 0) {
       const assignedIds = assignedTo.map(id => id.toString());
       users = users.filter(u => assignedIds.includes(u._id.toString()));
-    } else if (taskOwnerId) {
-      // Unassigned but has creator — only sync to creator
-      users = users.filter(u => u._id.toString() === taskOwnerId);
     }
-    // If neither assigned nor taskOwnerId — sync to all workspace members (legacy behavior)
 
     if (users.length === 0) {
       return;
