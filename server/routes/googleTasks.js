@@ -344,12 +344,12 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
       // Helper: check if task belongs to this user
       const isUserTask = (task) => {
         const assignedTo = task.assignedTo || [];
-        const createdBy = task.createdBy || task.userId;
-        if (assignedTo.length === 0) {
-          if (createdBy && createdBy.toString() !== userId) return false;
-          return true;
+        const taskOwnerId = task.userId?.toString();
+        if (assignedTo.length > 0) {
+          return assignedTo.some(id => id.toString() === userId);
         }
-        return assignedTo.some(id => id.toString() === userId);
+        if (taskOwnerId && taskOwnerId !== userId) return false;
+        return true;
       };
       const isUserContactTask = (task) => {
         const assignedTo = task.assignedTo || [];
@@ -572,18 +572,18 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     // Helper: check if a task belongs to this user (assigned to them, created by them, or unassigned)
     const isUserTask = (task) => {
       const assignedTo = task.assignedTo || [];
-      const createdBy = task.createdBy || task.userId;
-      // If nobody is assigned, it's available to all workspace members
-      if (assignedTo.length === 0) {
-        // But if createdBy is set and it's not this user, skip it
-        if (createdBy && createdBy.toString() !== userId) return false;
-        return true;
+      // task.userId is ObjectId (creator), createdBy is username string (not useful for ID comparison)
+      const taskOwnerId = task.userId?.toString();
+      // If someone is assigned, only sync if user is in assignedTo
+      if (assignedTo.length > 0) {
+        return assignedTo.some(id => id.toString() === userId);
       }
-      // Check if user is in assignedTo
-      return assignedTo.some(id => id.toString() === userId);
+      // Unassigned: sync if user created it, or if no owner info (legacy tasks)
+      if (taskOwnerId && taskOwnerId !== userId) return false;
+      return true;
     };
 
-    // Helper for contact tasks (assignedTo is string array)
+    // Helper for contact tasks (assignedTo is string array of user IDs)
     const isUserContactTask = (task) => {
       const assignedTo = task.assignedTo || [];
       if (assignedTo.length === 0) return true; // Unassigned = sync for everyone
@@ -1640,8 +1640,8 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     // Determine workspace scope — only sync for members of the task's workspace
     const workspaceId = taskData.workspaceId?.toString();
     const assignedTo = taskData.assignedTo || [];
-    const createdBy = (taskData.createdBy || taskData.userId)?.toString();
-    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId, assignedTo, createdBy });
+    const taskOwnerId = taskData.userId?.toString(); // ObjectId of creator
+    logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId, assignedTo, taskOwnerId });
 
     try {
     // Find users with Google Tasks enabled — filtered by workspace membership
@@ -1659,11 +1659,11 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     if (assignedTo.length > 0) {
       const assignedIds = assignedTo.map(id => id.toString());
       users = users.filter(u => assignedIds.includes(u._id.toString()));
-    } else if (createdBy) {
+    } else if (taskOwnerId) {
       // Unassigned but has creator — only sync to creator
-      users = users.filter(u => u._id.toString() === createdBy);
+      users = users.filter(u => u._id.toString() === taskOwnerId);
     }
-    // If neither assigned nor createdBy — sync to all workspace members (legacy behavior)
+    // If neither assigned nor taskOwnerId — sync to all workspace members (legacy behavior)
 
     if (users.length === 0) {
       return;
