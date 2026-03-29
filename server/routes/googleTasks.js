@@ -713,7 +713,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       if (unchanged > 0 && skipped === 0) {
         msg = `Všetky úlohy sú aktuálne (${unchanged} synchronizovaných)`;
       } else if (unchanged === 0 && skipped === 0) {
-        msg = 'Žiadne úlohy na synchronizáciu (žiadne úlohy s termínom)';
+        msg = `Žiadne úlohy na synchronizáciu (workspace: ${workspaceId}, DB úloh: ${globalTasks.length}, kontaktových úloh: ${contactTaskCount}, po filtroch: ${tasksToSync.length})`;
       } else {
         msg = `Žiadne zmeny (${unchanged} aktuálnych, ${skipped} preskočených)`;
       }
