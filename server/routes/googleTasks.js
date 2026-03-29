@@ -310,7 +310,7 @@ router.get('/callback', async (req, res) => {
 });
 
 // Get connection status with quota info and pending tasks count
-router.get('/status', authenticateToken, async (req, res) => {
+router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
@@ -330,7 +330,7 @@ router.get('/status', authenticateToken, async (req, res) => {
     let syncedCount = 0;
 
     if (user.googleTasks?.enabled) {
-      const workspaceId = user.currentWorkspaceId;
+      const workspaceId = req.workspaceId || user.currentWorkspaceId;
       const globalTasks = workspaceId ? await Task.find(
         { workspaceId, completed: { $ne: true } },
         { _id: 1, subtasks: 1 }
@@ -366,12 +366,12 @@ router.get('/status', authenticateToken, async (req, res) => {
               if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
                 syncedCount++;
               }
-            }
-            // Count subtasks
-            if (task.subtasks) {
-              const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
-              totalTasks += subtaskCounts.total;
-              syncedCount += subtaskCounts.synced;
+              // Count subtasks only for non-completed tasks
+              if (task.subtasks) {
+                const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
+                totalTasks += subtaskCounts.total;
+                syncedCount += subtaskCounts.synced;
+              }
             }
           }
         }
@@ -557,10 +557,13 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       { workspaceId },
       { name: 1, tasks: 1 }
     ).lean() : [];
+    const contactTaskCount = contacts.reduce((sum, c) => sum + (c.tasks?.length || 0), 0);
     logger.info('[Google Tasks] Fetched tasks from DB', {
       userId: req.user.id,
+      workspaceId: workspaceId?.toString(),
       globalTasks: globalTasks.length,
       contacts: contacts.length,
+      contactTasks: contactTaskCount,
       existingSyncedIds: user.googleTasks.syncedTaskIds?.size || 0,
       existingSyncedHashes: user.googleTasks.syncedTaskHashes?.size || 0
     });
@@ -579,8 +582,8 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
           contact: null,
           modifiedAt: task.modifiedAt || task.updatedAt
         });
+        collectSubtasksForSync(task.subtasks, task.title, null, tasksToSync);
       }
-      collectSubtasksForSync(task.subtasks, task.title, null, tasksToSync);
     }
 
     // Collect contact tasks (all tasks, not just ones with due dates)
@@ -597,8 +600,8 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
               contact: contact.name,
               modifiedAt: task.modifiedAt
             });
+            collectSubtasksForSync(task.subtasks, task.title, contact.name, tasksToSync);
           }
-          collectSubtasksForSync(task.subtasks, task.title, contact.name, tasksToSync);
         }
       }
     }
@@ -1325,7 +1328,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
 });
 
 // Sync completed tasks FROM Google Tasks TO CRM
-router.post('/sync-completed', authenticateToken, async (req, res) => {
+router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, res) => {
   logger.info('[Google Tasks] Sync completed tasks started', { userId: req.user.id });
 
   try {
@@ -1391,7 +1394,7 @@ router.post('/sync-completed', authenticateToken, async (req, res) => {
 
       // Try to find and update the task in CRM
       // First check global tasks (workspace-scoped)
-      const wsId = user.currentWorkspaceId;
+      const wsId = req.workspaceId || user.currentWorkspaceId;
       const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
       if (globalTask) {
         if (globalTask.completed) {
