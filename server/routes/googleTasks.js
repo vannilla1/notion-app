@@ -557,6 +557,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     // Get all tasks for the workspace from which the sync was triggered
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
+    const workspaceName = req.workspace?.name || 'unknown';
     const userId = req.user.id.toString(); // Convert ObjectId to string for comparison
 
     // Only sync tasks assigned to this user (or unassigned tasks)
@@ -580,10 +581,13 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       { name: 1, tasks: 1 }
     ).lean() : [];
     const contactTaskCount = contacts.reduce((sum, c) => sum + (c.tasks?.length || 0), 0);
+    const globalTaskTitles = globalTasks.map(t => `${t.title}${t.completed ? ' ✓' : ''} [assigned:${(t.assignedTo||[]).length}]`);
     logger.info('[Google Tasks] Fetched tasks from DB', {
       userId: req.user.id,
       workspaceId: workspaceId?.toString(),
+      workspaceName,
       globalTasks: globalTasks.length,
+      globalTaskTitles,
       contacts: contacts.length,
       contactTasks: contactTaskCount,
       existingSyncedIds: user.googleTasks.syncedTaskIds?.size || 0,
@@ -711,7 +715,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
       return res.json({
         success: true,
-        message: msg,
+        message: `${msg} [${workspaceName}: ${globalTasks.length} úloh, ${tasksToSync.length} na sync]`,
         synced: 0,
         updated: 0,
         unchanged,
@@ -1015,7 +1019,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       timedOut
     });
 
-    let message = `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
+    let message = `[${workspaceName}] Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${unchanged} nezmenených`;
     if (completedFromGoogle > 0) message += `, ${completedFromGoogle} dokončených z Google`;
     if (skipped > 0) message += `, ${skipped} preskočených`;
     if (errors > 0) message += `, ${errors} chýb`;
