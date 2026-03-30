@@ -725,7 +725,7 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
               style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
               placeholder="Napíšte komentár..." />
             <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
-              disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '8px 12px' }}>
+              disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '8px 16px', whiteSpace: 'nowrap', flexShrink: 0 }}>
               Odoslať
             </button>
           </div>
