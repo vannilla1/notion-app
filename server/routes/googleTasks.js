@@ -943,9 +943,12 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         const crmTaskId = reverseMap.get(googleTask.id);
         if (!crmTaskId) continue;
 
-        // Check global tasks (workspace-scoped)
+        // Check global tasks (workspace-scoped) — only if crmTaskId is a valid ObjectId
         const wsId = req.workspaceId || user.currentWorkspaceId;
-        const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+        let globalTask = null;
+        if (isValidObjectId(crmTaskId)) {
+          globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+        }
         if (globalTask && !globalTask.completed) {
           globalTask.completed = true;
           globalTask.modifiedAt = new Date().toISOString();
@@ -1419,9 +1422,12 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
       }
 
       // Try to find and update the task in CRM
-      // First check global tasks (workspace-scoped)
+      // First check global tasks (workspace-scoped) — only if crmTaskId is a valid ObjectId
       const wsId = req.workspaceId || user.currentWorkspaceId;
-      const globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+      let globalTask = null;
+      if (isValidObjectId(crmTaskId)) {
+        globalTask = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+      }
       if (globalTask) {
         if (globalTask.completed) {
           alreadyCompleted++;
@@ -1782,13 +1788,17 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   const googleDue = googleTask.due ? googleTask.due.split('T')[0] : null;
   const isDeleted = googleTask.deleted === true;
 
-  // Try global task first
-  let task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+  // Try global task first (only if crmTaskId is a valid ObjectId)
+  let task = null;
   let contact = null;
   let taskIndex = -1;
 
+  if (isValidObjectId(crmTaskId)) {
+    task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+  }
+
   if (!task) {
-    // Search in contacts
+    // Search in contacts (works for both ObjectId and UUID strings)
     contact = await Contact.findOne({
       'tasks.id': crmTaskId,
       ...(wsId ? { workspaceId: wsId } : {})
@@ -1957,11 +1967,14 @@ const pollGoogleTasksChanges = async () => {
 
           // Find the actual task to get its workspaceId (instead of using currentWorkspaceId)
           let wsId = null;
-          const task = await Task.findById(crmTaskId, 'workspaceId').lean();
-          if (task) {
-            wsId = task.workspaceId;
-          } else {
-            // Check contacts
+          if (isValidObjectId(crmTaskId)) {
+            const task = await Task.findById(crmTaskId, 'workspaceId').lean();
+            if (task) {
+              wsId = task.workspaceId;
+            }
+          }
+          if (!wsId) {
+            // Check contacts (works for both ObjectId and UUID strings)
             const contact = await Contact.findOne({ 'tasks.id': crmTaskId }, 'workspaceId').lean();
             if (contact) wsId = contact.workspaceId;
           }
