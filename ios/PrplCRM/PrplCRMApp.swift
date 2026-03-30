@@ -21,12 +21,16 @@ class PushNotificationManager: ObservableObject {
 
     static let baseURL = "https://perun-crm.onrender.com"
 
+    private var retryCount = 0
+    private let maxRetries = 5
+
     func registerDeviceToken(_ tokenHex: String) {
         guard let token = authToken, !token.isEmpty else {
             print("[Push] No auth token yet, will retry after login")
             UserDefaults.standard.set(tokenHex, forKey: "pendingDeviceToken")
             return
         }
+        retryCount = 0
         sendTokenToServer(tokenHex, authToken: token)
     }
 
@@ -39,21 +43,53 @@ class PushNotificationManager: ObservableObject {
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceToken": tokenHex])
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+
             if let error = error {
                 print("[Push] Register failed: \(error.localizedDescription)")
+                self.retryWithBackoff(tokenHex: tokenHex, authToken: authToken)
                 return
             }
+
             if let httpResponse = response as? HTTPURLResponse {
                 print("[Push] Register response: \(httpResponse.statusCode)")
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    print("[Push] Device token registered successfully")
+                    self.retryCount = 0
+                    UserDefaults.standard.removeObject(forKey: "pendingDeviceToken")
+                } else if httpResponse.statusCode == 401 {
+                    // Auth token invalid — save for retry after re-login
+                    print("[Push] Auth token invalid, saving for retry")
+                    UserDefaults.standard.set(tokenHex, forKey: "pendingDeviceToken")
+                } else {
+                    self.retryWithBackoff(tokenHex: tokenHex, authToken: authToken)
+                }
             }
         }.resume()
+    }
+
+    private func retryWithBackoff(tokenHex: String, authToken: String) {
+        guard retryCount < maxRetries else {
+            print("[Push] Max retries (\(maxRetries)) reached, saving token for next app launch")
+            UserDefaults.standard.set(tokenHex, forKey: "pendingDeviceToken")
+            retryCount = 0
+            return
+        }
+
+        retryCount += 1
+        let delay = pow(2.0, Double(retryCount)) // 2s, 4s, 8s, 16s, 32s
+        print("[Push] Retrying in \(delay)s (attempt \(retryCount)/\(maxRetries))")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.sendTokenToServer(tokenHex, authToken: authToken)
+        }
     }
 
     func retryPendingRegistration() {
         guard let token = authToken,
               let pendingToken = UserDefaults.standard.string(forKey: "pendingDeviceToken") else { return }
-        UserDefaults.standard.removeObject(forKey: "pendingDeviceToken")
+        retryCount = 0
         sendTokenToServer(pendingToken, authToken: token)
     }
 }

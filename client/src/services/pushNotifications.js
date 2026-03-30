@@ -200,17 +200,42 @@ export const initializePush = async () => {
   }
 
   // Listen for subscription change messages from service worker
-  if (navigator.serviceWorker.controller) {
-    navigator.serviceWorker.addEventListener('message', async (event) => {
-      if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
-        console.log('Push subscription changed, re-subscribing...');
+  navigator.serviceWorker.addEventListener('message', async (event) => {
+    if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
+      if (event.data.newSubscription) {
+        // Service worker already re-subscribed, just persist to server
+        console.log('[Push] Service worker auto-renewed subscription, persisting...');
+        try {
+          await api.post('/api/push/subscribe', event.data.newSubscription);
+          console.log('[Push] New subscription persisted to server');
+        } catch (error) {
+          console.error('[Push] Failed to persist renewed subscription:', error);
+        }
+      } else {
+        // Service worker couldn't re-subscribe, do it from client
+        console.log('[Push] Subscription changed, re-subscribing from client...');
         try {
           await subscribeToPush();
         } catch (error) {
-          console.error('Failed to re-subscribe after subscription change:', error);
+          console.error('[Push] Failed to re-subscribe after subscription change:', error);
         }
       }
-    });
+    }
+  });
+
+  // Check for cached re-subscription from service worker (when no window was open during change)
+  try {
+    const cache = await caches.open('push-subscription-cache');
+    const cached = await cache.match('/_push_resubscribe');
+    if (cached) {
+      console.log('[Push] Found cached re-subscription, persisting to server...');
+      const newSub = await cached.json();
+      await api.post('/api/push/subscribe', newSub);
+      await cache.delete('/_push_resubscribe');
+      console.log('[Push] Cached re-subscription persisted successfully');
+    }
+  } catch (error) {
+    console.error('[Push] Error processing cached re-subscription:', error);
   }
 
   // Check if already subscribed

@@ -337,6 +337,17 @@ const checkDueDates = async () => {
       // Check subtask reminders
       processSubtaskReminders(task.subtasks, task._id, reminders);
 
+      // Mark reminders as sent BEFORE sending notifications (prevents duplicates on overlapping runs)
+      if (reminders.length > 0) {
+        if (taskReminder) {
+          task.reminderSent = true;
+        }
+        if (reminders.some(r => r.type === 'subtask')) {
+          task.subtasks = markSubtaskRemindersSent(task.subtasks);
+        }
+        await task.save();
+      }
+
       // Send reminder notifications
       for (const rem of reminders) {
         const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
@@ -379,22 +390,11 @@ const checkDueDates = async () => {
         }
       }
 
-      // Update stored urgency levels and mark reminders as sent
-      const needsUpdate = changes.length > 0 || reminders.length > 0;
-      if (needsUpdate) {
+      // Update stored urgency levels (reminders already marked as sent above)
+      if (changes.length > 0) {
         const currentTaskLevel = getUrgencyLevel(task.dueDate);
         task.lastUrgencyLevel = currentTaskLevel;
         task.subtasks = updateSubtaskUrgencyLevels(task.subtasks);
-
-        // Mark task reminder as sent
-        if (taskReminder) {
-          task.reminderSent = true;
-        }
-
-        // Mark subtask reminders as sent
-        if (reminders.some(r => r.type === 'subtask')) {
-          task.subtasks = markSubtaskRemindersSent(task.subtasks);
-        }
 
         await task.save();
         tasksUpdated++;

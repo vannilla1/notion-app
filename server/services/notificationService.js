@@ -127,6 +127,8 @@ const sendAPNsNotification = async (userId, payload) => {
       ...(payload.data || {})
     };
     notification.pushType = 'alert';
+    notification.mutableContent = true;
+    notification.threadId = payload.type || 'default';
 
     for (const device of devices) {
       try {
@@ -265,33 +267,50 @@ const sendPushNotification = async (userId, payload) => {
     });
 
     for (const sub of subscriptions) {
-      try {
-        await webpush.sendNotification({
-          endpoint: sub.endpoint,
-          keys: sub.keys
-        }, pushPayload);
+      let sent = false;
+      const maxRetries = 2;
 
-        // Update last used timestamp
-        sub.lastUsed = new Date();
-        await sub.save();
-        result.sent++;
-        metrics.notifications.pushSent++;
-      } catch (error) {
-        result.failed++;
-        metrics.notifications.pushFailed++;
-        logger.warn('[Push] Notification failed', {
-          endpoint: sub.endpoint.substring(0, 50) + '...',
-          statusCode: error.statusCode,
-          message: error.message
-        });
+      for (let attempt = 0; attempt <= maxRetries && !sent; attempt++) {
+        try {
+          await webpush.sendNotification({
+            endpoint: sub.endpoint,
+            keys: sub.keys
+          }, pushPayload);
 
-        // Remove invalid subscriptions (expired or unsubscribed)
-        if (error.statusCode === 410 || error.statusCode === 404) {
-          await PushSubscription.deleteOne({ _id: sub._id });
-          result.removed++;
-          metrics.notifications.subscriptionsRemoved++;
-          logger.info('[Push] Removed invalid subscription', {
-            endpoint: sub.endpoint.substring(0, 50) + '...'
+          // Update last used timestamp
+          sub.lastUsed = new Date();
+          await sub.save();
+          result.sent++;
+          metrics.notifications.pushSent++;
+          sent = true;
+        } catch (error) {
+          // Remove invalid subscriptions immediately — no retry needed
+          if (error.statusCode === 410 || error.statusCode === 404) {
+            await PushSubscription.deleteOne({ _id: sub._id });
+            result.removed++;
+            metrics.notifications.subscriptionsRemoved++;
+            logger.info('[Push] Removed invalid subscription', {
+              endpoint: sub.endpoint.substring(0, 50) + '...'
+            });
+            break;
+          }
+
+          // Retry on transient errors (429, 5xx, network)
+          const isRetryable = !error.statusCode || error.statusCode === 429 || error.statusCode >= 500;
+          if (isRetryable && attempt < maxRetries) {
+            const delay = Math.pow(2, attempt + 1) * 500; // 1s, 2s
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          // Final failure
+          result.failed++;
+          metrics.notifications.pushFailed++;
+          logger.warn('[Push] Notification failed', {
+            endpoint: sub.endpoint.substring(0, 50) + '...',
+            statusCode: error.statusCode,
+            message: error.message,
+            attempts: attempt + 1
           });
         }
       }
