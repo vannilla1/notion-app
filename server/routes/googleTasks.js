@@ -1541,29 +1541,34 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
 }
 
 function createGoogleTaskData(task) {
-  let notes = task.notes || '';
+  // Google Tasks title limit is 1024 chars
+  let title = (task.title || '').substring(0, 1024);
+  let notes = (task.notes || '').substring(0, 8192);
   if (task.contact) {
     notes += notes ? '\n\n' : '';
     notes += `Kontakt: ${task.contact}`;
   }
 
   const result = {
-    title: task.title,
-    notes: notes,
+    title,
+    notes,
     status: task.completed ? 'completed' : 'needsAction'
   };
 
-  // Google Tasks API requires 'completed' timestamp when status is 'completed'
   if (task.completed) {
     result.completed = new Date().toISOString();
   }
 
-  // Only add due date if task has one (Google Tasks API allows tasks without due date)
   if (task.dueDate) {
-    const dueDate = new Date(task.dueDate);
-    // Set to end of day in UTC
-    dueDate.setUTCHours(23, 59, 59, 999);
-    result.due = dueDate.toISOString();
+    try {
+      const dueDate = new Date(task.dueDate);
+      if (!isNaN(dueDate.getTime())) {
+        dueDate.setUTCHours(23, 59, 59, 999);
+        result.due = dueDate.toISOString();
+      }
+    } catch (e) {
+      logger.warn('[Google Tasks] Invalid dueDate', { taskId: task.id, dueDate: task.dueDate });
+    }
   }
 
   return result;
@@ -1689,19 +1694,15 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
                 tasklist: user.googleTasks.taskListId,
                 task: googleTaskId
               }));
-              logger.debug('[Auto-sync Tasks] Deleted task', { userId: user._id, taskId });
             } catch (e) {
-              // 404 is OK - task was already deleted
               if (e.code !== 404) {
                 logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
               }
             }
-            // Re-fetch user before modifying Map
-            const userToSave = await User.findById(user._id);
-            if (userToSave) {
-              userToSave.googleTasks.syncedTaskIds.delete(taskId);
-              await userToSave.save();
-            }
+            // Atomic removal of mapping
+            await User.findByIdAndUpdate(user._id, {
+              $unset: { [`googleTasks.syncedTaskIds.${taskId}`]: '' }
+            });
           }
         } else {
           const googleTaskData = createGoogleTaskData({
@@ -1713,63 +1714,39 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             contact: taskData.contactName || taskData.contact || null
           });
 
-          // Re-fetch user to get latest syncedTaskIds (prevents race condition)
-          const freshUser = await User.findById(user._id);
-          if (!freshUser) {
-            logger.warn('[Auto-sync Tasks] User not found on re-fetch', { userId: user._id });
-            continue;
-          }
-
-          const existingGoogleId = freshUser.googleTasks?.syncedTaskIds?.get(taskId);
-
-          logger.info('[Auto-sync Tasks] Checking existing', {
-            userId: user._id,
-            taskId,
-            existingGoogleId: existingGoogleId || 'none',
-            completed: taskData.completed,
-            googleTaskStatus: taskData.completed ? 'completed' : 'needsAction'
-          });
+          const existingGoogleId = user.googleTasks?.syncedTaskIds?.get(taskId);
 
           if (existingGoogleId) {
             try {
-              // Use patch instead of update - patch only updates specified fields
-              // update (PUT) can fail or ignore fields, patch (PATCH) is more reliable
               await retryWithBackoff(() => tasksApi.tasks.patch({
-                tasklist: freshUser.googleTasks.taskListId,
+                tasklist: user.googleTasks.taskListId,
                 task: existingGoogleId,
                 requestBody: googleTaskData
               }));
-              logger.info('[Auto-sync Tasks] Patched existing task in Google', { userId: user._id, taskId, googleTaskId: existingGoogleId, completed: taskData.completed, status: googleTaskData.status });
             } catch (e) {
               if (e.code === 404) {
                 // Task was deleted from Google, create new one
                 const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-                  tasklist: freshUser.googleTasks.taskListId,
+                  tasklist: user.googleTasks.taskListId,
                   resource: googleTaskData
                 }));
-                // Re-fetch again before saving to prevent overwriting other changes
-                const userToSave = await User.findById(user._id);
-                if (userToSave) {
-                  userToSave.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
-                  await userToSave.save();
-                }
-                logger.debug('[Auto-sync Tasks] Recreated deleted task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
+                // Atomic set of new mapping
+                await User.findByIdAndUpdate(user._id, {
+                  $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id }
+                });
               } else {
                 throw e;
               }
             }
           } else {
             const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-              tasklist: freshUser.googleTasks.taskListId,
+              tasklist: user.googleTasks.taskListId,
               resource: googleTaskData
             }));
-            // Re-fetch again before saving to prevent overwriting other changes
-            const userToSave = await User.findById(user._id);
-            if (userToSave) {
-              userToSave.googleTasks.syncedTaskIds.set(taskId, newTask.data.id);
-              await userToSave.save();
-            }
-            logger.debug('[Auto-sync Tasks] Created new task', { userId: user._id, taskId, newGoogleTaskId: newTask.data.id });
+            // Atomic set of new mapping
+            await User.findByIdAndUpdate(user._id, {
+              $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id }
+            });
           }
         }
       } catch (error) {
@@ -1846,8 +1823,11 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
     return false;
   }
 
-  // Deleted in Google — remove mapping (don't delete CRM task)
-  if (isDeleted) return false;
+  // Deleted in Google — remove mapping but don't delete CRM task
+  if (isDeleted) {
+    // Mapping cleanup happens in the polling loop (caller removes from syncedTaskIds)
+    return 'deleted';
+  }
 
   // Compare and apply changes
   let changed = false;
@@ -1991,8 +1971,15 @@ const pollGoogleTasksChanges = async () => {
             continue;
           }
 
-          const changed = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
-          if (changed) updated++;
+          const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
+          if (result === 'deleted') {
+            // Clean up mapping for task deleted from Google
+            await User.findByIdAndUpdate(user._id, {
+              $unset: { [`googleTasks.syncedTaskIds.${crmTaskId}`]: '' }
+            });
+          } else if (result) {
+            updated++;
+          }
         }
 
         // Update last sync timestamp

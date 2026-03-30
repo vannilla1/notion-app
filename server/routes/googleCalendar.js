@@ -407,37 +407,27 @@ const processCalendarChanges = async (user) => {
       // Strip the completion prefix "✓ " from event title to get clean title
       let newTitle = (event.summary || '').replace(/^✓\s*/, '').trim();
 
-      // Find the CRM task — look it up to get its actual workspaceId
-      let task = await Task.findById(crmTaskId);
+      // Find the CRM task — scoped to user's workspaces
+      let task = await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } });
       let contact = null;
       let taskIndex = -1;
 
       if (!task) {
-        // Search in contacts
-        contact = await Contact.findOne({ 'tasks.id': crmTaskId });
+        // Search in contacts within user's workspaces
+        contact = await Contact.findOne({ 'tasks.id': crmTaskId, workspaceId: { $in: userWorkspaceIds } });
         if (contact) {
           taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
           if (taskIndex !== -1) task = contact.tasks[taskIndex];
         }
       }
 
-      if (!task) continue; // Task no longer exists in CRM
-
-      // Verify the task's workspace is one where this user is a member
-      const taskWsId = (task.workspaceId || contact?.workspaceId)?.toString();
-      if (taskWsId && !userWorkspaceIds.some(wId => wId.toString() === taskWsId)) {
-        continue; // Task belongs to a workspace where user is not a member
-      }
+      if (!task) continue; // Task no longer exists in CRM or not in user's workspace
 
       if (isDeleted) {
-        // Event was deleted in Google Calendar — don't delete the CRM task,
-        // just remove the mapping so next sync recreates it
-        const userToSave = await User.findById(user._id);
-        if (userToSave) {
-          userToSave.googleCalendar.syncedTaskIds.delete(crmTaskId);
-          await userToSave.save();
-        }
-        logger.debug('[Calendar Webhook] Event deleted in Google, removed mapping', { crmTaskId });
+        // Event was deleted in Google Calendar — remove mapping atomically
+        await User.findByIdAndUpdate(user._id, {
+          $unset: { [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '' }
+        });
         continue;
       }
 
@@ -706,10 +696,11 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 });
 
 // Sync single task to Google Calendar
-router.post('/sync-task/:taskId', authenticateToken, async (req, res) => {
+router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { taskId } = req.params;
     const user = await User.findById(req.user.id);
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -717,13 +708,13 @@ router.post('/sync-task/:taskId', authenticateToken, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Find task (could be global or contact task)
-    let task = await Task.findById(taskId);
+    // Find task (could be global or contact task) — scoped to workspace
+    let task = await Task.findOne({ _id: taskId, workspaceId });
     let contactName = null;
 
     if (!task) {
-      // Search in contacts
-      const contacts = await Contact.find({});
+      // Search in contacts within workspace only
+      const contacts = await Contact.find({ workspaceId });
       for (const contact of contacts) {
         const found = contact.tasks?.find(t => t.id === taskId);
         if (found) {
@@ -822,9 +813,10 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
 
 // Clean up orphaned events (events in Google Calendar that no longer have corresponding tasks)
 // Also cleans up old events from the past
-router.post('/cleanup', authenticateToken, async (req, res) => {
+router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -832,9 +824,9 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Get all current task IDs
-    const globalTasks = await Task.find({});
-    const contacts = await Contact.find({});
+    // Get all current task IDs — scoped to workspace
+    const globalTasks = await Task.find({ workspaceId });
+    const contacts = await Contact.find({ workspaceId });
 
     const currentTaskIds = new Set();
 
@@ -937,7 +929,17 @@ function findSubtaskRecursive(subtasks, subtaskId) {
 }
 
 function createEventData(task) {
-  const dueDate = new Date(task.dueDate);
+  let dueDate;
+  try {
+    dueDate = new Date(task.dueDate);
+    if (isNaN(dueDate.getTime())) {
+      logger.warn('[Google Calendar] Invalid dueDate', { taskId: task.id, dueDate: task.dueDate });
+      dueDate = new Date(); // fallback to today
+    }
+  } catch (e) {
+    logger.warn('[Google Calendar] Failed to parse dueDate', { taskId: task.id, dueDate: task.dueDate });
+    dueDate = new Date();
+  }
   const nextDay = new Date(dueDate);
   nextDay.setDate(nextDay.getDate() + 1);
 
@@ -945,7 +947,9 @@ function createEventData(task) {
   const startDate = dueDate.toISOString().split('T')[0];
   const endDate = nextDay.toISOString().split('T')[0];
 
-  let description = task.description || '';
+  // Google Calendar limits: summary 1024 chars, description 8192 chars
+  let title = (task.title || '').substring(0, 1024);
+  let description = (task.description || '').substring(0, 8000);
   if (task.contact) {
     description += description ? '\n\n' : '';
     description += `Kontakt: ${task.contact}`;
@@ -960,7 +964,7 @@ function createEventData(task) {
                   '9'; // Blue (medium/default)
 
   return {
-    summary: (task.completed ? '✓ ' : '') + task.title,
+    summary: (task.completed ? '✓ ' : '') + title,
     description: description,
     start: {
       date: startDate,
@@ -1005,8 +1009,6 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
 
     // Determine workspace scope — only sync for members of the task's workspace
     const workspaceId = taskData.workspaceId?.toString();
-    console.log(`[Auto-sync Calendar] Starting sync for task "${taskData.title}" (ID: ${taskId}, action: ${action}, workspace: ${workspaceId || 'none'})`);
-
     // Find users with Google Calendar enabled — filtered by workspace membership
     let users;
     if (workspaceId) {
@@ -1018,12 +1020,15 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       users = await User.find({ 'googleCalendar.enabled': true });
     }
 
-    if (users.length === 0) {
-      console.log('[Auto-sync Calendar] No workspace members with Google Calendar connected');
-      return;
+    // Filter by assignedTo: if task is assigned, only sync for assigned users
+    const assignedTo = (taskData.assignedTo || []).map(id => id?.toString()).filter(Boolean);
+    if (assignedTo.length > 0) {
+      users = users.filter(u => assignedTo.includes(u._id.toString()));
     }
 
-    console.log(`[Auto-sync Calendar] Found ${users.length} workspace members with Google Calendar connected`);
+    if (users.length === 0) {
+      return;
+    }
 
     for (const user of users) {
       try {
@@ -1039,19 +1044,16 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 calendarId: user.googleCalendar.calendarId,
                 eventId: eventId
               });
-              console.log(`[Auto-sync Calendar] Deleted event ${eventId} for user ${user.username}`);
             } catch (e) {
               // 404 is OK - event already deleted
               if (e.code !== 404) {
-                console.warn(`[Auto-sync Calendar] Event deletion failed:`, e.message);
+                logger.warn('[Auto-sync Calendar] Event deletion failed', { error: e.message });
               }
             }
-            // Re-fetch user before modifying Map to prevent race conditions
-            const userToSave = await User.findById(user._id);
-            if (userToSave) {
-              userToSave.googleCalendar.syncedTaskIds.delete(taskId);
-              await userToSave.save();
-            }
+            // Atomic removal of mapping
+            await User.findByIdAndUpdate(user._id, {
+              $unset: { [`googleCalendar.syncedTaskIds.${taskId}`]: '' }
+            });
           }
         } else {
           // Create or update event
@@ -1065,38 +1067,27 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             contact: taskData.contactName || taskData.contact || null
           });
 
-          // Re-fetch user to get latest syncedTaskIds (prevents race condition)
-          const freshUser = await User.findById(user._id);
-          if (!freshUser) {
-            console.warn('[Auto-sync Calendar] User not found on re-fetch', { userId: user._id });
-            continue;
-          }
-
-          const existingEventId = freshUser.googleCalendar.syncedTaskIds?.get(taskId);
+          const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskId);
 
           if (existingEventId) {
             // Update existing event
             try {
               await calendar.events.update({
-                calendarId: freshUser.googleCalendar.calendarId,
+                calendarId: user.googleCalendar.calendarId,
                 eventId: existingEventId,
                 resource: eventData
               });
-              console.log(`[Auto-sync Calendar] Updated event ${existingEventId} for user ${user.username}`);
             } catch (e) {
               // If event doesn't exist, create new one
               if (e.code === 404) {
                 const event = await calendar.events.insert({
-                  calendarId: freshUser.googleCalendar.calendarId,
+                  calendarId: user.googleCalendar.calendarId,
                   resource: eventData
                 });
-                // Re-fetch again before saving to prevent overwriting other changes
-                const userToSave = await User.findById(user._id);
-                if (userToSave) {
-                  userToSave.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
-                  await userToSave.save();
-                }
-                console.log(`[Auto-sync Calendar] Created new event (old was deleted) for user ${user.username}`);
+                // Atomic set of new mapping
+                await User.findByIdAndUpdate(user._id, {
+                  $set: { [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id }
+                });
               } else {
                 throw e;
               }
@@ -1104,16 +1095,13 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
           } else {
             // Create new event
             const event = await calendar.events.insert({
-              calendarId: freshUser.googleCalendar.calendarId,
+              calendarId: user.googleCalendar.calendarId,
               resource: eventData
             });
-            // Re-fetch again before saving to prevent overwriting other changes
-            const userToSave = await User.findById(user._id);
-            if (userToSave) {
-              userToSave.googleCalendar.syncedTaskIds.set(taskId, event.data.id);
-              await userToSave.save();
-            }
-            console.log(`[Auto-sync Calendar] Created event ${event.data.id} for user ${user.username}`);
+            // Atomic set of new mapping
+            await User.findByIdAndUpdate(user._id, {
+              $set: { [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id }
+            });
           }
         }
       } catch (error) {

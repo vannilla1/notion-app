@@ -5,8 +5,33 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
+const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
+const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
+
+// Helper to sync contact tasks to both Google Calendar and Google Tasks
+const autoSyncContactToGoogle = async (taskData, action) => {
+  await Promise.all([
+    autoSyncTaskToCalendar(taskData, action).catch(err =>
+      logger.warn('Auto-sync Calendar (contact) error', { error: err.message })
+    ),
+    autoSyncTaskToGoogleTasks(taskData, action).catch(err =>
+      logger.warn('Auto-sync Tasks (contact) error', { error: err.message })
+    )
+  ]);
+};
+
+const autoDeleteContactFromGoogle = async (taskId) => {
+  await Promise.all([
+    autoDeleteTaskFromCalendar(taskId).catch(err =>
+      logger.warn('Auto-delete Calendar (contact) error', { error: err.message })
+    ),
+    autoDeleteTaskFromGoogleTasks(taskId).catch(err =>
+      logger.warn('Auto-delete Tasks (contact) error', { error: err.message })
+    )
+  ]);
+};
 
 const router = express.Router();
 
@@ -332,6 +357,18 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
+    // Auto-sync to Google
+    autoSyncContactToGoogle({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      dueDate: task.dueDate,
+      completed: task.completed,
+      assignedTo: task.assignedTo,
+      workspaceId: req.workspaceId?.toString(),
+      contact: contact.name
+    }, 'create');
+
     res.status(201).json(task);
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
@@ -379,6 +416,19 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
+    // Auto-sync to Google
+    const updatedTask = contact.tasks[taskIndex];
+    autoSyncContactToGoogle({
+      id: updatedTask.id,
+      title: updatedTask.title,
+      description: updatedTask.description,
+      dueDate: updatedTask.dueDate,
+      completed: updatedTask.completed,
+      assignedTo: updatedTask.assignedTo,
+      workspaceId: req.workspaceId?.toString(),
+      contact: contact.name
+    }, 'update');
+
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
@@ -402,12 +452,16 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
       return res.status(404).json({ message: 'Task not found' });
     }
 
+    const deletedTaskId = contact.tasks[taskIndex].id;
     contact.tasks.splice(taskIndex, 1);
     contact.markModified('tasks');
     await contact.save();
 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+
+    // Auto-delete from Google
+    autoDeleteContactFromGoogle(deletedTaskId);
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -495,6 +549,18 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
+    // Auto-sync subtask to Google
+    autoSyncContactToGoogle({
+      id: subtask.id,
+      title: `${subtask.title} (${task.title})`,
+      description: subtask.notes,
+      dueDate: subtask.dueDate,
+      completed: subtask.completed,
+      assignedTo: task.assignedTo || [],
+      workspaceId: req.workspaceId?.toString(),
+      contact: contact.name
+    }, 'create');
+
     res.status(201).json(subtask);
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
@@ -547,6 +613,19 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
+    // Auto-sync subtask to Google
+    const updatedSubtask = found.parent[found.index];
+    autoSyncContactToGoogle({
+      id: updatedSubtask.id,
+      title: `${updatedSubtask.title} (${task.title})`,
+      description: updatedSubtask.notes,
+      dueDate: updatedSubtask.dueDate,
+      completed: updatedSubtask.completed,
+      assignedTo: task.assignedTo || [],
+      workspaceId: req.workspaceId?.toString(),
+      contact: contact.name
+    }, 'update');
+
     res.json(found.parent[found.index]);
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
@@ -577,6 +656,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
+    const deletedSubtaskId = found.subtask.id;
     found.parent.splice(found.index, 1);
 
     contact.markModified('tasks');
@@ -584,6 +664,9 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+
+    // Auto-delete subtask from Google
+    autoDeleteContactFromGoogle(deletedSubtaskId);
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
