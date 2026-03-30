@@ -347,16 +347,19 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
         { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1, 'tasks.dueDate': 1 }
       ).lean() : [];
 
-      // Count global tasks — only with dueDate, unassigned or assigned to this user
+      // Count global tasks — unassigned or assigned to this user
       for (const task of globalTasks) {
-        if (!task.dueDate || !isUserTask(task)) continue;
-        totalTasks++;
-        const taskId = task._id.toString();
-        const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
-        if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
-          syncedCount++;
+        if (!isUserTask(task)) continue;
+        // Count parent task only if it has dueDate
+        if (task.dueDate) {
+          totalTasks++;
+          const taskId = task._id.toString();
+          const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
+          if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+            syncedCount++;
+          }
         }
-        // Count subtasks
+        // Always count subtasks (they have their own dueDate filter)
         if (task.subtasks) {
           const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
           totalTasks += subtaskCounts.total;
@@ -364,17 +367,19 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
         }
       }
 
-      // Count contact tasks — only with dueDate, unassigned or assigned to this user
+      // Count contact tasks — unassigned or assigned to this user
       for (const contact of contacts) {
         if (contact.tasks) {
           for (const task of contact.tasks) {
-            if (!task.completed && task.dueDate && isUserTask(task)) {
-              totalTasks++;
-              const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
-              if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
-                syncedCount++;
+            if (!task.completed && isUserTask(task)) {
+              if (task.dueDate) {
+                totalTasks++;
+                const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
+                if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
+                  syncedCount++;
+                }
               }
-              // Count subtasks only for non-completed tasks
+              // Always count subtasks (they have their own dueDate filter)
               if (task.subtasks) {
                 const subtaskCounts = countSubtasksPendingSync(task.subtasks, user);
                 totalTasks += subtaskCounts.total;
@@ -585,36 +590,42 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const tasksToSync = [];
 
-    // Collect global tasks — only with dueDate, unassigned or assigned to this user
+    // Collect global tasks — unassigned or assigned to this user
     for (const task of globalTasks) {
-      if (!task.completed && task.dueDate && isUserTask(task)) {
-        tasksToSync.push({
-          id: task._id.toString(),
-          title: task.title,
-          notes: task.description || '',
-          dueDate: task.dueDate,
-          completed: task.completed,
-          contact: null,
-          modifiedAt: task.modifiedAt || task.updatedAt
-        });
+      if (!task.completed && isUserTask(task)) {
+        // Only sync the parent task itself if it has a dueDate
+        if (task.dueDate) {
+          tasksToSync.push({
+            id: task._id.toString(),
+            title: task.title,
+            notes: task.description || '',
+            dueDate: task.dueDate,
+            completed: task.completed,
+            contact: null,
+            modifiedAt: task.modifiedAt || task.updatedAt
+          });
+        }
+        // Always check subtasks (they have their own dueDate filter)
         collectSubtasksForSync(task.subtasks, task.title, null, tasksToSync);
       }
     }
 
-    // Collect contact tasks — only with dueDate, unassigned or assigned to this user
+    // Collect contact tasks — unassigned or assigned to this user
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
-          if (!task.completed && task.dueDate && isUserTask(task)) {
-            tasksToSync.push({
-              id: task.id,
-              title: task.title,
-              notes: task.description || '',
-              dueDate: task.dueDate,
-              completed: task.completed,
-              contact: contact.name,
-              modifiedAt: task.modifiedAt
-            });
+          if (!task.completed && isUserTask(task)) {
+            if (task.dueDate) {
+              tasksToSync.push({
+                id: task.id,
+                title: task.title,
+                notes: task.description || '',
+                dueDate: task.dueDate,
+                completed: task.completed,
+                contact: contact.name,
+                modifiedAt: task.modifiedAt
+              });
+            }
             collectSubtasksForSync(task.subtasks, task.title, contact.name, tasksToSync);
           }
         }
