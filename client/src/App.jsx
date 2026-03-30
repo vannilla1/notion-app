@@ -11,6 +11,7 @@ import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Messages from './pages/Messages';
 import LandingPage from './pages/LandingPage';
+import AdminPanel from './pages/AdminPanel';
 import NotificationToast from './components/NotificationToast';
 import BottomNav from './components/BottomNav';
 import WorkspaceSetup from './components/WorkspaceSetup';
@@ -237,6 +238,10 @@ function AppContent() {
         <Route
           path="/messages"
           element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/admin"
+          element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
         />
         <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />

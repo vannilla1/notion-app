@@ -21,6 +21,7 @@ const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
 const workspaceRoutes = require('./routes/workspaces');
 const messageRoutes = require('./routes/messages');
+const adminRoutes = require('./routes/admin');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
@@ -106,6 +107,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
