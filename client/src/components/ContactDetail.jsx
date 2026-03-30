@@ -1,6 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
-import { API_BASE_URL } from '../api/api';
+import api from '../api/api';
+
+function FilePreviewImage({ contactId, fileId, alt }) {
+  const [src, setSrc] = useState(null);
+
+  useEffect(() => {
+    let revoke;
+    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' })
+      .then(res => {
+        const url = window.URL.createObjectURL(res.data);
+        revoke = url;
+        setSrc(url);
+      })
+      .catch(() => {});
+    return () => { if (revoke) window.URL.revokeObjectURL(revoke); };
+  }, [contactId, fileId]);
+
+  if (!src) return <div className="file-icon">🖼️</div>;
+  return <img src={src} alt={alt} />;
+}
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
@@ -77,6 +96,24 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
     if (file) {
       onUploadFile(contact.id, file);
       e.target.value = '';
+    }
+  };
+
+  const handleFileDownload = async (fileId, fileName) => {
+    try {
+      const response = await api.get(`/api/contacts/${contact.id}/files/${fileId}/download`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(response.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('File download failed:', err);
     }
   };
 
@@ -297,8 +334,9 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                 <div key={file.id} className="file-item">
                   {isImage(file.mimetype) ? (
                     <div className="file-preview">
-                      <img
-                        src={`${API_BASE_URL}/uploads/${file.filename}`}
+                      <FilePreviewImage
+                        contactId={contact.id}
+                        fileId={file.id}
                         alt={file.originalName}
                       />
                     </div>
@@ -314,14 +352,13 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                     </div>
                   </div>
                   <div className="file-actions">
-                    <a
-                      href={`${API_BASE_URL}/uploads/${file.filename}`}
-                      download={file.originalName}
+                    <button
                       className="btn-icon"
+                      onClick={() => handleFileDownload(file.id, file.originalName)}
                       title="Stiahnuť"
                     >
                       ⬇️
-                    </a>
+                    </button>
                     <button
                       className="btn-icon"
                       onClick={() => onDeleteFile(contact.id, file.id)}
