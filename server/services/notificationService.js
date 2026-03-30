@@ -69,15 +69,24 @@ let apnConfigured = false;
 const initializeAPNs = () => {
   if (apnConfigured) return true;
 
-  const keyPath = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
   const keyId = process.env.APNS_KEY_ID;
   const teamId = process.env.APNS_TEAM_ID;
 
   if (keyId && teamId) {
     try {
+      // Support key as env variable (APNS_KEY_BASE64 or APNS_KEY) or file path
+      let key;
+      if (process.env.APNS_KEY_BASE64) {
+        key = Buffer.from(process.env.APNS_KEY_BASE64, 'base64').toString('utf8');
+      } else if (process.env.APNS_KEY) {
+        key = process.env.APNS_KEY.replace(/\\n/g, '\n');
+      } else {
+        key = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
+      }
+
       apnProvider = new apn.Provider({
         token: {
-          key: keyPath,
+          key,
           keyId,
           teamId
         },
