@@ -1073,7 +1073,7 @@ function CRM() {
                   type="text"
                   value={subtaskInputs[subtask.id] || ''}
                   onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Nová úloha..."
+                  placeholder="Nová podúloha..."
                   className="form-input form-input-sm"
                   autoFocus
                 />

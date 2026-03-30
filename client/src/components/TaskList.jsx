@@ -341,7 +341,7 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
                         type="text"
                         value={subtaskInputs[task.id] || ''}
                         onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                        placeholder="Pridať úlohu..."
+                        placeholder="Nová podúloha..."
                         className="form-input form-input-sm"
                       />
                       <button type="submit" className="btn btn-secondary btn-sm">+</button>

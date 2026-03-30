@@ -1578,7 +1578,7 @@ function Tasks() {
                   type="text"
                   value={subtaskInputs[subtask.id] || ''}
                   onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Nová úloha..."
+                  placeholder="Nová podúloha..."
                   className="form-input form-input-sm"
                   autoFocus
                 />
@@ -2705,7 +2705,7 @@ function Tasks() {
                                     type="text"
                                     value={subtaskInputs[task.id] || ''}
                                     onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    placeholder="Pridať úlohu..."
+                                    placeholder="Nová podúloha..."
                                     className="form-input form-input-sm"
                                   />
                                   <button
