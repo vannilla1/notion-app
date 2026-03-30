@@ -340,16 +340,16 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
 
       const globalTasks = workspaceId ? await Task.find(
         { workspaceId, completed: { $ne: true } },
-        { _id: 1, subtasks: 1, assignedTo: 1 }
+        { _id: 1, subtasks: 1, assignedTo: 1, dueDate: 1 }
       ).lean() : [];
       const contacts = workspaceId ? await Contact.find(
         { workspaceId },
-        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1 }
+        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1, 'tasks.dueDate': 1 }
       ).lean() : [];
 
-      // Count global tasks — only unassigned or assigned to this user
+      // Count global tasks — only with dueDate, unassigned or assigned to this user
       for (const task of globalTasks) {
-        if (!isUserTask(task)) continue;
+        if (!task.dueDate || !isUserTask(task)) continue;
         totalTasks++;
         const taskId = task._id.toString();
         const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
@@ -364,11 +364,11 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
         }
       }
 
-      // Count contact tasks — only unassigned or assigned to this user
+      // Count contact tasks — only with dueDate, unassigned or assigned to this user
       for (const contact of contacts) {
         if (contact.tasks) {
           for (const task of contact.tasks) {
-            if (!task.completed && isUserTask(task)) {
+            if (!task.completed && task.dueDate && isUserTask(task)) {
               totalTasks++;
               const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
               if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
@@ -418,7 +418,7 @@ function countSubtasksPendingSync(subtasks, user) {
   if (!subtasks || !Array.isArray(subtasks)) return { total, synced };
 
   for (const subtask of subtasks) {
-    if (!subtask.completed) {
+    if (!subtask.completed && subtask.dueDate) {
       total++;
       const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(subtask.id);
       if (existingGoogleTaskId && typeof existingGoogleTaskId === 'string' && existingGoogleTaskId.length > 0) {
@@ -585,9 +585,9 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const tasksToSync = [];
 
-    // Collect global tasks — only unassigned or assigned to this user
+    // Collect global tasks — only with dueDate, unassigned or assigned to this user
     for (const task of globalTasks) {
-      if (!task.completed && isUserTask(task)) {
+      if (!task.completed && task.dueDate && isUserTask(task)) {
         tasksToSync.push({
           id: task._id.toString(),
           title: task.title,
@@ -601,11 +601,11 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       }
     }
 
-    // Collect contact tasks — only unassigned or assigned to this user
+    // Collect contact tasks — only with dueDate, unassigned or assigned to this user
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
-          if (!task.completed && isUserTask(task)) {
+          if (!task.completed && task.dueDate && isUserTask(task)) {
             tasksToSync.push({
               id: task.id,
               title: task.title,
@@ -1513,7 +1513,7 @@ function findSubtaskById(subtasks, id) {
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;
   for (const subtask of subtasks) {
-    if (!subtask.completed) {
+    if (!subtask.completed && subtask.dueDate) {
       tasksToSync.push({
         id: subtask.id,
         title: `${subtask.title} (${parentTitle})`,
@@ -1591,7 +1591,10 @@ const releaseLock = (key) => {
  */
 const autoSyncTaskToGoogleTasks = async (taskData, action) => {
   try {
-    // Tasks without due date can also be synced to Google Tasks
+    // Only sync tasks with a due date (except deletes — always propagate)
+    if (action !== 'delete' && !taskData.dueDate) {
+      return;
+    }
 
     let taskId = taskData.id || taskData._id;
     if (taskId && typeof taskId === 'object' && taskId.toString) {
