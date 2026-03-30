@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>4</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -31,6 +31,12 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Prpl CRM potrebuje pristup ku kamere na pridavanie fotiek k projektom a kontaktom.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Prpl CRM potrebuje pristup k fotoalbumu na pridavanie fotiek k projektom a kontaktom.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Prpl CRM potrebuje pristup k mikrofonu pre nahravanie videa.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
