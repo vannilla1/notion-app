@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { acceptInvitation } from '../api/workspaces';
@@ -122,6 +122,14 @@ function Login() {
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Načítavam...' : isRegister ? 'Registrovať' : 'Prihlásiť'}
           </button>
+          {isRegister && (
+            <p style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginTop: '12px', textAlign: 'center', lineHeight: '1.5' }}>
+              Registráciou súhlasíte s{' '}
+              <Link to="/vop" style={{ color: 'var(--accent-color, #6366f1)' }}>Obchodnými podmienkami</Link>
+              {' '}a{' '}
+              <Link to="/privacy" style={{ color: 'var(--accent-color, #6366f1)' }}>Zásadami ochrany osobných údajov</Link>.
+            </p>
+          )}
         </form>
 
         <div className="login-footer">
