@@ -1137,43 +1137,53 @@ function Dashboard() {
                     <p>Žiadne správy</p>
                   </div>
                 ) : (
-                  <div className="dashboard-messages-list">
-                    {pendingMessages > 0 && (
-                      <div
-                        className="dashboard-message-summary pending"
-                        onClick={(e) => { e.stopPropagation(); setDetailView('messages-pending'); }}
-                      >
-                        <span className="message-summary-icon" style={{ color: '#F59E0B' }}>✉</span>
-                        <span className="message-summary-text">{pendingMessages} neprečítaných správ</span>
-                      </div>
-                    )}
-                    {messages.received.slice(0, 4).map(msg => (
-                      <div
-                        key={msg.id}
-                        className={`dashboard-message-item ${msg.status === 'pending' ? 'unread' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
-                      >
+                  <div className="dashboard-contacts-list">
+                    {messages.received.slice(0, 5).map(msg => {
+                      const senderName = msg.fromUsername || 'Neznámy';
+                      const initial = senderName.charAt(0).toUpperCase();
+                      return (
                         <div
-                          className="message-status-dot"
-                          style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
-                        />
-                        <div className="dashboard-message-info">
-                          <div className="dashboard-message-subject">
-                            {msg.subject || 'Bez predmetu'}
+                          key={msg.id}
+                          className="dashboard-contact-item"
+                          onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
+                        >
+                          <div
+                            className="contact-avatar-sm"
+                            style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
+                          >
+                            {initial}
                           </div>
-                          <div className="dashboard-message-meta">
-                            <span className="message-from">Od: {msg.fromUsername || 'Neznámy'}</span>
-                            <span className="message-date">
-                              {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            {msg.attachment && <span className="message-attachment">📎</span>}
+                          <div className="dashboard-contact-info">
+                            <div className="dashboard-contact-name">
+                              {msg.subject || 'Bez predmetu'}
+                              {msg.status === 'pending' && (
+                                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#F59E0B', marginLeft: 6, verticalAlign: 'middle' }} />
+                              )}
+                            </div>
+                            <div className="dashboard-contact-meta">
+                              <span className="company-text">{senderName}</span>
+                              <span className="company-text" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              {msg.attachment && <span>📎</span>}
+                            </div>
+                            {msg.body && (
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {msg.body.length > 80 ? msg.body.substring(0, 80) + '...' : msg.body}
+                              </div>
+                            )}
                           </div>
+                          {msg.comments?.length > 0 && (
+                            <div className="dashboard-contact-tasks">
+                              <span className="task-progress">{msg.comments.length} 💬</span>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
-                    {totalReceived > 4 && (
+                      );
+                    })}
+                    {totalReceived > 5 && (
                       <div className="show-more">
-                        + {totalReceived - 4} ďalších správ
+                        + {totalReceived - 5} ďalších správ
                       </div>
                     )}
                     {totalSent > 0 && (
