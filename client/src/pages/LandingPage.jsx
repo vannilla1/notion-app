@@ -1,11 +1,29 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import api from '@/api/api';
 import './LandingPage.css';
 
 export default function LandingPage() {
   const [isYearly, setIsYearly] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
+  const [contactStatus, setContactStatus] = useState(null); // 'sending' | 'success' | 'error'
+  const [contactError, setContactError] = useState('');
+
+  const handleContactSubmit = async (e) => {
+    e.preventDefault();
+    setContactStatus('sending');
+    setContactError('');
+    try {
+      await api.post('/api/contact-form', contactForm);
+      setContactStatus('success');
+      setContactForm({ name: '', email: '', message: '' });
+    } catch (err) {
+      setContactStatus('error');
+      setContactError(err.response?.data?.message || 'Nepodarilo sa odoslať správu.');
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
@@ -33,6 +51,7 @@ export default function LandingPage() {
             <li><a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a></li>
             <li><a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a></li>
             <li><a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a></li>
+            <li><a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a></li>
           </ul>
 
           <Link to="/login" className="lp-nav-cta desktop-only">Prihlásiť sa</Link>
@@ -51,6 +70,7 @@ export default function LandingPage() {
           <a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a>
           <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a>
           <a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a>
+          <a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a>
           <Link to="/login" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</Link>
         </div>
       </div>
@@ -483,6 +503,82 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Contact */}
+      <section className="lp-contact" id="kontakt">
+        <div className="lp-section">
+          <div className="lp-section-header">
+            <span className="lp-section-accent" />
+            <h2 className="lp-section-title">Kontaktujte nás</h2>
+            <p className="lp-section-subtitle">
+              Máte otázku alebo návrh? Napíšte nám.
+            </p>
+          </div>
+
+          <div className="lp-contact-grid">
+            <div className="lp-contact-info">
+              <div className="lp-contact-card">
+                <div className="lp-contact-icon">&#9993;</div>
+                <h3>Email</h3>
+                <a href="mailto:support@prplcrm.eu" className="lp-contact-link">support@prplcrm.eu</a>
+              </div>
+              <div className="lp-contact-card">
+                <div className="lp-contact-icon">&#128172;</div>
+                <h3>Podpora</h3>
+                <p>Odpovieme do 24 hodín v pracovných dňoch.</p>
+              </div>
+            </div>
+
+            <form className="lp-contact-form" onSubmit={handleContactSubmit}>
+              <div className="lp-form-group">
+                <label htmlFor="contact-name">Meno</label>
+                <input
+                  id="contact-name"
+                  type="text"
+                  required
+                  maxLength={100}
+                  value={contactForm.name}
+                  onChange={(e) => setContactForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Vaše meno"
+                />
+              </div>
+              <div className="lp-form-group">
+                <label htmlFor="contact-email">Email</label>
+                <input
+                  id="contact-email"
+                  type="email"
+                  required
+                  maxLength={200}
+                  value={contactForm.email}
+                  onChange={(e) => setContactForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="vas@email.com"
+                />
+              </div>
+              <div className="lp-form-group">
+                <label htmlFor="contact-message">Správa</label>
+                <textarea
+                  id="contact-message"
+                  required
+                  maxLength={5000}
+                  rows={5}
+                  value={contactForm.message}
+                  onChange={(e) => setContactForm(f => ({ ...f, message: e.target.value }))}
+                  placeholder="Napíšte nám vašu otázku alebo návrh..."
+                />
+              </div>
+              {contactStatus === 'success' && (
+                <div className="lp-form-success">Správa bola úspešne odoslaná. Ďakujeme!</div>
+              )}
+              {contactStatus === 'error' && (
+                <div className="lp-form-error">{contactError}</div>
+              )}
+              <button type="submit" className="lp-cta-primary" disabled={contactStatus === 'sending'}>
+                {contactStatus === 'sending' ? 'Odosielam...' : 'Odoslať správu'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="lp-footer">
         <div className="lp-footer-inner">
@@ -491,6 +587,7 @@ export default function LandingPage() {
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">
+            <a href="mailto:support@prplcrm.eu">support@prplcrm.eu</a>
             <Link to="/privacy">Zásady ochrany osobných údajov</Link>
           </div>
         </div>

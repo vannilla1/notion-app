@@ -19,7 +19,7 @@ export default function PrivacyPolicy() {
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>1. Prevádzkovateľ</h2>
         <p>
           Prevádzkovateľom aplikácie <strong>Prpl CRM</strong> (ďalej len "aplikácia") dostupnej na adrese{' '}
-          <a href="https://perun-crm.onrender.com" style={{ color: '#6366f1' }}>perun-crm.onrender.com</a>.
+          <a href="https://prplcrm.eu" style={{ color: '#6366f1' }}>prplcrm.eu</a>.
         </p>
       </section>
 
