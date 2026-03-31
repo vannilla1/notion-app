@@ -90,9 +90,13 @@ function Messages() {
     };
   }, [socket, isConnected]);
 
-  // Deep link highlight
+  // Deep link highlight + tab
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'received' || tabParam === 'sent') {
+      setTab(tabParam);
+    }
     const highlightId = params.get('highlight');
     if (highlightId && messages.length > 0) {
       const msg = messages.find(m => m.id === highlightId || m._id === highlightId);

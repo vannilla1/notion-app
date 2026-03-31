@@ -898,7 +898,7 @@ function Dashboard() {
                     <div
                       key={msg.id}
                       className={`detail-item message-detail-item ${msg.status === 'pending' ? 'unread' : ''}`}
-                      onClick={() => navigate('/messages')}
+                      onClick={() => navigate(`/messages?tab=${messageTab}&highlight=${msg.id || msg._id}`)}
                     >
                       <div
                         className="contact-avatar"
@@ -1236,7 +1236,7 @@ function Dashboard() {
                           <div
                             key={msg.id}
                             className="dashboard-contact-item"
-                            onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
+                            onClick={(e) => { e.stopPropagation(); navigate(`/messages?tab=${isSent ? 'sent' : 'received'}&highlight=${msg.id || msg._id}`); }}
                           >
                             <div
                               className="contact-avatar-sm"
