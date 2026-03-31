@@ -59,6 +59,7 @@ function Dashboard() {
   // Detail view state
   const [detailView, setDetailView] = useState(null); // 'contacts', 'tasks', 'active', 'pending', 'completed', 'contactTasks'
   const [selectedContact, setSelectedContact] = useState(null);
+  const [messageTab, setMessageTab] = useState('received'); // 'received' | 'sent'
 
   // Task editing state
   const [expandedTask, setExpandedTask] = useState(null);
@@ -277,17 +278,17 @@ function Dashboard() {
       case 'priority-high':
         return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'high' && !t.completed)), title: 'Projekty s vysokou prioritou' };
       case 'messages-all':
-        return { type: 'messages', items: messages.received, title: 'Prijaté správy' };
       case 'messages-pending':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'pending'), title: 'Čakajúce správy' };
       case 'messages-approved':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'approved'), title: 'Schválené správy' };
       case 'messages-rejected':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'rejected'), title: 'Zamietnuté správy' };
-      case 'messages-commented':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'commented'), title: 'Komentované správy' };
-      case 'messages-sent':
-        return { type: 'messages', items: messages.sent, title: 'Odoslané správy' };
+      case 'messages-commented': {
+        const src = messageTab === 'sent' ? messages.sent : messages.received;
+        const statusKey = detailView.replace('messages-', '');
+        const filtered = statusKey === 'all' ? src : src.filter(m => m.status === statusKey);
+        const statusLabels = { all: 'Všetky', pending: 'Čakajúce', approved: 'Schválené', rejected: 'Zamietnuté', commented: 'Komentované' };
+        const tabLabel = messageTab === 'sent' ? 'Odoslané' : 'Prijaté';
+        return { type: 'messages', items: filtered, title: `${tabLabel} — ${statusLabels[statusKey]} správy` };
+      }
       default:
         return null;
     }
@@ -700,9 +701,11 @@ function Dashboard() {
               className={`stat-item clickable ${detailView === 'messages-all' ? 'active' : ''}`}
               onClick={() => setDetailView('messages-all')}
             >
-              <span className="stat-label">Prijaté</span>
+              <span className="stat-label">Celkom správ</span>
               <span className="stat-value">{totalReceived}</span>
             </div>
+
+            <h4 style={{ marginTop: '12px', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>Podľa stavu</h4>
             <div
               className={`stat-item clickable priority-stat ${detailView === 'messages-pending' ? 'active' : ''}`}
               onClick={() => setDetailView('messages-pending')}
@@ -742,13 +745,6 @@ function Dashboard() {
                 Komentované
               </span>
               <span className="stat-value">{commentedMessages}</span>
-            </div>
-            <div
-              className={`stat-item clickable ${detailView === 'messages-sent' ? 'active' : ''}`}
-              onClick={() => setDetailView('messages-sent')}
-            >
-              <span className="stat-label">Odoslané</span>
-              <span className="stat-value">{totalSent}</span>
             </div>
           </div>
 
@@ -790,6 +786,59 @@ function Dashboard() {
                 </button>
                 <h2>{detailData.title} ({detailData.items.length})</h2>
               </div>
+
+              {detailData.type === 'messages' && (
+                <>
+                  {/* Tab toggle: Prijaté / Odoslané */}
+                  <div style={{ display: 'flex', gap: '0', marginBottom: '12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '3px', border: '1px solid var(--border-color)' }}>
+                    <button
+                      onClick={() => setMessageTab('received')}
+                      style={{
+                        flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                        borderRadius: 'calc(var(--radius-md) - 2px)',
+                        background: messageTab === 'received' ? 'var(--accent-color)' : 'transparent',
+                        color: messageTab === 'received' ? 'white' : 'var(--text-secondary)',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      📥 Prijaté
+                    </button>
+                    <button
+                      onClick={() => setMessageTab('sent')}
+                      style={{
+                        flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                        borderRadius: 'calc(var(--radius-md) - 2px)',
+                        background: messageTab === 'sent' ? 'var(--accent-color)' : 'transparent',
+                        color: messageTab === 'sent' ? 'white' : 'var(--text-secondary)',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      📤 Odoslané
+                    </button>
+                  </div>
+                  {/* Status filter buttons */}
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                    {['all', 'pending', 'approved', 'rejected', 'commented'].map(s => {
+                      const labels = { all: 'Všetky', pending: 'Čaká', approved: 'Schválené', rejected: 'Zamietnuté', commented: 'Komentované' };
+                      const isActive = detailView === `messages-${s}`;
+                      return (
+                        <button
+                          key={s}
+                          onClick={() => setDetailView(`messages-${s}`)}
+                          style={{
+                            padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                            background: isActive ? 'var(--accent-color)' : 'var(--bg-card)',
+                            color: isActive ? 'white' : 'var(--text-secondary)',
+                            cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
+                          }}
+                        >
+                          {labels[s]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
 
               {detailData.items.length === 0 ? (
                 <div className="empty-state">
@@ -858,7 +907,7 @@ function Dashboard() {
                         <div className="detail-item-title">{msg.subject || 'Bez predmetu'}</div>
                         <div className="detail-item-meta">
                           <span className="meta-text">
-                            {detailView === 'messages-sent' ? `Komu: ${msg.toUsername || 'Neznámy'}` : `Od: ${msg.fromUsername || 'Neznámy'}`}
+                            {messageTab === 'sent' ? `Komu: ${msg.toUsername || 'Neznámy'}` : `Od: ${msg.fromUsername || 'Neznámy'}`}
                           </span>
                           <span className="meta-text">
                             {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
