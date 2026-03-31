@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
@@ -2223,8 +2224,8 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
     if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
 
     try {
-      const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-      if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
+      const { taskId } = req.params;
+      const subtaskId = req.query.subtaskId;
 
       const fileData = {
         id: uuidv4(),
@@ -2235,18 +2236,46 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         uploadedAt: new Date()
       };
 
-      const subtaskId = req.query.subtaskId;
+      // Try global Task first (only if taskId is a valid ObjectId)
+      if (mongoose.Types.ObjectId.isValid(taskId)) {
+        const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+        if (task) {
+          if (subtaskId) {
+            const subtask = findSubtaskById(task.subtasks, subtaskId);
+            if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
+            if (!subtask.files) subtask.files = [];
+            subtask.files.push(fileData);
+            task.markModified('subtasks');
+          } else {
+            task.files.push(fileData);
+          }
+          await task.save();
+          const { data, ...fileMeta } = fileData;
+          return res.json({ message: 'Súbor nahraný', file: fileMeta });
+        }
+      }
+
+      // Search in contact tasks (handles UUID task IDs)
+      const contact = await Contact.findOne({
+        workspaceId: req.workspaceId,
+        'tasks.id': taskId
+      });
+      if (!contact) return res.status(404).json({ message: 'Projekt nenájdený' });
+
+      const contactTask = contact.tasks.find(t => t.id === taskId);
+      if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+
       if (subtaskId) {
-        const subtask = findSubtaskById(task.subtasks, subtaskId);
+        const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
         if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
         if (!subtask.files) subtask.files = [];
         subtask.files.push(fileData);
-        task.markModified('subtasks');
       } else {
-        task.files.push(fileData);
+        if (!contactTask.files) contactTask.files = [];
+        contactTask.files.push(fileData);
       }
-
-      await task.save();
+      contact.markModified('tasks');
+      await contact.save();
 
       const { data, ...fileMeta } = fileData;
       res.json({ message: 'Súbor nahraný', file: fileMeta });
@@ -2260,18 +2289,40 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
 // Download file from task
 router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-    if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
-
+    const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
     let file;
 
-    if (subtaskId) {
-      const subtask = findSubtaskById(task.subtasks, subtaskId);
-      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-      file = (subtask.files || []).find(f => f.id === req.params.fileId);
-    } else {
-      file = task.files.find(f => f.id === req.params.fileId);
+    // Try global Task first (only if taskId is a valid ObjectId)
+    if (mongoose.Types.ObjectId.isValid(taskId)) {
+      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      if (task) {
+        if (subtaskId) {
+          const subtask = findSubtaskById(task.subtasks, subtaskId);
+          if (subtask) file = (subtask.files || []).find(f => f.id === fileId);
+        } else {
+          file = task.files.find(f => f.id === fileId);
+        }
+      }
+    }
+
+    // If not found, search in contact tasks (handles UUID task IDs)
+    if (!file) {
+      const contact = await Contact.findOne({
+        workspaceId: req.workspaceId,
+        'tasks.id': taskId
+      });
+      if (contact) {
+        const contactTask = contact.tasks.find(t => t.id === taskId);
+        if (contactTask) {
+          if (subtaskId) {
+            const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
+            if (subtask) file = (subtask.files || []).find(f => f.id === fileId);
+          } else {
+            file = (contactTask.files || []).find(f => f.id === fileId);
+          }
+        }
+      }
     }
 
     if (!file) return res.status(404).json({ message: 'Súbor nenájdený' });
@@ -2293,21 +2344,45 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
 // Delete file from task
 router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const task = await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId });
-    if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
-
+    const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
 
-    if (subtaskId) {
-      const subtask = findSubtaskById(task.subtasks, subtaskId);
-      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-      subtask.files = (subtask.files || []).filter(f => f.id !== req.params.fileId);
-      task.markModified('subtasks');
-    } else {
-      task.files = task.files.filter(f => f.id !== req.params.fileId);
+    // Try global Task first (only if taskId is a valid ObjectId)
+    if (mongoose.Types.ObjectId.isValid(taskId)) {
+      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      if (task) {
+        if (subtaskId) {
+          const subtask = findSubtaskById(task.subtasks, subtaskId);
+          if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
+          subtask.files = (subtask.files || []).filter(f => f.id !== fileId);
+          task.markModified('subtasks');
+        } else {
+          task.files = task.files.filter(f => f.id !== fileId);
+        }
+        await task.save();
+        return res.json({ message: 'Súbor vymazaný' });
+      }
     }
 
-    await task.save();
+    // Search in contact tasks (handles UUID task IDs)
+    const contact = await Contact.findOne({
+      workspaceId: req.workspaceId,
+      'tasks.id': taskId
+    });
+    if (!contact) return res.status(404).json({ message: 'Projekt nenájdený' });
+
+    const contactTask = contact.tasks.find(t => t.id === taskId);
+    if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+
+    if (subtaskId) {
+      const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
+      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
+      subtask.files = (subtask.files || []).filter(f => f.id !== fileId);
+    } else {
+      contactTask.files = (contactTask.files || []).filter(f => f.id !== fileId);
+    }
+    contact.markModified('tasks');
+    await contact.save();
     res.json({ message: 'Súbor vymazaný' });
   } catch (error) {
     logger.error('Task file delete error', { error: error.message });
