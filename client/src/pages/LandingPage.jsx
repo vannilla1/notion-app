@@ -588,7 +588,8 @@ export default function LandingPage() {
           </div>
           <div className="lp-footer-links">
             <a href="mailto:support@prplcrm.eu">support@prplcrm.eu</a>
-            <Link to="/privacy">Zásady ochrany osobných údajov</Link>
+            <Link to="/vop">Obchodné podmienky</Link>
+            <Link to="/privacy">Ochrana osobných údajov</Link>
           </div>
         </div>
         <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vannilla</a></p>

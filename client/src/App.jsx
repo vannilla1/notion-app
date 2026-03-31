@@ -9,6 +9,7 @@ import Tasks from './pages/Tasks';
 import WorkspaceMembers from './pages/WorkspaceMembers';
 import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 import Messages from './pages/Messages';
 import LandingPage from './pages/LandingPage';
 import AdminPanel from './pages/AdminPanel';
@@ -245,6 +246,7 @@ function AppContent() {
         />
         <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/vop" element={<TermsOfService />} />
       </Routes>
     </>
   );
