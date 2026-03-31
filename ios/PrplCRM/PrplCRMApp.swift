@@ -19,7 +19,7 @@ class PushNotificationManager: ObservableObject {
     @Published var pendingDeepLink: String?
     var authToken: String?
 
-    static let baseURL = "https://perun-crm.onrender.com"
+    static let baseURL = "https://prplcrm.eu"
 
     private var retryCount = 0
     private let maxRetries = 5

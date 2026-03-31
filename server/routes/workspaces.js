@@ -658,7 +658,7 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
         role: invitation.role,
         status: invitation.status,
         token: invitation.token,
-        inviteLink: `${process.env.CLIENT_URL || 'https://perun-crm.onrender.com'}/invite/${invitation.token}`,
+        inviteLink: `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/invite/${invitation.token}`,
         expiresAt: invitation.expiresAt,
         invitedBy: inviterUser?.username || 'Neznámy'
       }

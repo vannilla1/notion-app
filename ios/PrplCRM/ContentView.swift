@@ -9,7 +9,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             WebView(
-                url: URL(string: "https://perun-crm.onrender.com/app")!,
+                url: URL(string: "https://prplcrm.eu/app")!,
                 isLoading: $isLoading,
                 loadError: $loadError,
                 pushManager: pushManager
@@ -191,7 +191,7 @@ struct WebView: UIViewRepresentable {
         // Handle deep link from push notification tap
         if let deepLink = pushManager.pendingDeepLink {
             pushManager.pendingDeepLink = nil
-            let fullURL = "https://perun-crm.onrender.com/app\(deepLink)"
+            let fullURL = "https://prplcrm.eu/app\(deepLink)"
             if let navURL = URL(string: fullURL) {
                 webView.load(URLRequest(url: navURL))
             }
@@ -373,7 +373,7 @@ struct WebView: UIViewRepresentable {
             }
 
             let host = url.host ?? ""
-            let isInternal = host.isEmpty || host.contains("perun-crm.onrender.com") || host.contains("localhost")
+            let isInternal = host.isEmpty || host.contains("prplcrm.eu") || host.contains("localhost")
 
             // Google blocks OAuth in WKWebView — must open in Safari
             let isGoogleAuth = host.contains("accounts.google.com") || host.contains("accounts.youtube.com")
@@ -388,7 +388,7 @@ struct WebView: UIViewRepresentable {
                 // Block landing page — redirect to /app
                 let path = url.path
                 if path == "/" || path.isEmpty {
-                    let appURL = URL(string: "https://perun-crm.onrender.com/app")!
+                    let appURL = URL(string: "https://prplcrm.eu/app")!
                     webView.load(URLRequest(url: appURL))
                     decisionHandler(.cancel)
                     return

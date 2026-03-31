@@ -119,7 +119,7 @@ const sendAPNsNotification = async (userId, payload) => {
     if (devices.length === 0) return result;
 
     const url = generateNotificationUrl(payload.type, payload.data);
-    const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
+    const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
     const notification = new apn.Notification();
     notification.expiry = Math.floor(Date.now() / 1000) + 3600; // 1 hour

@@ -44,7 +44,7 @@ const server = http.createServer(app);
 
 // CORS configuration - restrict to frontend origin
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'https://perun-crm.onrender.com',
+  origin: process.env.CORS_ORIGIN || 'https://prplcrm.eu',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: false,

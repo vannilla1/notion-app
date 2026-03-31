@@ -131,7 +131,7 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 
 // OAuth callback - handle Google's response
 router.get('/callback', async (req, res) => {
-  const baseUrl = process.env.CLIENT_URL || 'https://perun-crm.onrender.com';
+  const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
   // Log all query parameters for debugging
   console.log('Google Calendar callback - full query:', req.query);
