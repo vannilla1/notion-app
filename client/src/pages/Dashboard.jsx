@@ -51,6 +51,7 @@ function Dashboard() {
   const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [messages, setMessages] = useState({ received: [], sent: [] });
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { socket, isConnected } = useSocket();
@@ -81,12 +82,15 @@ function Dashboard() {
     const handleTaskCreated = () => fetchData();
     const handleTaskDeleted = () => fetchData();
 
+    const handleMessageCreated = () => fetchData();
+
     socket.on('contact-created', handleContactCreated);
     socket.on('contact-updated', handleContactUpdated);
     socket.on('contact-deleted', handleContactDeleted);
     socket.on('task-updated', handleTaskUpdated);
     socket.on('task-created', handleTaskCreated);
     socket.on('task-deleted', handleTaskDeleted);
+    socket.on('new-message', handleMessageCreated);
 
     return () => {
       socket.off('contact-created', handleContactCreated);
@@ -95,17 +99,21 @@ function Dashboard() {
       socket.off('task-updated', handleTaskUpdated);
       socket.off('task-created', handleTaskCreated);
       socket.off('task-deleted', handleTaskDeleted);
+      socket.off('new-message', handleMessageCreated);
     };
   }, [socket, isConnected]);
 
   const fetchData = async () => {
     try {
-      const [contactsRes, tasksRes] = await Promise.all([
+      const [contactsRes, tasksRes, receivedRes, sentRes] = await Promise.all([
         api.get('/api/contacts'),
-        api.get('/api/tasks')
+        api.get('/api/tasks'),
+        api.get('/api/messages?tab=received'),
+        api.get('/api/messages?tab=sent')
       ]);
       setContacts(contactsRes.data);
       setTasks(tasksRes.data);
+      setMessages({ received: receivedRes.data, sent: sentRes.data });
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -207,6 +215,12 @@ function Dashboard() {
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const completedTasks = tasks.filter(t => t.completed).length;
 
+  // Message stats
+  const totalReceived = messages.received.length;
+  const pendingMessages = messages.received.filter(m => m.status === 'pending').length;
+  const readMessages = messages.received.filter(m => m.status === 'read').length;
+  const totalSent = messages.sent.length;
+
   // Priority stats
   const lowPriorityTasks = tasks.filter(t => t.priority === 'low' && !t.completed).length;
   const mediumPriorityTasks = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
@@ -260,6 +274,14 @@ function Dashboard() {
         return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'medium' && !t.completed)), title: 'Projekty so strednou prioritou' };
       case 'priority-high':
         return { type: 'tasks', items: sortTasks(tasks.filter(t => t.priority === 'high' && !t.completed)), title: 'Projekty s vysokou prioritou' };
+      case 'messages-all':
+        return { type: 'messages', items: messages.received, title: 'Prijaté správy' };
+      case 'messages-pending':
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'pending'), title: 'Neprečítané správy' };
+      case 'messages-read':
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'read'), title: 'Prečítané správy' };
+      case 'messages-sent':
+        return { type: 'messages', items: messages.sent, title: 'Odoslané správy' };
       default:
         return null;
     }
@@ -666,6 +688,42 @@ function Dashboard() {
               </span>
               <span className="stat-value">{cancelledContacts}</span>
             </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Správy</h4>
+            <div
+              className={`stat-item clickable ${detailView === 'messages-all' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-all')}
+            >
+              <span className="stat-label">Prijaté</span>
+              <span className="stat-value">{totalReceived}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'messages-pending' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-pending')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#F59E0B' }}></span>
+                Neprečítané
+              </span>
+              <span className="stat-value">{pendingMessages}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'messages-read' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-read')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
+                Prečítané
+              </span>
+              <span className="stat-value">{readMessages}</span>
+            </div>
+            <div
+              className={`stat-item clickable ${detailView === 'messages-sent' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-sent')}
+            >
+              <span className="stat-label">Odoslané</span>
+              <span className="stat-value">{totalSent}</span>
+            </div>
           </div>
 
           <div className="quick-actions">
@@ -755,6 +813,41 @@ function Dashboard() {
                       </div>
                     );
                   })}
+                </div>
+              ) : detailData.type === 'messages' ? (
+                <div className="detail-list">
+                  {detailData.items.map(msg => (
+                    <div
+                      key={msg.id}
+                      className={`detail-item message-detail-item ${msg.status === 'pending' ? 'unread' : ''}`}
+                      onClick={() => navigate('/messages')}
+                    >
+                      <div
+                        className="contact-avatar"
+                        style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
+                      >
+                        {msg.status === 'pending' ? '✉' : '✓'}
+                      </div>
+                      <div className="detail-item-content">
+                        <div className="detail-item-title">{msg.subject || 'Bez predmetu'}</div>
+                        <div className="detail-item-meta">
+                          <span className="meta-text">
+                            {detailView === 'messages-sent' ? `Komu: ${msg.toUsername || 'Neznámy'}` : `Od: ${msg.fromUsername || 'Neznámy'}`}
+                          </span>
+                          <span className="meta-text">
+                            {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {msg.attachment && <span className="meta-text">📎 Príloha</span>}
+                        </div>
+                        {msg.body && (
+                          <div className="detail-item-description" style={{ marginTop: '4px' }}>
+                            {msg.body.length > 100 ? msg.body.substring(0, 100) + '...' : msg.body}
+                          </div>
+                        )}
+                      </div>
+                      <div className="detail-item-arrow">→</div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="detail-list">
@@ -1025,6 +1118,74 @@ function Dashboard() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Messages Section */}
+              <div className="dashboard-section" onClick={() => setDetailView('messages-all')}>
+                <div className="section-header">
+                  <h3>Správy ({totalReceived + totalSent})</h3>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
+                  >
+                    Zobraziť všetky
+                  </button>
+                </div>
+
+                {totalReceived === 0 && totalSent === 0 ? (
+                  <div className="empty-state-small">
+                    <p>Žiadne správy</p>
+                  </div>
+                ) : (
+                  <div className="dashboard-messages-list">
+                    {pendingMessages > 0 && (
+                      <div
+                        className="dashboard-message-summary pending"
+                        onClick={(e) => { e.stopPropagation(); setDetailView('messages-pending'); }}
+                      >
+                        <span className="message-summary-icon" style={{ color: '#F59E0B' }}>✉</span>
+                        <span className="message-summary-text">{pendingMessages} neprečítaných správ</span>
+                      </div>
+                    )}
+                    {messages.received.slice(0, 4).map(msg => (
+                      <div
+                        key={msg.id}
+                        className={`dashboard-message-item ${msg.status === 'pending' ? 'unread' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
+                      >
+                        <div
+                          className="message-status-dot"
+                          style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
+                        />
+                        <div className="dashboard-message-info">
+                          <div className="dashboard-message-subject">
+                            {msg.subject || 'Bez predmetu'}
+                          </div>
+                          <div className="dashboard-message-meta">
+                            <span className="message-from">Od: {msg.fromUsername || 'Neznámy'}</span>
+                            <span className="message-date">
+                              {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {msg.attachment && <span className="message-attachment">📎</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {totalReceived > 4 && (
+                      <div className="show-more">
+                        + {totalReceived - 4} ďalších správ
+                      </div>
+                    )}
+                    {totalSent > 0 && (
+                      <div
+                        className="completed-summary"
+                        onClick={(e) => { e.stopPropagation(); setDetailView('messages-sent'); }}
+                      >
+                        {totalSent} odoslaných správ
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Recent Activity - Contacts with tasks */}
