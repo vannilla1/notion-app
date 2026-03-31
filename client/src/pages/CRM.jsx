@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '@/api/api';
+import { downloadBlob } from '../utils/fileDownload';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -447,34 +448,14 @@ function CRM() {
   };
 
   const downloadFile = (contactId, fileId, fileName) => {
-    const token = localStorage.getItem('token');
-    const url = `${api.defaults.baseURL}/api/contacts/${contactId}/files/${fileId}/download`;
-
-    fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(response => response.blob())
-      .then(blob => {
-        const link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.download = fileName;
-        link.click();
-      })
-      .catch(err => alert('Chyba pri sťahovaní súboru'));
+    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' })
+      .then(response => downloadBlob(response.data, fileName))
+      .catch(() => alert('Chyba pri sťahovaní súboru'));
   };
 
   const exportContactsCsv = () => {
-    const token = localStorage.getItem('token');
-    fetch(`${api.defaults.baseURL}/api/contacts/export/csv`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(response => response.blob())
-      .then(blob => {
-        const link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.download = 'kontakty.csv';
-        link.click();
-      })
+    api.get('/api/contacts/export/csv', { responseType: 'blob' })
+      .then(response => downloadBlob(response.data, 'kontakty.csv'))
       .catch(() => alert('Chyba pri exporte'));
   };
 

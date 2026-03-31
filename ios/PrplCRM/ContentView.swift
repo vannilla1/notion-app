@@ -114,9 +114,12 @@ struct WebView: UIViewRepresentable {
             config.preferences.isElementFullscreenEnabled = true
         }
 
-        // Add message handler for auth token extraction
+        // Add message handlers
         config.userContentController.add(
             context.coordinator, name: "iosNative"
+        )
+        config.userContentController.add(
+            context.coordinator, name: "fileDownload"
         )
 
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -229,9 +232,14 @@ struct WebView: UIViewRepresentable {
             NotificationCenter.default.removeObserver(self)
         }
 
-        // Handle messages from JavaScript (auth token)
+        // Handle messages from JavaScript (auth token + file downloads)
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
+            if message.name == "fileDownload" {
+                handleFileDownload(message)
+                return
+            }
+
             guard message.name == "iosNative",
                   let body = message.body as? [String: Any],
                   let type = body["type"] as? String else { return }
@@ -240,6 +248,44 @@ struct WebView: UIViewRepresentable {
                 print("[Push] Got auth token from WebView")
                 parent.pushManager.authToken = token
                 parent.pushManager.retryPendingRegistration()
+            }
+        }
+
+        private func handleFileDownload(_ message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any],
+                  let base64Data = body["data"] as? String,
+                  let fileName = body["fileName"] as? String,
+                  let data = Data(base64Encoded: base64Data) else {
+                print("[FileDownload] Invalid message data")
+                return
+            }
+
+            let mimetype = body["mimetype"] as? String ?? "application/octet-stream"
+
+            DispatchQueue.main.async {
+                let tempDir = FileManager.default.temporaryDirectory
+                let fileURL = tempDir.appendingPathComponent(fileName)
+
+                do {
+                    try data.write(to: fileURL)
+                    guard let viewController = self.webView?.window?.rootViewController else { return }
+
+                    let activityVC = UIActivityViewController(
+                        activityItems: [fileURL],
+                        applicationActivities: nil
+                    )
+
+                    // iPad requires popover presentation
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = viewController.view
+                        popover.sourceRect = CGRect(x: viewController.view.bounds.midX, y: viewController.view.bounds.midY, width: 0, height: 0)
+                        popover.permittedArrowDirections = []
+                    }
+
+                    viewController.present(activityVC, animated: true)
+                } catch {
+                    print("[FileDownload] Failed to write temp file: \(error)")
+                }
             }
         }
 
@@ -317,6 +363,12 @@ struct WebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.allow)
+                return
+            }
+
+            // Block blob: URL navigation (file downloads are handled via JS bridge)
+            if url.scheme == "blob" {
+                decisionHandler(.cancel)
                 return
             }
 

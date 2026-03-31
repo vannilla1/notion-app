@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
 import api from '../api/api';
+import { downloadBlob } from '../utils/fileDownload';
 
 function FilePreviewImage({ contactId, fileId, alt }) {
   const [src, setSrc] = useState(null);
@@ -104,14 +105,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
       const response = await api.get(`/api/contacts/${contact.id}/files/${fileId}/download`, {
         responseType: 'blob'
       });
-      const url = window.URL.createObjectURL(response.data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      downloadBlob(response.data, fileName);
     } catch (err) {
       console.error('File download failed:', err);
     }

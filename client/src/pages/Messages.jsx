@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api, { API_BASE_URL } from '@/api/api';
+import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -664,14 +665,7 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
               onClick={e => {
                 e.preventDefault();
                 api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
-                  .then(res => {
-                    const url = window.URL.createObjectURL(new Blob([res.data]));
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = msg.attachment.originalName;
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                  });
+                  .then(res => downloadBlob(res.data, msg.attachment.originalName));
               }}>
               {msg.attachment.originalName}
             </a>

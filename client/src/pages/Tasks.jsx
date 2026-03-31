@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '@/api/api';
+import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -1748,13 +1749,7 @@ function Tasks() {
         ? `/api/tasks/${taskId}/files/${fileId}/download?subtaskId=${subtaskId}`
         : `/api/tasks/${taskId}/files/${fileId}/download`;
       const response = await api.get(url, { responseType: 'blob' });
-      const link = document.createElement('a');
-      link.href = window.URL.createObjectURL(response.data);
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(link.href);
+      downloadBlob(response.data, fileName);
     } catch (error) {
       alert('Chyba pri sťahovaní súboru');
     }
