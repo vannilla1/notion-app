@@ -891,7 +891,10 @@ function Dashboard() {
                 </div>
               ) : detailData.type === 'messages' ? (
                 <div className="detail-list">
-                  {detailData.items.map(msg => (
+                  {detailData.items.map(msg => {
+                    const sColors = { pending: '#F59E0B', approved: '#10B981', rejected: '#EF4444', commented: '#6366F1' };
+                    const sIcons = { pending: '🕐', approved: '✅', rejected: '❌', commented: '💬' };
+                    return (
                     <div
                       key={msg.id}
                       className={`detail-item message-detail-item ${msg.status === 'pending' ? 'unread' : ''}`}
@@ -899,9 +902,9 @@ function Dashboard() {
                     >
                       <div
                         className="contact-avatar"
-                        style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
+                        style={{ backgroundColor: sColors[msg.status] || '#6366F1' }}
                       >
-                        {msg.status === 'pending' ? '✉' : '✓'}
+                        {sIcons[msg.status] || '✉'}
                       </div>
                       <div className="detail-item-content">
                         <div className="detail-item-title">{msg.subject || 'Bez predmetu'}</div>
@@ -922,7 +925,8 @@ function Dashboard() {
                       </div>
                       <div className="detail-item-arrow">→</div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="detail-list">
@@ -1223,7 +1227,10 @@ function Dashboard() {
                         const isSent = msg._dir === 'sent';
                         const personName = isSent ? (msg.toUsername || 'Neznámy') : (msg.fromUsername || 'Neznámy');
                         const initial = personName.charAt(0).toUpperCase();
-                        const avatarColor = isSent ? '#6366F1' : (msg.status === 'pending' ? '#F59E0B' : '#10B981');
+                        const statusColors = { pending: '#F59E0B', approved: '#10B981', rejected: '#EF4444', commented: '#6366F1' };
+                        const statusLabels = { pending: 'Čaká', approved: 'Schválené', rejected: 'Zamietnuté', commented: 'Komentované' };
+                        const statusColor = statusColors[msg.status] || '#6366F1';
+                        const avatarColor = statusColor;
 
                         return (
                           <div
@@ -1240,16 +1247,16 @@ function Dashboard() {
                             <div className="dashboard-contact-info">
                               <div className="dashboard-contact-name">
                                 {msg.subject || 'Bez predmetu'}
-                                {!isSent && msg.status === 'pending' && (
+                                {msg.status === 'pending' && (
                                   <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#F59E0B', marginLeft: 6, verticalAlign: 'middle' }} />
                                 )}
                               </div>
                               <div className="dashboard-contact-meta">
                                 <span
                                   className="status-badge-sm"
-                                  style={{ backgroundColor: isSent ? '#6366F1' : '#10B981' }}
+                                  style={{ backgroundColor: statusColor }}
                                 >
-                                  {isSent ? 'Odoslaná' : 'Prijatá'}
+                                  {statusLabels[msg.status] || msg.status}
                                 </span>
                                 <span className="company-text">{isSent ? `Pre: ${personName}` : `Od: ${personName}`}</span>
                                 <span className="company-text" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
