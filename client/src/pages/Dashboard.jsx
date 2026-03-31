@@ -1138,60 +1138,67 @@ function Dashboard() {
                   </div>
                 ) : (
                   <div className="dashboard-contacts-list">
-                    {messages.received.slice(0, 5).map(msg => {
-                      const senderName = msg.fromUsername || 'Neznámy';
-                      const initial = senderName.charAt(0).toUpperCase();
-                      return (
-                        <div
-                          key={msg.id}
-                          className="dashboard-contact-item"
-                          onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
-                        >
+                    {[
+                      ...messages.received.map(m => ({ ...m, _dir: 'received' })),
+                      ...messages.sent.map(m => ({ ...m, _dir: 'sent' }))
+                    ]
+                      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                      .slice(0, 5)
+                      .map(msg => {
+                        const isSent = msg._dir === 'sent';
+                        const personName = isSent ? (msg.toUsername || 'Neznámy') : (msg.fromUsername || 'Neznámy');
+                        const initial = personName.charAt(0).toUpperCase();
+                        const avatarColor = isSent ? '#6366F1' : (msg.status === 'pending' ? '#F59E0B' : '#10B981');
+
+                        return (
                           <div
-                            className="contact-avatar-sm"
-                            style={{ backgroundColor: msg.status === 'pending' ? '#F59E0B' : '#10B981' }}
+                            key={msg.id}
+                            className="dashboard-contact-item"
+                            onClick={(e) => { e.stopPropagation(); navigate('/messages'); }}
                           >
-                            {initial}
-                          </div>
-                          <div className="dashboard-contact-info">
-                            <div className="dashboard-contact-name">
-                              {msg.subject || 'Bez predmetu'}
-                              {msg.status === 'pending' && (
-                                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#F59E0B', marginLeft: 6, verticalAlign: 'middle' }} />
+                            <div
+                              className="contact-avatar-sm"
+                              style={{ backgroundColor: avatarColor }}
+                            >
+                              {initial}
+                            </div>
+                            <div className="dashboard-contact-info">
+                              <div className="dashboard-contact-name">
+                                {msg.subject || 'Bez predmetu'}
+                                {!isSent && msg.status === 'pending' && (
+                                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#F59E0B', marginLeft: 6, verticalAlign: 'middle' }} />
+                                )}
+                              </div>
+                              <div className="dashboard-contact-meta">
+                                <span
+                                  className="status-badge-sm"
+                                  style={{ backgroundColor: isSent ? '#6366F1' : '#10B981' }}
+                                >
+                                  {isSent ? 'Odoslaná' : 'Prijatá'}
+                                </span>
+                                <span className="company-text">{isSent ? `Pre: ${personName}` : `Od: ${personName}`}</span>
+                                <span className="company-text" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                {msg.attachment && <span>📎</span>}
+                              </div>
+                              {msg.body && (
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {msg.body.length > 80 ? msg.body.substring(0, 80) + '...' : msg.body}
+                                </div>
                               )}
                             </div>
-                            <div className="dashboard-contact-meta">
-                              <span className="company-text">{senderName}</span>
-                              <span className="company-text" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                {new Date(msg.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                              {msg.attachment && <span>📎</span>}
-                            </div>
-                            {msg.body && (
-                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {msg.body.length > 80 ? msg.body.substring(0, 80) + '...' : msg.body}
+                            {msg.comments?.length > 0 && (
+                              <div className="dashboard-contact-tasks">
+                                <span className="task-progress">{msg.comments.length} 💬</span>
                               </div>
                             )}
                           </div>
-                          {msg.comments?.length > 0 && (
-                            <div className="dashboard-contact-tasks">
-                              <span className="task-progress">{msg.comments.length} 💬</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {totalReceived > 5 && (
+                        );
+                      })}
+                    {(totalReceived + totalSent) > 5 && (
                       <div className="show-more">
-                        + {totalReceived - 5} ďalších správ
-                      </div>
-                    )}
-                    {totalSent > 0 && (
-                      <div
-                        className="completed-summary"
-                        onClick={(e) => { e.stopPropagation(); setDetailView('messages-sent'); }}
-                      >
-                        {totalSent} odoslaných správ
+                        + {(totalReceived + totalSent) - 5} ďalších správ
                       </div>
                     )}
                   </div>
