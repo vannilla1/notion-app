@@ -587,7 +587,6 @@ export default function LandingPage() {
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">
-            <a href="mailto:support@prplcrm.eu">support@prplcrm.eu</a>
             <Link to="/vop">Obchodné podmienky</Link>
             <Link to="/privacy">Ochrana osobných údajov</Link>
           </div>
