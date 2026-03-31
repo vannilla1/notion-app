@@ -218,7 +218,9 @@ function Dashboard() {
   // Message stats
   const totalReceived = messages.received.length;
   const pendingMessages = messages.received.filter(m => m.status === 'pending').length;
-  const readMessages = messages.received.filter(m => m.status === 'read').length;
+  const approvedMessages = messages.received.filter(m => m.status === 'approved').length;
+  const rejectedMessages = messages.received.filter(m => m.status === 'rejected').length;
+  const commentedMessages = messages.received.filter(m => m.status === 'commented').length;
   const totalSent = messages.sent.length;
 
   // Priority stats
@@ -277,9 +279,13 @@ function Dashboard() {
       case 'messages-all':
         return { type: 'messages', items: messages.received, title: 'Prijaté správy' };
       case 'messages-pending':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'pending'), title: 'Neprečítané správy' };
-      case 'messages-read':
-        return { type: 'messages', items: messages.received.filter(m => m.status === 'read'), title: 'Prečítané správy' };
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'pending'), title: 'Čakajúce správy' };
+      case 'messages-approved':
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'approved'), title: 'Schválené správy' };
+      case 'messages-rejected':
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'rejected'), title: 'Zamietnuté správy' };
+      case 'messages-commented':
+        return { type: 'messages', items: messages.received.filter(m => m.status === 'commented'), title: 'Komentované správy' };
       case 'messages-sent':
         return { type: 'messages', items: messages.sent, title: 'Odoslané správy' };
       default:
@@ -703,19 +709,39 @@ function Dashboard() {
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#F59E0B' }}></span>
-                Neprečítané
+                Čaká
               </span>
               <span className="stat-value">{pendingMessages}</span>
             </div>
             <div
-              className={`stat-item clickable priority-stat ${detailView === 'messages-read' ? 'active' : ''}`}
-              onClick={() => setDetailView('messages-read')}
+              className={`stat-item clickable priority-stat ${detailView === 'messages-approved' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-approved')}
             >
               <span className="stat-label">
                 <span className="priority-dot" style={{ backgroundColor: '#10B981' }}></span>
-                Prečítané
+                Schválené
               </span>
-              <span className="stat-value">{readMessages}</span>
+              <span className="stat-value">{approvedMessages}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'messages-rejected' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-rejected')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EF4444' }}></span>
+                Zamietnuté
+              </span>
+              <span className="stat-value">{rejectedMessages}</span>
+            </div>
+            <div
+              className={`stat-item clickable priority-stat ${detailView === 'messages-commented' ? 'active' : ''}`}
+              onClick={() => setDetailView('messages-commented')}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#6366F1' }}></span>
+                Komentované
+              </span>
+              <span className="stat-value">{commentedMessages}</span>
             </div>
             <div
               className={`stat-item clickable ${detailView === 'messages-sent' ? 'active' : ''}`}
