@@ -1115,14 +1115,10 @@
   font-weight: 500;
 }
 
-.lp-contact-form .lp-cta-primary {
-  align-self: flex-start;
-  margin-top: 4px;
-}
-
-.lp-contact-form .lp-cta-primary:disabled {
+.lp-contact-form .lp-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  transform: none;
 }
 
 @media (max-width: 768px) {

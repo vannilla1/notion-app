@@ -571,7 +571,7 @@ export default function LandingPage() {
               {contactStatus === 'error' && (
                 <div className="lp-form-error">{contactError}</div>
               )}
-              <button type="submit" className="lp-cta-primary" disabled={contactStatus === 'sending'}>
+              <button type="submit" className="lp-btn lp-btn-primary" disabled={contactStatus === 'sending'} style={{ width: '100%' }}>
                 {contactStatus === 'sending' ? 'Odosielam...' : 'Odoslať správu'}
               </button>
             </form>
