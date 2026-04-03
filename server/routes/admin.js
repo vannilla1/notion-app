@@ -1,4 +1,6 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { authenticateToken } = require('../middleware/auth');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
@@ -11,6 +13,35 @@ const router = express.Router();
 
 // Middleware: require super admin (only support@prplcrm.eu)
 const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
+
+// ─── ADMIN LOGIN (separate from regular auth) ──────────────────
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (email !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ message: 'Prístup zamietnutý' });
+    }
+
+    const user = await User.findOne({ email: SUPER_ADMIN_EMAIL });
+    if (!user) {
+      return res.status(403).json({ message: 'Prístup zamietnutý' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Nesprávne heslo' });
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '4h' });
+
+    logger.info('Admin login', { userId: user._id });
+    res.json({ token, user: { id: user._id, email: user.email, username: user.username } });
+  } catch (error) {
+    logger.error('Admin login error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
 
 const requireAdmin = async (req, res, next) => {
   try {

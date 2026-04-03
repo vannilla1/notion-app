@@ -37,6 +37,11 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov' });
     }
 
+    // Block registration with super admin email
+    if (email.toLowerCase() === 'support@prplcrm.eu') {
+      return res.status(400).json({ message: 'Registrácia zlyhala. Skúste iný email alebo používateľské meno.' });
+    }
+
     // Check if user exists (generic message to prevent email/username enumeration)
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
@@ -100,6 +105,11 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Validation
     if (!email || !password) {
       return res.status(400).json({ message: 'Email a heslo sú povinné' });
+    }
+
+    // Block super admin from regular login
+    if (email.toLowerCase() === 'support@prplcrm.eu') {
+      return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
     // Find user

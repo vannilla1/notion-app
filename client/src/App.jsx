@@ -13,6 +13,7 @@ import TermsOfService from './pages/TermsOfService';
 import Messages from './pages/Messages';
 import LandingPage from './pages/LandingPage';
 import AdminPanel from './pages/AdminPanel';
+import AdminLogin from './pages/AdminLogin';
 import NotificationToast from './components/NotificationToast';
 import BottomNav from './components/BottomNav';
 import WorkspaceSetup from './components/WorkspaceSetup';
@@ -240,10 +241,8 @@ function AppContent() {
           path="/messages"
           element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
         />
-        <Route
-          path="/admin"
-          element={isAuthenticated ? <AdminPanel /> : <Navigate to="/login" />}
-        />
+        <Route path="/admin" element={<AdminLogin />} />
+        <Route path="/admin/dashboard" element={<AdminPanel />} />
         <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/vop" element={<TermsOfService />} />

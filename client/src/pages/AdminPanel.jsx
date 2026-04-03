@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { API_BASE_URL } from '@/api/api';
-import { useAuth } from '../context/AuthContext';
-import UserMenu from '../components/UserMenu';
-import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import adminApi, { API_BASE_URL } from '@/api/adminApi';
 
 const TABS = [
   { id: 'overview', label: 'Prehľad', icon: '📊' },
@@ -13,17 +10,22 @@ const TABS = [
 ];
 
 function AdminPanel() {
-  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    if (user && user.email !== 'support@prplcrm.eu') {
-      navigate('/app');
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      navigate('/admin');
     }
-  }, [user, navigate]);
+  }, [navigate]);
 
-  if (!user || user.email !== 'support@prplcrm.eu') {
+  const handleLogout = () => {
+    localStorage.removeItem('adminToken');
+    navigate('/admin');
+  };
+
+  if (!localStorage.getItem('adminToken')) {
     return null;
   }
 
@@ -31,17 +33,15 @@ function AdminPanel() {
     <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
-          <button className="btn btn-secondary" onClick={() => navigate('/app')}>
-            ← Späť
-          </button>
-          <h1 className="header-title-link" onClick={() => navigate('/app')}>
+          <h1 className="header-title-link">
             <img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />
-            SuperAdmin
+            Super Admin
           </h1>
         </div>
         <div className="crm-header-right">
-          <WorkspaceSwitcher />
-          <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
+          <button className="btn btn-secondary" onClick={handleLogout}>
+            Odhlásiť sa
+          </button>
         </div>
       </header>
 
@@ -60,7 +60,7 @@ function AdminPanel() {
 
       <div className="sa-content">
         {activeTab === 'overview' && <OverviewTab />}
-        {activeTab === 'users' && <UsersTab currentUser={user} />}
+        {activeTab === 'users' && <UsersTab />}
         {activeTab === 'workspaces' && <WorkspacesTab />}
         {activeTab === 'sync' && <SyncTab />}
       </div>
@@ -74,7 +74,7 @@ function OverviewTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/admin/stats')
+    adminApi.get('/api/admin/stats')
       .then(res => setStats(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -138,7 +138,7 @@ function StatCard({ icon, label, value, sub }) {
 }
 
 // ─── USERS TAB ──────────────────────────────────────────────────
-function UsersTab({ currentUser }) {
+function UsersTab() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -149,7 +149,7 @@ function UsersTab({ currentUser }) {
   }, []);
 
   const fetchUsers = () => {
-    api.get('/api/admin/users')
+    adminApi.get('/api/admin/users')
       .then(res => setUsers(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -158,7 +158,7 @@ function UsersTab({ currentUser }) {
   const handleRoleChange = async (userId, newRole) => {
     setUpdating(userId);
     try {
-      await api.put(`/api/admin/users/${userId}/role`, { role: newRole });
+      await adminApi.put(`/api/admin/users/${userId}/role`, { role: newRole });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri zmene role');
@@ -170,7 +170,7 @@ function UsersTab({ currentUser }) {
   const handlePlanChange = async (userId, newPlan) => {
     setUpdating(userId);
     try {
-      await api.put(`/api/admin/users/${userId}/plan`, { plan: newPlan });
+      await adminApi.put(`/api/admin/users/${userId}/plan`, { plan: newPlan });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, plan: newPlan } : u));
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri zmene plánu');
@@ -182,7 +182,7 @@ function UsersTab({ currentUser }) {
   const handleDeleteUser = async (targetUser) => {
     if (!window.confirm(`Naozaj vymazať "${targetUser.username}"? Táto akcia je nevratná.`)) return;
     try {
-      await api.delete(`/api/admin/users/${targetUser.id}`);
+      await adminApi.delete(`/api/admin/users/${targetUser.id}`);
       setUsers(prev => prev.filter(u => u.id !== targetUser.id));
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri mazaní');
@@ -225,7 +225,7 @@ function UsersTab({ currentUser }) {
           </thead>
           <tbody>
             {filtered.map(u => (
-              <tr key={u.id} className={u.id === currentUser.id ? 'current-user' : ''}>
+              <tr key={u.id} className={u.email === 'support@prplcrm.eu' ? 'current-user' : ''}>
                 <td>
                   <div className="user-cell">
                     {u.avatar ? (
@@ -241,7 +241,7 @@ function UsersTab({ currentUser }) {
                     )}
                     <span className="user-name-cell">
                       {u.username}
-                      {u.id === currentUser.id && <span className="you-badge">(vy)</span>}
+                      {u.email === 'support@prplcrm.eu' && <span className="you-badge">(vy)</span>}
                     </span>
                   </div>
                 </td>
@@ -250,7 +250,7 @@ function UsersTab({ currentUser }) {
                   <select
                     value={u.role}
                     onChange={e => handleRoleChange(u.id, e.target.value)}
-                    disabled={updating === u.id || u.id === currentUser.id}
+                    disabled={updating === u.id || u.email === 'support@prplcrm.eu'}
                     className="sa-select"
                   >
                     <option value="admin">Admin</option>
@@ -317,7 +317,7 @@ function WorkspacesTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/admin/workspaces')
+    adminApi.get('/api/admin/workspaces')
       .then(res => setWorkspaces(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -384,7 +384,7 @@ function SyncTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/admin/sync-diagnostics')
+    adminApi.get('/api/admin/sync-diagnostics')
       .then(res => setDiagnostics(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
