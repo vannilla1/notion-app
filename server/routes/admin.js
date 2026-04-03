@@ -59,6 +59,9 @@ const requireAdmin = async (req, res, next) => {
 // ─── OVERVIEW STATS ─────────────────────────────────────────────
 router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    // Exclude super admin from all stats
+    const excludeSuperAdmin = { email: { $ne: SUPER_ADMIN_EMAIL } };
+
     const [
       totalUsers,
       totalWorkspaces,
@@ -67,21 +70,23 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
       usersWithGoogleCalendar,
       usersWithGoogleTasks
     ] = await Promise.all([
-      User.countDocuments(),
+      User.countDocuments(excludeSuperAdmin),
       Workspace.countDocuments(),
       Task.countDocuments(),
       Contact.countDocuments(),
-      User.countDocuments({ 'googleCalendar.enabled': true }),
-      User.countDocuments({ 'googleTasks.enabled': true })
+      User.countDocuments({ ...excludeSuperAdmin, 'googleCalendar.enabled': true }),
+      User.countDocuments({ ...excludeSuperAdmin, 'googleTasks.enabled': true })
     ]);
 
-    // Plan breakdown
+    // Plan breakdown (exclude super admin)
     const planBreakdown = await User.aggregate([
+      { $match: excludeSuperAdmin },
       { $group: { _id: '$subscription.plan', count: { $sum: 1 } } }
     ]);
 
-    // Role breakdown
+    // Role breakdown (exclude super admin)
     const roleBreakdown = await User.aggregate([
+      { $match: excludeSuperAdmin },
       { $group: { _id: '$role', count: { $sum: 1 } } }
     ]);
 
@@ -89,6 +94,7 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const recentRegistrations = await User.countDocuments({
+      ...excludeSuperAdmin,
       createdAt: { $gte: thirtyDaysAgo }
     });
 
@@ -127,8 +133,9 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
 // ─── ALL USERS (system-wide) ────────────────────────────────────
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    // Exclude super admin from the user list
     const users = await User.find(
-      {},
+      { email: { $ne: SUPER_ADMIN_EMAIL } },
       'username email color avatar role subscription currentWorkspaceId googleCalendar.enabled googleTasks.enabled createdAt'
     ).sort({ createdAt: -1 }).lean();
 
