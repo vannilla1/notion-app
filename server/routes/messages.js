@@ -236,6 +236,69 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
   });
 });
 
+// PUT /api/messages/:id — edit message (only sender can edit)
+router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
+  upload.single('attachment')(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
+    }
+
+    try {
+      const message = await Message.findOne({
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        fromUserId: req.user.id
+      });
+
+      if (!message) {
+        return res.status(404).json({ message: 'Odkaz nenájdený' });
+      }
+
+      // Update allowed fields
+      const { subject, description, type, dueDate, linkedType, linkedId, linkedName, removeAttachment } = req.body;
+
+      if (subject !== undefined) message.subject = subject.trim().substring(0, 200);
+      if (description !== undefined) message.description = description.trim().substring(0, 5000);
+      if (type !== undefined && ['approval', 'task', 'info', 'urgent'].includes(type)) message.type = type;
+      if (dueDate !== undefined) message.dueDate = dueDate || null;
+      if (linkedType !== undefined) {
+        message.linkedType = linkedType || null;
+        message.linkedId = linkedId || null;
+        message.linkedName = linkedName || null;
+      }
+
+      // Handle attachment: new file replaces old, or remove existing
+      if (req.file) {
+        message.attachment = {
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          data: req.file.buffer.toString('base64'),
+          uploadedAt: new Date()
+        };
+      } else if (removeAttachment === 'true') {
+        message.attachment = undefined;
+      }
+
+      await message.save();
+
+      // Notify recipient about edit
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`user-${message.toUserId.toString()}`).emit('message-updated', {
+          id: message._id.toString(),
+          status: message.status
+        });
+      }
+
+      res.json(stripAttachmentData(message));
+    } catch (error) {
+      logger.error('Edit message error', { error: error.message, userId: req.user.id });
+      res.status(500).json({ message: 'Chyba servera' });
+    }
+  });
+});
+
 // PUT /api/messages/:id/approve — approve message
 router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res) => {
   try {

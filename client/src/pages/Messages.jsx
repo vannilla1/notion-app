@@ -60,6 +60,7 @@ function Messages() {
   const [commentAttachment, setCommentAttachment] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -220,6 +221,34 @@ function Messages() {
       fetchMessages();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba');
+    }
+  };
+
+  const handleEdit = async (id, editData) => {
+    try {
+      const formData = new FormData();
+      formData.append('subject', editData.subject);
+      formData.append('description', editData.description);
+      formData.append('type', editData.type);
+      formData.append('dueDate', editData.dueDate || '');
+      if (editData.linkedType) {
+        formData.append('linkedType', editData.linkedType);
+        formData.append('linkedId', editData.linkedId);
+        formData.append('linkedName', editData.linkedName);
+      }
+      if (editData.newAttachment) {
+        formData.append('attachment', editData.newAttachment);
+      } else if (editData.removeAttachment) {
+        formData.append('removeAttachment', 'true');
+      }
+      const res = await api.put(`/api/messages/${id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setSelectedMessage(res.data);
+      setEditing(false);
+      fetchMessages();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri ukladaní');
     }
   };
 
@@ -411,6 +440,9 @@ function Messages() {
               onReject={() => setShowRejectDialog(true)}
               onComment={handleComment}
               onDelete={handleDelete}
+              onEdit={handleEdit}
+              editing={editing}
+              setEditing={setEditing}
               commentText={commentText}
               setCommentText={setCommentText}
               commentAttachment={commentAttachment}
@@ -418,6 +450,9 @@ function Messages() {
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               navigate={navigate}
+              contacts={contacts}
+              tasks={tasks}
+              userId={user.id}
             />
           ) : (
             <MessageList
@@ -615,9 +650,140 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate }) {
+function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
+
+  const [editForm, setEditForm] = useState({
+    subject: msg.subject || '',
+    description: msg.description || '',
+    type: msg.type || 'info',
+    dueDate: msg.dueDate ? msg.dueDate.substring(0, 10) : '',
+    linkedType: msg.linkedType || '',
+    linkedId: msg.linkedId || '',
+    linkedName: msg.linkedName || '',
+    newAttachment: null,
+    removeAttachment: false
+  });
+
+  // Reset edit form when message changes
+  useEffect(() => {
+    setEditForm({
+      subject: msg.subject || '',
+      description: msg.description || '',
+      type: msg.type || 'info',
+      dueDate: msg.dueDate ? msg.dueDate.substring(0, 10) : '',
+      linkedType: msg.linkedType || '',
+      linkedId: msg.linkedId || '',
+      linkedName: msg.linkedName || '',
+      newAttachment: null,
+      removeAttachment: false
+    });
+  }, [msg]);
+
+  const handleLinkedChangeEdit = (lType, lId) => {
+    let name = '';
+    if (lType === 'contact') name = contacts?.find(c => c.id === lId)?.name || '';
+    if (lType === 'task') name = tasks?.find(t => t.id === lId)?.title || '';
+    setEditForm(f => ({ ...f, linkedId: lId, linkedName: name }));
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <button onClick={() => setEditing(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-color)', fontSize: '14px', marginBottom: '12px' }}>
+          ← Zrušiť úpravu
+        </button>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+          <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Upraviť správu</h3>
+
+          {/* Type */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Typ</label>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {Object.entries(typeConfig).map(([key, cfg]) => (
+                <button key={key} type="button"
+                  onClick={() => setEditForm(f => ({ ...f, type: key }))}
+                  style={{
+                    padding: '6px 12px', borderRadius: 'var(--radius-sm)',
+                    border: editForm.type === key ? `2px solid ${cfg.color}` : '1px solid var(--border-color)',
+                    background: editForm.type === key ? `${cfg.color}15` : 'transparent',
+                    cursor: 'pointer', fontSize: '13px'
+                  }}>
+                  {cfg.icon} {cfg.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Subject */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Predmet *</label>
+            <input type="text" value={editForm.subject} onChange={e => setEditForm(f => ({ ...f, subject: e.target.value }))} maxLength={200}
+              style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }} />
+          </div>
+
+          {/* Description */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Popis</label>
+            <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} maxLength={5000} rows={4}
+              style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px', resize: 'vertical' }} />
+          </div>
+
+          {/* Link */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Prepojenie</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select value={editForm.linkedType} onChange={e => setEditForm(f => ({ ...f, linkedType: e.target.value, linkedId: '', linkedName: '' }))}
+                style={{ padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+                <option value="">Žiadne</option>
+                <option value="contact">Kontakt</option>
+                <option value="task">Projekt</option>
+              </select>
+              {editForm.linkedType && (
+                <select value={editForm.linkedId} onChange={e => handleLinkedChangeEdit(editForm.linkedType, e.target.value)}
+                  style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+                  <option value="">Vyberte...</option>
+                  {editForm.linkedType === 'contact' && contacts?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {editForm.linkedType === 'task' && tasks?.filter(t => !t.completed).map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* Due date */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Termín</label>
+            <input type="date" value={editForm.dueDate} onChange={e => setEditForm(f => ({ ...f, dueDate: e.target.value }))}
+              style={{ padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }} />
+          </div>
+
+          {/* Attachment */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Príloha</label>
+            {msg.attachment?.originalName && !editForm.removeAttachment && !editForm.newAttachment && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                <span>📎 {msg.attachment.originalName}</span>
+                <button onClick={() => setEditForm(f => ({ ...f, removeAttachment: true }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>× Odstrániť</button>
+              </div>
+            )}
+            <input type="file" onChange={e => setEditForm(f => ({ ...f, newAttachment: e.target.files[0] || null, removeAttachment: false }))}
+              style={{ fontSize: '13px' }} />
+          </div>
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button className="btn btn-secondary" onClick={() => setEditing(false)}>Zrušiť</button>
+            <button className="btn btn-primary" disabled={!editForm.subject.trim()}
+              onClick={() => onEdit(msg.id || msg._id, editForm)}>
+              Uložiť zmeny
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -637,10 +803,16 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
             <h3 style={{ fontSize: '18px', fontWeight: 600 }}>{msg.subject}</h3>
           </div>
           {isSender && (
-            <button onClick={() => onDelete(msg.id || msg._id)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>
-              🗑️ Vymazať
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={() => setEditing(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-color)', fontSize: '13px' }}>
+                ✏️ Upraviť
+              </button>
+              <button onClick={() => onDelete(msg.id || msg._id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>
+                🗑️ Vymazať
+              </button>
+            </div>
           )}
         </div>
 
