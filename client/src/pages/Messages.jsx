@@ -627,7 +627,7 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
             </div>
             <h3 style={{ fontSize: '18px', fontWeight: 600 }}>{msg.subject}</h3>
           </div>
-          {isSender && msg.status === 'pending' && (
+          {isSender && (
             <button onClick={() => onDelete(msg.id || msg._id)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>
               🗑️ Vymazať
