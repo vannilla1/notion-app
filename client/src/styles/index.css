@@ -6650,42 +6650,56 @@ a.detail-value:hover {
 /* Sync diagnostics cards */
 .sa-sync-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
 }
 
 .sa-sync-card {
   background: var(--bg-card);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-  padding: 20px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  padding: 24px;
+  transition: all 0.2s ease;
+}
+
+.sa-sync-card:hover {
+  border-color: var(--accent-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .sa-sync-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--border-color);
 }
 
+.sa-sync-card-header strong {
+  font-size: 16px;
+}
+
 .sa-sync-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
 }
 
 .sa-sync-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
 }
 
 .sa-sync-section-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  color: var(--text-primary);
 }
 
 .sa-sync-detail {
@@ -6693,6 +6707,7 @@ a.detail-value:hover {
   justify-content: space-between;
   font-size: 13px;
   color: var(--text-secondary);
+  padding: 4px 0;
 }
 
 .sa-sync-detail span:last-child {
