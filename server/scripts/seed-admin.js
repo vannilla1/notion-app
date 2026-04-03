@@ -23,17 +23,17 @@ async function seedAdmin() {
 
     const User = require('../models/User');
 
-    // Check if admin already exists
-    let admin = await User.findOne({ role: 'admin' });
+    // Check if admin already exists — search by EMAIL, not by role
+    let admin = await User.findOne({ email: ADMIN_EMAIL });
 
     if (admin) {
       // Update existing admin
       const salt = await bcrypt.genSalt(12);
       const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, salt);
 
-      admin.email = ADMIN_EMAIL;
       admin.username = ADMIN_USERNAME;
       admin.password = hashedPassword;
+      admin.role = 'admin';
       await admin.save();
 
       console.log(`Admin account updated:`);
