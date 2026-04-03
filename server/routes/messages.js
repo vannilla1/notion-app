@@ -43,6 +43,20 @@ const stripAttachmentData = (msg) => {
       uploadedAt: obj.attachment.uploadedAt
     };
   }
+  // Strip comment attachment data too
+  if (obj.comments) {
+    obj.comments = obj.comments.map(c => {
+      if (c.attachment && c.attachment.data) {
+        c.attachment = {
+          originalName: c.attachment.originalName,
+          mimetype: c.attachment.mimetype,
+          size: c.attachment.size,
+          uploadedAt: c.attachment.uploadedAt
+        };
+      }
+      return c;
+    });
+  }
   return obj;
 };
 
@@ -325,77 +339,94 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
   }
 });
 
-// POST /api/messages/:id/comment — add comment
-router.post('/:id/comment', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    const { text } = req.body;
-
-    if (!text || !text.trim()) {
-      return res.status(400).json({ message: 'Text komentára je povinný' });
+// POST /api/messages/:id/comment — add comment (with optional attachment)
+router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
+  upload.single('attachment')(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
     }
-
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
-
-    if (!message) {
-      return res.status(404).json({ message: 'Odkaz nenájdený' });
-    }
-
-    const comment = {
-      userId: req.user.id,
-      username: req.user.username,
-      text: text.trim().substring(0, 2000),
-      createdAt: new Date()
-    };
-
-    message.comments.push(comment);
-
-    // If comment is from recipient and status is pending, change to commented
-    if (message.toUserId.toString() === req.user.id.toString() && message.status === 'pending') {
-      message.status = 'commented';
-    }
-
-    await message.save();
-
-    // Notify the other party
-    const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
-      ? message.toUserId.toString()
-      : message.fromUserId.toString();
 
     try {
-      await notificationService.createNotification({
-        userId: notifyUserId,
-        type: 'message.commented',
-        title: '💬 Nový komentár',
-        message: `${req.user.username} komentoval odkaz "${message.subject}"`,
-        actorName: req.user.username,
-        relatedType: 'message',
-        relatedId: message._id.toString(),
-        relatedName: message.subject,
-        data: { messageId: message._id.toString() }
-      });
-    } catch (notifErr) {
-      logger.warn('Comment notification failed', { error: notifErr.message });
-    }
+      const { text } = req.body;
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user-${notifyUserId}`).emit('message-updated', {
-        id: message._id.toString(),
-        status: message.status
-      });
-    }
+      if (!text || !text.trim()) {
+        return res.status(400).json({ message: 'Text komentára je povinný' });
+      }
 
-    res.json(stripAttachmentData(message));
-  } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
-  }
+      const message = await Message.findOne({
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ]
+      });
+
+      if (!message) {
+        return res.status(404).json({ message: 'Odkaz nenájdený' });
+      }
+
+      const comment = {
+        userId: req.user.id,
+        username: req.user.username,
+        text: text.trim().substring(0, 2000),
+        createdAt: new Date()
+      };
+
+      // Attach file if uploaded
+      if (req.file) {
+        comment.attachment = {
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          data: req.file.buffer.toString('base64'),
+          uploadedAt: new Date()
+        };
+      }
+
+      message.comments.push(comment);
+
+      // If comment is from recipient and status is pending, change to commented
+      if (message.toUserId.toString() === req.user.id.toString() && message.status === 'pending') {
+        message.status = 'commented';
+      }
+
+      await message.save();
+
+      // Notify the other party
+      const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
+        ? message.toUserId.toString()
+        : message.fromUserId.toString();
+
+      try {
+        await notificationService.createNotification({
+          userId: notifyUserId,
+          type: 'message.commented',
+          title: '💬 Nový komentár',
+          message: `${req.user.username} komentoval odkaz "${message.subject}"`,
+          actorName: req.user.username,
+          relatedType: 'message',
+          relatedId: message._id.toString(),
+          relatedName: message.subject,
+          data: { messageId: message._id.toString() }
+        });
+      } catch (notifErr) {
+        logger.warn('Comment notification failed', { error: notifErr.message });
+      }
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`user-${notifyUserId}`).emit('message-updated', {
+          id: message._id.toString(),
+          status: message.status
+        });
+      }
+
+      res.json(stripAttachmentData(message));
+    } catch (error) {
+      res.status(500).json({ message: 'Chyba servera' });
+    }
+  });
 });
 
 // GET /api/messages/:id/attachment — download attachment
@@ -418,6 +449,39 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
     res.set({
       'Content-Type': message.attachment.mimetype,
       'Content-Disposition': `attachment; filename="${encodeURIComponent(message.attachment.originalName)}"`,
+      'Content-Length': fileBuffer.length
+    });
+    res.send(fileBuffer);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET /api/messages/:id/comment/:commentId/attachment — download comment attachment
+router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [
+        { fromUserId: req.user.id },
+        { toUserId: req.user.id }
+      ]
+    });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Odkaz nenájdený' });
+    }
+
+    const comment = message.comments.id(req.params.commentId);
+    if (!comment || !comment.attachment || !comment.attachment.data) {
+      return res.status(404).json({ message: 'Príloha nenájdená' });
+    }
+
+    const fileBuffer = Buffer.from(comment.attachment.data, 'base64');
+    res.set({
+      'Content-Type': comment.attachment.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(comment.attachment.originalName)}"`,
       'Content-Length': fileBuffer.length
     });
     res.send(fileBuffer);

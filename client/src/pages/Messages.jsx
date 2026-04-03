@@ -57,6 +57,7 @@ function Messages() {
   // Detail view
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [commentText, setCommentText] = useState('');
+  const [commentAttachment, setCommentAttachment] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
 
@@ -207,9 +208,15 @@ function Messages() {
   const handleComment = async (id) => {
     if (!commentText.trim()) return;
     try {
-      const res = await api.post(`/api/messages/${id}/comment`, { text: commentText.trim() });
+      const formData = new FormData();
+      formData.append('text', commentText.trim());
+      if (commentAttachment) formData.append('attachment', commentAttachment);
+      const res = await api.post(`/api/messages/${id}/comment`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
       setSelectedMessage(res.data);
       setCommentText('');
+      setCommentAttachment(null);
       fetchMessages();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba');
@@ -406,6 +413,8 @@ function Messages() {
               onDelete={handleDelete}
               commentText={commentText}
               setCommentText={setCommentText}
+              commentAttachment={commentAttachment}
+              setCommentAttachment={setCommentAttachment}
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               navigate={navigate}
@@ -606,7 +615,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, commentText, setCommentText, formatDate, formatDateTime, navigate }) {
+function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
 
@@ -711,21 +720,56 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
                     <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDateTime(c.createdAt)}</span>
                   </div>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                  {c.attachment?.originalName && (
+                    <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>📎</span>
+                      <a href="#" onClick={(e) => {
+                          e.preventDefault();
+                          api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
+                            .then(res => {
+                              const url = URL.createObjectURL(res.data);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = c.attachment.originalName;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            });
+                        }}
+                        style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
+                        {c.attachment.originalName}
+                      </a>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
           {/* Add comment */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input type="text" value={commentText} onChange={e => setCommentText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
-              style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
-              placeholder="Napíšte komentár..." />
-            <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
-              disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              Odoslať
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input type="text" value={commentText} onChange={e => setCommentText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
+                style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
+                placeholder="Napíšte komentár..." />
+              <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
+                disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                Odoslať
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+                📎 Príloha
+                <input type="file" onChange={e => setCommentAttachment(e.target.files[0] || null)} style={{ display: 'none' }} />
+              </label>
+              {commentAttachment && (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {commentAttachment.name} ({(commentAttachment.size / 1024 / 1024).toFixed(1)} MB)
+                  <button onClick={() => setCommentAttachment(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '14px', padding: '0 2px' }}>×</button>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
