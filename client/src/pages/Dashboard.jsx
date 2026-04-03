@@ -1197,10 +1197,8 @@ function Dashboard() {
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Messages Section */}
-              <div className="dashboard-section" style={{ marginTop: '24px' }} onClick={() => setDetailView('messages-all')}>
+                {/* Messages Section */}
+                <div className="dashboard-section" onClick={() => setDetailView('messages-all')}>
                 <div className="section-header">
                   <h3>Správy ({totalReceived + totalSent})</h3>
                   <button
@@ -1287,8 +1285,8 @@ function Dashboard() {
                 )}
               </div>
 
-              {/* Recent Activity - Contacts with tasks */}
-              <div className="dashboard-section full-width" style={{ marginTop: '24px' }}>
+                {/* Recent Activity - Contacts with tasks */}
+                <div className="dashboard-section full-width">
                 <div className="section-header">
                   <h3>Kontakty s projektami</h3>
                 </div>
@@ -1344,6 +1342,7 @@ function Dashboard() {
                     </div>
                   )}
                 </div>
+              </div>
               </div>
             </div>
           )}
