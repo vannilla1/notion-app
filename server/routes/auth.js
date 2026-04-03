@@ -58,9 +58,8 @@ router.post('/register', registerLimiter, async (req, res) => {
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
     const color = colors[Math.floor(Math.random() * colors.length)];
 
-    // First user becomes admin, others become regular users
-    const userCount = await User.countDocuments();
-    const role = userCount === 0 ? 'admin' : 'user';
+    // All users register as regular users. Admin is set only via seed script.
+    const role = 'user';
 
     // Create user
     const user = new User({
@@ -368,9 +367,9 @@ router.post('/set-admin', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
-    // Only existing admins can promote others
+    // Only super admin can promote others
     const currentUser = await User.findById(req.user.id);
-    if (currentUser.role !== 'admin') {
+    if (!currentUser || currentUser.email !== 'support@prplcrm.eu') {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
@@ -401,7 +400,7 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
     }
 
     const currentUser = await User.findById(req.user.id);
-    if (currentUser.role !== 'admin') {
+    if (!currentUser || currentUser.email !== 'support@prplcrm.eu') {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 

@@ -18,12 +18,12 @@ function AdminPanel() {
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    if (user && user.role !== 'admin') {
+    if (user && user.email !== 'support@prplcrm.eu') {
       navigate('/app');
     }
   }, [user, navigate]);
 
-  if (!user || user.role !== 'admin') {
+  if (!user || user.email !== 'support@prplcrm.eu') {
     return null;
   }
 

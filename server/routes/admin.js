@@ -9,12 +9,14 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Middleware: require admin role
+// Middleware: require super admin (only support@prplcrm.eu)
+const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
+
 const requireAdmin = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user || user.role !== 'admin') {
-      return res.status(403).json({ message: 'Prístup zamietnutý — vyžaduje sa admin rola' });
+    if (!user || user.email !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({ message: 'Prístup zamietnutý' });
     }
     req.adminUser = user;
     next();
