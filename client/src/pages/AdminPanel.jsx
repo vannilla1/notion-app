@@ -292,7 +292,7 @@ function UsersTab() {
                   {u.createdAt ? new Date(u.createdAt).toLocaleDateString('sk-SK') : '—'}
                 </td>
                 <td>
-                  {u.id !== currentUser.id && u.role !== 'admin' && (
+                  {u.email !== 'support@prplcrm.eu' && u.role !== 'admin' && (
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => handleDeleteUser(u)}
