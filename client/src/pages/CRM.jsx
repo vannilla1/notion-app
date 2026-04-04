@@ -19,7 +19,7 @@ const crmHelpTips = [
   {
     icon: '📋',
     title: 'Detail kontaktu',
-    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s projektami, poznámkami a súbormi.'
+    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s projektami, poznámkami, súbormi a prepojenými správami.'
   },
   {
     icon: '✏️',

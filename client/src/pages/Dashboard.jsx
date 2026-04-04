@@ -28,12 +28,12 @@ const dashboardHelpTips = [
   {
     icon: '🔔',
     title: 'Notifikácie',
-    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na nové kontakty, projekty, priradenia a blížiace sa termíny — aj ako push notifikácie na iOS.'
+    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na všetky zmeny vo workspace — nové kontakty, projekty, priradenia, termíny a správy. Push notifikácie fungujú aj na iOS. Notifikácie chodia len členom daného workspace.'
   },
   {
     icon: '🏢',
     title: 'Pracovné prostredia',
-    description: 'Cez ikonu profilu v pravom hornom rohu môžete prepínať medzi pracovnými prostrediami alebo vytvoriť nové prostredie pre ďalšie odvetvie.'
+    description: 'Cez ikonu profilu v pravom hornom rohu môžete prepínať medzi pracovnými prostrediami alebo vytvoriť nové. Na mobilnej verzii sa názov aktuálneho prostredia zobrazuje v hlavičke pod logom.'
   },
   {
     icon: '📆',

@@ -13,9 +13,10 @@ import { useWorkspace } from '../context/WorkspaceContext';
 const messagesHelpTips = [
   { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie alebo žiadosti.' },
   { icon: '🟡', title: 'Typy odkazov', description: 'Schválenie (žltá) — vyžaduje rozhodnutie. Informácia (modrá) — len na prečítanie. Žiadosť (oranžová) — prosba o akciu. Návrh (zelená) — diskusia.' },
-  { icon: '✅', title: 'Akcie príjemcu', description: 'Prijaté odkazy môžete schváliť, zamietnuť alebo komentovať. Po schválení/zamietnutí sa stav nedá zmeniť.' },
-  { icon: '📎', title: 'Prílohy', description: 'Ku každému odkazu môžete priložiť súbor do 10MB — dokumenty, obrázky, PDF.' },
-  { icon: '🔗', title: 'Prepojenia', description: 'Odkaz môžete prepojiť s konkrétnym kontaktom alebo projektom pre jednoduchšiu orientáciu.' }
+  { icon: '✅', title: 'Akcie príjemcu', description: 'Prijaté odkazy môžete schváliť, zamietnuť alebo komentovať. Komentované správy je možné následne ešte schváliť alebo zamietnuť.' },
+  { icon: '📎', title: 'Prílohy', description: 'Ku každému odkazu môžete priložiť viacero súborov (max. 10 MB na súbor) — dokumenty, obrázky, PDF a ďalšie formáty.' },
+  { icon: '🔗', title: 'Prepojenia', description: 'Odkaz môžete prepojiť s konkrétnym kontaktom alebo projektom. Prepojené správy sa zobrazujú aj v detaile kontaktu alebo projektu.' },
+  { icon: '🗑️', title: 'Správa odkazov', description: 'Vlastník a manažér workspace môžu vymazať akúkoľvek správu. Odosielateľ môže upraviť alebo vymazať svoje vlastné správy.' }
 ];
 
 const typeConfig = {

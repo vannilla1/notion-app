@@ -74,6 +74,11 @@ const tasksHelpTips = [
     icon: '📆',
     title: 'Google synchronizácia',
     description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a projektov.'
+  },
+  {
+    icon: '📨',
+    title: 'Prepojené správy',
+    description: 'V detaile projektu vidíte všetky správy, ktoré boli s ním prepojené. Kliknutím na správu sa presmerujete do sekcie Správy.'
   }
 ];
 
