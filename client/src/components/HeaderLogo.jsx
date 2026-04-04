@@ -14,7 +14,7 @@ const HeaderLogo = ({ active, onClick }) => {
         Prpl CRM
       </h1>
       {currentWorkspace && (
-        <span className="header-workspace-badge">
+        <span className="header-workspace-name">
           <span className="header-workspace-dot" style={{ backgroundColor: currentWorkspace.color || '#6366f1' }} />
           {currentWorkspace.name}
         </span>
