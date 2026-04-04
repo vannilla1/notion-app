@@ -978,7 +978,7 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
         )}
 
         {/* Actions for recipient */}
-        {isRecipient && msg.status === 'pending' && (
+        {isRecipient && (msg.status === 'pending' || msg.status === 'commented') && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <button className="btn" onClick={() => onApprove(msg.id || msg._id)}
               style={{ background: 'var(--success)', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px' }}>

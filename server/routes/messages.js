@@ -340,7 +340,7 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
       _id: req.params.id,
       workspaceId: req.workspaceId,
       toUserId: req.user.id,
-      status: 'pending'
+      status: { $in: ['pending', 'commented'] }
     });
 
     if (!message) {
@@ -392,7 +392,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
       _id: req.params.id,
       workspaceId: req.workspaceId,
       toUserId: req.user.id,
-      status: 'pending'
+      status: { $in: ['pending', 'commented'] }
     });
 
     if (!message) {
