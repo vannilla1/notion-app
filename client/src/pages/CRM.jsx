@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import HeaderLogo from '../components/HeaderLogo';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -1203,7 +1204,7 @@ function CRM() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link" onClick={() => navigate('/app')}><img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM</h1>
+          <HeaderLogo />
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />

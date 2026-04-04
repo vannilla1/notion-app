@@ -7,6 +7,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import HeaderLogo from '../components/HeaderLogo';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -2033,7 +2034,7 @@ function Tasks() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link" onClick={() => navigate('/app')}><img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM</h1>
+          <HeaderLogo />
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />

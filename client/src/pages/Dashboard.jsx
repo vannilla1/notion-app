@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
+import HeaderLogo from '../components/HeaderLogo';
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
@@ -547,7 +548,7 @@ function Dashboard() {
             <span></span>
             <span></span>
           </button>
-          <h1 className="header-title-link active" onClick={closeDetailView}><img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />Prpl CRM</h1>
+          <HeaderLogo active onClick={closeDetailView} />
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />

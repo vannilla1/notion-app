@@ -3982,6 +3982,14 @@ a.detail-value:hover {
 }
 
 /* Header Title Link */
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+
 .header-title-link {
   cursor: pointer;
   transition: opacity var(--transition);
@@ -4005,6 +4013,39 @@ a.detail-value:hover {
 
 .header-title-link.active:hover {
   opacity: 1;
+}
+
+.header-workspace-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 3px 12px 3px 8px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+  letter-spacing: 0.2px;
+  transition: all 0.2s;
+}
+
+.header-workspace-badge:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.header-workspace-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
 }
 
 /* Dashboard Styles */
@@ -5245,6 +5286,12 @@ a.detail-value:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100px;
+  }
+
+  .header-workspace-badge {
+    max-width: 100px;
+    font-size: 11px;
+    padding: 2px 8px 2px 6px;
   }
 
   .crm-header-right {
