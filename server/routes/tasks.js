@@ -973,13 +973,13 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       autoSyncToGoogle(taskObj, 'create');
 
       // Send notification about new task
-      notificationService.notifyTaskChange('task.created', taskObj, req.user);
+      await notificationService.notifyTaskChange('task.created', taskObj, req.user, [], req.workspaceId);
 
       // Notify assigned users
       logger.debug('[Task Create Global] Assignment check', { assignedTo });
       if (assignedTo && assignedTo.length > 0) {
         logger.debug('[Task Create Global] Sending assignment notification', { assignedTo });
-        notificationService.notifyTaskAssignment(taskObj, assignedTo, req.user);
+        await notificationService.notifyTaskAssignment(taskObj, assignedTo, req.user);
       } else {
         logger.debug('[Task Create Global] No assigned users, skipping');
       }
@@ -1042,13 +1042,13 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       autoSyncToGoogle(task, 'create');
 
       // Send notification about new task
-      notificationService.notifyTaskChange('task.created', task, req.user);
+      await notificationService.notifyTaskChange('task.created', task, req.user, [], req.workspaceId);
 
       // Notify assigned users
       logger.debug('[Task Create Contact] Assignment check', { assignedTo: task.assignedTo });
       if (task.assignedTo && task.assignedTo.length > 0) {
         logger.debug('[Task Create Contact] Sending assignment notification', { assignedTo: task.assignedTo });
-        notificationService.notifyTaskAssignment(task, task.assignedTo, req.user);
+        await notificationService.notifyTaskAssignment(task, task.assignedTo, req.user);
       } else {
         logger.debug('[Task Create Contact] No assigned users, skipping');
       }
@@ -1190,12 +1190,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
             // Send notification about task update (exclude newly assigned - they get assignment notification)
             const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
-            notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned);
+            await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
               logger.debug('[Task Update Contact] Sending assignment notification', { newlyAssigned });
-              notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+              await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
             }
 
             return res.json(taskData);
@@ -1319,12 +1319,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Send notification about task update (exclude newly assigned - they get assignment notification)
       const prevCompleted = task.completed;
       const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
-      notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned);
+      await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
 
       // Notify newly assigned users with specific assignment notification
       if (newlyAssigned.length > 0) {
         logger.debug('[Task Update Global] Sending assignment notification', { newlyAssigned });
-        notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+        await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
       }
 
       return res.json(taskData);
@@ -1394,12 +1394,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
           // Send notification about task update (exclude newly assigned - they get assignment notification)
           const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
-          notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned);
+          await notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned, req.workspaceId);
 
           // Notify newly assigned users with specific assignment notification
           if (newlyAssigned.length > 0) {
             logger.debug('[Task Update Fallback] Sending assignment notification', { newlyAssigned });
-            notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+            await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
           }
 
           return res.json(taskData);
@@ -1438,7 +1438,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             autoDeleteFromGoogle(req.params.id);
 
             // Send notification about deleted task
-            notificationService.notifyTaskChange('task.deleted', deletedTask, req.user);
+            await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
             return res.json({ message: 'Task deleted' });
           }
@@ -1456,7 +1456,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       autoDeleteFromGoogle(req.params.id);
 
       // Send notification about deleted task
-      notificationService.notifyTaskChange('task.deleted', task, req.user);
+      await notificationService.notifyTaskChange('task.deleted', task, req.user, [], req.workspaceId);
 
       return res.json({ message: 'Task deleted' });
     }
@@ -1479,7 +1479,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           autoDeleteFromGoogle(req.params.id);
 
           // Send notification about deleted task
-          notificationService.notifyTaskChange('task.deleted', deletedTask, req.user);
+          await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
           return res.json({ message: 'Task deleted' });
         }
@@ -1723,11 +1723,11 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
               }, 'create');
 
               // Send notification about new subtask
-              notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
+              await notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user, [], req.workspaceId);
 
               // Send assignment notification if subtask is assigned to someone
               if (assignedTo && assignedTo.length > 0) {
-                notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+                await notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
               }
 
               return res.status(201).json(subtask);
@@ -1760,11 +1760,11 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
         }, 'create');
 
         // Send notification about new subtask
-        notificationService.notifySubtaskChange('subtask.created', subtask, task, req.user);
+        await notificationService.notifySubtaskChange('subtask.created', subtask, task, req.user, [], req.workspaceId);
 
         // Send assignment notification if subtask is assigned to someone
         if (assignedTo && assignedTo.length > 0) {
-          notificationService.notifySubtaskAssignment(subtask, task, assignedTo, req.user);
+          await notificationService.notifySubtaskAssignment(subtask, task, assignedTo, req.user);
         }
 
         return res.status(201).json(subtask);
@@ -1803,11 +1803,11 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
             }, 'create');
 
             // Send notification about new subtask
-            notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user);
+            await notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user, [], req.workspaceId);
 
             // Send assignment notification if subtask is assigned to someone
             if (assignedTo && assignedTo.length > 0) {
-              notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+              await notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
             }
 
             return res.status(201).json(subtask);
@@ -1899,12 +1899,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
               // Send notification about subtask update (exclude newly assigned - they get assignment notification)
               const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-              notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned);
+              await notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
 
               // Notify newly assigned users with specific assignment notification
               if (newlyAssigned.length > 0) {
                 logger.debug('[Subtask Update Contact] Sending assignment notification', { newlyAssigned });
-                notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+                await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
               }
 
               // Auto-complete project when all subtasks are done
@@ -1960,12 +1960,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
         // Send notification about subtask update (exclude newly assigned - they get assignment notification)
         const globalSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-        notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user, newlyAssigned);
+        await notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user, newlyAssigned, req.workspaceId);
 
         // Notify newly assigned users with specific assignment notification
         if (newlyAssigned.length > 0) {
           logger.debug('[Subtask Update Global] Sending assignment notification', { newlyAssigned });
-          notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user);
+          await notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user);
         }
 
         // Auto-complete project when all subtasks are done
@@ -2025,12 +2025,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
             // Send notification about subtask update (exclude newly assigned - they get assignment notification)
             const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-            notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned);
+            await notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
               logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
-              notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+              await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
             }
 
             // Auto-complete project when all subtasks are done
@@ -2087,7 +2087,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     const sendDeleteNotifications = async (deletedSubtask, parentTask) => {
       const allSubtasksToNotify = collectAllSubtasks(deletedSubtask);
       for (const subtask of allSubtasksToNotify) {
-        await notificationService.notifySubtaskChange('subtask.deleted', subtask, parentTask, req.user);
+        await notificationService.notifySubtaskChange('subtask.deleted', subtask, parentTask, req.user, [], req.workspaceId);
       }
     };
 

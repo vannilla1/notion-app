@@ -599,12 +599,12 @@ const notifyContactChange = async (type, contact, actor, workspaceId, excludeAct
  * @param {Object} actor - User who performed the action
  * @param {Array} excludeUserIds - User IDs to exclude from notification (e.g., newly assigned users who get separate notification)
  */
-const notifyTaskChange = async (type, task, actor, excludeUserIds = []) => {
+const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspaceId = null) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, task.title);
   const message = getNotificationMessage(type, actorName, { contactName: task.contactName });
 
-  logger.debug('[NotificationService] Task change', { type, taskTitle: task.title, actorName, excludeUserIds });
+  logger.debug('[NotificationService] Task change', { type, taskTitle: task.title, actorName, excludeUserIds, workspaceId });
 
   const notificationData = {
     type,
@@ -622,34 +622,44 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = []) => {
     }
   };
 
-  // Collect all users to notify
-  const recipientIds = new Set();
+  // Use workspace-based notification if workspaceId is available
+  if (workspaceId) {
+    try {
+      const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const recipientIds = members
+        .map(m => m.userId.toString())
+        .filter(id => {
+          if (actor && id === (actor._id || actor.id).toString()) return false;
+          if (excludeUserIds && Array.isArray(excludeUserIds)) {
+            return !excludeUserIds.some(exId => exId && exId.toString() === id);
+          }
+          return true;
+        });
 
-  // Add assigned users
+      if (recipientIds.length === 0) {
+        logger.debug('[NotificationService] No workspace recipients for task notification');
+        return [];
+      }
+      return await notifyUsers(recipientIds, notificationData);
+    } catch (error) {
+      logger.error('[NotificationService] Error fetching workspace members for task notification', { error: error.message });
+      return [];
+    }
+  }
+
+  // Fallback: notify assigned users only (legacy behavior)
+  const recipientIds = new Set();
   if (task.assignedTo && Array.isArray(task.assignedTo)) {
     task.assignedTo.forEach(id => {
       if (id) recipientIds.add(id.toString());
     });
   }
-
-  // Remove the actor
-  if (actor) {
-    recipientIds.delete((actor._id || actor.id).toString());
-  }
-
-  // Remove excluded users (e.g., newly assigned who get their own notification)
+  if (actor) recipientIds.delete((actor._id || actor.id).toString());
   if (excludeUserIds && Array.isArray(excludeUserIds)) {
-    excludeUserIds.forEach(id => {
-      if (id) recipientIds.delete(id.toString());
-    });
+    excludeUserIds.forEach(id => { if (id) recipientIds.delete(id.toString()); });
   }
 
-  if (recipientIds.size === 0) {
-    // No specific recipients - don't spam all users, just skip
-    logger.debug('[NotificationService] No recipients for task notification, skipping');
-    return [];
-  }
-
+  if (recipientIds.size === 0) return [];
   return await notifyUsers(Array.from(recipientIds), notificationData);
 };
 
@@ -738,12 +748,12 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
  * @param {Object} actor - User who performed the action
  * @param {Array} excludeUserIds - User IDs to exclude from notification (e.g., newly assigned users who get separate notification)
  */
-const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUserIds = []) => {
+const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUserIds = [], workspaceId = null) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle(type, actorName, subtask.title);
   const message = getNotificationMessage(type, actorName, { taskTitle: parentTask.title });
 
-  logger.debug('[NotificationService] Subtask change', { type, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName, excludeUserIds });
+  logger.debug('[NotificationService] Subtask change', { type, subtaskTitle: subtask.title, parentTaskTitle: parentTask.title, actorName, excludeUserIds, workspaceId });
 
   const notificationData = {
     type,
@@ -762,33 +772,39 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
     }
   };
 
-  // Notify parent task's assigned users
+  // Use workspace-based notification if workspaceId is available
+  if (workspaceId) {
+    try {
+      const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const recipientIds = members
+        .map(m => m.userId.toString())
+        .filter(id => {
+          if (actor && id === (actor._id || actor.id).toString()) return false;
+          if (excludeUserIds && Array.isArray(excludeUserIds)) {
+            return !excludeUserIds.some(exId => exId && exId.toString() === id);
+          }
+          return true;
+        });
+
+      if (recipientIds.length === 0) return [];
+      return await notifyUsers(recipientIds, notificationData);
+    } catch (error) {
+      logger.error('[NotificationService] Error fetching workspace members for subtask notification', { error: error.message });
+      return [];
+    }
+  }
+
+  // Fallback: notify parent task's assigned users only
   const recipientIds = new Set();
-
   if (parentTask.assignedTo && Array.isArray(parentTask.assignedTo)) {
-    parentTask.assignedTo.forEach(id => {
-      if (id) recipientIds.add(id.toString());
-    });
+    parentTask.assignedTo.forEach(id => { if (id) recipientIds.add(id.toString()); });
   }
-
-  // Remove the actor
-  if (actor) {
-    recipientIds.delete((actor._id || actor.id).toString());
-  }
-
-  // Remove excluded users (e.g., newly assigned who get their own notification)
+  if (actor) recipientIds.delete((actor._id || actor.id).toString());
   if (excludeUserIds && Array.isArray(excludeUserIds)) {
-    excludeUserIds.forEach(id => {
-      if (id) recipientIds.delete(id.toString());
-    });
+    excludeUserIds.forEach(id => { if (id) recipientIds.delete(id.toString()); });
   }
 
-  if (recipientIds.size === 0) {
-    // No specific recipients - don't spam all users, just skip
-    logger.debug('[NotificationService] No recipients for subtask notification, skipping');
-    return [];
-  }
-
+  if (recipientIds.size === 0) return [];
   return await notifyUsers(Array.from(recipientIds), notificationData);
 };
 

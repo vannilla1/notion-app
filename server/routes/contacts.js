@@ -245,7 +245,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     io.to(`workspace-${req.workspaceId}`).emit('contact-created', contactData);
 
     // Send notification to workspace members except creator
-    notificationService.notifyContactChange('contact.created', contact, req.user, req.workspaceId);
+    await notificationService.notifyContactChange('contact.created', contact, req.user, req.workspaceId);
 
     res.status(201).json(contactData);
   } catch (error) {
@@ -283,7 +283,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactData);
 
     // Send notification to workspace members except updater
-    notificationService.notifyContactChange('contact.updated', contact, req.user, req.workspaceId);
+    await notificationService.notifyContactChange('contact.updated', contact, req.user, req.workspaceId);
 
     res.json(contactData);
   } catch (error) {
@@ -311,7 +311,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     io.to(`workspace-${req.workspaceId}`).emit('contact-deleted', { id: req.params.id });
 
     // Send notification to workspace members except deleter
-    notificationService.notifyContactChange('contact.deleted', contactData, req.user, req.workspaceId);
+    await notificationService.notifyContactChange('contact.deleted', contactData, req.user, req.workspaceId);
 
     res.json({ message: 'Contact deleted' });
   } catch (error) {
