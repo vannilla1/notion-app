@@ -4024,7 +4024,7 @@ a.detail-value:hover {
 }
 
 .header-workspace-name {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 3px;
   font-size: 11px;
@@ -4035,6 +4035,12 @@ a.detail-value:hover {
   white-space: nowrap;
   letter-spacing: 0.3px;
   line-height: 1;
+}
+
+@media (max-width: 767px) {
+  .header-workspace-name {
+    display: flex;
+  }
 }
 
 .header-workspace-dot {
