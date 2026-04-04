@@ -664,17 +664,23 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
   }
 });
 
-// DELETE /api/messages/:id — delete message (only sender can delete)
+// DELETE /api/messages/:id — sender or workspace owner/manager can delete
 router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const message = await Message.findOne({
       _id: req.params.id,
-      workspaceId: req.workspaceId,
-      fromUserId: req.user.id
+      workspaceId: req.workspaceId
     });
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
+    }
+
+    const isSender = message.fromUserId.toString() === req.user.id;
+    const isAdmin = req.workspaceMember.canAdmin();
+
+    if (!isSender && !isAdmin) {
+      return res.status(403).json({ message: 'Nemáte oprávnenie vymazať tento odkaz' });
     }
 
     await Message.deleteOne({ _id: req.params.id });
@@ -684,6 +690,11 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       io.to(`user-${message.toUserId.toString()}`).emit('message-deleted', {
         id: req.params.id
       });
+      if (!isSender) {
+        io.to(`user-${message.fromUserId.toString()}`).emit('message-deleted', {
+          id: req.params.id
+        });
+      }
     }
 
     res.json({ message: 'Odkaz bol vymazaný' });

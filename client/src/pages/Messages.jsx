@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 const messagesHelpTips = [
   { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie alebo žiadosti.' },
@@ -33,6 +34,7 @@ const statusConfig = {
 
 function Messages() {
   const { user, logout, updateUser } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const { socket, isConnected } = useSocket();
@@ -506,6 +508,7 @@ function Messages() {
               msg={selectedMessage}
               isRecipient={isRecipient(selectedMessage)}
               isSender={selectedMessage.fromUserId === user.id || selectedMessage.fromUserId?._id === user.id}
+              canDelete={(selectedMessage.fromUserId === user.id || selectedMessage.fromUserId?._id === user.id) || currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager'}
               onBack={() => setSelectedMessage(null)}
               onApprove={handleApprove}
               onReject={() => setShowRejectDialog(true)}
@@ -728,7 +731,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
 
@@ -880,16 +883,20 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
             </div>
             <h3 style={{ fontSize: '18px', fontWeight: 600 }}>{msg.subject}</h3>
           </div>
-          {isSender && (
+          {(isSender || canDelete) && (
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => setEditing(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-color)', fontSize: '13px' }}>
-                ✏️ Upraviť
-              </button>
-              <button onClick={() => onDelete(msg.id || msg._id)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>
-                🗑️ Vymazať
-              </button>
+              {isSender && (
+                <button onClick={() => setEditing(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-color)', fontSize: '13px' }}>
+                  ✏️ Upraviť
+                </button>
+              )}
+              {canDelete && (
+                <button onClick={() => onDelete(msg.id || msg._id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>
+                  🗑️ Vymazať
+                </button>
+              )}
             </div>
           )}
         </div>
