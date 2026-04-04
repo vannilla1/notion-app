@@ -2174,15 +2174,15 @@ body {
     position: fixed;
     left: 0;
     top: 0;
-    height: 100vh;
-    height: 100dvh;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    height: auto;
     width: 85%;
     max-width: 320px;
     z-index: 100;
     transform: translateX(-100%);
     transition: transform var(--transition-slow);
     padding-top: 70px;
-    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: 20px;
     box-shadow: var(--shadow-xl);
     overscroll-behavior: contain;
   }
