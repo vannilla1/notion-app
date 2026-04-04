@@ -3984,9 +3984,16 @@ a.detail-value:hover {
 /* Header Title Link */
 .header-brand {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+  min-width: 0;
+  flex: 1;
+}
+
+.header-brand-text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   gap: 1px;
 }
@@ -3996,7 +4003,7 @@ a.detail-value:hover {
   transition: opacity var(--transition);
   display: flex;
   align-items: center;
-  gap: 8px;
+  white-space: nowrap;
 }
 
 .header-logo-icon {
@@ -4023,12 +4030,10 @@ a.detail-value:hover {
   font-size: 11px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.6);
-  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   letter-spacing: 0.3px;
-  padding-left: 36px;
   line-height: 1;
 }
 
@@ -5273,16 +5278,10 @@ a.detail-value:hover {
   .crm-header h1,
   .header-title-link {
     font-size: 14px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100px;
   }
 
   .header-workspace-name {
-    max-width: 120px;
     font-size: 10px;
-    padding-left: 30px;
   }
 
   .crm-header-right {
