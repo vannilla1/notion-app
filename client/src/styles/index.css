@@ -5925,7 +5925,7 @@ a.detail-value:hover {
 /* Fix for notch and home indicator on newer iPhones */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .crm-main {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: calc(env(safe-area-inset-bottom) + 20px);
   }
 
   .modal-actions {
@@ -7559,6 +7559,10 @@ a.detail-value:hover {
 
 /* Sidebar mobile improvements */
 @media (max-width: 767px) {
+  .crm-main {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+
   .crm-sidebar {
     width: 90%;
     max-width: 340px;
