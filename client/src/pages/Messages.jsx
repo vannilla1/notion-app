@@ -921,67 +921,48 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
 
 
         {/* Files section */}
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: 600 }}>📎 Prílohy ({(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)})</h4>
+        <div className="task-files-section" style={{ marginBottom: '16px' }}>
+          <div className="task-files-header">
+            <span>📎 Prílohy ({(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)})</span>
             {(isSender || isRecipient) && (
               <button
+                className="btn btn-secondary btn-sm btn-attach"
                 onClick={() => onFileUpload(msg.id || msg._id)}
                 disabled={uploadingFile}
-                style={{
-                  background: 'var(--accent-color)', color: 'white', border: 'none',
-                  width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer',
-                  fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  opacity: uploadingFile ? 0.5 : 1
-                }}
-                title="Pridať súbor"
-              >+</button>
+              >
+                {uploadingFile ? '⏳' : '+'} Pridať
+              </button>
             )}
           </div>
 
-          {/* Legacy single attachment */}
-          {msg.attachment?.originalName && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '13px' }}>
-              <span>{getFileIcon(msg.attachment.mimetype)}</span>
-              <a href="#" onClick={(e) => {
-                  e.preventDefault();
-                  api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
-                    .then(res => downloadBlob(res.data, msg.attachment.originalName));
-                }}
-                style={{ flex: 1, color: 'var(--accent-color)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {msg.attachment.originalName}
-              </a>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatFileSize(msg.attachment.size)}</span>
-              <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
-                    .then(res => downloadBlob(res.data, msg.attachment.originalName));
-                }} title="Stiahnuť">⬇️</button>
-            </div>
-          )}
-
-          {/* Multi-file attachments */}
-          {msg.files && msg.files.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {msg.files.map(file => (
-                <div key={file.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
-                  <span>{getFileIcon(file.mimetype)}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.originalName}</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatFileSize(file.size)}</span>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
-                    onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+          {/* File list */}
+          {(msg.attachment?.originalName || (msg.files && msg.files.length > 0)) && (
+            <div className="task-files-list">
+              {/* Legacy single attachment */}
+              {msg.attachment?.originalName && (
+                <div className="task-file-item">
+                  <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
+                  <span className="task-file-name" title={msg.attachment.originalName}>{msg.attachment.originalName}</span>
+                  <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
+                  <button className="btn-icon-sm" onClick={() => {
+                    api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
+                      .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                  }} title="Stiahnuť">⬇️</button>
+                </div>
+              )}
+              {/* Multi-file attachments */}
+              {msg.files?.map(file => (
+                <div key={file.id} className="task-file-item">
+                  <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
+                  <span className="task-file-size">{formatFileSize(file.size)}</span>
+                  <button className="btn-icon-sm" onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
                   {(isSender || isRecipient) && (
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '14px', padding: '2px 4px' }}
-                      onClick={() => onFileDelete(msg.id || msg._id, file.id)} title="Vymazať">×</button>
+                    <button className="btn-icon-sm btn-delete" onClick={() => onFileDelete(msg.id || msg._id, file.id)} title="Vymazať">×</button>
                   )}
                 </div>
               ))}
             </div>
-          )}
-
-          {!msg.attachment?.originalName && (!msg.files || msg.files.length === 0) && (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Žiadne prílohy</p>
           )}
 
           {uploadingFile && (
