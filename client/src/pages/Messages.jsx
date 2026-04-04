@@ -1061,18 +1061,6 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
                 Odoslať
               </button>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
-                📎 Príloha
-                <input type="file" onChange={e => setCommentAttachment(e.target.files[0] || null)} style={{ display: 'none' }} />
-              </label>
-              {commentAttachment && (
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {commentAttachment.name} ({(commentAttachment.size / 1024 / 1024).toFixed(1)} MB)
-                  <button onClick={() => setCommentAttachment(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '14px', padding: '0 2px' }}>×</button>
-                </span>
-              )}
-            </div>
           </div>
         </div>
       </div>
