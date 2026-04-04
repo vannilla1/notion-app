@@ -5251,6 +5251,23 @@ a.detail-value:hover {
 
 /* Safe area support for iPhone X and newer */
 /* Native iOS app injects --safe-area-top/--safe-area-bottom via Swift */
+body.ios-app {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100%;
+}
+
+.ios-app .crm-container {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.ios-app .crm-main {
+  -webkit-overflow-scrolling: touch;
+}
+
 .ios-app .crm-header {
   padding-top: calc(var(--safe-area-top, 0px) + 16px);
 }
