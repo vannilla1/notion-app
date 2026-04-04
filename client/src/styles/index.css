@@ -661,6 +661,7 @@ body {
   flex-direction: column;
   height: 100vh;
   background: var(--bg-secondary);
+  overflow: hidden;
 }
 
 .crm-header {
@@ -849,6 +850,7 @@ body {
   overflow-y: auto;
   padding: 32px;
   background: var(--bg-secondary);
+  overscroll-behavior: contain;
 }
 
 /* Contact List */
