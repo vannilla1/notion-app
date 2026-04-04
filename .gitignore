@@ -3,6 +3,9 @@ node_modules
 .env.local
 dist
 
+# APNs private keys
+*.p8
+
 # Logs
 logs
 *.log
