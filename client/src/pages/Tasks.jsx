@@ -444,6 +444,9 @@ function Tasks() {
   const subtaskFileInputRef = useRef(null);
   const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
 
+  // Linked messages
+  const [linkedMessages, setLinkedMessages] = useState({});
+
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
@@ -497,6 +500,13 @@ function Tasks() {
     }
   }, []);
 
+  const fetchLinkedMessages = useCallback(async (taskId) => {
+    try {
+      const res = await api.get('/api/messages/by-linked', { params: { linkedType: 'task', linkedId: taskId } });
+      setLinkedMessages(prev => ({ ...prev, [taskId]: res.data }));
+    } catch (error) { /* ignore */ }
+  }, []);
+
   // Sync completed tasks from Google Tasks to CRM
   const syncCompletedFromGoogle = useCallback(async () => {
     try {
@@ -518,6 +528,10 @@ function Tasks() {
     // Sync completed tasks from Google Tasks (if connected)
     syncCompletedFromGoogle();
   }, [fetchTasks, fetchContacts, fetchUsers, syncCompletedFromGoogle]);
+
+  useEffect(() => {
+    if (expandedTask) fetchLinkedMessages(expandedTask);
+  }, [expandedTask, fetchLinkedMessages]);
 
   // Handle Google Calendar and Google Tasks OAuth callback parameters
   useEffect(() => {
@@ -2685,6 +2699,33 @@ function Tasks() {
                               </div>
                             )}
                           </div>
+
+                          {/* Linked messages */}
+                          {linkedMessages[task.id]?.length > 0 && (
+                            <div className="task-files-section">
+                              <div className="task-files-header">
+                                <span>✉️ Správy ({linkedMessages[task.id].length})</span>
+                                <button className="btn btn-secondary btn-sm btn-attach" onClick={() => navigate('/messages')}>
+                                  Zobraziť všetky
+                                </button>
+                              </div>
+                              <div className="task-files-list">
+                                {linkedMessages[task.id].map(msg => {
+                                  const typeIcons = { approval: '🟡', info: '🔵', request: '🟠', proposal: '🟢' };
+                                  const statusLabels = { pending: '🕐 Čaká', approved: '✅ Schválené', rejected: '❌ Zamietnuté', commented: '💬 Komentované' };
+                                  return (
+                                    <div key={msg.id} className="task-file-item" style={{ cursor: 'pointer' }}
+                                      onClick={() => navigate(`/messages?tab=received&highlight=${msg.id}`)}>
+                                      <span className="task-file-icon">{typeIcons[msg.type] || '✉️'}</span>
+                                      <span className="task-file-name" title={msg.subject}>{msg.subject}</span>
+                                      <span className="task-file-size">{statusLabels[msg.status] || msg.status}</span>
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{msg.fromUsername}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
 
                           <div className="subtasks">
                             <div className="subtasks-header">Úlohy</div>

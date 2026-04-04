@@ -118,6 +118,9 @@ function CRM() {
   const [previewTextContent, setPreviewTextContent] = useState(null);
   const [previewError, setPreviewError] = useState(null);
 
+  // Linked messages
+  const [linkedMessages, setLinkedMessages] = useState({});
+
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
@@ -151,10 +154,21 @@ function CRM() {
     }
   }, []);
 
+  const fetchLinkedMessages = useCallback(async (contactId) => {
+    try {
+      const res = await api.get('/api/messages/by-linked', { params: { linkedType: 'contact', linkedId: contactId } });
+      setLinkedMessages(prev => ({ ...prev, [contactId]: res.data }));
+    } catch (error) { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     fetchContacts();
     fetchGlobalTasks();
   }, [fetchContacts, fetchGlobalTasks]);
+
+  useEffect(() => {
+    if (expandedContact) fetchLinkedMessages(expandedContact);
+  }, [expandedContact, fetchLinkedMessages]);
 
   // Handle navigation state OR URL query params to expand contact from Dashboard or push notification
   // Track navTimestamp to detect new navigation even when on same page
@@ -1630,6 +1644,33 @@ function CRM() {
                               <div className="no-files">Žiadne súbory</div>
                             )}
                           </div>
+
+                          {/* Linked messages */}
+                          {linkedMessages[contact.id]?.length > 0 && (
+                            <div className="task-files-section" style={{ marginTop: '12px' }}>
+                              <div className="task-files-header">
+                                <span>✉️ Správy ({linkedMessages[contact.id].length})</span>
+                                <button className="btn btn-secondary btn-sm btn-attach" onClick={() => navigate('/messages')}>
+                                  Zobraziť všetky
+                                </button>
+                              </div>
+                              <div className="task-files-list">
+                                {linkedMessages[contact.id].map(msg => {
+                                  const typeIcons = { approval: '🟡', info: '🔵', request: '🟠', proposal: '🟢' };
+                                  const statusLabels = { pending: '🕐 Čaká', approved: '✅ Schválené', rejected: '❌ Zamietnuté', commented: '💬 Komentované' };
+                                  return (
+                                    <div key={msg.id} className="task-file-item" style={{ cursor: 'pointer' }}
+                                      onClick={() => navigate(`/messages?tab=received&highlight=${msg.id}`)}>
+                                      <span className="task-file-icon">{typeIcons[msg.type] || '✉️'}</span>
+                                      <span className="task-file-name" title={msg.subject}>{msg.subject}</span>
+                                      <span className="task-file-size">{statusLabels[msg.status] || msg.status}</span>
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{msg.fromUsername}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
 
                           {/* Tasks Link Section */}
                           <div className="contact-tasks-link">

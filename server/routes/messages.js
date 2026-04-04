@@ -103,6 +103,30 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+// GET /api/messages/by-linked — messages linked to a contact or task
+router.get('/by-linked', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { linkedType, linkedId } = req.query;
+    if (!linkedType || !linkedId) {
+      return res.status(400).json({ message: 'linkedType a linkedId sú povinné' });
+    }
+
+    const messages = await Message.find(
+      { workspaceId: req.workspaceId, linkedType, linkedId },
+      { 'attachment.data': 0, 'files.data': 0 }
+    )
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const result = messages.map(m => ({ ...m, id: m._id.toString() }));
+    res.json(result);
+  } catch (error) {
+    logger.error('Get linked messages error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // GET /api/messages/pending-count — count pending messages for current user
 router.get('/pending-count', authenticateToken, requireWorkspace, async (req, res) => {
   try {
