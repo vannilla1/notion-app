@@ -2175,13 +2175,16 @@ body {
     left: 0;
     top: 0;
     height: 100vh;
+    height: 100dvh;
     width: 85%;
     max-width: 320px;
     z-index: 100;
     transform: translateX(-100%);
     transition: transform var(--transition-slow);
     padding-top: 70px;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     box-shadow: var(--shadow-xl);
+    overscroll-behavior: contain;
   }
 
   .crm-sidebar.open {
@@ -5943,10 +5946,6 @@ body.ios-app {
 
 /* Fix for notch and home indicator on newer iPhones */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .crm-main {
-    padding-bottom: calc(env(safe-area-inset-bottom) + 20px);
-  }
-
   .modal-actions {
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
