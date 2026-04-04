@@ -1,5 +1,15 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
+
+const fileSchema = new mongoose.Schema({
+  id: { type: String, default: () => uuidv4() },
+  originalName: String,
+  mimetype: String,
+  size: Number,
+  data: String, // Base64
+  uploadedAt: { type: Date, default: Date.now }
+}, { _id: false });
 
 const commentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -52,7 +62,7 @@ const messageSchema = new mongoose.Schema({
     default: '',
     maxlength: 5000
   },
-  // Optional attachment (Base64 in MongoDB)
+  // Legacy single attachment (kept for backward compatibility)
   attachment: {
     id: String,
     originalName: String,
@@ -61,6 +71,8 @@ const messageSchema = new mongoose.Schema({
     data: String, // Base64
     uploadedAt: Date
   },
+  // Multiple file attachments (same pattern as Tasks)
+  files: { type: [fileSchema], default: [] },
   // Optional link to contact or task
   linkedType: {
     type: String,

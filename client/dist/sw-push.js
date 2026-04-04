@@ -1,7 +1,7 @@
 // Push notification service worker
-// Version: 2.5 - PWA-friendly navigation with postMessage
+// Version: 2.6 - Improved subscription change handling, URL validation
 
-const SW_VERSION = '2.5';
+const SW_VERSION = '2.6';
 
 // Debug logging - enabled temporarily for troubleshooting
 const DEBUG = true;
@@ -9,6 +9,9 @@ const log = (...args) => DEBUG && console.log('[SW]', ...args);
 const logError = (...args) => console.error('[SW]', ...args);
 
 log('Push service worker loaded, version:', SW_VERSION);
+
+// Allowed route prefixes for notification deep links
+const ALLOWED_ROUTES = ['/app', '/crm', '/tasks', '/messages', '/admin', '/pages', '/settings'];
 
 self.addEventListener('push', (event) => {
   log('Push received');
@@ -58,31 +61,55 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Validate and sanitize notification URL
+function sanitizeNotificationUrl(rawUrl) {
+  try {
+    let url = rawUrl || '/app';
+
+    // Ensure it starts with /
+    if (!url.startsWith('/') && !url.startsWith(self.location.origin)) {
+      return self.location.origin + '/app';
+    }
+
+    // Make absolute
+    if (url.startsWith('/')) {
+      url = self.location.origin + url;
+    }
+
+    const parsed = new URL(url);
+
+    // Block cross-origin
+    if (parsed.origin !== self.location.origin) {
+      logError('Blocked cross-origin URL:', url);
+      return self.location.origin + '/app';
+    }
+
+    // Normalize path — resolve ../ and double slashes
+    const normalizedPath = parsed.pathname.replace(/\/+/g, '/');
+
+    // Whitelist check — must start with an allowed route (or be /)
+    if (normalizedPath !== '/' && !ALLOWED_ROUTES.some(route => normalizedPath.startsWith(route))) {
+      logError('Blocked non-whitelisted route:', normalizedPath);
+      return self.location.origin + '/app';
+    }
+
+    // Reconstruct safe URL
+    parsed.pathname = normalizedPath;
+    return parsed.toString();
+  } catch (e) {
+    logError('Invalid URL:', rawUrl);
+    return self.location.origin + '/app';
+  }
+}
+
 self.addEventListener('notificationclick', (event) => {
   log('Notification clicked');
   log('Notification data:', JSON.stringify(event.notification.data));
 
   event.notification.close();
 
-  // Get the URL to open - could be relative or absolute
-  let urlToOpen = event.notification.data?.url || '/';
-  log('Original URL from notification:', urlToOpen);
-
-  // Validate URL to prevent open redirect attacks
-  try {
-    if (urlToOpen.startsWith('/')) {
-      urlToOpen = self.location.origin + urlToOpen;
-    }
-    const url = new URL(urlToOpen);
-    // Only allow same-origin URLs
-    if (url.origin !== self.location.origin) {
-      logError('Blocked cross-origin URL:', urlToOpen);
-      urlToOpen = self.location.origin + '/';
-    }
-  } catch (e) {
-    logError('Invalid URL:', urlToOpen);
-    urlToOpen = self.location.origin + '/';
-  }
+  let urlToOpen = sanitizeNotificationUrl(event.notification.data?.url);
+  log('Sanitized URL:', urlToOpen);
 
   // Add timestamp to URL to force navigation even when app is already on the same page
   const urlWithTimestamp = new URL(urlToOpen);
@@ -149,24 +176,56 @@ self.addEventListener('activate', (event) => {
 });
 
 // Handle subscription change
-// Note: This handler cannot send authenticated requests from the service worker.
-// The subscription will need to be re-established by the main app on next load.
+// Try to re-subscribe automatically using the existing VAPID key from old subscription.
+// If no window is open, save a flag so the app re-subscribes on next load.
 self.addEventListener('pushsubscriptionchange', (event) => {
-  log('Push subscription changed - user will need to re-subscribe on next app load');
+  log('Push subscription changed - attempting auto-resubscribe');
 
-  // Notify the app that subscription changed (if any window is open)
   event.waitUntil(
-    clients.matchAll({ type: 'window' })
-      .then((windowClients) => {
-        windowClients.forEach((client) => {
+    (async () => {
+      try {
+        // Try to resubscribe with the old subscription's options
+        const oldSub = event.oldSubscription;
+        if (oldSub) {
+          const newSub = await self.registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: oldSub.options.applicationServerKey
+          });
+          log('Auto-resubscribed successfully');
+
+          // Notify open windows to persist the new subscription to server
+          const windowClients = await clients.matchAll({ type: 'window' });
+          for (const client of windowClients) {
+            client.postMessage({
+              type: 'PUSH_SUBSCRIPTION_CHANGED',
+              newSubscription: newSub.toJSON(),
+              message: 'Push subscription auto-renewed'
+            });
+          }
+
+          // If no window open, cache in IndexedDB for next app load
+          if (windowClients.length === 0) {
+            log('No window open — caching new subscription for next load');
+            // Use a simple cache approach
+            const cache = await caches.open('push-subscription-cache');
+            await cache.put(
+              new Request('/_push_resubscribe'),
+              new Response(JSON.stringify(newSub.toJSON()))
+            );
+          }
+        }
+      } catch (error) {
+        logError('Auto-resubscribe failed:', error.message);
+        // Notify clients to handle manually
+        const windowClients = await clients.matchAll({ type: 'window' });
+        for (const client of windowClients) {
           client.postMessage({
             type: 'PUSH_SUBSCRIPTION_CHANGED',
-            message: 'Push subscription expired or changed'
+            error: error.message,
+            message: 'Push subscription expired - please re-enable notifications'
           });
-        });
-      })
-      .catch((error) => {
-        logError('Error notifying clients about subscription change:', error.message);
-      })
+        }
+      }
+    })()
   );
 });

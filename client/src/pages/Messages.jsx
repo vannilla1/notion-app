@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import api, { API_BASE_URL } from '@/api/api';
+import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -61,6 +61,11 @@ function Messages() {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  // File attachments
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const msgFileInputRef = useRef(null);
+  const [activeFileMessageId, setActiveFileMessageId] = useState(null);
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -274,6 +279,73 @@ function Messages() {
     setForm(f => ({ ...f, linkedType, linkedId, linkedName }));
   };
 
+  // File helpers
+  const getFileIcon = (mimetype) => {
+    if (mimetype?.startsWith('image/')) return '🖼️';
+    if (mimetype?.includes('pdf')) return '📄';
+    if (mimetype?.includes('word') || mimetype?.includes('document')) return '📝';
+    if (mimetype?.includes('sheet') || mimetype?.includes('excel')) return '📊';
+    if (mimetype?.includes('presentation') || mimetype?.includes('powerpoint')) return '📽️';
+    if (mimetype?.startsWith('video/')) return '🎬';
+    if (mimetype?.startsWith('audio/')) return '🎵';
+    return '📎';
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const triggerMsgFileUpload = (messageId) => {
+    setActiveFileMessageId(messageId);
+    setTimeout(() => msgFileInputRef.current?.click(), 0);
+  };
+
+  const onMsgFileSelected = (e) => {
+    const file = e.target.files[0];
+    if (!file || !activeFileMessageId) return;
+    handleMsgFileUpload(activeFileMessageId, file);
+    e.target.value = '';
+  };
+
+  const handleMsgFileUpload = async (messageId, file) => {
+    setUploadingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post(`/api/messages/${messageId}/files`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000
+      });
+      setSelectedMessage(res.data);
+      fetchMessages();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleMsgFileDownload = async (messageId, fileId, fileName) => {
+    try {
+      const response = await api.get(`/api/messages/${messageId}/files/${fileId}/download`, { responseType: 'blob' });
+      downloadBlob(response.data, fileName);
+    } catch (error) {
+      alert('Chyba pri sťahovaní súboru');
+    }
+  };
+
+  const handleMsgFileDelete = async (messageId, fileId) => {
+    if (!window.confirm('Vymazať tento súbor?')) return;
+    try {
+      const res = await api.delete(`/api/messages/${messageId}/files/${fileId}`);
+      setSelectedMessage(res.data);
+      fetchMessages();
+    } catch (error) {
+      alert('Chyba pri mazaní súboru');
+    }
+  };
+
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '';
   const formatDateTime = (d) => d ? new Date(d).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
@@ -453,6 +525,12 @@ function Messages() {
               contacts={contacts}
               tasks={tasks}
               userId={user.id}
+              onFileUpload={triggerMsgFileUpload}
+              onFileDownload={handleMsgFileDownload}
+              onFileDelete={handleMsgFileDelete}
+              uploadingFile={uploadingFile}
+              getFileIcon={getFileIcon}
+              formatFileSize={formatFileSize}
             />
           ) : (
             <MessageList
@@ -466,6 +544,7 @@ function Messages() {
             />
           )}
         </div>
+        <input type="file" ref={msgFileInputRef} style={{ display: 'none' }} onChange={onMsgFileSelected} />
       </main>
       </div>
 
@@ -638,7 +717,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
                   {isOverdue ? '⚠️' : '📅'} {formatDate(msg.dueDate)}
                 </span>
               )}
-              {msg.attachment?.originalName && <span>📎</span>}
+              {(msg.attachment?.originalName || msg.files?.length > 0) && <span>📎 {(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)}</span>}
               {msg.linkedName && <span>🔗 {msg.linkedName}</span>}
               {msg.comments?.length > 0 && <span>💬 {msg.comments.length}</span>}
             </div>
@@ -650,7 +729,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId }) {
+function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
 
@@ -840,23 +919,75 @@ function MessageDetail({ msg, isRecipient, isSender, onBack, onApprove, onReject
           </div>
         )}
 
-        {/* Attachment */}
-        {msg.attachment?.originalName && (
-          <div style={{ marginBottom: '16px', padding: '10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>📎</span>
-            <a href={`${API_BASE_URL}/api/messages/${msg.id || msg._id}/attachment`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ color: 'var(--accent-color)', fontSize: '13px', textDecoration: 'none' }}
-              onClick={e => {
-                e.preventDefault();
-                api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
-                  .then(res => downloadBlob(res.data, msg.attachment.originalName));
-              }}>
-              {msg.attachment.originalName}
-            </a>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(msg.attachment.size / 1024).toFixed(0)} KB)</span>
+
+        {/* Files section */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <h4 style={{ fontSize: '14px', fontWeight: 600 }}>📎 Prílohy ({(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)})</h4>
+            {(isSender || isRecipient) && (
+              <button
+                onClick={() => onFileUpload(msg.id || msg._id)}
+                disabled={uploadingFile}
+                style={{
+                  background: 'var(--accent-color)', color: 'white', border: 'none',
+                  width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer',
+                  fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: uploadingFile ? 0.5 : 1
+                }}
+                title="Pridať súbor"
+              >+</button>
+            )}
           </div>
-        )}
+
+          {/* Legacy single attachment */}
+          {msg.attachment?.originalName && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '13px' }}>
+              <span>{getFileIcon(msg.attachment.mimetype)}</span>
+              <a href="#" onClick={(e) => {
+                  e.preventDefault();
+                  api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
+                    .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                }}
+                style={{ flex: 1, color: 'var(--accent-color)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {msg.attachment.originalName}
+              </a>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatFileSize(msg.attachment.size)}</span>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
+                    .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                }} title="Stiahnuť">⬇️</button>
+            </div>
+          )}
+
+          {/* Multi-file attachments */}
+          {msg.files && msg.files.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {msg.files.map(file => (
+                <div key={file.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                  <span>{getFileIcon(file.mimetype)}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.originalName}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatFileSize(file.size)}</span>
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
+                    onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+                  {(isSender || isRecipient) && (
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '14px', padding: '2px 4px' }}
+                      onClick={() => onFileDelete(msg.id || msg._id, file.id)} title="Vymazať">×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!msg.attachment?.originalName && (!msg.files || msg.files.length === 0) && (
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Žiadne prílohy</p>
+          )}
+
+          {uploadingFile && (
+            <p style={{ fontSize: '12px', color: 'var(--accent-color)', marginTop: '4px' }}>Nahrávam súbor...</p>
+          )}
+        </div>
 
         {/* Rejection reason */}
         {msg.status === 'rejected' && msg.rejectionReason && (

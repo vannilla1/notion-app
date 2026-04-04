@@ -43,6 +43,16 @@ const stripAttachmentData = (msg) => {
       uploadedAt: obj.attachment.uploadedAt
     };
   }
+  // Strip files data
+  if (obj.files) {
+    obj.files = obj.files.map(f => ({
+      id: f.id,
+      originalName: f.originalName,
+      mimetype: f.mimetype,
+      size: f.size,
+      uploadedAt: f.uploadedAt
+    }));
+  }
   // Strip comment attachment data too
   if (obj.comments) {
     obj.comments = obj.comments.map(c => {
@@ -548,6 +558,83 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
       'Content-Length': fileBuffer.length
     });
     res.send(fileBuffer);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── FILE ATTACHMENTS (same pattern as Tasks) ─────────────────
+
+// POST /api/messages/:id/files — add file to message
+router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
+
+    try {
+      const message = await Message.findOne({
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
+      });
+      if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
+
+      const { v4: uuidv4 } = require('uuid');
+      message.files.push({
+        id: uuidv4(),
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        data: req.file.buffer.toString('base64'),
+        uploadedAt: new Date()
+      });
+
+      await message.save();
+      res.json(stripAttachmentData(message));
+    } catch (error) {
+      res.status(500).json({ message: 'Chyba servera' });
+    }
+  });
+});
+
+// GET /api/messages/:id/files/:fileId/download — download file
+router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
+    });
+    if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
+
+    const file = message.files.find(f => f.id === req.params.fileId);
+    if (!file || !file.data) return res.status(404).json({ message: 'Súbor nenájdený' });
+
+    const buffer = Buffer.from(file.data, 'base64');
+    res.set({
+      'Content-Type': file.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Length': buffer.length
+    });
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// DELETE /api/messages/:id/files/:fileId — delete file from message
+router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
+    });
+    if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
+
+    message.files = message.files.filter(f => f.id !== req.params.fileId);
+    await message.save();
+    res.json(stripAttachmentData(message));
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
