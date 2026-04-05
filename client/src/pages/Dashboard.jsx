@@ -770,7 +770,7 @@ function Dashboard() {
               onClick={() => navigate('/messages')}
               style={{ width: '100%' }}
             >
-              Správy
+              + Nová správa
             </button>
           </div>
         </aside>
