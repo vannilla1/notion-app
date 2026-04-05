@@ -101,19 +101,24 @@ function Messages() {
     };
   }, [socket, isConnected]);
 
-  // Deep link highlight + tab
+  // Deep link tab (only on URL change, not on messages change)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tabParam = params.get('tab');
     if (tabParam === 'received' || tabParam === 'sent') {
       setTab(tabParam);
     }
+  }, [location.search]);
+
+  // Deep link highlight (when messages load)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
     const highlightId = params.get('highlight');
     if (highlightId && messages.length > 0) {
       const msg = messages.find(m => m.id === highlightId || m._id === highlightId);
       if (msg) setSelectedMessage(msg);
     }
-  }, [location.search, messages]);
+  }, [messages]);
 
   const fetchMessages = async () => {
     try {
