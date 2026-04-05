@@ -368,12 +368,13 @@ router.get('/apns/status', authenticateToken, async (req, res) => {
 
     res.json({
       apnsConfigured: status.configured,
-      apnsProduction: status.production,
       apnsTopic: status.topic,
+      providers: status.providers,
       registeredDevices: devices.length,
       devices: devices.map(d => ({
         tokenPrefix: d.deviceToken.substring(0, 8) + '...',
         bundleId: d.bundleId,
+        apnsEnvironment: d.apnsEnvironment || 'unknown (will auto-detect)',
         lastUsed: d.lastUsed,
         createdAt: d.createdAt
       }))

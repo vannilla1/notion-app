@@ -63,7 +63,8 @@ const initializeVapid = () => {
 initializeVapid();
 
 // APNs provider
-let apnProvider = null;
+let apnProductionProvider = null;
+let apnSandboxProvider = null;
 let apnConfigured = false;
 
 const initializeAPNs = () => {
@@ -74,7 +75,6 @@ const initializeAPNs = () => {
 
   if (keyId && teamId) {
     try {
-      // Support key as env variable (APNS_KEY_BASE64 or APNS_KEY) or file path
       let key;
       if (process.env.APNS_KEY_BASE64) {
         key = Buffer.from(process.env.APNS_KEY_BASE64, 'base64').toString('utf8');
@@ -84,16 +84,13 @@ const initializeAPNs = () => {
         key = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
       }
 
-      apnProvider = new apn.Provider({
-        token: {
-          key,
-          keyId,
-          teamId
-        },
-        production: process.env.NODE_ENV === 'production'
-      });
+      const tokenConfig = { key, keyId, teamId };
+
+      apnProductionProvider = new apn.Provider({ token: tokenConfig, production: true });
+      apnSandboxProvider = new apn.Provider({ token: tokenConfig, production: false });
+
       apnConfigured = true;
-      logger.info('[APNs] Provider initialized', { keyId, teamId, production: process.env.NODE_ENV === 'production' });
+      logger.info('[APNs] Both production and sandbox providers initialized', { keyId, teamId });
     } catch (err) {
       logger.warn('[APNs] Provider initialization failed', { error: err.message });
     }
@@ -108,17 +105,17 @@ initializeAPNs();
 
 const getAPNsStatus = () => ({
   configured: apnConfigured,
-  production: process.env.NODE_ENV === 'production',
   topic: 'sk.perunelectromobility.prplcrm',
   keyId: process.env.APNS_KEY_ID ? '***' + process.env.APNS_KEY_ID.slice(-4) : null,
-  teamId: process.env.APNS_TEAM_ID ? '***' + process.env.APNS_TEAM_ID.slice(-4) : null
+  teamId: process.env.APNS_TEAM_ID ? '***' + process.env.APNS_TEAM_ID.slice(-4) : null,
+  providers: { production: !!apnProductionProvider, sandbox: !!apnSandboxProvider }
 });
 
 /**
  * Send APNs push notification to iOS devices
  */
 const sendAPNsNotification = async (userId, payload) => {
-  if (!apnConfigured || !apnProvider) return { sent: 0, failed: 0 };
+  if (!apnConfigured) return { sent: 0, failed: 0 };
 
   const result = { sent: 0, failed: 0, removed: 0 };
 
@@ -130,7 +127,7 @@ const sendAPNsNotification = async (userId, payload) => {
     const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
     const notification = new apn.Notification();
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
     notification.badge = 1;
     notification.sound = 'default';
     notification.alert = {
@@ -149,30 +146,57 @@ const sendAPNsNotification = async (userId, payload) => {
 
     for (const device of devices) {
       try {
-        const res = await apnProvider.send(notification, device.deviceToken);
+        // Try with device's saved environment, or detect via production-first then sandbox fallback
+        const primaryProvider = device.apnsEnvironment === 'sandbox' ? apnSandboxProvider : apnProductionProvider;
+        const fallbackProvider = device.apnsEnvironment === 'sandbox' ? apnProductionProvider : apnSandboxProvider;
+
+        let res = await primaryProvider.send(notification, device.deviceToken);
+
         if (res.sent.length > 0) {
           result.sent++;
           device.lastUsed = new Date();
-          await device.save();
-        }
-        if (res.failed.length > 0) {
-          result.failed++;
-          const failure = res.failed[0];
-          // Remove invalid tokens
-          if (failure.status === '410' || failure.response?.reason === 'Unregistered' || failure.response?.reason === 'BadDeviceToken') {
-            await APNsDevice.deleteOne({ _id: device._id });
-            result.removed++;
-            logger.info('[APNs] Removed invalid device', { reason: failure.response?.reason });
+          if (!device.apnsEnvironment) {
+            device.apnsEnvironment = primaryProvider === apnProductionProvider ? 'production' : 'sandbox';
           }
+          await device.save();
+          continue;
+        }
+
+        // If primary failed with BadDeviceToken or DeviceTokenNotForTopic, try fallback
+        const failure = res.failed[0];
+        const reason = failure?.response?.reason;
+        if (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic' || reason === 'Unregistered') {
+          logger.info('[APNs] Primary failed, trying fallback', { reason, env: device.apnsEnvironment || 'production' });
+
+          res = await fallbackProvider.send(notification, device.deviceToken);
+
+          if (res.sent.length > 0) {
+            result.sent++;
+            device.lastUsed = new Date();
+            device.apnsEnvironment = fallbackProvider === apnProductionProvider ? 'production' : 'sandbox';
+            await device.save();
+            logger.info('[APNs] Fallback succeeded', { env: device.apnsEnvironment, tokenPrefix: device.deviceToken.substring(0, 8) });
+            continue;
+          }
+        }
+
+        // Both failed — remove truly invalid tokens
+        result.failed++;
+        if (failure?.status === '410' || reason === 'Unregistered') {
+          await APNsDevice.deleteOne({ _id: device._id });
+          result.removed++;
+          logger.info('[APNs] Removed invalid device', { reason });
+        } else {
+          logger.warn('[APNs] Send failed', { reason, status: failure?.status });
         }
       } catch (err) {
         result.failed++;
-        logger.warn('[APNs] Send failed', { error: err.message });
+        logger.warn('[APNs] Send error', { error: err.message });
       }
     }
 
-    if (result.sent > 0) {
-      logger.debug('[APNs] Notifications sent', { userId, ...result });
+    if (result.sent > 0 || result.failed > 0) {
+      logger.info('[APNs] Results', { userId, ...result });
     }
   } catch (error) {
     logger.error('[APNs] Error', { error: error.message, userId });

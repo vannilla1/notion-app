@@ -16,6 +16,11 @@ const apnsDeviceSchema = new mongoose.Schema({
     type: String,
     default: 'sk.perunelectromobility.prplcrm'
   },
+  apnsEnvironment: {
+    type: String,
+    enum: ['production', 'sandbox', null],
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
