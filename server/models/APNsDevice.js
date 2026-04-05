@@ -14,7 +14,7 @@ const apnsDeviceSchema = new mongoose.Schema({
   },
   bundleId: {
     type: String,
-    default: 'sk.eperun.prplcrm'
+    default: 'sk.perunelectromobility.prplcrm'
   },
   createdAt: {
     type: Date,

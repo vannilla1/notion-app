@@ -359,4 +359,44 @@ router.post('/apns/unregister', authenticateToken, async (req, res) => {
   }
 });
 
+// APNs status & test endpoint
+router.get('/apns/status', authenticateToken, async (req, res) => {
+  try {
+    const devices = await APNsDevice.find({ userId: req.user.id });
+    const { sendAPNsNotification, getAPNsStatus } = require('../services/notificationService');
+    const status = getAPNsStatus();
+
+    res.json({
+      apnsConfigured: status.configured,
+      apnsProduction: status.production,
+      apnsTopic: status.topic,
+      registeredDevices: devices.length,
+      devices: devices.map(d => ({
+        tokenPrefix: d.deviceToken.substring(0, 8) + '...',
+        bundleId: d.bundleId,
+        lastUsed: d.lastUsed,
+        createdAt: d.createdAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Test APNs push to current user
+router.post('/apns/test', authenticateToken, async (req, res) => {
+  try {
+    const { sendAPNsNotification } = require('../services/notificationService');
+    const result = await sendAPNsNotification(req.user.id, {
+      title: 'Test notifikácie',
+      body: 'Ak vidíte túto správu, iOS push notifikácie fungujú správne.',
+      type: 'test',
+      data: {}
+    });
+    res.json({ message: 'Test odoslaný', result });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
 module.exports = router;

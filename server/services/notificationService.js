@@ -106,6 +106,14 @@ const initializeAPNs = () => {
 // Initialize APNs on module load
 initializeAPNs();
 
+const getAPNsStatus = () => ({
+  configured: apnConfigured,
+  production: process.env.NODE_ENV === 'production',
+  topic: 'sk.perunelectromobility.prplcrm',
+  keyId: process.env.APNS_KEY_ID ? '***' + process.env.APNS_KEY_ID.slice(-4) : null,
+  teamId: process.env.APNS_TEAM_ID ? '***' + process.env.APNS_TEAM_ID.slice(-4) : null
+});
+
 /**
  * Send APNs push notification to iOS devices
  */
@@ -129,7 +137,7 @@ const sendAPNsNotification = async (userId, payload) => {
       title: String(payload.title).slice(0, 100),
       body: String(payload.body || payload.message || '').slice(0, 200)
     };
-    notification.topic = 'sk.eperun.prplcrm';
+    notification.topic = 'sk.perunelectromobility.prplcrm';
     notification.payload = {
       url: baseUrl + url,
       type: payload.type,
@@ -851,6 +859,8 @@ module.exports = {
   sendPushNotification,
   isVapidConfigured: () => vapidConfigured,
   isAPNsConfigured: () => apnConfigured,
+  getAPNsStatus,
+  sendAPNsNotification,
   getMetrics,
   resetMetrics
 };
