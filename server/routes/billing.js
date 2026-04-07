@@ -260,6 +260,50 @@ router.get('/verify-session/:sessionId', authenticateToken, async (req, res) => 
   }
 });
 
+// Debug: check subscription state (admin only)
+router.get('/debug', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin only' });
+    }
+
+    const sub = user.subscription || {};
+    const result = {
+      userId: user._id,
+      email: user.email,
+      subscription: {
+        plan: sub.plan,
+        stripeCustomerId: sub.stripeCustomerId || null,
+        stripeSubscriptionId: sub.stripeSubscriptionId || null,
+        stripePriceId: sub.stripePriceId || null,
+        billingPeriod: sub.billingPeriod || null,
+        paidUntil: sub.paidUntil,
+        cancelAtPeriodEnd: sub.cancelAtPeriodEnd
+      }
+    };
+
+    // Check Stripe for customer's subscriptions
+    if (sub.stripeCustomerId) {
+      try {
+        const subs = await stripe.subscriptions.list({ customer: sub.stripeCustomerId, limit: 5 });
+        result.stripeSubscriptions = subs.data.map(s => ({
+          id: s.id,
+          status: s.status,
+          plan: s.items.data[0]?.price?.id,
+          currentPeriodEnd: new Date(s.current_period_end * 1000)
+        }));
+      } catch (err) {
+        result.stripeError = err.message;
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 module.exports = router;
 
 // ===== Webhook handler (called from index.js with raw body) =====
