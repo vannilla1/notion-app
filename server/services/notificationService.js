@@ -4,7 +4,8 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
 const webpush = require('web-push');
-const apn = require('apn');
+const http2 = require('http2');
+const crypto = require('crypto');
 const path = require('path');
 const logger = require('../utils/logger');
 
@@ -62,10 +63,18 @@ const initializeVapid = () => {
 // Initialize VAPID on module load
 initializeVapid();
 
-// APNs provider
-let apnProductionProvider = null;
-let apnSandboxProvider = null;
+// ===== APNs via native HTTP/2 (replaces unmaintained 'apn' library) =====
+
 let apnConfigured = false;
+let apnKeyId = null;
+let apnTeamId = null;
+let apnPrivateKey = null;
+let apnJwtToken = null;
+let apnJwtIssuedAt = 0;
+
+const APNS_TOPIC = 'sk.perunelectromobility.prplcrm';
+const APNS_HOST_PRODUCTION = 'api.push.apple.com';
+const APNS_HOST_SANDBOX = 'api.sandbox.push.apple.com';
 
 const initializeAPNs = () => {
   if (apnConfigured) return true;
@@ -75,24 +84,27 @@ const initializeAPNs = () => {
 
   if (keyId && teamId) {
     try {
-      let key;
+      let keyContent;
       if (process.env.APNS_KEY_BASE64) {
-        key = Buffer.from(process.env.APNS_KEY_BASE64, 'base64').toString('utf8');
+        keyContent = Buffer.from(process.env.APNS_KEY_BASE64, 'base64').toString('utf8');
       } else if (process.env.APNS_KEY) {
-        key = process.env.APNS_KEY.replace(/\\n/g, '\n');
+        keyContent = process.env.APNS_KEY.replace(/\\n/g, '\n');
       } else {
-        key = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
+        const fs = require('fs');
+        const keyPath = process.env.APNS_KEY_PATH || path.join(__dirname, '..', 'config', 'AuthKey.p8');
+        keyContent = fs.readFileSync(keyPath, 'utf8');
       }
 
-      const tokenConfig = { key, keyId, teamId };
+      // Verify key is valid by creating a test key object
+      crypto.createPrivateKey(keyContent);
 
-      apnProductionProvider = new apn.Provider({ token: tokenConfig, production: true });
-      apnSandboxProvider = new apn.Provider({ token: tokenConfig, production: false });
-
+      apnKeyId = keyId;
+      apnTeamId = teamId;
+      apnPrivateKey = keyContent;
       apnConfigured = true;
-      logger.info('[APNs] Both production and sandbox providers initialized', { keyId, teamId });
+      logger.info('[APNs] Configured with native HTTP/2', { keyId, teamId });
     } catch (err) {
-      logger.warn('[APNs] Provider initialization failed', { error: err.message });
+      logger.warn('[APNs] Initialization failed', { error: err.message });
     }
   } else {
     logger.debug('[APNs] Not configured (missing APNS_KEY_ID or APNS_TEAM_ID)');
@@ -100,19 +112,131 @@ const initializeAPNs = () => {
   return apnConfigured;
 };
 
+// Generate JWT for APNs authentication (refreshed every 30 minutes)
+const getApnJwt = () => {
+  const now = Math.floor(Date.now() / 1000);
+  // Refresh every 30 minutes (Apple tokens valid for 1 hour)
+  if (apnJwtToken && (now - apnJwtIssuedAt) < 1800) {
+    return apnJwtToken;
+  }
+
+  const header = Buffer.from(JSON.stringify({ alg: 'ES256', kid: apnKeyId })).toString('base64url');
+  const claims = Buffer.from(JSON.stringify({ iss: apnTeamId, iat: now })).toString('base64url');
+  const signingInput = `${header}.${claims}`;
+
+  const sign = crypto.createSign('SHA256');
+  sign.update(signingInput);
+  const signature = sign.sign(apnPrivateKey);
+
+  // Convert DER signature to raw r||s format for JWT ES256
+  const derToRaw = (derSig) => {
+    let offset = 2;
+    const rLen = derSig[offset + 1];
+    offset += 2;
+    let r = derSig.slice(offset, offset + rLen);
+    offset += rLen + 2;
+    const sLen = derSig[offset - 1];
+    let s = derSig.slice(offset, offset + sLen);
+    // Ensure 32 bytes each
+    if (r.length > 32) r = r.slice(r.length - 32);
+    if (s.length > 32) s = s.slice(s.length - 32);
+    if (r.length < 32) r = Buffer.concat([Buffer.alloc(32 - r.length), r]);
+    if (s.length < 32) s = Buffer.concat([Buffer.alloc(32 - s.length), s]);
+    return Buffer.concat([r, s]);
+  };
+
+  const rawSig = derToRaw(signature);
+  const sig64 = rawSig.toString('base64url');
+
+  apnJwtToken = `${signingInput}.${sig64}`;
+  apnJwtIssuedAt = now;
+  return apnJwtToken;
+};
+
+// Send a single notification to APNs via HTTP/2
+const sendToAPNs = (deviceToken, payload, sandbox = false) => {
+  return new Promise((resolve, reject) => {
+    const host = sandbox ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
+    const jwt = getApnJwt();
+
+    let client;
+    try {
+      client = http2.connect(`https://${host}`);
+    } catch (err) {
+      return reject(new Error(`HTTP/2 connect failed: ${err.message}`));
+    }
+
+    client.on('error', (err) => {
+      logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
+      reject(err);
+    });
+
+    const headers = {
+      ':method': 'POST',
+      ':path': `/3/device/${deviceToken}`,
+      'authorization': `bearer ${jwt}`,
+      'apns-topic': APNS_TOPIC,
+      'apns-push-type': 'alert',
+      'apns-priority': '10',
+      'apns-expiration': String(Math.floor(Date.now() / 1000) + 3600),
+      'content-type': 'application/json'
+    };
+
+    const req = client.request(headers);
+    let responseData = '';
+    let statusCode = 0;
+
+    req.on('response', (hdrs) => {
+      statusCode = hdrs[':status'];
+    });
+
+    req.on('data', (chunk) => {
+      responseData += chunk;
+    });
+
+    req.on('end', () => {
+      client.close();
+      if (statusCode === 200) {
+        resolve({ success: true, status: statusCode });
+      } else {
+        let reason = 'Unknown';
+        try {
+          const parsed = JSON.parse(responseData);
+          reason = parsed.reason || reason;
+        } catch {}
+        resolve({ success: false, status: statusCode, reason });
+      }
+    });
+
+    req.on('error', (err) => {
+      client.close();
+      reject(err);
+    });
+
+    req.write(JSON.stringify(payload));
+    req.end();
+
+    // Timeout after 10s
+    setTimeout(() => {
+      try { client.close(); } catch {}
+      reject(new Error('APNs request timeout'));
+    }, 10000);
+  });
+};
+
 // Initialize APNs on module load
 initializeAPNs();
 
 const getAPNsStatus = () => ({
   configured: apnConfigured,
-  topic: 'sk.perunelectromobility.prplcrm',
+  topic: APNS_TOPIC,
   keyId: process.env.APNS_KEY_ID ? '***' + process.env.APNS_KEY_ID.slice(-4) : null,
   teamId: process.env.APNS_TEAM_ID ? '***' + process.env.APNS_TEAM_ID.slice(-4) : null,
-  providers: { production: !!apnProductionProvider, sandbox: !!apnSandboxProvider }
+  providers: { production: apnConfigured, sandbox: apnConfigured }
 });
 
 /**
- * Send APNs push notification to iOS devices
+ * Send APNs push notification to iOS devices via native HTTP/2
  */
 const sendAPNsNotification = async (userId, payload) => {
   if (!apnConfigured) return { sent: 0, failed: 0 };
@@ -126,68 +250,61 @@ const sendAPNsNotification = async (userId, payload) => {
     const url = generateNotificationUrl(payload.type, payload.data);
     const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
-    const notification = new apn.Notification();
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
-    notification.badge = 1;
-    notification.sound = 'default';
-    notification.alert = {
-      title: String(payload.title).slice(0, 100),
-      body: String(payload.body || payload.message || '').slice(0, 200)
-    };
-    notification.topic = 'sk.perunelectromobility.prplcrm';
-    notification.payload = {
+    const apnsPayload = {
+      aps: {
+        alert: {
+          title: String(payload.title).slice(0, 100),
+          body: String(payload.body || payload.message || '').slice(0, 200)
+        },
+        badge: 1,
+        sound: 'default',
+        'mutable-content': 1,
+        'thread-id': payload.type || 'default'
+      },
       url: baseUrl + url,
       type: payload.type,
       ...(payload.data || {})
     };
-    notification.pushType = 'alert';
-    notification.mutableContent = true;
-    notification.threadId = payload.type || 'default';
 
     for (const device of devices) {
       try {
-        // Try with device's saved environment, or detect via production-first then sandbox fallback
-        const primaryProvider = device.apnsEnvironment === 'sandbox' ? apnSandboxProvider : apnProductionProvider;
-        const fallbackProvider = device.apnsEnvironment === 'sandbox' ? apnProductionProvider : apnSandboxProvider;
+        // Try primary environment (saved or sandbox for Xcode builds)
+        const primarySandbox = device.apnsEnvironment === 'sandbox' || !device.apnsEnvironment;
+        let res = await sendToAPNs(device.deviceToken, apnsPayload, primarySandbox);
 
-        let res = await primaryProvider.send(notification, device.deviceToken);
-
-        if (res.sent.length > 0) {
+        if (res.success) {
           result.sent++;
           device.lastUsed = new Date();
           if (!device.apnsEnvironment) {
-            device.apnsEnvironment = primaryProvider === apnProductionProvider ? 'production' : 'sandbox';
+            device.apnsEnvironment = primarySandbox ? 'sandbox' : 'production';
           }
           await device.save();
           continue;
         }
 
-        // If primary failed with BadDeviceToken or DeviceTokenNotForTopic, try fallback
-        const failure = res.failed[0];
-        const reason = failure?.response?.reason;
-        if (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic' || reason === 'Unregistered') {
-          logger.info('[APNs] Primary failed, trying fallback', { reason, env: device.apnsEnvironment || 'production' });
+        // If primary failed with token error, try the other environment
+        if (res.reason === 'BadDeviceToken' || res.reason === 'DeviceTokenNotForTopic' || res.reason === 'Unregistered') {
+          logger.info('[APNs] Primary failed, trying fallback', { reason: res.reason, primarySandbox });
+          const fallbackRes = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
 
-          res = await fallbackProvider.send(notification, device.deviceToken);
-
-          if (res.sent.length > 0) {
+          if (fallbackRes.success) {
             result.sent++;
             device.lastUsed = new Date();
-            device.apnsEnvironment = fallbackProvider === apnProductionProvider ? 'production' : 'sandbox';
+            device.apnsEnvironment = !primarySandbox ? 'sandbox' : 'production';
             await device.save();
-            logger.info('[APNs] Fallback succeeded', { env: device.apnsEnvironment, tokenPrefix: device.deviceToken.substring(0, 8) });
+            logger.info('[APNs] Fallback succeeded', { env: device.apnsEnvironment });
             continue;
           }
         }
 
         // Both failed — remove truly invalid tokens
         result.failed++;
-        if (failure?.status === '410' || reason === 'Unregistered') {
+        if (res.status === 410 || res.reason === 'Unregistered') {
           await APNsDevice.deleteOne({ _id: device._id });
           result.removed++;
-          logger.info('[APNs] Removed invalid device', { reason });
+          logger.info('[APNs] Removed invalid device', { reason: res.reason });
         } else {
-          logger.warn('[APNs] Send failed', { reason, status: failure?.status });
+          logger.warn('[APNs] Send failed', { reason: res.reason, status: res.status });
         }
       } catch (err) {
         result.failed++;
@@ -231,16 +348,18 @@ const sendAPNsDebug = async (userId, payload) => {
       return debug;
     }
 
-    const notification = new apn.Notification();
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
-    notification.badge = 1;
-    notification.sound = 'default';
-    notification.alert = {
-      title: String(payload.title).slice(0, 100),
-      body: String(payload.body || '').slice(0, 200)
+    const apnsPayload = {
+      aps: {
+        alert: {
+          title: String(payload.title).slice(0, 100),
+          body: String(payload.body || '').slice(0, 200)
+        },
+        badge: 1,
+        sound: 'default',
+        'mutable-content': 1
+      },
+      type: payload.type || 'test'
     };
-    notification.topic = 'sk.perunelectromobility.prplcrm';
-    notification.pushType = 'alert';
 
     for (const device of devices) {
       const deviceDebug = {
@@ -249,43 +368,39 @@ const sendAPNsDebug = async (userId, payload) => {
         attempts: []
       };
 
-      // Try primary
-      const primaryProvider = device.apnsEnvironment === 'sandbox' ? apnSandboxProvider : apnProductionProvider;
-      const primaryEnv = device.apnsEnvironment === 'sandbox' ? 'sandbox' : 'production';
+      // Try primary (default to sandbox for Xcode builds)
+      const primarySandbox = device.apnsEnvironment === 'sandbox' || !device.apnsEnvironment;
+      const primaryEnv = primarySandbox ? 'sandbox' : 'production';
 
       try {
-        const res1 = await primaryProvider.send(notification, device.deviceToken);
+        const res1 = await sendToAPNs(device.deviceToken, apnsPayload, primarySandbox);
         deviceDebug.attempts.push({
           provider: primaryEnv,
-          sent: res1.sent.length,
-          failed: res1.failed.length,
-          failReason: res1.failed[0]?.response?.reason || null,
-          failStatus: res1.failed[0]?.status || null
+          success: res1.success,
+          status: res1.status,
+          reason: res1.reason || null
         });
 
-        if (res1.sent.length > 0) {
+        if (res1.success) {
           deviceDebug.result = 'SUCCESS via ' + primaryEnv;
           debug.results.push(deviceDebug);
           continue;
         }
 
-        // Try fallback
-        const fallbackProvider = primaryEnv === 'sandbox' ? apnProductionProvider : apnSandboxProvider;
-        const fallbackEnv = primaryEnv === 'sandbox' ? 'production' : 'sandbox';
-
-        const res2 = await fallbackProvider.send(notification, device.deviceToken);
+        // Try fallback environment
+        const fallbackEnv = primarySandbox ? 'production' : 'sandbox';
+        const res2 = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
         deviceDebug.attempts.push({
           provider: fallbackEnv,
-          sent: res2.sent.length,
-          failed: res2.failed.length,
-          failReason: res2.failed[0]?.response?.reason || null,
-          failStatus: res2.failed[0]?.status || null
+          success: res2.success,
+          status: res2.status,
+          reason: res2.reason || null
         });
 
-        if (res2.sent.length > 0) {
+        if (res2.success) {
           deviceDebug.result = 'SUCCESS via ' + fallbackEnv;
         } else {
-          deviceDebug.result = 'FAILED both providers';
+          deviceDebug.result = 'FAILED both environments';
         }
       } catch (err) {
         deviceDebug.attempts.push({ error: err.message });
