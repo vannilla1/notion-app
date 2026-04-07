@@ -131,6 +131,31 @@ function AppContent() {
     }
   }, [location, isAuthenticated, loading, navigate]);
 
+  // Refresh data when app returns from background (iOS / tab switch)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let lastHidden = 0;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        lastHidden = Date.now();
+      } else {
+        // Only refresh if was hidden for at least 3 seconds
+        const hiddenFor = Date.now() - lastHidden;
+        if (lastHidden > 0 && hiddenFor > 3000) {
+          console.log('[App] Resuming from background, refreshing data...');
+          window.dispatchEvent(new CustomEvent('app-resumed', {
+            detail: { timestamp: Date.now(), hiddenFor }
+          }));
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isAuthenticated]);
+
   // Listen for messages from service worker (push notification clicks)
   useEffect(() => {
     if (!isAuthenticated) return;

@@ -535,6 +535,13 @@ function Tasks() {
     syncCompletedFromGoogle();
   }, [fetchTasks, fetchContacts, fetchUsers, syncCompletedFromGoogle]);
 
+  // Refresh when app returns from background
+  useEffect(() => {
+    const handleResume = () => { fetchTasks(); fetchContacts(); };
+    window.addEventListener('app-resumed', handleResume);
+    return () => window.removeEventListener('app-resumed', handleResume);
+  }, [fetchTasks, fetchContacts]);
+
   useEffect(() => {
     if (expandedTask) fetchLinkedMessages(expandedTask);
   }, [expandedTask, fetchLinkedMessages]);

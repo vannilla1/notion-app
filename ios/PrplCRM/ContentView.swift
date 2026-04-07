@@ -216,10 +216,22 @@ struct WebView: UIViewRepresentable {
         // Handle deep link from push notification tap
         if let deepLink = pushManager.pendingDeepLink {
             pushManager.pendingDeepLink = nil
-            let fullURL = "https://prplcrm.eu/app\(deepLink)"
-            if let navURL = URL(string: fullURL) {
-                webView.load(URLRequest(url: navURL))
-            }
+            // Use JS navigation within the SPA instead of full page reload
+            let js = """
+            (function() {
+                // Dispatch app-resumed to refresh data on current page
+                window.dispatchEvent(new CustomEvent('app-resumed', { detail: { timestamp: Date.now(), fromNotification: true } }));
+                // Navigate within React Router
+                var path = '\(deepLink)';
+                if (window.location.pathname !== path.split('?')[0]) {
+                    window.location.href = '/app' + path;
+                } else {
+                    // Already on the right page — just refresh + re-trigger deep link
+                    window.location.href = '/app' + path + (path.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                }
+            })();
+            """
+            webView.evaluateJavaScript(js, completionHandler: nil)
         }
     }
 

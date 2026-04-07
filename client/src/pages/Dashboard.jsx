@@ -74,6 +74,13 @@ function Dashboard() {
     fetchData();
   }, []);
 
+  // Refresh when app returns from background
+  useEffect(() => {
+    const handleResume = () => fetchData();
+    window.addEventListener('app-resumed', handleResume);
+    return () => window.removeEventListener('app-resumed', handleResume);
+  }, []);
+
   useEffect(() => {
     if (!socket || !isConnected) return;
 

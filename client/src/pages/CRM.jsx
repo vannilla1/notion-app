@@ -167,6 +167,13 @@ function CRM() {
     fetchGlobalTasks();
   }, [fetchContacts, fetchGlobalTasks]);
 
+  // Refresh when app returns from background
+  useEffect(() => {
+    const handleResume = () => { fetchContacts(); fetchGlobalTasks(); };
+    window.addEventListener('app-resumed', handleResume);
+    return () => window.removeEventListener('app-resumed', handleResume);
+  }, [fetchContacts, fetchGlobalTasks]);
+
   useEffect(() => {
     if (expandedContact) fetchLinkedMessages(expandedContact);
   }, [expandedContact, fetchLinkedMessages]);

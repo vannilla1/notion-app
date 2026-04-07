@@ -83,6 +83,13 @@ function Messages() {
 
   useEffect(() => { fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
+  // Refresh when app returns from background (iOS / tab switch)
+  useEffect(() => {
+    const handleResume = () => { fetchMessages(); fetchPendingCount(); };
+    window.addEventListener('app-resumed', handleResume);
+    return () => window.removeEventListener('app-resumed', handleResume);
+  }, [tab, statusFilter]);
+
   useEffect(() => {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);
