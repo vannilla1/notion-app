@@ -25,6 +25,19 @@ export default function LandingPage() {
     }
   };
 
+  // SEO: Set page-specific meta tags
+  useEffect(() => {
+    document.title = 'Prpl CRM — Slovenský CRM systém pre správu kontaktov, projektov a tímov';
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', 'Prpl CRM je moderný slovenský CRM systém pre správu kontaktov, projektov a tímovej spolupráce. Zadarmo na vyskúšanie, s mobilnou aplikáciou pre iOS a Android. Synchronizácia s Google Tasks.');
+    }
+    // Restore on unmount (when navigating to app)
+    return () => {
+      document.title = 'Prpl CRM';
+    };
+  }, []);
+
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -37,7 +50,7 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="lp-page">
+    <div className="lp-page" itemScope itemType="https://schema.org/WebPage">
       {/* Navbar */}
       <nav className={`lp-navbar ${scrolled ? 'scrolled' : ''}`}>
         <div className="lp-navbar-inner">

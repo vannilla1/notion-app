@@ -1,7 +1,7 @@
 {
   "name": "Prpl CRM",
   "short_name": "PrplCRM",
-  "description": "CRM a správa úloh",
+  "description": "Moderný slovenský CRM systém pre správu kontaktov, projektov a tímovej spolupráce. Zadarmo na vyskúšanie.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
