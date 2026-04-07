@@ -1,10 +1,13 @@
 import SwiftUI
 import WebKit
+import LocalAuthentication
 
 struct ContentView: View {
     @EnvironmentObject var pushManager: PushNotificationManager
     @State private var isLoading = true
     @State private var loadError = false
+    @State private var isLocked = false
+    @State private var biometricFailed = false
 
     var body: some View {
         ZStack {
@@ -26,9 +29,122 @@ struct ContentView: View {
                     isLoading = true
                 })
             }
+
+            // Face ID / biometric lock screen
+            if isLocked {
+                LockScreenView(
+                    biometricFailed: biometricFailed,
+                    onAuthenticate: { authenticate() }
+                )
+                .transition(.opacity)
+            }
         }
         .animation(.easeInOut(duration: 0.3), value: isLoading)
         .animation(.easeInOut(duration: 0.3), value: loadError)
+        .animation(.easeInOut(duration: 0.3), value: isLocked)
+        .onAppear {
+            // If we have a saved token, require biometric auth
+            if KeychainHelper.getToken() != nil {
+                isLocked = true
+                authenticate()
+            }
+        }
+    }
+
+    private func authenticate() {
+        biometricFailed = false
+        let context = LAContext()
+        var error: NSError?
+
+        // Try biometrics first (Face ID / Touch ID)
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(
+                .deviceOwnerAuthenticationWithBiometrics,
+                localizedReason: "Overenie identity pre prístup do Prpl CRM"
+            ) { success, _ in
+                DispatchQueue.main.async {
+                    if success {
+                        isLocked = false
+                    } else {
+                        biometricFailed = true
+                    }
+                }
+            }
+        } else {
+            // Fallback to device passcode
+            context.evaluatePolicy(
+                .deviceOwnerAuthentication,
+                localizedReason: "Overenie identity pre prístup do Prpl CRM"
+            ) { success, _ in
+                DispatchQueue.main.async {
+                    if success {
+                        isLocked = false
+                    } else {
+                        biometricFailed = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct LockScreenView: View {
+    var biometricFailed: Bool
+    var onAuthenticate: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color(red: 99/255, green: 102/255, blue: 241/255)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(16)
+
+                Text("Prpl CRM")
+                    .font(.title.bold())
+                    .foregroundColor(.white)
+
+                if biometricFailed {
+                    Text("Overenie zlyhalo")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
+                        .padding(.top, 8)
+
+                    Button(action: onAuthenticate) {
+                        HStack(spacing: 8) {
+                            Image(systemName: biometricIconName())
+                                .font(.title3)
+                            Text("Skúsiť znova")
+                        }
+                        .font(.headline)
+                        .foregroundColor(Color(red: 99/255, green: 102/255, blue: 241/255))
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 12)
+                        .background(.white)
+                        .cornerRadius(12)
+                    }
+                } else {
+                    Image(systemName: biometricIconName())
+                        .font(.system(size: 48))
+                        .foregroundColor(.white)
+                        .padding(.top, 16)
+                }
+            }
+        }
+    }
+
+    private func biometricIconName() -> String {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        switch context.biometryType {
+        case .faceID: return "faceid"
+        case .touchID: return "touchid"
+        default: return "lock.shield"
+        }
     }
 }
 
@@ -138,6 +254,19 @@ struct WebView: UIViewRepresentable {
         // Set mobile user agent
         webView.customUserAgent = "PrplCRM-iOS/1.0 " + (webView.value(forKey: "userAgent") as? String ?? "")
 
+        // Restore token from Keychain BEFORE page JS runs
+        if let savedToken = KeychainHelper.getToken() {
+            let escapedToken = savedToken.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let restoreScript = WKUserScript(
+                source: "localStorage.setItem('token', '\(escapedToken)');",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(restoreScript)
+            print("[Keychain] Injecting saved token into WebView localStorage")
+        }
+
         // Inject CSS safe area variables + auth token bridge
         let script = WKUserScript(
             source: """
@@ -177,6 +306,19 @@ struct WebView: UIViewRepresentable {
                         origSetItem(key, value);
                         if (key === 'token') {
                             sendTokenToNative(value);
+                        }
+                    };
+                } catch(e) {}
+
+                // Watch for logout (token removal)
+                try {
+                    var origRemoveItem = localStorage.removeItem.bind(localStorage);
+                    localStorage.removeItem = function(key) {
+                        origRemoveItem(key);
+                        if (key === 'token') {
+                            try {
+                                window.webkit.messageHandlers.iosNative.postMessage({ type: 'logout' });
+                            } catch(e) {}
                         }
                     };
                 } catch(e) {}
@@ -293,7 +435,15 @@ struct WebView: UIViewRepresentable {
             if type == "authToken", let token = body["token"] as? String {
                 print("[Push] Got auth token from WebView: \(token.prefix(20))...")
                 parent.pushManager.authToken = token
+                // Save to Keychain for persistent login + Face ID
+                KeychainHelper.saveToken(token)
                 // Registration is triggered automatically via authToken didSet
+            }
+
+            if type == "logout" {
+                print("[Auth] User logged out, clearing Keychain")
+                KeychainHelper.deleteToken()
+                parent.pushManager.authToken = nil
             }
         }
 
