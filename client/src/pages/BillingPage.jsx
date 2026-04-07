@@ -248,16 +248,19 @@ function BillingPage() {
                     <h3 className="plan-name">{plan.name}</h3>
 
                     <div className="plan-price">
-                      <span className="plan-price-amount">
-                        {price === 0 ? 'Zadarmo' : `${billingPeriod === 'yearly' ? (price / 12).toFixed(2) : price.toFixed(2)} €`}
-                      </span>
-                      {price > 0 && (
-                        <span className="plan-price-period">
-                          / mesiac
-                          {billingPeriod === 'yearly' && (
-                            <span className="plan-price-yearly-total"> ({price.toFixed(0)} €/rok)</span>
-                          )}
-                        </span>
+                      {price === 0 ? (
+                        <span className="plan-price-amount">Zadarmo</span>
+                      ) : billingPeriod === 'yearly' ? (
+                        <>
+                          <span className="plan-price-amount">{price.toFixed(0)} €</span>
+                          <span className="plan-price-period"> / rok</span>
+                          <span className="plan-price-yearly-detail">tj. {(price / 12).toFixed(2).replace('.', ',')} € / mesiac</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="plan-price-amount">{price.toFixed(2).replace('.', ',')} €</span>
+                          <span className="plan-price-period"> / mesiac</span>
+                        </>
                       )}
                     </div>
 

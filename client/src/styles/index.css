@@ -10334,6 +10334,14 @@ body.ios-app {
   margin-top: 2px;
 }
 
+.plan-price-yearly-detail {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #16a34a;
+  margin-top: 4px;
+}
+
 .plan-features {
   list-style: none;
   padding: 0;
