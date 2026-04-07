@@ -10334,6 +10334,13 @@ body.ios-app {
   margin-top: 2px;
 }
 
+.billing-vat-note {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  margin: -24px 0 32px;
+}
+
 .plan-price-yearly-detail {
   display: block;
   font-size: 13px;

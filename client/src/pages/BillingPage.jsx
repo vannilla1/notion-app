@@ -302,6 +302,8 @@ function BillingPage() {
               })}
             </div>
 
+            <p className="billing-vat-note">Všetky ceny sú uvedené s DPH.</p>
+
             {/* FAQ */}
             <div className="billing-faq">
               <h3>Časté otázky</h3>
