@@ -54,7 +54,7 @@ export default function LandingPage() {
             <li><a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a></li>
           </ul>
 
-          <Link to="/login" className="lp-nav-cta desktop-only">Prihlásiť sa</Link>
+          <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-nav-cta desktop-only">Prihlásiť sa</a>
 
           <button className="lp-hamburger" onClick={() => setMobileMenuOpen(true)} aria-label="Menu">
             <span /><span /><span />
@@ -71,7 +71,7 @@ export default function LandingPage() {
           <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a>
           <a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a>
           <a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a>
-          <Link to="/login" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</Link>
+          <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</a>
         </div>
       </div>
 
@@ -93,8 +93,8 @@ export default function LandingPage() {
             Jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
-            <Link to="/login?register=true" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</Link>
-            <Link to="/login" className="lp-btn lp-btn-outline">Prihlásiť sa</Link>
+            <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</a>
+            <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-outline">Prihlásiť sa</a>
           </div>
         </div>
       </section>
@@ -265,9 +265,9 @@ export default function LandingPage() {
                 </li>
               </ul>
 
-              <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
                 Začať zadarmo
-              </Link>
+              </a>
             </div>
 
             {/* Tím */}
@@ -316,9 +316,9 @@ export default function LandingPage() {
                 </li>
               </ul>
 
-              <Link to="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
                 Začať s Tímom
-              </Link>
+              </a>
             </div>
 
             {/* Pro */}
@@ -386,9 +386,9 @@ export default function LandingPage() {
                 </li>
               </ul>
 
-              <Link to="/login?register=true" className="lp-btn lp-btn-primary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-primary lp-pricing-cta">
                 Začať s Pro
-              </Link>
+              </a>
             </div>
           </div>
 
