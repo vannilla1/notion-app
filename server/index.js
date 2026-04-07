@@ -22,6 +22,7 @@ const pushRoutes = require('./routes/push');
 const workspaceRoutes = require('./routes/workspaces');
 const messageRoutes = require('./routes/messages');
 const adminRoutes = require('./routes/admin');
+const billingRoutes = require('./routes/billing');
 const contactFormRoutes = require('./routes/contact-form');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
@@ -67,6 +68,12 @@ app.use(helmet({
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
+// Stripe webhook needs raw body (must be before JSON parser)
+app.post('/api/billing/webhook',
+  express.raw({ type: 'application/json' }),
+  billingRoutes.handleWebhook
+);
+
 // Body parsers with size limits
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
@@ -109,6 +116,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/contact-form', contactFormRoutes);
+app.use('/api/billing', billingRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Initialize notification service with Socket.IO

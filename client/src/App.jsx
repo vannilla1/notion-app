@@ -11,6 +11,7 @@ import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import Messages from './pages/Messages';
+import BillingPage from './pages/BillingPage';
 import LandingPage from './pages/LandingPage';
 import AdminPanel from './pages/AdminPanel';
 import AdminLogin from './pages/AdminLogin';
@@ -240,6 +241,10 @@ function AppContent() {
         <Route
           path="/messages"
           element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/app/billing"
+          element={isAuthenticated ? <BillingPage /> : <Navigate to="/login" />}
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />

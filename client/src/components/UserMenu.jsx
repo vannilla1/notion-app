@@ -894,6 +894,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">👥</span>
             Správa tímu
           </button>
+          <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
+            <span className="menu-icon">💳</span>
+            Predplatné
+          </button>
           <div className="user-menu-divider"></div>
           <button className="user-menu-item logout" onClick={onLogout}>
             <span className="menu-icon">🚪</span>

@@ -42,8 +42,13 @@ const userSchema = new mongoose.Schema({
   // Subscription / plan
   subscription: {
     plan: { type: String, enum: ['free', 'team', 'pro', 'trial'], default: 'free' },
+    stripeCustomerId: { type: String, default: null },
+    stripeSubscriptionId: { type: String, default: null },
+    stripePriceId: { type: String, default: null },
+    billingPeriod: { type: String, enum: ['monthly', 'yearly', null], default: null },
     trialEndsAt: { type: Date, default: null },
-    paidUntil: { type: Date, default: null }
+    paidUntil: { type: Date, default: null },
+    cancelAtPeriodEnd: { type: Boolean, default: false }
   },
   // Current active workspace
   currentWorkspaceId: {
