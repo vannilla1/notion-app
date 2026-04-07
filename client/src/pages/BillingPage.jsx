@@ -249,13 +249,13 @@ function BillingPage() {
 
                     <div className="plan-price">
                       <span className="plan-price-amount">
-                        {price === 0 ? 'Zadarmo' : `${billingPeriod === 'yearly' ? (price / 12).toFixed(2) : price.toFixed(2)} \u20AC`}
+                        {price === 0 ? 'Zadarmo' : `${billingPeriod === 'yearly' ? (price / 12).toFixed(2) : price.toFixed(2)} €`}
                       </span>
                       {price > 0 && (
                         <span className="plan-price-period">
                           / mesiac
                           {billingPeriod === 'yearly' && (
-                            <span className="plan-price-yearly-total"> ({price.toFixed(0)} \u20AC/rok)</span>
+                            <span className="plan-price-yearly-total"> ({price.toFixed(0)} €/rok)</span>
                           )}
                         </span>
                       )}
