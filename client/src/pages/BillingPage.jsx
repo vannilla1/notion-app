@@ -78,7 +78,7 @@ function BillingPage() {
     try {
       const res = await api.post('/api/billing/checkout', { plan: planId, period });
       if (res.data.url) {
-        window.location.href = res.data.url;
+        window.open(res.data.url, '_blank');
       }
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytváraní platby');
@@ -92,7 +92,7 @@ function BillingPage() {
     try {
       const res = await api.post('/api/billing/portal');
       if (res.data.url) {
-        window.location.href = res.data.url;
+        window.open(res.data.url, '_blank');
       }
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba servera');
