@@ -154,24 +154,45 @@ struct WebView: UIViewRepresentable {
 
             // Extract auth token from localStorage and send to native
             (function() {
-                try {
-                    var token = localStorage.getItem('token');
-                    if (token && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
-                        window.webkit.messageHandlers.iosNative.postMessage({ type: 'authToken', token: token });
-                    }
-                } catch(e) {}
+                function sendTokenToNative(token) {
+                    try {
+                        if (token && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
+                            window.webkit.messageHandlers.iosNative.postMessage({ type: 'authToken', token: token });
+                            return true;
+                        }
+                    } catch(e) {}
+                    return false;
+                }
+
+                // Try immediately
+                var token = localStorage.getItem('token');
+                if (token) {
+                    sendTokenToNative(token);
+                }
+
                 // Watch for token changes (after login)
                 try {
                     var origSetItem = localStorage.setItem.bind(localStorage);
                     localStorage.setItem = function(key, value) {
                         origSetItem(key, value);
                         if (key === 'token') {
-                            try {
-                                window.webkit.messageHandlers.iosNative.postMessage({ type: 'authToken', token: value });
-                            } catch(e) {}
+                            sendTokenToNative(value);
                         }
                     };
                 } catch(e) {}
+
+                // Fallback: retry every 3s for 30s in case token arrives late
+                var attempts = 0;
+                var checkInterval = setInterval(function() {
+                    attempts++;
+                    var t = localStorage.getItem('token');
+                    if (t) {
+                        sendTokenToNative(t);
+                        clearInterval(checkInterval);
+                    } else if (attempts >= 10) {
+                        clearInterval(checkInterval);
+                    }
+                }, 3000);
             })();
             """,
             injectionTime: .atDocumentEnd,
@@ -258,9 +279,9 @@ struct WebView: UIViewRepresentable {
                   let type = body["type"] as? String else { return }
 
             if type == "authToken", let token = body["token"] as? String {
-                print("[Push] Got auth token from WebView")
+                print("[Push] Got auth token from WebView: \(token.prefix(20))...")
                 parent.pushManager.authToken = token
-                parent.pushManager.retryPendingRegistration()
+                // Registration is triggered automatically via authToken didSet
             }
         }
 
