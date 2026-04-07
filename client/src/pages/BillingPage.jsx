@@ -117,10 +117,12 @@ function BillingPage() {
     return (
       <div className="crm-container">
         <header className="crm-header">
-          <HeaderLogo />
-          <div className="header-actions">
+          <div className="crm-header-left">
+            <HeaderLogo />
+          </div>
+          <div className="crm-header-right">
             <WorkspaceSwitcher />
-            <UserMenu user={user} onLogout={logout} />
+            <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
           </div>
         </header>
         <div className="crm-content">
@@ -135,10 +137,12 @@ function BillingPage() {
   return (
     <div className="crm-container">
       <header className="crm-header">
-        <HeaderLogo />
-        <div className="header-actions">
+        <div className="crm-header-left">
+          <HeaderLogo />
+        </div>
+        <div className="crm-header-right">
           <WorkspaceSwitcher />
-          <UserMenu user={user} onLogout={logout} />
+          <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>
 
