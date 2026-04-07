@@ -81,7 +81,7 @@ function Messages() {
   const rejectedMessages = messages.filter(m => m.status === 'rejected');
   const commentedMessages = messages.filter(m => m.status === 'commented');
 
-  useEffect(() => { fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
+  useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
   // Refresh when app returns from background (iOS / tab switch)
   useEffect(() => {
@@ -94,7 +94,7 @@ function Messages() {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);
 
-  // Socket events
+  // Socket events — include tab and statusFilter to avoid stale closures
   useEffect(() => {
     if (!socket || !isConnected) return;
     const refresh = () => { fetchMessages(); fetchPendingCount(); };
@@ -106,7 +106,7 @@ function Messages() {
       socket.off('message-updated', refresh);
       socket.off('message-deleted', refresh);
     };
-  }, [socket, isConnected]);
+  }, [socket, isConnected, tab, statusFilter]);
 
   // Deep link tab (only on URL change, not on messages change)
   useEffect(() => {
@@ -140,6 +140,12 @@ function Messages() {
     try {
       const res = await api.get('/api/messages', { params: { tab, status: statusFilter } });
       setMessages(res.data);
+      // Update selectedMessage if it's in the new list (keeps detail view fresh)
+      setSelectedMessage(prev => {
+        if (!prev) return null;
+        const updated = res.data.find(m => (m.id || m._id) === (prev.id || prev._id));
+        return updated || prev;
+      });
     } catch (err) {
       // ignore
     } finally {
@@ -197,9 +203,8 @@ function Messages() {
 
       setShowForm(false);
       resetForm();
+      // setTab triggers useEffect which fetches messages — no manual fetch needed
       setTab('sent');
-      fetchMessages();
-      fetchPendingCount();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba pri odosielaní');
     } finally {
@@ -249,6 +254,7 @@ function Messages() {
       setCommentText('');
       setCommentAttachment(null);
       fetchMessages();
+      fetchPendingCount();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba');
     }
@@ -374,7 +380,10 @@ function Messages() {
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '';
   const formatDateTime = (d) => d ? new Date(d).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
-  const isRecipient = (msg) => msg.toUserId === user.id || msg.toUserId?._id === user.id;
+  const isRecipient = (msg) => {
+    const toId = msg.toUserId?._id?.toString?.() || msg.toUserId?.toString?.() || msg.toUserId;
+    return toId === user.id;
+  };
 
   return (
     <div className="crm-container">

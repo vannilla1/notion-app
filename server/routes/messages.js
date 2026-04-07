@@ -293,7 +293,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 
       if (subject !== undefined) message.subject = subject.trim().substring(0, 200);
       if (description !== undefined) message.description = description.trim().substring(0, 5000);
-      if (type !== undefined && ['approval', 'task', 'info', 'urgent'].includes(type)) message.type = type;
+      if (type !== undefined && ['approval', 'info', 'request', 'proposal'].includes(type)) message.type = type;
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
         message.linkedType = linkedType || null;
