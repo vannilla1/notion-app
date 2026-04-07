@@ -198,8 +198,7 @@ router.post('/checkout', authenticateToken, async (req, res) => {
         }
       },
       allow_promotion_codes: true,
-      billing_address_collection: 'auto',
-      tax_id_collection: { enabled: true }
+      billing_address_collection: 'auto'
     });
 
     logger.info('[Billing] Checkout session created', {
@@ -211,8 +210,8 @@ router.post('/checkout', authenticateToken, async (req, res) => {
 
     res.json({ url: session.url, sessionId: session.id, type: 'checkout' });
   } catch (error) {
-    logger.error('[Billing] Checkout error', { error: error.message, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba pri vytváraní platby' });
+    logger.error('[Billing] Checkout error', { error: error.message, stack: error.stack, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba pri vytváraní platby', detail: error.message });
   }
 });
 
