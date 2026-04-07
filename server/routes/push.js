@@ -387,7 +387,19 @@ router.get('/apns/status', authenticateToken, async (req, res) => {
 // Test APNs push to current user
 router.post('/apns/test', authenticateToken, async (req, res) => {
   try {
-    const { sendAPNsNotification } = require('../services/notificationService');
+    const { sendAPNsNotification, sendAPNsDebug } = require('../services/notificationService');
+
+    // Use debug version if available, otherwise fallback
+    if (sendAPNsDebug) {
+      const result = await sendAPNsDebug(req.user.id, {
+        title: 'Test notifikácie',
+        body: 'Ak vidíte túto správu, iOS push notifikácie fungujú správne.',
+        type: 'test',
+        data: {}
+      });
+      return res.json({ message: 'Test odoslaný', ...result });
+    }
+
     const result = await sendAPNsNotification(req.user.id, {
       title: 'Test notifikácie',
       body: 'Ak vidíte túto správu, iOS push notifikácie fungujú správne.',

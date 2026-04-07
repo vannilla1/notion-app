@@ -294,7 +294,7 @@ struct WebView: UIViewRepresentable {
                 return
             }
 
-            let mimetype = body["mimetype"] as? String ?? "application/octet-stream"
+            let _ = body["mimetype"] as? String ?? "application/octet-stream"
 
             DispatchQueue.main.async {
                 let tempDir = FileManager.default.temporaryDirectory

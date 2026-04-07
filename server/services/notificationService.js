@@ -206,6 +206,102 @@ const sendAPNsNotification = async (userId, payload) => {
 };
 
 /**
+ * Debug version of sendAPNsNotification — returns detailed info for each device
+ */
+const sendAPNsDebug = async (userId, payload) => {
+  const debug = { apnConfigured, devices: [], results: [] };
+
+  if (!apnConfigured) {
+    debug.error = 'APNs not configured';
+    return debug;
+  }
+
+  try {
+    const devices = await APNsDevice.find({ userId });
+    debug.deviceCount = devices.length;
+    debug.devices = devices.map(d => ({
+      tokenPrefix: d.deviceToken.substring(0, 16),
+      environment: d.apnsEnvironment || 'unknown',
+      bundleId: d.bundleId,
+      lastUsed: d.lastUsed
+    }));
+
+    if (devices.length === 0) {
+      debug.error = 'No registered devices';
+      return debug;
+    }
+
+    const notification = new apn.Notification();
+    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
+    notification.badge = 1;
+    notification.sound = 'default';
+    notification.alert = {
+      title: String(payload.title).slice(0, 100),
+      body: String(payload.body || '').slice(0, 200)
+    };
+    notification.topic = 'sk.perunelectromobility.prplcrm';
+    notification.pushType = 'alert';
+
+    for (const device of devices) {
+      const deviceDebug = {
+        tokenPrefix: device.deviceToken.substring(0, 16),
+        savedEnv: device.apnsEnvironment || 'unknown',
+        attempts: []
+      };
+
+      // Try primary
+      const primaryProvider = device.apnsEnvironment === 'sandbox' ? apnSandboxProvider : apnProductionProvider;
+      const primaryEnv = device.apnsEnvironment === 'sandbox' ? 'sandbox' : 'production';
+
+      try {
+        const res1 = await primaryProvider.send(notification, device.deviceToken);
+        deviceDebug.attempts.push({
+          provider: primaryEnv,
+          sent: res1.sent.length,
+          failed: res1.failed.length,
+          failReason: res1.failed[0]?.response?.reason || null,
+          failStatus: res1.failed[0]?.status || null
+        });
+
+        if (res1.sent.length > 0) {
+          deviceDebug.result = 'SUCCESS via ' + primaryEnv;
+          debug.results.push(deviceDebug);
+          continue;
+        }
+
+        // Try fallback
+        const fallbackProvider = primaryEnv === 'sandbox' ? apnProductionProvider : apnSandboxProvider;
+        const fallbackEnv = primaryEnv === 'sandbox' ? 'production' : 'sandbox';
+
+        const res2 = await fallbackProvider.send(notification, device.deviceToken);
+        deviceDebug.attempts.push({
+          provider: fallbackEnv,
+          sent: res2.sent.length,
+          failed: res2.failed.length,
+          failReason: res2.failed[0]?.response?.reason || null,
+          failStatus: res2.failed[0]?.status || null
+        });
+
+        if (res2.sent.length > 0) {
+          deviceDebug.result = 'SUCCESS via ' + fallbackEnv;
+        } else {
+          deviceDebug.result = 'FAILED both providers';
+        }
+      } catch (err) {
+        deviceDebug.attempts.push({ error: err.message });
+        deviceDebug.result = 'ERROR: ' + err.message;
+      }
+
+      debug.results.push(deviceDebug);
+    }
+  } catch (error) {
+    debug.error = error.message;
+  }
+
+  return debug;
+};
+
+/**
  * Initialize the notification service with Socket.IO instance
  */
 const initialize = (socketIo) => {
@@ -885,6 +981,7 @@ module.exports = {
   isAPNsConfigured: () => apnConfigured,
   getAPNsStatus,
   sendAPNsNotification,
+  sendAPNsDebug,
   getMetrics,
   resetMetrics
 };
