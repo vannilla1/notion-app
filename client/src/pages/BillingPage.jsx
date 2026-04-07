@@ -72,13 +72,22 @@ function BillingPage() {
     }
   }, [searchParams]); // eslint-disable-line
 
+  // Open URL externally — uses native bridge on iOS, window.open on web
+  const openExternal = (url) => {
+    if (window.webkit?.messageHandlers?.openExternal) {
+      window.webkit.messageHandlers.openExternal.postMessage(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
   const handleCheckout = async (planId, period) => {
     const key = `${planId}-${period}`;
     setCheckoutLoading(key);
     try {
       const res = await api.post('/api/billing/checkout', { plan: planId, period });
       if (res.data.url) {
-        window.open(res.data.url, '_blank');
+        openExternal(res.data.url);
       }
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytváraní platby');
@@ -92,7 +101,7 @@ function BillingPage() {
     try {
       const res = await api.post('/api/billing/portal');
       if (res.data.url) {
-        window.open(res.data.url, '_blank');
+        openExternal(res.data.url);
       }
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba servera');

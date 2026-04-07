@@ -108,6 +108,7 @@ struct WebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         // Enable service worker for PWA
         if #available(iOS 16.4, *) {
@@ -120,6 +121,9 @@ struct WebView: UIViewRepresentable {
         )
         config.userContentController.add(
             context.coordinator, name: "fileDownload"
+        )
+        config.userContentController.add(
+            context.coordinator, name: "openExternal"
         )
 
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -232,11 +236,20 @@ struct WebView: UIViewRepresentable {
             NotificationCenter.default.removeObserver(self)
         }
 
-        // Handle messages from JavaScript (auth token + file downloads)
+        // Handle messages from JavaScript (auth token + file downloads + external URLs)
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             if message.name == "fileDownload" {
                 handleFileDownload(message)
+                return
+            }
+
+            // Open external URL in Safari (used by billing page)
+            if message.name == "openExternal",
+               let urlString = message.body as? String,
+               let url = URL(string: urlString) {
+                print("[WebView] Opening external URL: \(urlString.prefix(60))")
+                UIApplication.shared.open(url)
                 return
             }
 
