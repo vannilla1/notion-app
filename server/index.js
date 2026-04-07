@@ -239,17 +239,25 @@ server.listen(PORT, () => {
     if (!dbConnected) {
       logger.warn('MongoDB not connected. Some features may not work.');
     } else {
-      // Set Pro plan for team accounts (always ensure pro, regardless of current state)
+      // Set Pro plan for team accounts (skip if user has active Stripe subscription)
       try {
         const User = require('./models/User');
         const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
         for (const email of proEmails) {
-          const u = await User.findOneAndUpdate(
-            { email },
-            { $set: { 'subscription.plan': 'pro', 'subscription.paidUntil': new Date('2099-12-31') } },
-            { new: true }
-          );
-          if (u) logger.info(`Pro plan ensured for ${email} (plan: ${u.subscription?.plan})`);
+          const existing = await User.findOne({ email });
+          if (!existing) continue;
+          // Don't override if user has an active Stripe subscription
+          if (existing.subscription?.stripeSubscriptionId) {
+            logger.info(`Skipping pro override for ${email} — has Stripe subscription`);
+            continue;
+          }
+          existing.subscription = {
+            ...existing.subscription?.toObject(),
+            plan: 'pro',
+            paidUntil: new Date('2099-12-31')
+          };
+          await existing.save();
+          logger.info(`Pro plan ensured for ${email} (plan: pro)`);
         }
       } catch (err) {
         logger.error('Failed to set pro plans', { error: err.message });
