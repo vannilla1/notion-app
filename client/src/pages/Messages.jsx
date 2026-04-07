@@ -117,13 +117,22 @@ function Messages() {
     }
   }, [location.search]);
 
-  // Deep link highlight (when messages load)
+  // Deep link highlight (one-time on initial load)
+  const highlightProcessed = useRef(false);
   useEffect(() => {
+    if (highlightProcessed.current) return;
     const params = new URLSearchParams(location.search);
     const highlightId = params.get('highlight');
     if (highlightId && messages.length > 0) {
       const msg = messages.find(m => m.id === highlightId || m._id === highlightId);
       if (msg) setSelectedMessage(msg);
+      // Clear highlight param from URL to prevent re-opening
+      highlightProcessed.current = true;
+      const newParams = new URLSearchParams(location.search);
+      newParams.delete('highlight');
+      newParams.delete('_t');
+      const newSearch = newParams.toString();
+      navigate(location.pathname + (newSearch ? '?' + newSearch : ''), { replace: true });
     }
   }, [messages]);
 
