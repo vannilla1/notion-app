@@ -272,15 +272,9 @@ function BillingPage() {
                           Aktualny plan
                         </button>
                       ) : plan.id === 'free' ? (
-                        isDowngrade && billingStatus?.hasSubscription ? (
-                          <button className="plan-btn downgrade" onClick={handlePortal} disabled={portalLoading}>
-                            Zrusit predplatne
-                          </button>
-                        ) : (
-                          <button className="plan-btn free" disabled>
-                            Zakladny plan
-                          </button>
-                        )
+                        <button className="plan-btn free" disabled>
+                          Zakladny plan
+                        </button>
                       ) : (
                         <button
                           className={`plan-btn upgrade ${plan.id === 'pro' ? 'pro' : ''}`}
