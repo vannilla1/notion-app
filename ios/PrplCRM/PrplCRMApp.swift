@@ -133,6 +133,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
 
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // Clear badge when app is opened
+        application.applicationIconBadgeNumber = 0
+    }
+
     private func requestPushPermission(_ application: UIApplication) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             print("[Push] Permission granted: \(granted)")
@@ -171,6 +176,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+
+        // Clear badge on notification tap
+        UIApplication.shared.applicationIconBadgeNumber = 0
 
         if let urlString = userInfo["url"] as? String {
             print("[Push] Deep link: \(urlString)")
