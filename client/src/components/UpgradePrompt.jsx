@@ -16,11 +16,11 @@ function UpgradePrompt({ message, onClose }) {
           className="upgrade-prompt-btn"
           onClick={() => navigate('/app/billing')}
         >
-          Zobrazit plany
+          Zobraziť plány
         </button>
         {onClose && (
           <button className="upgrade-prompt-close" onClick={onClose}>
-            Zavriet
+            Zavrieť
           </button>
         )}
       </div>

@@ -47,7 +47,7 @@ function BillingPage() {
   useEffect(() => {
     if (searchParams.get('success') === 'true') {
       const sessionId = searchParams.get('session_id');
-      setSuccessMessage('Platba bola uspesna! Vas plan sa aktivuje.');
+      setSuccessMessage('Platba bola úspešná! Váš plán sa aktivuje.');
 
       // Verify session and refresh status
       if (sessionId) {
@@ -81,7 +81,7 @@ function BillingPage() {
         window.location.href = res.data.url;
       }
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytvarani platby');
+      alert(error.response?.data?.message || 'Chyba pri vytváraní platby');
     } finally {
       setCheckoutLoading(null);
     }
@@ -110,8 +110,8 @@ function BillingPage() {
     });
   };
 
-  const planLabels = { free: 'Free', team: 'Tim', pro: 'Pro' };
-  const periodLabels = { monthly: 'mesacne', yearly: 'rocne' };
+  const planLabels = { free: 'Free', team: 'Tím', pro: 'Pro' };
+  const periodLabels = { monthly: 'mesačne', yearly: 'ročne' };
 
   if (loading) {
     return (
@@ -125,7 +125,7 @@ function BillingPage() {
         </header>
         <div className="crm-content">
           <main className="crm-main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            Nacitavam...
+            Načítavam...
           </main>
         </div>
       </div>
@@ -147,7 +147,7 @@ function BillingPage() {
           <div className="billing-page">
 
             <div className="billing-header">
-              <h2>Predplatne a fakturacia</h2>
+              <h2>Predplatné a fakturácia</h2>
               <button
                 className="help-toggle-btn"
                 onClick={() => setShowHelp(!showHelp)}
@@ -159,16 +159,16 @@ function BillingPage() {
 
             {showHelp && (
               <div className="help-tips">
-                <h4>Pomoc — Fakturacia</h4>
+                <h4>Pomoc — Fakturácia</h4>
                 <ul>
-                  <li><strong>Free plan</strong> — trvaly, ziadna kreditna karta. 5 kontaktov, 2 clenovia.</li>
-                  <li><strong>Tim plan</strong> — 25 kontaktov, 10 clenov, 2 prostredia. Idealne pre male timy.</li>
-                  <li><strong>Pro plan</strong> — neobmedzene kontakty, clenovia a prostredia.</li>
-                  <li><strong>Rocne predplatne</strong> — usetrite ~17 % oproti mesacnemu.</li>
-                  <li><strong>Sprava predplatneho</strong> — cez portal mozete zmenit kartu, stiahnut faktury, alebo zrusit predplatne.</li>
-                  <li><strong>Downgrade</strong> — po skonceni predplatneho sa plan zmeni na Free. Existujuce data ostanu, ale vytvaranie noveho obsahu moze byt obmedzene.</li>
+                  <li><strong>Free plán</strong> — trvalý, žiadna kreditná karta. 5 kontaktov, 2 členovia.</li>
+                  <li><strong>Tím plán</strong> — 25 kontaktov, 10 členov, 2 prostredia. Ideálne pre malé tímy.</li>
+                  <li><strong>Pro plán</strong> — neobmedzené kontakty, členovia a prostredia.</li>
+                  <li><strong>Ročné predplatné</strong> — ušetríte ~17 % oproti mesačnému.</li>
+                  <li><strong>Správa predplatného</strong> — cez portál môžete zmeniť kartu, stiahnuť faktúry, alebo zrušiť predplatné.</li>
+                  <li><strong>Downgrade</strong> — po skončení predplatného sa plán zmení na Free. Existujúce dáta ostanú, ale vytváranie nového obsahu môže byť obmedzené.</li>
                 </ul>
-                <button className="help-close-btn" onClick={() => setShowHelp(false)}>Zavriet</button>
+                <button className="help-close-btn" onClick={() => setShowHelp(false)}>Zavrieť</button>
               </div>
             )}
 
@@ -194,8 +194,8 @@ function BillingPage() {
               {billingStatus?.paidUntil && currentPlan !== 'free' && (
                 <p className="billing-paid-until">
                   {billingStatus.cancelAtPeriodEnd
-                    ? `Plan aktivny do: ${formatDate(billingStatus.paidUntil)} (nebude sa obnovovat)`
-                    : `Dalsie obnovenie: ${formatDate(billingStatus.currentPeriodEnd || billingStatus.paidUntil)}`
+                    ? `Plán aktívny do: ${formatDate(billingStatus.paidUntil)} (nebude sa obnovovať)`
+                    : `Ďalšie obnovenie: ${formatDate(billingStatus.currentPeriodEnd || billingStatus.paidUntil)}`
                   }
                 </p>
               )}
@@ -206,7 +206,7 @@ function BillingPage() {
                   onClick={handlePortal}
                   disabled={portalLoading}
                 >
-                  {portalLoading ? 'Nacitavam...' : 'Spravovat predplatne'}
+                  {portalLoading ? 'Načítavam...' : 'Spravovať predplatné'}
                 </button>
               )}
             </div>
@@ -217,13 +217,13 @@ function BillingPage() {
                 className={`period-btn ${billingPeriod === 'monthly' ? 'active' : ''}`}
                 onClick={() => setBillingPeriod('monthly')}
               >
-                Mesacne
+                Mesačne
               </button>
               <button
                 className={`period-btn ${billingPeriod === 'yearly' ? 'active' : ''}`}
                 onClick={() => setBillingPeriod('yearly')}
               >
-                Rocne
+                Ročne
                 <span className="period-save-badge">-17%</span>
               </button>
             </div>
@@ -239,7 +239,7 @@ function BillingPage() {
 
                 return (
                   <div key={plan.id} className={`billing-plan-card ${isCurrent ? 'current' : ''} ${plan.id === 'pro' ? 'featured' : ''}`}>
-                    {plan.id === 'pro' && <div className="plan-featured-label">Najpopularnejsi</div>}
+                    {plan.id === 'pro' && <div className="plan-featured-label">Najpopulárnejší</div>}
 
                     <h3 className="plan-name">{plan.name}</h3>
 
@@ -258,22 +258,22 @@ function BillingPage() {
                     </div>
 
                     <ul className="plan-features">
-                      <li>{plan.limits.contacts === -1 ? 'Neobmedzene kontakty' : `${plan.limits.contacts} kontaktov`}</li>
-                      <li>{plan.limits.projectsPerContact === -1 ? 'Neobmedzene projekty' : `${plan.limits.projectsPerContact} projektov/kontakt`}</li>
-                      <li>{plan.limits.members === -1 ? 'Neobmedzeni clenovia' : `${plan.limits.members} clenov`}</li>
-                      <li>{plan.limits.workspaces === -1 ? 'Neobmedzene prostredia' : `${plan.limits.workspaces === 1 ? '1 prostredie' : `${plan.limits.workspaces} prostredia`}`}</li>
-                      {plan.id !== 'free' && <li>Prioritna podpora</li>}
-                      {plan.id === 'pro' && <li>Export dat (CSV/Excel)</li>}
+                      <li>{plan.limits.contacts === -1 ? 'Neobmedzené kontakty' : `${plan.limits.contacts} kontaktov`}</li>
+                      <li>{plan.limits.projectsPerContact === -1 ? 'Neobmedzené projekty' : `${plan.limits.projectsPerContact} projektov/kontakt`}</li>
+                      <li>{plan.limits.members === -1 ? 'Neobmedzení členovia' : `${plan.limits.members} členov`}</li>
+                      <li>{plan.limits.workspaces === -1 ? 'Neobmedzené prostredia' : `${plan.limits.workspaces === 1 ? '1 prostredie' : `${plan.limits.workspaces} prostredia`}`}</li>
+                      {plan.id !== 'free' && <li>Prioritná podpora</li>}
+                      {plan.id === 'pro' && <li>Export dát (CSV/Excel)</li>}
                     </ul>
 
                     <div className="plan-action">
                       {isCurrent ? (
                         <button className="plan-btn current" disabled>
-                          Aktualny plan
+                          Aktuálny plán
                         </button>
                       ) : plan.id === 'free' ? (
                         <button className="plan-btn free" disabled>
-                          Zakladny plan
+                          Základný plán
                         </button>
                       ) : (
                         <button
@@ -282,10 +282,10 @@ function BillingPage() {
                           disabled={checkoutLoading === checkoutKey}
                         >
                           {checkoutLoading === checkoutKey
-                            ? 'Presmerovavam...'
+                            ? 'Presmerovávam...'
                             : isDowngrade
-                              ? 'Zmenit plan'
-                              : 'Upgradovat'
+                              ? 'Zmeniť plán'
+                              : 'Upgradovať'
                           }
                         </button>
                       )}
@@ -297,26 +297,26 @@ function BillingPage() {
 
             {/* FAQ */}
             <div className="billing-faq">
-              <h3>Caste otazky</h3>
+              <h3>Časté otázky</h3>
               <details>
                 <summary>Ako funguje platba?</summary>
-                <p>Platba prebieha bezpecne cez Stripe. Akceptujeme platobne karty (Visa, Mastercard, a dalsie). Po uspesnej platbe sa vas plan okamzite aktivuje.</p>
+                <p>Platba prebieha bezpečne cez Stripe. Akceptujeme platobné karty (Visa, Mastercard a ďalšie). Po úspešnej platbe sa váš plán okamžite aktivuje.</p>
               </details>
               <details>
-                <summary>Mozem kedykolvek zrusit predplatne?</summary>
-                <p>Ano, predplatne mozete zrusit kedykolvek cez "Spravovat predplatne". Vas plan zostane aktivny do konca fakturacneho obdobia.</p>
+                <summary>Môžem kedykoľvek zrušiť predplatné?</summary>
+                <p>Áno, predplatné môžete zrušiť kedykoľvek cez „Spravovať predplatné". Váš plán zostane aktívny do konca fakturačného obdobia.</p>
               </details>
               <details>
-                <summary>Co sa stane po zruseni predplatneho?</summary>
-                <p>Po skonceni aktivneho obdobia sa vas plan zmeni na Free. Vase data ostanu zachovane, ale vytvaranie noveho obsahu moze byt obmedzene podla limitov Free planu.</p>
+                <summary>Čo sa stane po zrušení predplatného?</summary>
+                <p>Po skončení aktívneho obdobia sa váš plán zmení na Free. Vaše dáta ostanú zachované, ale vytváranie nového obsahu môže byť obmedzené podľa limitov Free plánu.</p>
               </details>
               <details>
-                <summary>Mozem zmenit plan alebo fakturacne obdobie?</summary>
-                <p>Ano, cez "Spravovat predplatne" mozete zmenit plan, prejst z mesacneho na rocne predplatne, alebo aktualizovat platobnu metodu.</p>
+                <summary>Môžem zmeniť plán alebo fakturačné obdobie?</summary>
+                <p>Áno, cez „Spravovať predplatné" môžete zmeniť plán, prejsť z mesačného na ročné predplatné, alebo aktualizovať platobnú metódu.</p>
               </details>
               <details>
-                <summary>Kde najdem faktury?</summary>
-                <p>Vsetky faktury su dostupne v sekcii "Spravovat predplatne" → Fakturacna historia.</p>
+                <summary>Kde nájdem faktúry?</summary>
+                <p>Všetky faktúry sú dostupné v sekcii „Spravovať predplatné" → Fakturačná história.</p>
               </details>
             </div>
           </div>
