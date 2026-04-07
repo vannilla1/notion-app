@@ -351,8 +351,19 @@ struct WebView: UIViewRepresentable {
             viewController.present(alert, animated: true)
         }
 
-        // Handle target="_blank" links
+        // Handle target="_blank" links and window.open()
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                let host = url.host ?? ""
+                // Open external URLs (Stripe, etc.) in Safari
+                let isExternal = host.contains("stripe.com") ||
+                                 (!host.isEmpty && !host.contains("prplcrm.eu") && !host.contains("localhost"))
+                if isExternal {
+                    UIApplication.shared.open(url)
+                    return nil
+                }
+            }
+            // Internal target="_blank" — load in same WebView
             if navigationAction.targetFrame == nil {
                 webView.load(navigationAction.request)
             }
@@ -379,6 +390,13 @@ struct WebView: UIViewRepresentable {
             let isGoogleAuth = host.contains("accounts.google.com") || host.contains("accounts.youtube.com")
             if isGoogleAuth {
                 didOpenExternalAuth = true
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+
+            // Stripe checkout/portal — open in Safari
+            if host.contains("stripe.com") {
                 UIApplication.shared.open(url)
                 decisionHandler(.cancel)
                 return
