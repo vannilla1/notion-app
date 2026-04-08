@@ -164,11 +164,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         print("[Push] Apple registration FAILED: \(error.localizedDescription)")
     }
 
-    // Handle notification when app is in foreground — show banner
+    // Handle notification when app is in foreground — show banner + keep in notification center
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .badge, .sound])
+        if #available(iOS 16.0, *) {
+            completionHandler([.banner, .list, .badge, .sound])
+        } else {
+            completionHandler([.banner, .badge, .sound])
+        }
     }
 
     // Handle notification tap — extract deep link URL

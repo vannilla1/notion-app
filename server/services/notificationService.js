@@ -259,6 +259,8 @@ const sendAPNsNotification = async (userId, payload) => {
         badge: 1,
         sound: 'default',
         'mutable-content': 1,
+        'interruption-level': 'active',
+        'relevance-score': 1.0,
         'thread-id': payload.type || 'default'
       },
       url: baseUrl + url,
