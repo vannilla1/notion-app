@@ -263,7 +263,7 @@ const sendAPNsNotification = async (userId, payload) => {
         'relevance-score': 1.0,
         'thread-id': payload.type || 'default'
       },
-      url: baseUrl + url,
+      url: url,
       type: payload.type,
       ...(payload.data || {})
     };

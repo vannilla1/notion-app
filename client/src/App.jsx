@@ -63,8 +63,8 @@ function AppContent() {
     // If we have deep link params but not authenticated, store them for later
     if (!isAuthenticated && !loading) {
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
-          (location.pathname === '/tasks' && params.get('highlightTask'))) {
-        // Store the full URL for after login
+          (location.pathname === '/tasks' && params.get('highlightTask')) ||
+          (location.pathname === '/messages' && params.get('highlight'))) {
         sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
       }
       return;
@@ -98,6 +98,10 @@ function AppContent() {
           },
           replace: true
         });
+        return;
+      }
+      if (pendingUrl.pathname === '/messages' && pendingParams.get('highlight')) {
+        navigate('/messages?highlight=' + pendingParams.get('highlight') + '&_t=' + Date.now(), { replace: true });
         return;
       }
     }

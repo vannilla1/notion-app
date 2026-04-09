@@ -358,19 +358,25 @@ struct WebView: UIViewRepresentable {
         // Handle deep link from push notification tap
         if let deepLink = pushManager.pendingDeepLink {
             pushManager.pendingDeepLink = nil
-            // Use JS navigation within the SPA instead of full page reload
+            let escapedLink = deepLink
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
             let js = """
             (function() {
-                // Dispatch app-resumed to refresh data on current page
+                // Refresh data on current page
                 window.dispatchEvent(new CustomEvent('app-resumed', { detail: { timestamp: Date.now(), fromNotification: true } }));
-                // Navigate within React Router
-                var path = '\(deepLink)';
-                if (window.location.pathname !== path.split('?')[0]) {
-                    window.location.href = '/app' + path;
-                } else {
-                    // Already on the right page — just refresh + re-trigger deep link
-                    window.location.href = '/app' + path + (path.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                // Parse URL — handle both full URLs and relative paths
+                var raw = '\(escapedLink)';
+                var path;
+                try {
+                    var u = new URL(raw, window.location.origin);
+                    path = u.pathname + u.search;
+                } catch(e) {
+                    path = raw;
                 }
+                // Routes are /crm, /tasks, /messages — navigate with timestamp to force refresh
+                var sep = path.includes('?') ? '&' : '?';
+                window.location.href = path + sep + '_t=' + Date.now();
             })();
             """
             webView.evaluateJavaScript(js, completionHandler: nil)
