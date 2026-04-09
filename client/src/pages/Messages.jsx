@@ -799,9 +799,17 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
+  const commentsEndRef = useRef(null);
+
+  // Auto-scroll to last comment on mount and when comments change
+  useEffect(() => {
+    if (commentsEndRef.current && msg.comments?.length > 0) {
+      commentsEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [msg.comments?.length, scrollToComments]);
 
   const [editForm, setEditForm] = useState({
     subject: msg.subject || '',
@@ -1101,6 +1109,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                   )}
                 </div>
               ))}
+              <div ref={commentsEndRef} />
             </div>
           )}
 
