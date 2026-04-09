@@ -201,9 +201,17 @@ function AppContent() {
                 state: { highlightTaskId: taskId, highlightSubtaskId: subtaskId, navTimestamp }
               });
             }
+          } else if (path === '/messages' && (params.get('highlight') || data?.messageId)) {
+            const messageId = params.get('highlight') || data.messageId;
+            window.dispatchEvent(new CustomEvent('message-highlight', {
+              detail: { messageId, timestamp: navTimestamp }
+            }));
+            if (location.pathname !== '/messages') {
+              navigate('/messages?highlight=' + messageId + '&_t=' + navTimestamp);
+            }
           } else {
-            // Fallback: navigate to the path
-            navigate(path);
+            // Fallback: navigate to the path with query params preserved
+            navigate(path + (urlObj.search || ''));
           }
         } catch (e) {
           console.error('[App] Error parsing notification URL:', e);

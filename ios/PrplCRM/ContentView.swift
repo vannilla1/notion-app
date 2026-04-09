@@ -379,15 +379,23 @@ struct WebView: UIViewRepresentable {
                 window.location.href = path + sep + '_t=' + Date.now();
             })();
             """
-            webView.evaluateJavaScript(js, completionHandler: nil)
+
+            // If page hasn't loaded yet (cold start), defer until didFinish
+            if context.coordinator.hasFinishedInitialLoad {
+                webView.evaluateJavaScript(js, completionHandler: nil)
+            } else {
+                print("[Push] Page not loaded yet, deferring deep link")
+                context.coordinator.pendingDeepLinkJS = js
+            }
         }
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var parent: WebView
         weak var webView: WKWebView?
-        private var hasFinishedInitialLoad = false
+        var hasFinishedInitialLoad = false
         private var didOpenExternalAuth = false
+        var pendingDeepLinkJS: String?
 
         init(_ parent: WebView) {
             self.parent = parent
@@ -512,6 +520,15 @@ struct WebView: UIViewRepresentable {
                 hasFinishedInitialLoad = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.parent.isLoading = false
+                }
+
+                // Execute deferred deep link from cold start notification tap
+                if let deepLinkJS = pendingDeepLinkJS {
+                    pendingDeepLinkJS = nil
+                    print("[Push] Executing deferred deep link after page load")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        webView.evaluateJavaScript(deepLinkJS, completionHandler: nil)
+                    }
                 }
             }
         }
