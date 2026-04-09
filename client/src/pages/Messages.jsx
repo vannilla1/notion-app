@@ -117,24 +117,61 @@ function Messages() {
     }
   }, [location.search]);
 
-  // Deep link highlight (one-time on initial load)
+  // Deep link highlight — fetch message by ID, switch to correct tab, select it
   const highlightProcessed = useRef(false);
+  const highlightMessage = async (messageId) => {
+    try {
+      const res = await api.get(`/api/messages/${messageId}`);
+      const msg = res.data;
+      if (!msg) return;
+
+      // Determine correct tab: if user is recipient → received, if sender → sent
+      const userId = user?.id || user?._id;
+      const isRecipient = msg.toUserId?.toString() === userId?.toString() ||
+        msg.toUserId?._id?.toString() === userId?.toString();
+      const correctTab = isRecipient ? 'received' : 'sent';
+
+      if (tab !== correctTab) {
+        setTab(correctTab);
+      }
+      // Clear any status filter to ensure message is visible
+      if (statusFilter !== 'all') {
+        setStatusFilter('all');
+      }
+      setSelectedMessage(msg);
+    } catch (err) {
+      console.error('[Messages] Failed to fetch highlighted message:', err);
+    }
+  };
+
+  // Handle highlight from URL params (initial load / iOS deep link)
   useEffect(() => {
     if (highlightProcessed.current) return;
     const params = new URLSearchParams(location.search);
     const highlightId = params.get('highlight');
-    if (highlightId && messages.length > 0) {
-      const msg = messages.find(m => m.id === highlightId || m._id === highlightId);
-      if (msg) setSelectedMessage(msg);
-      // Clear highlight param from URL to prevent re-opening
+    if (highlightId) {
       highlightProcessed.current = true;
+      highlightMessage(highlightId);
+      // Clear highlight param from URL
       const newParams = new URLSearchParams(location.search);
       newParams.delete('highlight');
       newParams.delete('_t');
       const newSearch = newParams.toString();
       navigate(location.pathname + (newSearch ? '?' + newSearch : ''), { replace: true });
     }
-  }, [messages]);
+  }, [location.search]);
+
+  // Handle highlight from custom event (service worker notification click while on /messages)
+  useEffect(() => {
+    const handleHighlight = (e) => {
+      const { messageId } = e.detail || {};
+      if (messageId) {
+        highlightMessage(messageId);
+      }
+    };
+    window.addEventListener('message-highlight', handleHighlight);
+    return () => window.removeEventListener('message-highlight', handleHighlight);
+  }, [tab, statusFilter]);
 
   const fetchMessages = async () => {
     try {
