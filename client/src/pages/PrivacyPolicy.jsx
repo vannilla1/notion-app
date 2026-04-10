@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 export default function PrivacyPolicy() {
   const navigate = useNavigate();
@@ -91,20 +91,27 @@ export default function PrivacyPolicy() {
         </p>
       </section>
 
-      <button
-        onClick={() => navigate('/login')}
-        style={{
-          background: '#6366f1',
-          color: 'white',
-          border: 'none',
-          padding: '10px 24px',
-          borderRadius: '8px',
-          fontSize: '14px',
-          cursor: 'pointer'
-        }}
-      >
-        Späť do aplikácie
-      </button>
+      <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: '#6366f1', color: 'white', border: 'none', padding: '10px 24px',
+            borderRadius: '8px', fontSize: '14px', cursor: 'pointer'
+          }}
+        >
+          Späť na hlavnú stránku
+        </button>
+        <Link
+          to="/terms"
+          style={{
+            background: '#f1f5f9', color: '#1e293b', border: 'none', padding: '10px 24px',
+            borderRadius: '8px', fontSize: '14px', cursor: 'pointer', textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center'
+          }}
+        >
+          Všeobecné obchodné podmienky
+        </Link>
+      </div>
     </div>
   );
 }
