@@ -3263,13 +3263,13 @@ body.modal-open {
   .modal-overlay {
     padding: 10px;
     align-items: flex-start;
-    padding-top: max(50px, env(safe-area-inset-top, 50px));
+    padding-top: max(10px, env(safe-area-inset-top, 10px));
     padding-bottom: max(10px, env(safe-area-inset-bottom, 10px));
   }
 
   .modal-content {
     margin: 0;
-    max-height: calc(100dvh - 60px);
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 10px)) - max(20px, env(safe-area-inset-bottom, 10px)));
     max-width: 100%;
     width: 100%;
     overflow-y: auto;
@@ -3277,7 +3277,7 @@ body.modal-open {
   }
 
   .modal-content.profile-modal {
-    max-height: calc(100vh - 60px);
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 10px)) - max(20px, env(safe-area-inset-bottom, 10px)));
   }
 
   .profile-content {
@@ -5639,7 +5639,7 @@ body.ios-app {
   .modal-content {
     width: 95%;
     margin: 10px;
-    max-height: 85vh;
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 10px)) - max(20px, env(safe-area-inset-bottom, 10px)));
     border-radius: var(--radius-lg);
   }
   
@@ -7666,12 +7666,14 @@ body.ios-app {
 @media (max-width: 599px) {
   .modal-overlay {
     padding: 12px;
-    align-items: flex-end;
+    padding-top: max(12px, env(safe-area-inset-top, 12px));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+    align-items: flex-start;
   }
 
   .modal-content {
-    max-height: 90vh;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: calc(100dvh - max(24px, env(safe-area-inset-top, 12px)) - max(24px, env(safe-area-inset-bottom, 12px)));
+    border-radius: var(--radius-lg);
     margin-bottom: 0;
   }
 
