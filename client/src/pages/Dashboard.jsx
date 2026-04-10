@@ -41,9 +41,14 @@ const dashboardHelpTips = [
     description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú synchronizáciu vašich termínov a projektov.'
   },
   {
+    icon: '✉️',
+    title: 'Správy a ankety',
+    description: 'V bočnom paneli vidíte prehľad správ podľa stavu (Čaká, Schválené, Zamietnuté, Komentované) a podľa typu (Ankety). Kliknutím na kategóriu zobrazíte zoznam správ. Počet ankiet zahŕňa prijaté aj odoslané.'
+  },
+  {
     icon: '⚡',
     title: 'Rýchla navigácia',
-    description: 'Pomocou tlačidiel "Kontakty" a "Projekty" v hlavičke sa rýchlo prepnete na detailné zobrazenie.'
+    description: 'Pomocou tlačidiel "Kontakty", "Projekty" a "Správy" v hlavičke alebo cez spodnú navigáciu sa rýchlo prepnete na detailné zobrazenie.'
   }
 ];
 

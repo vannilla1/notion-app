@@ -32,8 +32,8 @@ const tasksHelpTips = [
   },
   {
     icon: '📝',
-    title: 'Úlohy',
-    description: 'Rozbaľte projekt a pridajte úlohy pre lepšiu organizáciu. Úlohy môžu mať vlastné úlohy, termíny, poznámky a priradených používateľov. Kliknutím na názov úlohy rozbalíte jej úlohy.'
+    title: 'Úlohy a podúlohy',
+    description: 'Rozbaľte projekt a pridajte úlohy cez pole "Nová úloha". Úlohy môžu mať vlastné podúlohy (pole "Nová podúloha"), termíny, poznámky a priradených používateľov. Kliknutím na názov úlohy rozbalíte jej podúlohy.'
   },
   {
     icon: '✅',

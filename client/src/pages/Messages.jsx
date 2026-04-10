@@ -11,11 +11,14 @@ import HeaderLogo from '../components/HeaderLogo';
 import { useWorkspace } from '../context/WorkspaceContext';
 
 const messagesHelpTips = [
-  { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie alebo žiadosti.' },
-  { icon: '🟡', title: 'Typy odkazov', description: 'Schválenie (žltá) — vyžaduje rozhodnutie. Informácia (modrá) — len na prečítanie. Žiadosť (oranžová) — prosba o akciu. Návrh (zelená) — diskusia.' },
-  { icon: '✅', title: 'Akcie príjemcu', description: 'Prijaté odkazy môžete schváliť, zamietnuť alebo komentovať. Komentované správy je možné následne ešte schváliť alebo zamietnuť.' },
-  { icon: '📎', title: 'Prílohy', description: 'Ku každému odkazu môžete priložiť viacero súborov (max. 10 MB na súbor) — dokumenty, obrázky, PDF a ďalšie formáty.' },
-  { icon: '🔗', title: 'Prepojenia', description: 'Odkaz môžete prepojiť s konkrétnym kontaktom alebo projektom. Prepojené správy sa zobrazujú aj v detaile kontaktu alebo projektu.' },
+  { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie, žiadosti alebo ankety. Správy sa zobrazujú v troch taboch: Všetky (prijaté aj odoslané pokope), Prijaté a Odoslané.' },
+  { icon: '🟡', title: 'Typy odkazov', description: 'Schválenie (žltá) — vyžaduje rozhodnutie. Informácia (modrá) — len na prečítanie. Žiadosť (oranžová) — prosba o akciu. Návrh (zelená) — diskusia. Anketa (ružová) — hlasovanie s možnosťami.' },
+  { icon: '📊', title: 'Ankety', description: 'Vytvorte anketu s 2 až 10 možnosťami. Anketa môže byť s jednou alebo viacerými odpoveďami. Hlasy sa zobrazujú s percentami a menom hlasujúceho. Ankety môžete filtrovať cez filter "Ankety" v hornej lište aj v bočnom paneli.' },
+  { icon: '✅', title: 'Schvaľovanie a rozhodovanie', description: 'Prijaté správy môžete schváliť, zamietnuť alebo komentovať. Admin alebo manažér môže schváliť/zamietnuť akúkoľvek správu, aj keď nie je príjemcom. Po schválení alebo zamietnutí je možné rozhodnutie zrušiť a vrátiť správu na opätovné posúdenie.' },
+  { icon: '💬', title: 'Komentáre', description: 'Ku každej správe môžete pridať komentár s voliteľnou prílohou. Vlastné komentáre môžete upraviť (ikona ceruzky) alebo vymazať (ikona koša). Cudzie komentáre sa nedajú upravovať ani mazať. Textové pole sa automaticky zväčšuje podľa dĺžky textu.' },
+  { icon: '📎', title: 'Prílohy a súbory', description: 'Ku správe môžete priložiť viacero súborov (max. 10 MB na súbor) — dokumenty, obrázky, PDF a ďalšie formáty. Prílohy sa dajú prikladať aj ku komentárom.' },
+  { icon: '🔗', title: 'Prepojenia', description: 'Správu môžete prepojiť s konkrétnym kontaktom alebo projektom. Prepojené správy sa zobrazujú aj v detaile kontaktu alebo projektu.' },
+  { icon: '🔍', title: 'Filtrovanie', description: 'Správy môžete filtrovať podľa stavu (Všetky, Čaká, Schválené, Zamietnuté, Komentované) alebo podľa typu (Ankety). Filtre sú dostupné v hornej lište aj v bočnom paneli so štatistikami.' },
   { icon: '🗑️', title: 'Správa odkazov', description: 'Vlastník a manažér workspace môžu vymazať akúkoľvek správu. Odosielateľ môže upraviť alebo vymazať svoje vlastné správy.' }
 ];
 
