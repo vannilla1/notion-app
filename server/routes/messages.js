@@ -386,15 +386,21 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
   });
 });
 
-// PUT /api/messages/:id/approve — approve message
+// PUT /api/messages/:id/approve — approve message (recipient or workspace admin)
 router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
+    const query = {
       _id: req.params.id,
       workspaceId: req.workspaceId,
-      toUserId: req.user.id,
       status: { $in: ['pending', 'commented'] }
-    });
+    };
+    // Recipient can always approve; admin/manager can too
+    const isAdmin = req.workspaceMember.canAdmin();
+    if (!isAdmin) {
+      query.toUserId = req.user.id;
+    }
+
+    const message = await Message.findOne(query);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });
@@ -452,17 +458,22 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
   }
 });
 
-// PUT /api/messages/:id/reject — reject message
+// PUT /api/messages/:id/reject — reject message (recipient or workspace admin)
 router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { reason } = req.body;
 
-    const message = await Message.findOne({
+    const query = {
       _id: req.params.id,
       workspaceId: req.workspaceId,
-      toUserId: req.user.id,
       status: { $in: ['pending', 'commented'] }
-    });
+    };
+    const isAdmin = req.workspaceMember.canAdmin();
+    if (!isAdmin) {
+      query.toUserId = req.user.id;
+    }
+
+    const message = await Message.findOne(query);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });

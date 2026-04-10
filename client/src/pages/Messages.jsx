@@ -622,6 +622,7 @@ function Messages() {
               onReopen={handleReopen}
               onVote={handleVote}
               canReopen={(selectedMessage.status === 'approved' || selectedMessage.status === 'rejected') && (currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager' || isRecipient(selectedMessage))}
+              canManageMessage={currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager'}
               onFileUpload={triggerMsgFileUpload}
               onFileDownload={handleMsgFileDownload}
               onFileDelete={handleMsgFileDelete}
@@ -868,7 +869,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1184,8 +1185,8 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           </div>
         )}
 
-        {/* Actions for recipient */}
-        {isRecipient && (msg.status === 'pending' || msg.status === 'commented') && (
+        {/* Actions — recipient always, or admin/manager can also approve/reject */}
+        {(isRecipient || canManageMessage) && (msg.status === 'pending' || msg.status === 'commented') && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <button className="btn" onClick={() => onApprove(msg.id || msg._id)}
               style={{ background: 'var(--success)', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px' }}>
