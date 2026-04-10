@@ -494,124 +494,196 @@ function UsersTab() {
       {/* User Detail Modal */}
       {selectedUser && (
         <div className="modal-overlay" onClick={() => { setSelectedUser(null); setUserDetail(null); }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '85vh', overflow: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 600 }}>Detail používateľa</h3>
-              <button onClick={() => { setSelectedUser(null); setUserDetail(null); }} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
-            </div>
-            {userDetailLoading ? <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Načítavam...</div> : userDetail ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* User info */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: userDetail.user.color || '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '18px', flexShrink: 0 }}>
-                    {(userDetail.user.username || '?')[0].toUpperCase()}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '16px' }}>{userDetail.user.username}</div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{userDetail.user.email}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Role: <strong>{userDetail.user.role}</strong> · Plán: <strong>{userDetail.user.subscription?.plan || 'free'}</strong> · Registrovaný {new Date(userDetail.user.createdAt).toLocaleDateString('sk-SK')}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                  {[
-                    { label: 'Kontakty', value: userDetail.stats.contactCount },
-                    { label: 'Úlohy', value: userDetail.stats.taskCount },
-                    { label: 'Odoslané', value: userDetail.stats.messagesSent },
-                    { label: 'Prijaté', value: userDetail.stats.messagesReceived },
-                  ].map(s => (
-                    <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '8px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '18px', fontWeight: 700 }}>{s.value}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Workspaces */}
-                <div>
-                  <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Workspace-y ({userDetail.memberships.length})</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {userDetail.memberships.map(m => (
-                      <div key={m._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.workspace?.color || '#6B7280', flexShrink: 0 }}></span>
-                          <span style={{ fontWeight: 500 }}>{m.workspace?.name || '—'}</span>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto', padding: '0' }}>
+            {userDetailLoading ? <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>Načítavam...</div> : userDetail ? (
+              <>
+                {/* Header with user info */}
+                <div style={{ padding: '24px 28px 20px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: userDetail.user.color || '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '22px', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                        {(userDetail.user.username || '?')[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '20px', marginBottom: '2px' }}>{userDetail.user.username}</div>
+                        <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{userDetail.user.email}</div>
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '10px', background: userDetail.user.role === 'admin' ? '#EF4444' : '#6B7280', color: 'white', fontWeight: 600 }}>{userDetail.user.role}</span>
+                          <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '10px', background: (userDetail.user.subscription?.plan || 'free') === 'pro' ? '#8B5CF6' : (userDetail.user.subscription?.plan || 'free') === 'team' ? '#F59E0B' : '#6B7280', color: 'white', fontWeight: 600 }}>{userDetail.user.subscription?.plan || 'free'}</span>
+                          <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '10px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>od {new Date(userDetail.user.createdAt).toLocaleDateString('sk-SK')}</span>
                         </div>
-                        <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: m.role === 'owner' ? '#8B5CF6' : m.role === 'manager' ? '#F59E0B' : '#6B7280', color: 'white' }}>{m.role}</span>
+                      </div>
+                    </div>
+                    <button onClick={() => { setSelectedUser(null); setUserDetail(null); }} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px', lineHeight: 1 }}>✕</button>
+                  </div>
+
+                  {/* Stats */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '16px' }}>
+                    {[
+                      { label: 'Kontakty', value: userDetail.stats.contactCount, icon: '👤' },
+                      { label: 'Projekty', value: userDetail.stats.taskCount, icon: '📋' },
+                      { label: 'Odoslané', value: userDetail.stats.messagesSent, icon: '📤' },
+                      { label: 'Prijaté', value: userDetail.stats.messagesReceived, icon: '📥' },
+                    ].map(s => (
+                      <div key={s.label} style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius)', padding: '10px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontSize: '22px', fontWeight: 700 }}>{s.value}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{s.icon} {s.label}</div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Devices */}
-                {(userDetail.devices?.pushSubscriptions?.length > 0 || userDetail.devices?.apnsDevices?.length > 0) && (
-                  <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Zariadenia</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
-                      {userDetail.devices.apnsDevices?.map((d, i) => (
-                        <div key={i} style={{ padding: '4px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                          📱 iOS ({d.apnsEnvironment || 'unknown'}) · Token: ...{d.deviceToken?.slice(-8)} · Posledné použitie: {d.lastUsed ? new Date(d.lastUsed).toLocaleDateString('sk-SK') : '—'}
-                        </div>
-                      ))}
-                      {userDetail.devices.pushSubscriptions?.map((d, i) => (
-                        <div key={i} style={{ padding: '4px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                          🌐 Web Push · {d.endpoint?.includes('apple.com') ? 'Safari' : d.endpoint?.includes('google') ? 'Chrome' : 'Browser'} · Posledné použitie: {d.lastUsed ? new Date(d.lastUsed).toLocaleDateString('sk-SK') : '—'}
-                        </div>
-                      ))}
+                {/* Body */}
+                <div style={{ padding: '20px 28px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+                  {/* Two-column layout for Workspaces + Devices */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    {/* Workspaces */}
+                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Workspace-y ({userDetail.memberships.length})</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {userDetail.memberships.map(m => (
+                          <div key={m._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.workspace?.color || '#6B7280', flexShrink: 0 }}></span>
+                              <span style={{ fontWeight: 500 }}>{m.workspace?.name || '—'}</span>
+                            </div>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: m.role === 'owner' ? '#8B5CF6' : m.role === 'manager' ? '#F59E0B' : '#6B7280', color: 'white', fontWeight: 500 }}>{m.role}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Devices — grouped and collapsible */}
+                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                      <DevicesSummary devices={userDetail.devices} />
                     </div>
                   </div>
-                )}
 
-                {/* Recent activity */}
-                {userDetail.recentActivity?.length > 0 && (
-                  <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Posledná aktivita</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '200px', overflow: 'auto' }}>
-                      {userDetail.recentActivity.map((a, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                          <span>{ACTION_LABELS[a.action] || a.action} {a.targetName ? `— ${a.targetName}` : ''}</span>
-                          <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', marginLeft: '8px' }}>{new Date(a.createdAt).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                      ))}
+                  {/* Google integrations */}
+                  {(userDetail.user.googleCalendar?.enabled || userDetail.user.googleTasks?.enabled) && (
+                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Integrácie</h4>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '13px' }}>
+                        {userDetail.user.googleCalendar?.enabled && <span style={{ padding: '6px 12px', background: '#DBEAFE', borderRadius: 'var(--radius-sm)', fontWeight: 500 }}>📅 Google Calendar · od {new Date(userDetail.user.googleCalendar.connectedAt).toLocaleDateString('sk-SK')}</span>}
+                        {userDetail.user.googleTasks?.enabled && <span style={{ padding: '6px 12px', background: '#D1FAE5', borderRadius: 'var(--radius-sm)', fontWeight: 500 }}>✅ Google Tasks · od {new Date(userDetail.user.googleTasks.connectedAt).toLocaleDateString('sk-SK')}</span>}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Subscription management */}
-                <SubscriptionEditor user={userDetail.user} onUpdate={(sub) => {
-                  setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
-                  setUsers(prev => prev.map(u => u.id === userDetail.user._id ? { ...u, plan: sub.plan } : u));
-                }} />
-
-                {/* Discount management */}
-                <DiscountEditor user={userDetail.user} onUpdate={(sub) => {
-                  setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
-                  setUsers(prev => prev.map(u => u.id === userDetail.user._id ? {
-                    ...u,
-                    plan: sub.plan,
-                    discount: sub.discount?.type ? { type: sub.discount.type, value: sub.discount.value, targetPlan: sub.discount.targetPlan, expiresAt: sub.discount.expiresAt } : null
-                  } : u));
-                }} />
-
-                {/* Google integrations */}
-                {(userDetail.user.googleCalendar?.enabled || userDetail.user.googleTasks?.enabled) && (
-                  <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Integrácie</h4>
-                    <div style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
-                      {userDetail.user.googleCalendar?.enabled && <span style={{ padding: '4px 10px', background: '#DBEAFE', borderRadius: 'var(--radius-sm)' }}>📅 Google Calendar · od {new Date(userDetail.user.googleCalendar.connectedAt).toLocaleDateString('sk-SK')}</span>}
-                      {userDetail.user.googleTasks?.enabled && <span style={{ padding: '4px 10px', background: '#D1FAE5', borderRadius: 'var(--radius-sm)' }}>✅ Google Tasks · od {new Date(userDetail.user.googleTasks.connectedAt).toLocaleDateString('sk-SK')}</span>}
+                  {/* Recent activity */}
+                  {userDetail.recentActivity?.length > 0 && (
+                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Posledná aktivita</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '180px', overflow: 'auto' }}>
+                        {userDetail.recentActivity.map((a, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '8px' }}>{ACTION_LABELS[a.action] || a.action} {a.targetName ? `— ${a.targetName}` : ''}</span>
+                            <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{new Date(a.createdAt).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  )}
+
+                  {/* Subscription management */}
+                  <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                    <SubscriptionEditor user={userDetail.user} onUpdate={(sub) => {
+                      setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
+                      setUsers(prev => prev.map(u => u.id === userDetail.user._id ? { ...u, plan: sub.plan } : u));
+                    }} />
                   </div>
-                )}
-              </div>
+
+                  {/* Discount management */}
+                  <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '14px' }}>
+                    <DiscountEditor user={userDetail.user} onUpdate={(sub) => {
+                      setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
+                      setUsers(prev => prev.map(u => u.id === userDetail.user._id ? {
+                        ...u,
+                        plan: sub.plan,
+                        discount: sub.discount?.type ? { type: sub.discount.type, value: sub.discount.value, targetPlan: sub.discount.targetPlan, expiresAt: sub.discount.expiresAt } : null
+                      } : u));
+                    }} />
+                  </div>
+                </div>
+              </>
             ) : null}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ─── DEVICES SUMMARY ────────────────────────────────────────────
+function DevicesSummary({ devices }) {
+  const [expanded, setExpanded] = useState(false);
+  const apns = devices?.apnsDevices || [];
+  const web = devices?.pushSubscriptions || [];
+  const total = apns.length + web.length;
+
+  if (total === 0) {
+    return (
+      <>
+        <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Zariadenia (0)</h4>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Žiadne registrované zariadenia</div>
+      </>
+    );
+  }
+
+  // Group web push by browser type
+  const webByBrowser = {};
+  web.forEach(d => {
+    const browser = d.endpoint?.includes('apple.com') ? 'Safari' : d.endpoint?.includes('google') ? 'Chrome' : d.endpoint?.includes('mozilla') ? 'Firefox' : 'Browser';
+    if (!webByBrowser[browser]) webByBrowser[browser] = [];
+    webByBrowser[browser].push(d);
+  });
+
+  return (
+    <>
+      <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        Zariadenia ({total})
+      </h4>
+
+      {/* Summary badges */}
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: expanded ? '10px' : 0 }}>
+        {apns.length > 0 && (
+          <span style={{ fontSize: '12px', padding: '4px 10px', background: '#DBEAFE', borderRadius: 'var(--radius-sm)', fontWeight: 500 }}>
+            📱 {apns.length}× iOS
+          </span>
+        )}
+        {Object.entries(webByBrowser).map(([browser, subs]) => (
+          <span key={browser} style={{ fontSize: '12px', padding: '4px 10px', background: '#E0E7FF', borderRadius: 'var(--radius-sm)', fontWeight: 500 }}>
+            🌐 {subs.length}× {browser}
+          </span>
+        ))}
+        <button onClick={() => setExpanded(!expanded)}
+          style={{ fontSize: '11px', padding: '4px 10px', background: 'none', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', color: 'var(--accent-color)', fontWeight: 500 }}>
+          {expanded ? '▲ Skryť' : '▼ Detail'}
+        </button>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', maxHeight: '180px', overflow: 'auto' }}>
+          {apns.map((d, i) => (
+            <div key={`apns-${i}`} style={{ padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+              <span>📱 iOS <span style={{ color: d.apnsEnvironment === 'production' ? '#10B981' : '#F59E0B', fontWeight: 500 }}>({d.apnsEnvironment || '?'})</span> · ...{d.deviceToken?.slice(-8)}</span>
+              <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.lastUsed ? new Date(d.lastUsed).toLocaleDateString('sk-SK') : '—'}</span>
+            </div>
+          ))}
+          {web.map((d, i) => {
+            const browser = d.endpoint?.includes('apple.com') ? 'Safari' : d.endpoint?.includes('google') ? 'Chrome' : d.endpoint?.includes('mozilla') ? 'Firefox' : 'Browser';
+            return (
+              <div key={`web-${i}`} style={{ padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                <span>🌐 {browser}</span>
+                <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.lastUsed ? new Date(d.lastUsed).toLocaleDateString('sk-SK') : '—'}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
