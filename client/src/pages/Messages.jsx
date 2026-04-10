@@ -1277,29 +1277,31 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                       </div>
                     </div>
                     {isEditing ? (
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                        <input
-                          type="text"
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                        <textarea
                           value={editingCommentText}
-                          onChange={e => setEditingCommentText(e.target.value)}
+                          onChange={e => { setEditingCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
                           onKeyDown={e => {
                             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
                             if (e.key === 'Escape') { setEditingCommentId(null); setEditingCommentText(''); }
                           }}
-                          style={{ flex: 1, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
+                          ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', resize: 'none', overflow: 'hidden', minHeight: '36px', fontFamily: 'inherit', lineHeight: '1.4' }}
                           autoFocus
                         />
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => onEditComment(msg.id || msg._id, c._id, editingCommentText)}
-                          disabled={!editingCommentText.trim()}
-                          style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
-                        >Uložiť</button>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => { setEditingCommentId(null); setEditingCommentText(''); }}
-                          style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
-                        >Zrušiť</button>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => { setEditingCommentId(null); setEditingCommentText(''); }}
+                            style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                          >Zrušiť</button>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => onEditComment(msg.id || msg._id, c._id, editingCommentText)}
+                            disabled={!editingCommentText.trim()}
+                            style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                          >Uložiť</button>
+                        </div>
                       </div>
                     ) : (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
@@ -1334,11 +1336,11 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
 
           {/* Add comment */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input type="text" value={commentText} onChange={e => setCommentText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
-                style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
-                placeholder="Napíšte komentár..." />
+            <textarea value={commentText} onChange={e => { setCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
+              style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', resize: 'none', overflow: 'hidden', minHeight: '40px', fontFamily: 'inherit', lineHeight: '1.4' }}
+              placeholder="Napíšte komentár..." rows={1} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
                 disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 Odoslať
