@@ -25,6 +25,7 @@ function FilePreviewImage({ contactId, fileId, alt }) {
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState(contact);
   const [errors, setErrors] = useState({});
   const fileInputRef = useRef(null);
@@ -84,12 +85,15 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
       return;
     }
 
+    setSaving(true);
     try {
       await onUpdate(contact.id, formData);
       setEditing(false);
       setErrors({});
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladaní');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -150,7 +154,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
         <div className="contact-detail-actions">
           {editing ? (
             <>
-              <button className="btn btn-primary" onClick={handleSave}>Uložiť</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Ukladám...' : 'Uložiť'}</button>
               <button className="btn btn-secondary" onClick={() => {
                 setFormData(contact);
                 setEditing(false);
@@ -160,7 +164,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
           ) : (
             <>
               <button className="btn btn-secondary" onClick={() => setEditing(true)}>Upraviť</button>
-              <button className="btn btn-danger" onClick={() => onDelete(contact.id)}>Vymazať</button>
+              <button className="btn btn-danger" onClick={() => { if (window.confirm('Naozaj chcete vymazať tento kontakt?')) onDelete(contact.id); }}>Vymazať</button>
             </>
           )}
         </div>

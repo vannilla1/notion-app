@@ -69,6 +69,7 @@ function CRM() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [expandedContact, setExpandedContact] = useState(null);
   const { socket, isConnected } = useSocket();
 
@@ -367,8 +368,9 @@ function CRM() {
 
   const createContact = async (e) => {
     e.preventDefault();
-    if (!newContactForm.name.trim()) return;
+    if (!newContactForm.name.trim() || submitting) return;
 
+    setSubmitting(true);
     try {
       await api.post('/api/contacts', newContactForm);
       setNewContactForm({
@@ -383,6 +385,8 @@ function CRM() {
       setShowForm(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytváraní kontaktu');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1387,8 +1391,8 @@ function CRM() {
                   <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
                     Zrušiť
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Vytvoriť kontakt
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? 'Vytváram...' : 'Vytvoriť kontakt'}
                   </button>
                 </div>
               </form>

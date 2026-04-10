@@ -405,6 +405,7 @@ function Tasks() {
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [expandedTask, setExpandedTask] = useState(null);
   const { socket, isConnected } = useSocket();
@@ -1051,8 +1052,9 @@ function Tasks() {
 
   const createTask = async (e) => {
     e.preventDefault();
-    if (!newTaskForm.title.trim()) return;
+    if (!newTaskForm.title.trim() || submitting) return;
 
+    setSubmitting(true);
     try {
       const response = await api.post('/api/tasks', {
         ...newTaskForm,
@@ -1091,6 +1093,8 @@ function Tasks() {
       setShowForm(false);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -2360,8 +2364,8 @@ function Tasks() {
                   <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
                     Zrušiť
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Vytvoriť projekt
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? 'Vytváram...' : 'Vytvoriť projekt'}
                   </button>
                 </div>
               </form>

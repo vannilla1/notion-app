@@ -771,7 +771,7 @@ function Dashboard() {
 
         <main className="crm-main">
           {loading ? (
-            <div className="loading">Nacitavam...</div>
+            <div className="loading">Načítavam...</div>
           ) : detailView && detailData ? (
             /* Detail View */
             <div className="dashboard-detail-view">
