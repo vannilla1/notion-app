@@ -48,7 +48,17 @@ const userSchema = new mongoose.Schema({
     billingPeriod: { type: String, enum: ['monthly', 'yearly', null], default: null },
     trialEndsAt: { type: Date, default: null },
     paidUntil: { type: Date, default: null },
-    cancelAtPeriodEnd: { type: Boolean, default: false }
+    cancelAtPeriodEnd: { type: Boolean, default: false },
+    // Admin-applied discount
+    discount: {
+      type: { type: String, enum: ['percentage', 'fixed', 'freeMonths', 'planUpgrade', null], default: null },
+      value: { type: Number, default: null },
+      targetPlan: { type: String, enum: ['team', 'pro', null], default: null },
+      reason: { type: String, default: null },
+      expiresAt: { type: Date, default: null },
+      createdAt: { type: Date, default: null },
+      createdBy: { type: String, default: null }
+    }
   },
   // Current active workspace
   currentWorkspaceId: {

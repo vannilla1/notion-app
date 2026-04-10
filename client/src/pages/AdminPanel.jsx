@@ -447,6 +447,12 @@ function UsersTab() {
                     <option value="pro">Pro</option>
                     <option value="trial">Trial</option>
                   </select>
+                  {u.discount && (
+                    <span title={u.discount.type === 'percentage' ? `${u.discount.value}%` : u.discount.type === 'fixed' ? `−${u.discount.value}€` : u.discount.type === 'freeMonths' ? `${u.discount.value} mes.` : `→${u.discount.targetPlan?.toUpperCase()}`}
+                      style={{ display: 'inline-block', marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#FEF3C7', color: '#92400E', fontWeight: 600 }}>
+                      🏷️
+                    </span>
+                  )}
                 </td>
                 <td>
                   <div className="sa-sync-badges">
@@ -578,6 +584,16 @@ function UsersTab() {
                 <SubscriptionEditor user={userDetail.user} onUpdate={(sub) => {
                   setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
                   setUsers(prev => prev.map(u => u.id === userDetail.user._id ? { ...u, plan: sub.plan } : u));
+                }} />
+
+                {/* Discount management */}
+                <DiscountEditor user={userDetail.user} onUpdate={(sub) => {
+                  setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
+                  setUsers(prev => prev.map(u => u.id === userDetail.user._id ? {
+                    ...u,
+                    plan: sub.plan,
+                    discount: sub.discount?.type ? { type: sub.discount.type, value: sub.discount.value, targetPlan: sub.discount.targetPlan, expiresAt: sub.discount.expiresAt } : null
+                  } : u));
                 }} />
 
                 {/* Google integrations */}
@@ -865,6 +881,190 @@ function SubscriptionEditor({ user, onUpdate }) {
   );
 }
 
+// ─── DISCOUNT EDITOR ──────────────────────────────────────────
+const DISCOUNT_TYPES = {
+  percentage: { label: 'Percentuálna zľava', unit: '%', icon: '🏷️' },
+  fixed: { label: 'Fixná zľava', unit: '€/mes', icon: '💶' },
+  freeMonths: { label: 'Voľné mesiace', unit: 'mes.', icon: '🎁' },
+  planUpgrade: { label: 'Upgrade zadarmo', unit: '', icon: '⬆️' }
+};
+
+function DiscountEditor({ user, onUpdate }) {
+  const [showForm, setShowForm] = useState(false);
+  const [discType, setDiscType] = useState('percentage');
+  const [discValue, setDiscValue] = useState('');
+  const [targetPlan, setTargetPlan] = useState('pro');
+  const [reason, setReason] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const activeDiscount = user.subscription?.discount?.type ? user.subscription.discount : null;
+
+  const handleApply = async () => {
+    setSaving(true);
+    try {
+      const body = { type: discType, reason, expiresAt: expiresAt || null };
+      if (discType === 'planUpgrade') {
+        body.targetPlan = targetPlan;
+      } else {
+        body.value = parseFloat(discValue);
+        if (isNaN(body.value) || body.value <= 0) {
+          alert('Zadajte platnú hodnotu');
+          setSaving(false);
+          return;
+        }
+      }
+      const res = await adminApi.put(`/api/admin/users/${user._id}/discount`, body);
+      onUpdate(res.data.subscription);
+      setShowForm(false);
+      setDiscValue('');
+      setReason('');
+      setExpiresAt('');
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri aplikovaní zľavy');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!window.confirm('Naozaj odstrániť zľavu?')) return;
+    setSaving(true);
+    try {
+      const res = await adminApi.delete(`/api/admin/users/${user._id}/discount`);
+      onUpdate(res.data.subscription);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri odstránení zľavy');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyPreset = (type, value, tPlan) => {
+    setDiscType(type);
+    setDiscValue(value?.toString() || '');
+    setTargetPlan(tPlan || 'pro');
+    setShowForm(true);
+  };
+
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
+  const isExpired = activeDiscount?.expiresAt && new Date(activeDiscount.expiresAt) < new Date();
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <h4 style={{ fontSize: '14px', fontWeight: 600 }}>Zľavy</h4>
+        {!showForm && !activeDiscount && (
+          <button onClick={() => setShowForm(true)} style={{ background: 'none', border: 'none', fontSize: '12px', cursor: 'pointer', color: 'var(--primary, #8B5CF6)', fontWeight: 500 }}>+ Pridať zľavu</button>
+        )}
+      </div>
+
+      {/* Active discount display */}
+      {activeDiscount && (
+        <div style={{ padding: '10px 14px', background: isExpired ? 'var(--bg-secondary)' : '#FEF3C7', borderRadius: 'var(--radius-sm)', border: `1px solid ${isExpired ? 'var(--border-color)' : '#F59E0B'}`, marginBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <span style={{ fontSize: '14px', marginRight: '6px' }}>{DISCOUNT_TYPES[activeDiscount.type]?.icon}</span>
+              <strong style={{ fontSize: '13px' }}>
+                {activeDiscount.type === 'percentage' && `${activeDiscount.value}% zľava`}
+                {activeDiscount.type === 'fixed' && `−${activeDiscount.value}€/mes`}
+                {activeDiscount.type === 'freeMonths' && `${activeDiscount.value} voľných mesiacov`}
+                {activeDiscount.type === 'planUpgrade' && `Upgrade na ${activeDiscount.targetPlan?.toUpperCase()}`}
+              </strong>
+              {isExpired && <span style={{ color: '#EF4444', fontSize: '11px', marginLeft: '6px' }}>EXPIROVANÁ</span>}
+            </div>
+            <button onClick={handleRemove} disabled={saving}
+              style={{ background: 'none', border: 'none', fontSize: '12px', cursor: 'pointer', color: '#EF4444' }}>
+              Odstrániť
+            </button>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            {activeDiscount.reason && <span>Dôvod: {activeDiscount.reason} · </span>}
+            {activeDiscount.expiresAt && <span>Platí do: {formatDate(activeDiscount.expiresAt)} · </span>}
+            <span>Pridal: {activeDiscount.createdBy} ({formatDate(activeDiscount.createdAt)})</span>
+          </div>
+        </div>
+      )}
+
+      {/* Quick presets */}
+      {!showForm && !activeDiscount && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+          {[
+            { label: '10%', type: 'percentage', value: 10 },
+            { label: '20%', type: 'percentage', value: 20 },
+            { label: '50%', type: 'percentage', value: 50 },
+            { label: '1 mes. free', type: 'freeMonths', value: 1 },
+            { label: '3 mes. free', type: 'freeMonths', value: 3 },
+            { label: 'Pro zadarmo', type: 'planUpgrade', value: null, targetPlan: 'pro' },
+          ].map(p => (
+            <button key={p.label} onClick={() => applyPreset(p.type, p.value, p.targetPlan)}
+              style={{ padding: '4px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', cursor: 'pointer' }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Custom form */}
+      {showForm && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <label style={{ fontSize: '12px', width: '70px', color: 'var(--text-muted)', flexShrink: 0 }}>Typ</label>
+            <select value={discType} onChange={e => setDiscType(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }}>
+              {Object.entries(DISCOUNT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+            </select>
+          </div>
+
+          {discType !== 'planUpgrade' && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontSize: '12px', width: '70px', color: 'var(--text-muted)', flexShrink: 0 }}>Hodnota</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                <input type="number" value={discValue} onChange={e => setDiscValue(e.target.value)}
+                  placeholder={discType === 'percentage' ? '20' : discType === 'fixed' ? '2.50' : '3'}
+                  style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{DISCOUNT_TYPES[discType].unit}</span>
+              </div>
+            </div>
+          )}
+
+          {discType === 'planUpgrade' && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontSize: '12px', width: '70px', color: 'var(--text-muted)', flexShrink: 0 }}>Plán</label>
+              <select value={targetPlan} onChange={e => setTargetPlan(e.target.value)}
+                style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }}>
+                <option value="team">Tím (4,99€/mes)</option>
+                <option value="pro">Pro (9,99€/mes)</option>
+              </select>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <label style={{ fontSize: '12px', width: '70px', color: 'var(--text-muted)', flexShrink: 0 }}>Dôvod</label>
+            <input type="text" value={reason} onChange={e => setReason(e.target.value)}
+              placeholder="Napr. verný zákazník, beta tester..."
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <label style={{ fontSize: '12px', width: '70px', color: 'var(--text-muted)', flexShrink: 0 }}>Platí do</label>
+            <input type="date" value={expiresAt} onChange={e => setExpiresAt(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>prázdne = bez limitu</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 12px' }} onClick={() => setShowForm(false)}>Zrušiť</button>
+            <button className="btn btn-primary" style={{ fontSize: '12px', padding: '4px 12px' }} disabled={saving} onClick={handleApply}>
+              {saving ? 'Aplikujem...' : 'Aplikovať zľavu'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── SYNC DIAGNOSTICS TAB ───────────────────────────────────────
 function SyncTab() {
   const [diagnostics, setDiagnostics] = useState([]);
@@ -961,6 +1161,7 @@ function SyncTab() {
 // ─── AUDIT LOG TAB ──────────────────────────────────────────────
 const ACTION_LABELS = {
   'user.role_changed': '🔑 Zmena role', 'user.plan_changed': '💳 Zmena plánu', 'user.deleted': '🗑️ Vymazaný užívateľ',
+  'user.discount_applied': '🏷️ Zľava pridaná', 'user.discount_removed': '🏷️ Zľava odobratá', 'user.subscription_updated': '💳 Predplatné upravené',
   'auth.login': '🔓 Prihlásenie', 'auth.register': '📝 Registrácia',
   'contact.created': '➕ Nový kontakt', 'contact.updated': '✏️ Úprava kontaktu', 'contact.deleted': '🗑️ Vymazaný kontakt',
   'task.created': '➕ Nová úloha', 'task.completed': '✅ Dokončená úloha', 'task.deleted': '🗑️ Vymazaná úloha',

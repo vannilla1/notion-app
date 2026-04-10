@@ -174,6 +174,12 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
       avatar: u.avatar,
       role: u.role,
       plan: u.subscription?.plan || 'free',
+      discount: u.subscription?.discount?.type ? {
+        type: u.subscription.discount.type,
+        value: u.subscription.discount.value,
+        targetPlan: u.subscription.discount.targetPlan,
+        expiresAt: u.subscription.discount.expiresAt
+      } : null,
       googleCalendar: u.googleCalendar?.enabled || false,
       googleTasks: u.googleTasks?.enabled || false,
       createdAt: u.createdAt,
@@ -745,6 +751,114 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: 'Chyba pri mazaní workspace' });
+  }
+});
+
+// ─── DISCOUNT MANAGEMENT ──────────────────────────────────────
+// Apply discount to user
+router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
+
+    const { type, value, targetPlan, reason, expiresAt } = req.body;
+
+    // Validate discount type
+    const validTypes = ['percentage', 'fixed', 'freeMonths', 'planUpgrade'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ message: 'Neplatný typ zľavy' });
+    }
+
+    // Validate value based on type
+    if (type === 'percentage' && (value < 1 || value > 100)) {
+      return res.status(400).json({ message: 'Percentuálna zľava musí byť medzi 1-100%' });
+    }
+    if (type === 'fixed' && (value < 0.01 || value > 100)) {
+      return res.status(400).json({ message: 'Fixná zľava musí byť medzi 0.01-100€' });
+    }
+    if (type === 'freeMonths' && (value < 1 || value > 24)) {
+      return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
+    }
+    if (type === 'planUpgrade' && !['team', 'pro'].includes(targetPlan)) {
+      return res.status(400).json({ message: 'Neplatný cieľový plán' });
+    }
+
+    const oldDiscount = user.subscription?.discount?.type ? { ...user.subscription.discount.toObject() } : null;
+
+    user.subscription.discount = {
+      type,
+      value: type === 'planUpgrade' ? null : value,
+      targetPlan: type === 'planUpgrade' ? targetPlan : null,
+      reason: reason || null,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      createdAt: new Date(),
+      createdBy: req.adminUser.username
+    };
+
+    // For planUpgrade: also set the plan and paidUntil
+    if (type === 'planUpgrade') {
+      user.subscription.plan = targetPlan;
+      if (expiresAt) {
+        user.subscription.paidUntil = new Date(expiresAt);
+      }
+    }
+
+    // For freeMonths: extend paidUntil by X months
+    if (type === 'freeMonths') {
+      const current = user.subscription.paidUntil ? new Date(user.subscription.paidUntil) : new Date();
+      current.setMonth(current.getMonth() + value);
+      user.subscription.paidUntil = current;
+    }
+
+    await user.save();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: 'user.discount_applied', category: 'billing',
+      targetType: 'user', targetId: req.params.userId, targetName: user.username,
+      details: { type, value, targetPlan, reason, expiresAt, oldDiscount },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true, subscription: user.subscription });
+  } catch (error) {
+    logger.error('Apply discount error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri aplikovaní zľavy' });
+  }
+});
+
+// Remove discount from user
+router.delete('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
+
+    const oldDiscount = user.subscription?.discount?.type ? { ...user.subscription.discount.toObject() } : null;
+
+    // If it was a planUpgrade, revert the plan to free (unless they have a Stripe subscription)
+    if (user.subscription?.discount?.type === 'planUpgrade' && !user.subscription.stripeSubscriptionId) {
+      user.subscription.plan = 'free';
+      user.subscription.paidUntil = null;
+    }
+
+    user.subscription.discount = {
+      type: null, value: null, targetPlan: null,
+      reason: null, expiresAt: null, createdAt: null, createdBy: null
+    };
+    await user.save();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: 'user.discount_removed', category: 'billing',
+      targetType: 'user', targetId: req.params.userId, targetName: user.username,
+      details: { removedDiscount: oldDiscount },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true, subscription: user.subscription });
+  } catch (error) {
+    logger.error('Remove discount error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri odstraňovaní zľavy' });
   }
 });
 
