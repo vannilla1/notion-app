@@ -152,12 +152,6 @@ function WorkspaceMembers() {
     <div className="wm-page">
       <header className="crm-header">
         <div className="crm-header-left">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/app')}
-          >
-            ← Späť
-          </button>
           <HeaderLogo />
         </div>
         <div className="crm-header-right">
