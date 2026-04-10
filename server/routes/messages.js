@@ -82,6 +82,8 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
 
     if (tab === 'sent') {
       query.fromUserId = req.user.id;
+    } else if (tab === 'all') {
+      query.$or = [{ fromUserId: req.user.id }, { toUserId: req.user.id }];
     } else {
       query.toUserId = req.user.id;
     }
