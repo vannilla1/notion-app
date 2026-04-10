@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner } = require('../middleware/workspace');
 const logger = require('../utils/logger');
+const { sendInvitationEmail } = require('../services/adminEmailService');
 
 // Get all workspaces user is member of
 router.get('/', authenticateToken, async (req, res) => {
@@ -643,22 +644,42 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     await invitation.save();
 
     // inviterUser already fetched above for capacity check
+    const inviteLink = `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/invite/${invitation.token}`;
+
+    // Send invitation email (fire and forget — don't block response)
+    let emailSent = false;
+    try {
+      emailSent = await sendInvitationEmail({
+        toEmail: normalizedEmail,
+        inviterName: inviterUser?.username || 'Člen tímu',
+        workspaceName: workspace.name,
+        role: invitation.role,
+        inviteLink,
+        expiresAt: invitation.expiresAt
+      });
+    } catch (emailErr) {
+      logger.warn('Invitation email failed', { error: emailErr.message, email: normalizedEmail });
+    }
 
     logger.info('Invitation sent', {
       workspaceId: req.workspaceId,
       email: normalizedEmail,
-      invitedBy: req.user.id
+      invitedBy: req.user.id,
+      emailSent
     });
 
     res.json({
-      message: 'Pozvánka bola vytvorená',
+      message: emailSent
+        ? `Pozvánka bola odoslaná na ${normalizedEmail}`
+        : 'Pozvánka bola vytvorená (email sa nepodarilo odoslať)',
+      emailSent,
       invitation: {
         id: invitation._id,
         email: invitation.email,
         role: invitation.role,
         status: invitation.status,
         token: invitation.token,
-        inviteLink: `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/invite/${invitation.token}`,
+        inviteLink,
         expiresAt: invitation.expiresAt,
         invitedBy: inviterUser?.username || 'Neznámy'
       }

@@ -59,7 +59,9 @@ function WorkspaceMembers() {
       setInviteResult({
         type: 'success',
         message: result.message,
-        link: result.invitation?.inviteLink
+        emailSent: result.emailSent,
+        link: result.invitation?.inviteLink,
+        email: inviteEmail.trim()
       });
       setInviteEmail('');
       fetchData();
@@ -216,27 +218,41 @@ function WorkspaceMembers() {
 
             {inviteResult && (
               <div className={`wm-invite-result ${inviteResult.type}`}>
-                <span>{inviteResult.message}</span>
-                {inviteResult.link && (
-                  <div className="wm-invite-link-box">
-                    <span className="wm-invite-link-label">Odkaz na pozvánku:</span>
-                    <div className="wm-invite-link-row">
-                      <input
-                        type="text"
-                        value={inviteResult.link}
-                        readOnly
-                        className="form-input wm-invite-link-input"
-                      />
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleCopyLink(inviteResult.link)}
-                      >
-                        {copiedLink === inviteResult.link ? '✓ Skopírované' : 'Kopírovať'}
-                      </button>
+                {inviteResult.type === 'success' && inviteResult.emailSent ? (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '20px' }}>✅</span>
+                      <strong style={{ fontSize: '14px' }}>Pozvánka odoslaná na {inviteResult.email}</strong>
                     </div>
-                    <p className="wm-invite-link-hint">
-                      Pošlite tento odkaz pozvanému. Ak ešte nemá konto, zaregistruje sa a automaticky sa pridá do prostredia.
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 8px' }}>
+                      Pozvaný dostane email s odkazom na prijatie pozvánky. Pozvánka je platná 7 dní.
                     </p>
+                    {inviteResult.link && (
+                      <details style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        <summary style={{ cursor: 'pointer', userSelect: 'none' }}>Zobraziť odkaz na pozvánku (záloha)</summary>
+                        <div className="wm-invite-link-row" style={{ marginTop: '6px' }}>
+                          <input type="text" value={inviteResult.link} readOnly className="form-input wm-invite-link-input" />
+                          <button className="btn btn-secondary btn-sm" onClick={() => handleCopyLink(inviteResult.link)}>
+                            {copiedLink === inviteResult.link ? '✓ Skopírované' : 'Kopírovať'}
+                          </button>
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <span>{inviteResult.message}</span>
+                    {inviteResult.link && (
+                      <div className="wm-invite-link-box">
+                        <span className="wm-invite-link-label">⚠️ Email sa nepodarilo odoslať. Pošlite tento odkaz manuálne:</span>
+                        <div className="wm-invite-link-row">
+                          <input type="text" value={inviteResult.link} readOnly className="form-input wm-invite-link-input" />
+                          <button className="btn btn-secondary btn-sm" onClick={() => handleCopyLink(inviteResult.link)}>
+                            {copiedLink === inviteResult.link ? '✓ Skopírované' : 'Kopírovať'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
