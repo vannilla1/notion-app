@@ -579,6 +579,58 @@ const sendPushNotification = async (userId, payload) => {
 };
 
 /**
+ * Send web push only to non-iOS subscriptions (desktop browsers)
+ * iOS WKWebView push subscriptions use web.push.apple.com endpoints
+ */
+const sendPushNotificationExcludeIOS = async (userId, payload) => {
+  const result = { sent: 0, failed: 0, removed: 0 };
+  if (!vapidConfigured || !payload?.title) return result;
+
+  try {
+    const subscriptions = await PushSubscription.find({ userId });
+    if (subscriptions.length === 0) return result;
+
+    // Filter out iOS subscriptions (Apple push endpoints)
+    const desktopSubs = subscriptions.filter(sub =>
+      !sub.endpoint.includes('web.push.apple.com') &&
+      !sub.endpoint.includes('windows.push.apple.com')
+    );
+
+    if (desktopSubs.length === 0) return result;
+
+    const url = generateNotificationUrl(payload.type, payload.data);
+    const pushPayload = JSON.stringify({
+      title: String(payload.title).slice(0, 100),
+      body: String(payload.body || payload.message || '').slice(0, 200),
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/icon-72x72.png',
+      data: { url, type: payload.type, ...payload.data },
+      tag: payload.tag || payload.type || 'default'
+    });
+
+    for (const sub of desktopSubs) {
+      try {
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload);
+        sub.lastUsed = new Date();
+        await sub.save();
+        result.sent++;
+      } catch (error) {
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          await PushSubscription.deleteOne({ _id: sub._id });
+          result.removed++;
+        } else {
+          result.failed++;
+        }
+      }
+    }
+  } catch (error) {
+    logger.error('[Push] Error sending desktop notifications', { error: error.message, userId });
+  }
+
+  return result;
+};
+
+/**
  * Create a notification for a specific user
  */
 const createNotification = async ({
@@ -628,17 +680,24 @@ const createNotification = async ({
       metrics.notifications.socketEmitted++;
     }
 
-    // Send push notification (for background/closed app)
+    // Send push notifications — prefer APNs for iOS, web push for desktop
     const pushPayload = {
       title: notification.title,
       body: notification.message,
       type: notification.type,
       data: notification.data
     };
-    await sendPushNotification(userId, pushPayload);
 
-    // Send APNs push to iOS devices
-    await sendAPNsNotification(userId, pushPayload);
+    // Check if user has APNs devices — if so, use APNs only (avoid duplicate on iOS)
+    const apnsDevices = apnConfigured ? await APNsDevice.find({ userId }) : [];
+    if (apnsDevices.length > 0) {
+      await sendAPNsNotification(userId, pushPayload);
+      // Send web push only to non-iOS subscriptions (desktop browsers)
+      await sendPushNotificationExcludeIOS(userId, pushPayload);
+    } else {
+      // No APNs devices — send web push to all subscriptions
+      await sendPushNotification(userId, pushPayload);
+    }
 
     return notification;
   } catch (error) {

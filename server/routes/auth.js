@@ -5,6 +5,7 @@ const multer = require('multer');
 const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 const { loginLimiter, registerLimiter, passwordChangeLimiter } = require('../middleware/rateLimiter');
+const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -91,6 +92,22 @@ router.post('/register', registerLimiter, async (req, res) => {
         role: user.role
       }
     });
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.register',
+      category: 'auth',
+      targetType: 'user',
+      targetId: user._id.toString(),
+      targetName: user.username,
+      details: { username: user.username, email: user.email },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
   } catch (error) {
     logger.error('Registration error', { error: error.message, ip: req.ip });
     res.status(500).json({ message: 'Chyba servera' });
@@ -141,6 +158,22 @@ router.post('/login', loginLimiter, async (req, res) => {
         avatar: user.avatar,
         role: user.role
       }
+    });
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.login',
+      category: 'auth',
+      targetType: 'user',
+      targetId: user._id.toString(),
+      targetName: user.username,
+      details: { email: user.email },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
     });
   } catch (error) {
     logger.error('Login error', { error: error.message, ip: req.ip });

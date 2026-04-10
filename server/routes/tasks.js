@@ -21,6 +21,7 @@ const upload = multer({
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
+const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -984,6 +985,22 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         logger.debug('[Task Create Global] No assigned users, skipping');
       }
 
+      // Audit log (fire and forget)
+      auditService.logAction({
+        userId: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        action: 'task.created',
+        category: 'task',
+        targetType: 'task',
+        targetId: taskObj.id,
+        targetName: taskObj.title,
+        details: { title: taskObj.title, source: 'global' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        workspaceId: req.workspaceId || null
+      });
+
       return res.status(201).json(taskObj);
     }
 
@@ -1062,6 +1079,24 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         createdCount: createdTasks.length,
         tasks: createdTasks,
         message: `Projekt bol vytvorený v ${createdTasks.length} kontaktoch`
+      });
+    }
+
+    // Audit log for each created contact task (fire and forget)
+    for (const ct of createdTasks) {
+      auditService.logAction({
+        userId: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        action: 'task.created',
+        category: 'task',
+        targetType: 'task',
+        targetId: ct.id,
+        targetName: ct.title,
+        details: { title: ct.title, source: 'contact', contactName: ct.contactName },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        workspaceId: req.workspaceId || null
       });
     }
   } catch (error) {
@@ -1198,7 +1233,24 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
             }
 
-            return res.json(taskData);
+            res.json(taskData);
+
+            // Audit log (fire and forget)
+            auditService.logAction({
+              userId: req.user.id,
+              username: req.user.username,
+              email: req.user.email,
+              action: taskType === 'task.completed' ? 'task.completed' : 'task.updated',
+              category: 'task',
+              targetType: 'task',
+              targetId: taskData.id,
+              targetName: taskData.title,
+              details: { title: taskData.title, source: 'contact', changedFields: Object.keys(req.body).filter(k => req.body[k] !== undefined) },
+              ipAddress: req.ip,
+              userAgent: req.get('user-agent'),
+              workspaceId: req.workspaceId || null
+            });
+            return;
           }
         }
       return res.status(404).json({ message: 'Task not found in contacts' });
@@ -1327,7 +1379,24 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
       }
 
-      return res.json(taskData);
+      res.json(taskData);
+
+      // Audit log (fire and forget)
+      auditService.logAction({
+        userId: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        action: taskType === 'task.completed' ? 'task.completed' : 'task.updated',
+        category: 'task',
+        targetType: 'task',
+        targetId: taskData.id,
+        targetName: taskData.title,
+        details: { title: taskData.title, source: 'global', changedFields: Object.keys(req.body).filter(k => req.body[k] !== undefined) },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        workspaceId: req.workspaceId || null
+      });
+      return;
     }
 
     // Task not found in global tasks, try to find in contacts
@@ -1402,7 +1471,24 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
           }
 
-          return res.json(taskData);
+          res.json(taskData);
+
+          // Audit log (fire and forget)
+          auditService.logAction({
+            userId: req.user.id,
+            username: req.user.username,
+            email: req.user.email,
+            action: fallbackTaskType === 'task.completed' ? 'task.completed' : 'task.updated',
+            category: 'task',
+            targetType: 'task',
+            targetId: taskData.id,
+            targetName: taskData.title,
+            details: { title: taskData.title, source: 'contact', changedFields: Object.keys(req.body).filter(k => req.body[k] !== undefined) },
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            workspaceId: req.workspaceId || null
+          });
+          return;
         }
       }
     }
@@ -1440,7 +1526,24 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             // Send notification about deleted task
             await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
-            return res.json({ message: 'Task deleted' });
+            res.json({ message: 'Task deleted' });
+
+            // Audit log (fire and forget)
+            auditService.logAction({
+              userId: req.user.id,
+              username: req.user.username,
+              email: req.user.email,
+              action: 'task.deleted',
+              category: 'task',
+              targetType: 'task',
+              targetId: req.params.id,
+              targetName: deletedTask.title,
+              details: { title: deletedTask.title, source: 'contact' },
+              ipAddress: req.ip,
+              userAgent: req.get('user-agent'),
+              workspaceId: req.workspaceId || null
+            });
+            return;
           }
         }
       }
@@ -1458,7 +1561,24 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Send notification about deleted task
       await notificationService.notifyTaskChange('task.deleted', task, req.user, [], req.workspaceId);
 
-      return res.json({ message: 'Task deleted' });
+      res.json({ message: 'Task deleted' });
+
+      // Audit log (fire and forget)
+      auditService.logAction({
+        userId: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        action: 'task.deleted',
+        category: 'task',
+        targetType: 'task',
+        targetId: req.params.id,
+        targetName: task.title,
+        details: { title: task.title, source: 'global' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        workspaceId: req.workspaceId || null
+      });
+      return;
     }
 
     // If not found in global tasks, try contacts
@@ -1481,7 +1601,24 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           // Send notification about deleted task
           await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
-          return res.json({ message: 'Task deleted' });
+          res.json({ message: 'Task deleted' });
+
+          // Audit log (fire and forget)
+          auditService.logAction({
+            userId: req.user.id,
+            username: req.user.username,
+            email: req.user.email,
+            action: 'task.deleted',
+            category: 'task',
+            targetType: 'task',
+            targetId: req.params.id,
+            targetName: deletedTask.title,
+            details: { title: deletedTask.title, source: 'contact' },
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            workspaceId: req.workspaceId || null
+          });
+          return;
         }
       }
     }

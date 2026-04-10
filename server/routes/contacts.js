@@ -8,6 +8,7 @@ const User = require('../models/User');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
+const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
 
 // Helper to sync contact tasks to both Google Calendar and Google Tasks
@@ -248,6 +249,22 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     await notificationService.notifyContactChange('contact.created', contact, req.user, req.workspaceId);
 
     res.status(201).json(contactData);
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'contact.created',
+      category: 'contact',
+      targetType: 'contact',
+      targetId: contact._id.toString(),
+      targetName: contact.name,
+      details: { name: contact.name, email: contact.email, company: contact.company },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
@@ -286,6 +303,23 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     await notificationService.notifyContactChange('contact.updated', contact, req.user, req.workspaceId);
 
     res.json(contactData);
+
+    // Audit log (fire and forget)
+    const changedFields = Object.keys(req.body).filter(k => req.body[k] !== undefined);
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'contact.updated',
+      category: 'contact',
+      targetType: 'contact',
+      targetId: contact._id.toString(),
+      targetName: contact.name,
+      details: { changedFields },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
@@ -314,6 +348,22 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     await notificationService.notifyContactChange('contact.deleted', contactData, req.user, req.workspaceId);
 
     res.json({ message: 'Contact deleted' });
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'contact.deleted',
+      category: 'contact',
+      targetType: 'contact',
+      targetId: req.params.id,
+      targetName: contactData.name,
+      details: { name: contactData.name },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }

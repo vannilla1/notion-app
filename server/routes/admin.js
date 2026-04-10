@@ -8,7 +8,10 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const logger = require('../utils/logger');
+const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
+const PushSubscription = require('../models/PushSubscription');
+const APNsDevice = require('../models/APNsDevice');
 const auditService = require('../services/auditService');
 
 const router = express.Router();
@@ -368,6 +371,108 @@ router.get('/workspaces', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
+// ─── WORKSPACE DETAIL ──────────────────────────────────────────
+router.get('/workspaces/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
+
+    const workspace = await Workspace.findById(id);
+    if (!workspace) return res.status(404).json({ message: 'Workspace nenájdený' });
+
+    // Get members with user details
+    const members = await WorkspaceMember.find({ workspaceId: id }).lean();
+    const memberUserIds = members.map(m => m.userId);
+    const memberUsers = await User.find({ _id: { $in: memberUserIds } }).select('username email role subscription color avatar avatarData avatarMimetype').lean();
+    const memberMap = {};
+    memberUsers.forEach(u => { memberMap[u._id.toString()] = u; });
+
+    const enrichedMembers = members.map(m => ({
+      ...m,
+      user: memberMap[m.userId.toString()] || null
+    }));
+
+    // Get counts
+    const [contactCount, taskCount, messageCount] = await Promise.all([
+      Contact.countDocuments({ workspaceId: id }),
+      Task.countDocuments({ workspaceId: id }),
+      Message.countDocuments({ workspaceId: id })
+    ]);
+
+    // Recent activity - last 20 contacts created
+    const recentContacts = await Contact.find({ workspaceId: id })
+      .select('name email company status createdAt')
+      .sort({ createdAt: -1 }).limit(20).lean();
+
+    // Task stats
+    const completedTasks = await Task.countDocuments({ workspaceId: id, completed: true });
+    const pendingTasks = taskCount - completedTasks;
+
+    // Message stats
+    const pendingMessages = await Message.countDocuments({ workspaceId: id, status: 'pending' });
+
+    res.json({
+      workspace,
+      members: enrichedMembers,
+      stats: { contactCount, taskCount, completedTasks, pendingTasks, messageCount, pendingMessages },
+      recentContacts
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri načítaní workspace detailu' });
+  }
+});
+
+// ─── USER DETAIL ───────────────────────────────────────────────
+router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
+
+    const user = await User.findById(id).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
+
+    // Get workspace memberships
+    const memberships = await WorkspaceMember.find({ userId: id }).lean();
+    const workspaceIds = memberships.map(m => m.workspaceId);
+    const workspaces = await Workspace.find({ _id: { $in: workspaceIds } }).lean();
+    const wsMap = {};
+    workspaces.forEach(w => { wsMap[w._id.toString()] = w; });
+
+    const enrichedMemberships = memberships.map(m => ({
+      ...m,
+      workspace: wsMap[m.workspaceId.toString()] || null
+    }));
+
+    // Activity counts
+    const [contactCount, taskCount, messagesSent, messagesReceived] = await Promise.all([
+      Contact.countDocuments({ userId: id }),
+      Task.countDocuments({ $or: [{ userId: id }, { createdBy: id }, { assignedTo: id }] }),
+      Message.countDocuments({ fromUserId: id }),
+      Message.countDocuments({ toUserId: id })
+    ]);
+
+    // Recent audit log
+    const recentActivity = await AuditLog.find({ userId: id })
+      .sort({ createdAt: -1 }).limit(30).lean();
+
+    // Push subscriptions and APNs devices
+    const [pushSubs, apnsDevices] = await Promise.all([
+      PushSubscription.find({ userId: id }).select('endpoint userAgent createdAt lastUsed').lean(),
+      APNsDevice.find({ userId: id }).select('deviceToken apnsEnvironment createdAt lastUsed').lean()
+    ]);
+
+    res.json({
+      user,
+      memberships: enrichedMemberships,
+      stats: { contactCount, taskCount, messagesSent, messagesReceived },
+      recentActivity,
+      devices: { pushSubscriptions: pushSubs, apnsDevices }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri načítaní detailu používateľa' });
+  }
+});
+
 // ─── SYNC DIAGNOSTICS ───────────────────────────────────────────
 router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -472,6 +577,70 @@ router.get('/audit-log/categories', authenticateToken, requireAdmin, async (req,
   } catch (error) {
     logger.error('Admin audit log categories error', { error: error.message });
     res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// Export users to CSV
+router.get('/export/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const users = await User.find().select('-password -avatarData').lean();
+    const members = await WorkspaceMember.find().lean();
+    const workspaces = await Workspace.find().select('_id name').lean();
+    const wsMap = {};
+    workspaces.forEach(w => { wsMap[w._id.toString()] = w.name; });
+
+    const header = 'Meno,Email,Rola,Plán,Workspace-y,Registrovaný,Google Calendar,Google Tasks\n';
+    const rows = users.map(u => {
+      const userWs = members.filter(m => m.userId.toString() === u._id.toString()).map(m => wsMap[m.workspaceId.toString()] || '').filter(Boolean).join('; ');
+      return [
+        `"${(u.username || '').replace(/"/g, '""')}"`,
+        `"${(u.email || '').replace(/"/g, '""')}"`,
+        u.role || 'user',
+        u.subscription?.plan || 'free',
+        `"${userWs}"`,
+        u.createdAt ? new Date(u.createdAt).toLocaleDateString('sk-SK') : '',
+        u.googleCalendar?.enabled ? 'Áno' : 'Nie',
+        u.googleTasks?.enabled ? 'Áno' : 'Nie'
+      ].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=users-export.csv');
+    res.send('\ufeff' + header + rows);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri exporte' });
+  }
+});
+
+// Export workspaces to CSV
+router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const workspaces = await Workspace.find().lean();
+    const members = await WorkspaceMember.find().lean();
+    const users = await User.find().select('_id username email').lean();
+    const userMap = {};
+    users.forEach(u => { userMap[u._id.toString()] = u; });
+
+    const header = 'Názov,Slug,Vlastník,Email vlastníka,Počet členov,Platené miesta,Vytvorený\n';
+    const rows = workspaces.map(w => {
+      const owner = userMap[w.ownerId.toString()] || {};
+      const memberCount = members.filter(m => m.workspaceId.toString() === w._id.toString()).length;
+      return [
+        `"${(w.name || '').replace(/"/g, '""')}"`,
+        `"${(w.slug || '').replace(/"/g, '""')}"`,
+        `"${(owner.username || '').replace(/"/g, '""')}"`,
+        `"${(owner.email || '').replace(/"/g, '""')}"`,
+        memberCount,
+        w.paidSeats || 0,
+        w.createdAt ? new Date(w.createdAt).toLocaleDateString('sk-SK') : ''
+      ].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=workspaces-export.csv');
+    res.send('\ufeff' + header + rows);
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
 

@@ -6,6 +6,7 @@ const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/work
 const Message = require('../models/Message');
 const User = require('../models/User');
 const notificationService = require('../services/notificationService');
+const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -263,6 +264,22 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       }
 
       res.status(201).json(stripAttachmentData(message));
+
+      // Audit log (fire and forget)
+      auditService.logAction({
+        userId: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        action: 'message.created',
+        category: 'message',
+        targetType: 'message',
+        targetId: message._id.toString(),
+        targetName: subject,
+        details: { subject, recipient: recipient.username, type },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        workspaceId: req.workspaceId || null
+      });
     } catch (error) {
       logger.error('Create message error', { error: error.message, userId: req.user.id });
       res.status(500).json({ message: 'Chyba servera' });
@@ -378,6 +395,22 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
     }
 
     res.json(stripAttachmentData(message));
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'message.approved',
+      category: 'message',
+      targetType: 'message',
+      targetId: message._id.toString(),
+      targetName: message.subject,
+      details: { subject: message.subject },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
@@ -431,6 +464,22 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
     }
 
     res.json(stripAttachmentData(message));
+
+    // Audit log (fire and forget)
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'message.rejected',
+      category: 'message',
+      targetType: 'message',
+      targetId: message._id.toString(),
+      targetName: message.subject,
+      details: { subject: message.subject, reason: message.rejectionReason },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
