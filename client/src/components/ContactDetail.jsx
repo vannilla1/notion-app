@@ -7,15 +7,16 @@ function FilePreviewImage({ contactId, fileId, alt }) {
   const [src, setSrc] = useState(null);
 
   useEffect(() => {
-    let revoke;
+    let url = null;
+    let cancelled = false;
     api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' })
       .then(res => {
-        const url = window.URL.createObjectURL(res.data);
-        revoke = url;
+        if (cancelled) return;
+        url = window.URL.createObjectURL(res.data);
         setSrc(url);
       })
       .catch(() => {});
-    return () => { if (revoke) window.URL.revokeObjectURL(revoke); };
+    return () => { cancelled = true; if (url) window.URL.revokeObjectURL(url); };
   }, [contactId, fileId]);
 
   if (!src) return <div className="file-icon">🖼️</div>;

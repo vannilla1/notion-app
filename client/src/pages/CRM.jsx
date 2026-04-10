@@ -325,7 +325,7 @@ function CRM() {
 
     const handleContactDeleted = ({ id }) => {
       setContacts(prev => prev.filter(c => c.id !== id));
-      if (expandedContact === id) setExpandedContact(null);
+      setExpandedContact(prev => prev === id ? null : prev);
     };
 
     const handleTaskUpdated = (updatedTask) => {
@@ -363,7 +363,7 @@ function CRM() {
       socket.off('task-created', handleTaskCreated);
       socket.off('task-deleted', handleTaskDeleted);
     };
-  }, [socket, isConnected, expandedContact]);
+  }, [socket, isConnected]);
 
   const createContact = async (e) => {
     e.preventDefault();

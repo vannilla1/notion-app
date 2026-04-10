@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -70,8 +70,16 @@ function Dashboard() {
   const [subtaskEditForm, setSubtaskEditForm] = useState({});
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
+  // Debounced fetch — coalesce rapid socket events into one API call
+  const fetchTimerRef = useRef(null);
+  const debouncedFetch = useCallback(() => {
+    if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
+    fetchTimerRef.current = setTimeout(() => fetchData(), 300);
+  }, []);
+
   useEffect(() => {
     fetchData();
+    return () => { if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current); };
   }, []);
 
   // Refresh when app returns from background
@@ -84,33 +92,10 @@ function Dashboard() {
   useEffect(() => {
     if (!socket || !isConnected) return;
 
-    const handleContactUpdated = () => fetchData();
-    const handleContactCreated = () => fetchData();
-    const handleContactDeleted = () => fetchData();
-    const handleTaskUpdated = () => fetchData();
-    const handleTaskCreated = () => fetchData();
-    const handleTaskDeleted = () => fetchData();
-
-    const handleMessageCreated = () => fetchData();
-
-    socket.on('contact-created', handleContactCreated);
-    socket.on('contact-updated', handleContactUpdated);
-    socket.on('contact-deleted', handleContactDeleted);
-    socket.on('task-updated', handleTaskUpdated);
-    socket.on('task-created', handleTaskCreated);
-    socket.on('task-deleted', handleTaskDeleted);
-    socket.on('new-message', handleMessageCreated);
-
-    return () => {
-      socket.off('contact-created', handleContactCreated);
-      socket.off('contact-updated', handleContactUpdated);
-      socket.off('contact-deleted', handleContactDeleted);
-      socket.off('task-updated', handleTaskUpdated);
-      socket.off('task-created', handleTaskCreated);
-      socket.off('task-deleted', handleTaskDeleted);
-      socket.off('new-message', handleMessageCreated);
-    };
-  }, [socket, isConnected]);
+    const events = ['contact-created', 'contact-updated', 'contact-deleted', 'task-updated', 'task-created', 'task-deleted', 'new-message'];
+    events.forEach(e => socket.on(e, debouncedFetch));
+    return () => events.forEach(e => socket.off(e, debouncedFetch));
+  }, [socket, isConnected, debouncedFetch]);
 
   const fetchData = async () => {
     try {
@@ -216,44 +201,46 @@ function Dashboard() {
       .filter(Boolean);
   };
 
-  // Stats
-  const activeContacts = contacts.filter(c => c.status === 'active').length;
-  const newContacts = contacts.filter(c => c.status === 'new').length;
-  const completedContacts = contacts.filter(c => c.status === 'completed').length;
-  const cancelledContacts = contacts.filter(c => c.status === 'cancelled').length;
-  const pendingTasks = tasks.filter(t => !t.completed).length;
-  const completedTasks = tasks.filter(t => t.completed).length;
+  // Stats (memoized — recompute only when data changes)
+  const stats = useMemo(() => {
+    const activeTasks = tasks.filter(t => !t.completed);
+    return {
+      activeContacts: contacts.filter(c => c.status === 'active').length,
+      newContacts: contacts.filter(c => c.status === 'new').length,
+      completedContacts: contacts.filter(c => c.status === 'completed').length,
+      cancelledContacts: contacts.filter(c => c.status === 'cancelled').length,
+      pendingTasks: activeTasks.length,
+      completedTasks: tasks.length - activeTasks.length,
+      totalReceived: messages.received.length,
+      pendingMessages: messages.received.filter(m => m.status === 'pending').length,
+      approvedMessages: messages.received.filter(m => m.status === 'approved').length,
+      rejectedMessages: messages.received.filter(m => m.status === 'rejected').length,
+      commentedMessages: messages.received.filter(m => m.status === 'commented').length,
+      totalSent: messages.sent.length,
+      lowPriorityTasks: activeTasks.filter(t => t.priority === 'low').length,
+      mediumPriorityTasks: activeTasks.filter(t => t.priority === 'medium').length,
+      highPriorityTasks: activeTasks.filter(t => t.priority === 'high').length,
+    };
+  }, [contacts, tasks, messages]);
 
-  // Message stats
-  const totalReceived = messages.received.length;
-  const pendingMessages = messages.received.filter(m => m.status === 'pending').length;
-  const approvedMessages = messages.received.filter(m => m.status === 'approved').length;
-  const rejectedMessages = messages.received.filter(m => m.status === 'rejected').length;
-  const commentedMessages = messages.received.filter(m => m.status === 'commented').length;
-  const totalSent = messages.sent.length;
+  const { activeContacts, newContacts, completedContacts, cancelledContacts, pendingTasks, completedTasks, totalReceived, pendingMessages, approvedMessages, rejectedMessages, commentedMessages, totalSent, lowPriorityTasks, mediumPriorityTasks, highPriorityTasks } = stats;
 
-  // Priority stats
-  const lowPriorityTasks = tasks.filter(t => t.priority === 'low' && !t.completed).length;
-  const mediumPriorityTasks = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
-  const highPriorityTasks = tasks.filter(t => t.priority === 'high' && !t.completed).length;
-
-  // Sort tasks: incomplete first, then by priority (high→medium→low)
-  const sortTasks = (list) => [...list].sort((a, b) => {
+  // Sort functions (stable references)
+  const sortTasks = useCallback((list) => [...list].sort((a, b) => {
     const aCompleted = a.completed === true;
     const bCompleted = b.completed === true;
     if (aCompleted && !bCompleted) return 1;
     if (!aCompleted && bCompleted) return -1;
     const pri = { high: 0, medium: 1, low: 2 };
     return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
-  });
+  }), []);
 
-  // Sort contacts: new/active first, completed second, cancelled last, alphabetically within groups
-  const sortContacts = (list) => [...list].sort((a, b) => {
+  const sortContacts = useCallback((list) => [...list].sort((a, b) => {
     const order = { new: 0, active: 0, completed: 1, cancelled: 2 };
     const diff = (order[a.status] ?? 0) - (order[b.status] ?? 0);
     if (diff !== 0) return diff;
     return (a.name || '').localeCompare(b.name || '', 'sk');
-  });
+  }), []);
 
   // Get items for detail view
   const getDetailItems = () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
@@ -931,9 +931,11 @@ function Tasks() {
       setSelectedTask(prev => prev?.id === id ? null : prev);
     };
 
-    // When a contact is updated, refresh tasks to get updated embedded tasks
+    // When a contact is updated, refresh tasks (debounced to avoid rapid re-fetches)
+    let contactTimer = null;
     const handleContactUpdated = () => {
-      fetchTasks();
+      if (contactTimer) clearTimeout(contactTimer);
+      contactTimer = setTimeout(() => fetchTasks(), 300);
     };
 
     socket.on('task-created', handleTaskCreated);
@@ -946,6 +948,7 @@ function Tasks() {
       socket.off('task-updated', handleTaskUpdated);
       socket.off('task-deleted', handleTaskDeleted);
       socket.off('contact-updated', handleContactUpdated);
+      if (contactTimer) clearTimeout(contactTimer);
     };
   }, [socket, isConnected]);
 
@@ -1832,7 +1835,7 @@ function Tasks() {
     });
   };
 
-  const filteredTasks = tasks.filter(t => {
+  const filteredTasks = useMemo(() => tasks.filter(t => {
     // First apply contact filter (from CRM navigation)
     if (contactFilter) {
       const taskContactIds = t.contactIds || (t.contactId ? [t.contactId] : []);
@@ -1895,11 +1898,11 @@ function Tasks() {
       return isAssignedToUser(t, userId);
     }
     return true;
-  });
+  }), [tasks, contactFilter, searchQuery, filter, user]);
 
   // Sort tasks: incomplete first, then by priority (high→medium→low), then by order, completed at the end
   const priorityOrder = { high: 0, medium: 1, low: 2 };
-  const sortedFilteredTasks = [...filteredTasks].sort((a, b) => {
+  const sortedFilteredTasks = useMemo(() => [...filteredTasks].sort((a, b) => {
     const aCompleted = a.completed === true;
     const bCompleted = b.completed === true;
     if (aCompleted && !bCompleted) return 1;
@@ -1913,7 +1916,7 @@ function Tasks() {
     const orderB = b.order || 0;
     if (orderA !== orderB) return orderA - orderB;
     return 0;
-  });
+  }), [filteredTasks]);
 
   // DnD sensors
   const sensors = useSensors(
@@ -2010,23 +2013,25 @@ function Tasks() {
     }
   }, []);
 
-  const completedCount = tasks.filter(t => t.completed).length;
-  const activeCount = tasks.filter(t => !t.completed).length;
-  const newCount = countNewOrModified(tasks);
-  const highPriorityCount = countWithPriority(tasks, 'high');
-  const mediumPriorityCount = countWithPriority(tasks, 'medium');
-  const lowPriorityCount = countWithPriority(tasks, 'low');
-  const withContactCount = tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length;
-  const withoutContactCount = tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length;
-  const assignedToMeCount = tasks.filter(t => {
+  const filterCounts = useMemo(() => {
     const userId = user?.id?.toString();
-    if (!userId) return false;
-    return isAssignedToUser(t, userId);
-  }).length;
-  const dueSuccessCount = countWithDueClass(tasks, 'due-success');
-  const dueWarningCount = countWithDueClass(tasks, 'due-warning');
-  const dueDangerCount = countWithDueClass(tasks, 'due-danger');
-  const overdueCount = countWithDueClass(tasks, 'overdue');
+    return {
+      completedCount: tasks.filter(t => t.completed).length,
+      activeCount: tasks.filter(t => !t.completed).length,
+      newCount: countNewOrModified(tasks),
+      highPriorityCount: countWithPriority(tasks, 'high'),
+      mediumPriorityCount: countWithPriority(tasks, 'medium'),
+      lowPriorityCount: countWithPriority(tasks, 'low'),
+      withContactCount: tasks.filter(t => (t.contactIds?.length > 0) || t.contactId).length,
+      withoutContactCount: tasks.filter(t => !((t.contactIds?.length > 0) || t.contactId)).length,
+      assignedToMeCount: userId ? tasks.filter(t => isAssignedToUser(t, userId)).length : 0,
+      dueSuccessCount: countWithDueClass(tasks, 'due-success'),
+      dueWarningCount: countWithDueClass(tasks, 'due-warning'),
+      dueDangerCount: countWithDueClass(tasks, 'due-danger'),
+      overdueCount: countWithDueClass(tasks, 'overdue'),
+    };
+  }, [tasks, user]);
+  const { completedCount, activeCount, newCount, highPriorityCount, mediumPriorityCount, lowPriorityCount, withContactCount, withoutContactCount, assignedToMeCount, dueSuccessCount, dueWarningCount, dueDangerCount, overdueCount } = filterCounts;
 
   return (
     <div className="crm-container">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
@@ -74,12 +74,15 @@ function Messages() {
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Stats for sidebar
+  // Stats for sidebar (memoized)
   const receivedMessages = messages;
-  const pendingMessages = messages.filter(m => m.status === 'pending');
-  const approvedMessages = messages.filter(m => m.status === 'approved');
-  const rejectedMessages = messages.filter(m => m.status === 'rejected');
-  const commentedMessages = messages.filter(m => m.status === 'commented');
+  const messageStats = useMemo(() => ({
+    pending: messages.filter(m => m.status === 'pending'),
+    approved: messages.filter(m => m.status === 'approved'),
+    rejected: messages.filter(m => m.status === 'rejected'),
+    commented: messages.filter(m => m.status === 'commented'),
+  }), [messages]);
+  const { pending: pendingMessages, approved: approvedMessages, rejected: rejectedMessages, commented: commentedMessages } = messageStats;
 
   useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
@@ -94,10 +97,14 @@ function Messages() {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);
 
-  // Socket events — include tab and statusFilter to avoid stale closures
+  // Socket events — debounced to coalesce rapid updates
+  const msgFetchTimerRef = useRef(null);
   useEffect(() => {
     if (!socket || !isConnected) return;
-    const refresh = () => { fetchMessages(); fetchPendingCount(); };
+    const refresh = () => {
+      if (msgFetchTimerRef.current) clearTimeout(msgFetchTimerRef.current);
+      msgFetchTimerRef.current = setTimeout(() => { fetchMessages(); fetchPendingCount(); }, 300);
+    };
     socket.on('message-created', refresh);
     socket.on('message-updated', refresh);
     socket.on('message-deleted', refresh);
@@ -105,6 +112,7 @@ function Messages() {
       socket.off('message-created', refresh);
       socket.off('message-updated', refresh);
       socket.off('message-deleted', refresh);
+      if (msgFetchTimerRef.current) clearTimeout(msgFetchTimerRef.current);
     };
   }, [socket, isConnected, tab, statusFilter]);
 
