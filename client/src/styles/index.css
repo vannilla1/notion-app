@@ -3262,7 +3262,7 @@ body.modal-open {
 
   .modal-overlay {
     padding: 10px;
-    align-items: flex-start;
+    align-items: center;
     padding-top: max(10px, env(safe-area-inset-top, 10px));
     padding-bottom: max(10px, env(safe-area-inset-bottom, 10px));
   }
@@ -7668,7 +7668,7 @@ body.ios-app {
     padding: 12px;
     padding-top: max(12px, env(safe-area-inset-top, 12px));
     padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
-    align-items: flex-start;
+    align-items: center;
   }
 
   .modal-content {
