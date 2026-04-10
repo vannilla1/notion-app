@@ -205,55 +205,27 @@ function CRM() {
     }
   }, [contacts.length]);
 
-  // Listen for custom event from App.jsx (when notification clicked while on this page)
+  // Handle notification deep links — unified via URL query params
+  // Both service worker (postMessage → App.jsx navigate) and iOS (location.href) use this
   useEffect(() => {
-    const handleCrmHighlight = async (event) => {
-      const { contactId, timestamp } = event.detail;
-      if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = timestamp.toString();
-
-        // Refresh contacts first to get latest data
-        await fetchContacts();
-
-        // Then highlight the contact (with small delay to ensure state updated)
-        setTimeout(() => {
-          processContactHighlight(contactId);
-        }, 100);
-      }
-    };
-
-    window.addEventListener('crm-highlight', handleCrmHighlight);
-    return () => window.removeEventListener('crm-highlight', handleCrmHighlight);
-  }, [processContactHighlight, fetchContacts]);
-
-  useEffect(() => {
-    // Check URL query params first (from service worker navigate)
     const params = new URLSearchParams(location.search);
     const urlContactId = params.get('expandContact');
     const urlTimestamp = params.get('_t');
 
-    if (urlContactId && urlTimestamp) {
-      // Check if this is a new navigation
-      if (urlTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = urlTimestamp;
-        // Clear query params from URL
+    if (urlContactId) {
+      const tsKey = urlTimestamp || 'no-ts';
+      // Only process if this is a new navigation (different _t)
+      if (tsKey !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = tsKey;
+        // Clear query params from URL immediately
         navigate(location.pathname, { replace: true, state: {} });
-        processContactHighlight(urlContactId);
-        return;
+        // Refresh contacts then highlight
+        fetchContacts().then(() => {
+          setTimeout(() => processContactHighlight(urlContactId), 100);
+        });
       }
     }
-
-    // Fallback: Check navigation state (from postMessage)
-    if (location.state?.expandContactId) {
-      const currentTimestamp = location.state.navTimestamp?.toString();
-      if (currentTimestamp && currentTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = currentTimestamp;
-        // Clear the navigation state immediately
-        navigate(location.pathname, { replace: true, state: {} });
-        processContactHighlight(location.state.expandContactId);
-      }
-    }
-  }, [location.search, location.state, navigate, location.pathname, contacts.length]);
+  }, [location.search]);
 
   // Process pending highlight when contacts are loaded
   useEffect(() => {

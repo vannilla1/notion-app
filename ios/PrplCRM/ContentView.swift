@@ -363,8 +363,6 @@ struct WebView: UIViewRepresentable {
                 .replacingOccurrences(of: "'", with: "\\'")
             let js = """
             (function() {
-                // Refresh data on current page
-                window.dispatchEvent(new CustomEvent('app-resumed', { detail: { timestamp: Date.now(), fromNotification: true } }));
                 // Parse URL — handle both full URLs and relative paths
                 var raw = '\(escapedLink)';
                 var path;
@@ -374,9 +372,13 @@ struct WebView: UIViewRepresentable {
                 } catch(e) {
                     path = raw;
                 }
-                // Routes are /crm, /tasks, /messages — navigate with timestamp to force refresh
+                // Add timestamp to force re-navigation
                 var sep = path.includes('?') ? '&' : '?';
-                window.location.href = path + sep + '_t=' + Date.now();
+                var fullPath = path + sep + '_t=' + Date.now();
+                // Use history.pushState + popstate event — this triggers React Router
+                // without doing a full page reload (which would destroy React state)
+                window.history.pushState({}, '', fullPath);
+                window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
             })();
             """
 

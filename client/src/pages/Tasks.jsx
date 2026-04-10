@@ -825,56 +825,24 @@ function Tasks() {
     }
   }, [tasks.length]);
 
-  // Listen for custom event from App.jsx (when notification clicked while on this page)
+  // Handle notification deep links — unified via URL query params
   useEffect(() => {
-    const handleTaskHighlight = async (event) => {
-      const { taskId, subtaskId, timestamp } = event.detail;
-      if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = timestamp.toString();
-
-        // Refresh tasks first to get latest data
-        await fetchTasks();
-
-        // Then highlight the task (with small delay to ensure state updated)
-        setTimeout(() => {
-          processHighlight(taskId, subtaskId);
-        }, 100);
-      }
-    };
-
-    window.addEventListener('task-highlight', handleTaskHighlight);
-    return () => window.removeEventListener('task-highlight', handleTaskHighlight);
-  }, [processHighlight, fetchTasks]);
-
-  useEffect(() => {
-    // Check URL query params first (from service worker navigate)
     const params = new URLSearchParams(location.search);
     const urlTaskId = params.get('highlightTask');
     const urlSubtaskId = params.get('subtask');
     const urlTimestamp = params.get('_t');
 
-    if (urlTaskId && urlTimestamp) {
-      // Check if this is a new navigation
-      if (urlTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = urlTimestamp;
-        // Clear query params from URL
+    if (urlTaskId) {
+      const tsKey = urlTimestamp || 'no-ts';
+      if (tsKey !== lastNavTimestampRef.current) {
+        lastNavTimestampRef.current = tsKey;
         navigate(location.pathname, { replace: true, state: {} });
-        processHighlight(urlTaskId, urlSubtaskId);
-        return;
+        fetchTasks().then(() => {
+          setTimeout(() => processHighlight(urlTaskId, urlSubtaskId), 100);
+        });
       }
     }
-
-    // Fallback: Check navigation state (from postMessage)
-    if (location.state?.highlightTaskId) {
-      const currentTimestamp = location.state.navTimestamp?.toString();
-      if (currentTimestamp && currentTimestamp !== lastNavTimestampRef.current) {
-        lastNavTimestampRef.current = currentTimestamp;
-        // Clear the navigation state immediately
-        navigate(location.pathname, { replace: true, state: {} });
-        processHighlight(location.state.highlightTaskId, location.state.highlightSubtaskId);
-      }
-    }
-  }, [location.search, location.state, navigate, location.pathname, tasks.length]);
+  }, [location.search]);
 
   // Process pending highlight when tasks are loaded
   useEffect(() => {

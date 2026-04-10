@@ -233,56 +233,32 @@ function AppContent() {
       if (event.data?.type === 'NOTIFICATION_CLICK') {
         const { url, data, timestamp } = event.data;
 
-        // Parse URL to extract path and params
         try {
           const urlObj = new URL(url);
           const path = urlObj.pathname;
           const params = new URLSearchParams(urlObj.search);
+          const navTs = (timestamp || Date.now()).toString();
 
-          const navTimestamp = timestamp || Date.now();
-
-          // Dispatch custom event that pages can listen to
-          // This works even when we're already on the target page
+          // ALWAYS navigate via URL with _t param — this triggers useEffect in target page
+          // The _t param forces React Router to treat it as a new navigation even on same page
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
             const contactId = params.get('expandContact') || data.contactId;
-            window.dispatchEvent(new CustomEvent('crm-highlight', {
-              detail: { contactId, timestamp: navTimestamp }
-            }));
-            // Also navigate in case we're on a different page
-            if (location.pathname !== '/crm') {
-              navigate('/crm', {
-                state: { expandContactId: contactId, navTimestamp }
-              });
-            }
+            navigate(`/crm?expandContact=${contactId}&_t=${navTs}`);
           } else if (path === '/tasks' && (params.get('highlightTask') || data?.taskId)) {
             const taskId = params.get('highlightTask') || data.taskId;
             const subtaskId = params.get('subtask') || data.subtaskId || null;
-            window.dispatchEvent(new CustomEvent('task-highlight', {
-              detail: { taskId, subtaskId, timestamp: navTimestamp }
-            }));
-            // Also navigate in case we're on a different page
-            if (location.pathname !== '/tasks') {
-              navigate('/tasks', {
-                state: { highlightTaskId: taskId, highlightSubtaskId: subtaskId, navTimestamp }
-              });
-            }
+            let taskUrl = `/tasks?highlightTask=${taskId}&_t=${navTs}`;
+            if (subtaskId) taskUrl += `&subtask=${subtaskId}`;
+            navigate(taskUrl);
           } else if (path === '/messages' && (params.get('highlight') || data?.messageId)) {
             const messageId = params.get('highlight') || data.messageId;
-            window.dispatchEvent(new CustomEvent('message-highlight', {
-              detail: { messageId, timestamp: navTimestamp }
-            }));
-            if (location.pathname !== '/messages') {
-              navigate('/messages?highlight=' + messageId + '&_t=' + navTimestamp);
-            }
+            navigate(`/messages?highlight=${messageId}&_t=${navTs}`);
           } else {
-            // Fallback: navigate to the path with query params preserved
             navigate(path + (urlObj.search || ''));
           }
         } catch (e) {
           console.error('[App] Error parsing notification URL:', e);
-          if (url.startsWith('/')) {
-            navigate(url);
-          }
+          if (url.startsWith('/')) navigate(url);
         }
       }
     };

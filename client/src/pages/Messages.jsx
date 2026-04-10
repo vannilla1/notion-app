@@ -128,7 +128,7 @@ function Messages() {
   }, [location.search]);
 
   // Deep link highlight — fetch message by ID, switch to correct tab, select it
-  const highlightProcessed = useRef(false);
+  const lastMsgHighlightRef = useRef(null);
   const highlightMessage = async (messageId) => {
     try {
       const res = await api.get(`/api/messages/${messageId}`);
@@ -154,34 +154,22 @@ function Messages() {
     }
   };
 
-  // Handle highlight from URL params (initial load / iOS deep link)
+  // Handle highlight from URL params — unified for all sources (SW, iOS, direct link)
   useEffect(() => {
-    if (highlightProcessed.current) return;
     const params = new URLSearchParams(location.search);
     const highlightId = params.get('highlight');
+    const urlTimestamp = params.get('_t');
+
     if (highlightId) {
-      highlightProcessed.current = true;
-      highlightMessage(highlightId);
-      // Clear highlight param from URL
-      const newParams = new URLSearchParams(location.search);
-      newParams.delete('highlight');
-      newParams.delete('_t');
-      const newSearch = newParams.toString();
-      navigate(location.pathname + (newSearch ? '?' + newSearch : ''), { replace: true });
+      const tsKey = urlTimestamp || 'no-ts';
+      if (tsKey !== lastMsgHighlightRef.current) {
+        lastMsgHighlightRef.current = tsKey;
+        highlightMessage(highlightId);
+        // Clear params from URL
+        navigate(location.pathname, { replace: true });
+      }
     }
   }, [location.search]);
-
-  // Handle highlight from custom event (service worker notification click while on /messages)
-  useEffect(() => {
-    const handleHighlight = (e) => {
-      const { messageId } = e.detail || {};
-      if (messageId) {
-        highlightMessage(messageId);
-      }
-    };
-    window.addEventListener('message-highlight', handleHighlight);
-    return () => window.removeEventListener('message-highlight', handleHighlight);
-  }, [tab, statusFilter]);
 
   const fetchMessages = async () => {
     try {
