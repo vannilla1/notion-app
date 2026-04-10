@@ -1,13 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApi, { API_BASE_URL } from '@/api/adminApi';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
+import { Line, Bar, Doughnut } from 'react-chartjs-2';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler);
 
 const TABS = [
   { id: 'overview', label: 'Prehľad', icon: '📊' },
   { id: 'users', label: 'Používatelia', icon: '👥' },
   { id: 'workspaces', label: 'Workspace-y', icon: '🏢' },
+  { id: 'charts', label: 'Grafy', icon: '📈' },
+  { id: 'activity', label: 'Aktivita', icon: '⚡' },
+  { id: 'api', label: 'API', icon: '🔌' },
+  { id: 'storage', label: 'Storage', icon: '💾' },
+  { id: 'comparison', label: 'Porovnanie', icon: '⚖️' },
   { id: 'audit', label: 'Audit log', icon: '📋' },
-  { id: 'sync', label: 'Sync diagnostika', icon: '🔄' }
+  { id: 'sync', label: 'Sync', icon: '🔄' }
 ];
 
 function AdminPanel() {
@@ -63,6 +72,11 @@ function AdminPanel() {
         {activeTab === 'overview' && <OverviewTab />}
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'workspaces' && <WorkspacesTab />}
+        {activeTab === 'charts' && <ChartsTab />}
+        {activeTab === 'activity' && <ActivityFeedTab />}
+        {activeTab === 'api' && <ApiMetricsTab />}
+        {activeTab === 'storage' && <StorageTab />}
+        {activeTab === 'comparison' && <WorkspaceComparisonTab />}
         {activeTab === 'audit' && <AuditLogTab />}
         {activeTab === 'sync' && <SyncTab />}
       </div>
@@ -1081,6 +1095,555 @@ function AuditLogTab() {
           <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} style={{ fontSize: '13px', padding: '4px 12px' }}>→</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── P3: CHARTS TAB ────────────────────────────────────────────
+const chartColors = {
+  primary: '#8B5CF6',
+  primaryLight: 'rgba(139, 92, 246, 0.1)',
+  green: '#22C55E',
+  greenLight: 'rgba(34, 197, 94, 0.1)',
+  blue: '#3B82F6',
+  orange: '#F59E0B',
+  red: '#EF4444',
+  gray: '#6B7280'
+};
+
+function ChartsTab() {
+  const [userGrowth, setUserGrowth] = useState(null);
+  const [activity, setActivity] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      adminApi.get(`/api/admin/charts/user-growth?days=${days}`).then(r => r.data).catch(() => []),
+      adminApi.get(`/api/admin/charts/activity?days=${days}`).then(r => r.data).catch(() => [])
+    ]).then(([ug, act]) => {
+      setUserGrowth(ug);
+      setActivity(act);
+    }).finally(() => setLoading(false));
+  }, [days]);
+
+  if (loading) return <div className="sa-loading">Načítavam grafy...</div>;
+
+  const formatLabel = (d) => {
+    const date = new Date(d);
+    return `${date.getDate()}.${date.getMonth() + 1}.`;
+  };
+
+  const growthData = userGrowth && {
+    labels: userGrowth.map(d => formatLabel(d.date)),
+    datasets: [
+      {
+        label: 'Celkovo používateľov',
+        data: userGrowth.map(d => d.cumulative),
+        borderColor: chartColors.primary,
+        backgroundColor: chartColors.primaryLight,
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y'
+      },
+      {
+        label: 'Nové registrácie',
+        data: userGrowth.map(d => d.daily),
+        borderColor: chartColors.green,
+        backgroundColor: chartColors.greenLight,
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y1'
+      }
+    ]
+  };
+
+  const activityData = activity && {
+    labels: activity.map(d => formatLabel(d.date)),
+    datasets: [
+      { label: 'Kontakty', data: activity.map(d => d.contact || 0), backgroundColor: chartColors.blue, stack: 'a' },
+      { label: 'Úlohy', data: activity.map(d => d.task || 0), backgroundColor: chartColors.green, stack: 'a' },
+      { label: 'Správy', data: activity.map(d => d.message || 0), backgroundColor: chartColors.orange, stack: 'a' },
+      { label: 'Auth', data: activity.map(d => d.auth || 0), backgroundColor: chartColors.gray, stack: 'a' }
+    ]
+  };
+
+  const chartOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 16, font: { size: 12 } } } },
+    scales: { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 15, font: { size: 11 } } } }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Grafy a analytika</h2>
+        <select value={days} onChange={e => setDays(Number(e.target.value))}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+          <option value={7}>7 dní</option>
+          <option value={30}>30 dní</option>
+          <option value={90}>90 dní</option>
+        </select>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px' }}>
+        {growthData && (
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>Rast používateľov</h3>
+            <div style={{ height: '300px' }}>
+              <Line data={growthData} options={{
+                ...chartOpts,
+                scales: {
+                  ...chartOpts.scales,
+                  y: { position: 'left', title: { display: true, text: 'Celkovo', font: { size: 11 } } },
+                  y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Denne', font: { size: 11 } } }
+                }
+              }} />
+            </div>
+          </div>
+        )}
+
+        {activityData && (
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>Aktivita podľa kategórie</h3>
+            <div style={{ height: '300px' }}>
+              <Bar data={activityData} options={{
+                ...chartOpts,
+                scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, stacked: true }, y: { stacked: true } }
+              }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── P3: ACTIVITY FEED TAB ─────────────────────────────────────
+function ActivityFeedTab() {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const timerRef = useRef(null);
+
+  const fetchEvents = useCallback((after) => {
+    const params = after ? `?after=${after}&limit=20` : '?limit=50';
+    return adminApi.get(`/api/admin/activity-feed${params}`).then(r => r.data).catch(() => []);
+  }, []);
+
+  useEffect(() => {
+    fetchEvents().then(data => { setEvents(data); setLoading(false); });
+  }, [fetchEvents]);
+
+  // Auto-refresh every 10s
+  useEffect(() => {
+    if (!autoRefresh) { clearInterval(timerRef.current); return; }
+    timerRef.current = setInterval(async () => {
+      if (events.length === 0) return;
+      const latest = events[0]?.createdAt;
+      if (!latest) return;
+      const newEvents = await fetchEvents(latest);
+      if (newEvents.length > 0) {
+        setEvents(prev => [...newEvents, ...prev].slice(0, 200));
+      }
+    }, 10000);
+    return () => clearInterval(timerRef.current);
+  }, [autoRefresh, events, fetchEvents]);
+
+  const formatTime = (d) => {
+    const date = new Date(d);
+    const now = new Date();
+    const diffMs = now - date;
+    if (diffMs < 60000) return 'práve teraz';
+    if (diffMs < 3600000) return `pred ${Math.floor(diffMs / 60000)} min`;
+    if (diffMs < 86400000) return `pred ${Math.floor(diffMs / 3600000)} h`;
+    return date.toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const actionIcons = {
+    'auth.login': '🔓', 'auth.register': '📝',
+    'contact.created': '➕', 'contact.updated': '✏️', 'contact.deleted': '🗑️',
+    'task.created': '📋', 'task.completed': '✅', 'task.deleted': '🗑️',
+    'message.created': '📨', 'message.approved': '✅', 'message.rejected': '❌',
+    'user.role_changed': '🔑', 'user.plan_changed': '💳', 'user.deleted': '🗑️',
+    'workspace.deleted': '🏢'
+  };
+
+  if (loading) return <div className="sa-loading">Načítavam aktivitu...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600 }}>
+          Live aktivita
+          {autoRefresh && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#22C55E', marginLeft: '8px', animation: 'pulse 2s infinite' }}></span>}
+        </h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
+          Auto-refresh (10s)
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '70vh', overflow: 'auto' }}>
+        {events.length === 0 && <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadna aktivita</div>}
+        {events.map((e, i) => (
+          <div key={e.id || i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: i === 0 && events.length > 1 ? 'var(--primary-light, #EDE9FE)' : 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px', transition: 'background 0.3s' }}>
+            <span style={{ fontSize: '16px', flexShrink: 0 }}>{actionIcons[e.action] || '📌'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div>
+                <strong>{e.username || '—'}</strong>
+                <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>{ACTION_LABELS[e.action] || e.action}</span>
+                {e.targetName && <span style={{ marginLeft: '4px' }}>— {e.targetName}</span>}
+              </div>
+              {e.details && (e.details.oldRole || e.details.oldPlan || e.details.subject) && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {e.details.oldRole && e.details.newRole && `${e.details.oldRole} → ${e.details.newRole}`}
+                  {e.details.oldPlan && e.details.newPlan && `${e.details.oldPlan} → ${e.details.newPlan}`}
+                  {e.details.subject && `"${e.details.subject}"`}
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{formatTime(e.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── P3: API METRICS TAB ───────────────────────────────────────
+function ApiMetricsTab() {
+  const [metrics, setMetrics] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.get('/api/admin/api-metrics')
+      .then(r => setMetrics(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="sa-loading">Načítavam API metriky...</div>;
+  if (!metrics) return <div className="sa-error">Nepodarilo sa načítať metriky</div>;
+
+  const hourlyData = {
+    labels: metrics.hourlyData.map(h => h.hour.slice(11) + ':00'),
+    datasets: [{
+      label: 'Requesty/hod',
+      data: metrics.hourlyData.map(h => h.count),
+      backgroundColor: chartColors.primaryLight,
+      borderColor: chartColors.primary,
+      fill: true,
+      tension: 0.3
+    }]
+  };
+
+  const statusData = {
+    labels: Object.keys(metrics.statusCodes).map(c => `${c} ${parseInt(c) < 400 ? 'OK' : parseInt(c) < 500 ? 'Client Err' : 'Server Err'}`),
+    datasets: [{
+      data: Object.values(metrics.statusCodes),
+      backgroundColor: Object.keys(metrics.statusCodes).map(c => parseInt(c) < 400 ? chartColors.green : parseInt(c) < 500 ? chartColors.orange : chartColors.red)
+    }]
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>API Metriky</h2>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+        {[
+          { label: 'Celkom requestov', value: metrics.totalRequests.toLocaleString() },
+          { label: 'Req/min (avg)', value: metrics.requestsPerMinute },
+          { label: 'Error rate', value: `${metrics.errorRate}%` },
+          { label: 'Tracking od', value: new Date(metrics.trackingSince).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+        ].map(s => (
+          <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '12px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '20px', fontWeight: 700 }}>{s.value}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '24px' }}>
+        {/* Hourly chart */}
+        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Requesty za posledných 24h</h3>
+          <div style={{ height: '250px' }}>
+            <Line data={hourlyData} options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12, font: { size: 10 } } } }
+            }} />
+          </div>
+        </div>
+
+        {/* Status codes */}
+        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Status kódy</h3>
+          <div style={{ height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {Object.keys(metrics.statusCodes).length > 0 ? (
+              <Doughnut data={statusData} options={{
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } }
+              }} />
+            ) : <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Žiadne dáta</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Top routes */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Top endpointy</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '400px', overflow: 'auto' }}>
+          {metrics.topRoutes.map((r, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontFamily: 'monospace' }}>
+              <span style={{ flex: 1 }}>{r.route}</span>
+              <div style={{ display: 'flex', gap: '16px', flexShrink: 0 }}>
+                <span style={{ color: 'var(--text-muted)' }}>{Object.entries(r.methods || {}).map(([m, c]) => `${m}:${c}`).join(' ')}</span>
+                <span style={{ fontWeight: 600, minWidth: '50px', textAlign: 'right' }}>{r.total}x</span>
+                <span style={{ color: 'var(--text-muted)', minWidth: '60px', textAlign: 'right' }}>{r.avgDuration}ms</span>
+              </div>
+            </div>
+          ))}
+          {metrics.topRoutes.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadne dáta — metriky sa začnú zbierať po reštarte servera</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── P3: STORAGE TAB ───────────────────────────────────────────
+function StorageTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.get('/api/admin/storage')
+      .then(r => setData(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="sa-loading">Načítavam storage metriky...</div>;
+  if (!data) return <div className="sa-error">Nepodarilo sa načítať storage</div>;
+
+  const fmtSize = (bytes) => {
+    if (!bytes || bytes === 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+    return `${(bytes / 1073741824).toFixed(2)} GB`;
+  };
+
+  const collLabels = { users: 'Používatelia', contacts: 'Kontakty', tasks: 'Úlohy', messages: 'Správy', notifications: 'Notifikácie', auditlogs: 'Audit log', pages: 'Stránky', workspaces: 'Workspace-y', workspacemembers: 'Členstvá', pushsubscriptions: 'Push subs', apnsdevices: 'APNs zariadenia' };
+
+  const collectionData = {
+    labels: data.collections.map(c => collLabels[c.name] || c.name),
+    datasets: [{
+      data: data.collections.map(c => c.size),
+      backgroundColor: [chartColors.primary, chartColors.blue, chartColors.green, chartColors.orange, chartColors.red, chartColors.gray, '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1']
+    }]
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Storage metriky</h2>
+
+      {/* DB overview */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+        {[
+          { label: 'Dáta', value: fmtSize(data.database.dataSize) },
+          { label: 'Storage', value: fmtSize(data.database.storageSize) },
+          { label: 'Indexy', value: fmtSize(data.database.indexSize) },
+          { label: 'Kolekcie', value: data.database.collections }
+        ].map(s => (
+          <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '12px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '20px', fontWeight: 700 }}>{s.value}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+        {/* Collection breakdown chart */}
+        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Veľkosť kolekcií</h3>
+          <div style={{ height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Doughnut data={collectionData} options={{
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 }, padding: 8 } } }
+            }} />
+          </div>
+        </div>
+
+        {/* Collection table */}
+        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Detaily kolekcií</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '12px' }}>
+            {data.collections.map(c => (
+              <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ fontWeight: 500 }}>{collLabels[c.name] || c.name}</span>
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  <span style={{ color: 'var(--text-muted)', minWidth: '50px', textAlign: 'right' }}>{c.count.toLocaleString()} dok.</span>
+                  <span style={{ fontWeight: 600, minWidth: '70px', textAlign: 'right' }}>{fmtSize(c.size)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Per workspace */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Storage per workspace</h3>
+        <div className="sa-table-wrap">
+          <table className="sa-table" style={{ fontSize: '12px' }}>
+            <thead>
+              <tr>
+                <th>Workspace</th>
+                <th style={{ textAlign: 'right' }}>Kontakty</th>
+                <th style={{ textAlign: 'right' }}>Úlohy</th>
+                <th style={{ textAlign: 'right' }}>Správy</th>
+                <th style={{ textAlign: 'right' }}>Celkom dok.</th>
+                <th style={{ textAlign: 'right' }}>Odhad veľkosti</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.perWorkspace.map(w => (
+                <tr key={w.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: w.color, flexShrink: 0 }}></span>
+                      {w.name}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{w.contacts}</td>
+                  <td style={{ textAlign: 'right' }}>{w.tasks}</td>
+                  <td style={{ textAlign: 'right' }}>{w.messages}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{w.totalDocs}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtSize(w.estimatedSize)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── P3: WORKSPACE COMPARISON TAB ──────────────────────────────
+function WorkspaceComparisonTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('activityScore');
+
+  useEffect(() => {
+    adminApi.get('/api/admin/workspace-comparison')
+      .then(r => setData(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="sa-loading">Načítavam porovnanie...</div>;
+  if (!data || data.length === 0) return <div className="sa-empty">Žiadne workspace-y</div>;
+
+  const sorted = [...data].sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0));
+  const maxScore = Math.max(...data.map(d => d.activityScore || 1));
+
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
+
+  const comparisonChart = {
+    labels: sorted.slice(0, 10).map(w => w.name),
+    datasets: [
+      { label: 'Kontakty', data: sorted.slice(0, 10).map(w => w.contacts), backgroundColor: chartColors.blue },
+      { label: 'Úlohy', data: sorted.slice(0, 10).map(w => w.tasks), backgroundColor: chartColors.green },
+      { label: 'Správy', data: sorted.slice(0, 10).map(w => w.messages), backgroundColor: chartColors.orange }
+    ]
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Porovnanie workspace-ov</h2>
+
+      {/* Chart */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Top 10 workspace-ov podľa aktivity</h3>
+        <div style={{ height: '280px' }}>
+          <Bar data={comparisonChart} options={{
+            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+            scales: { x: { stacked: true }, y: { stacked: true, ticks: { font: { size: 11 } } } }
+          }} />
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Detailné porovnanie</h3>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+            <option value="activityScore">Podľa aktivity</option>
+            <option value="contacts">Podľa kontaktov</option>
+            <option value="tasks">Podľa úloh</option>
+            <option value="messages">Podľa správ</option>
+            <option value="members">Podľa členov</option>
+            <option value="completionRate">Podľa dokončenia</option>
+          </select>
+        </div>
+        <div className="sa-table-wrap">
+          <table className="sa-table" style={{ fontSize: '12px' }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Workspace</th>
+                <th>Vlastník</th>
+                <th style={{ textAlign: 'right' }}>Členovia</th>
+                <th style={{ textAlign: 'right' }}>Kontakty</th>
+                <th style={{ textAlign: 'right' }}>Úlohy</th>
+                <th style={{ textAlign: 'right' }}>Dokončené</th>
+                <th style={{ textAlign: 'right' }}>Správy</th>
+                <th>Posledná aktivita</th>
+                <th>Skóre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((w, i) => (
+                <tr key={w.id}>
+                  <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{i + 1}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: w.color, flexShrink: 0 }}></span>
+                      <span style={{ fontWeight: 500 }}>{w.name}</span>
+                    </div>
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{w.owner}</td>
+                  <td style={{ textAlign: 'right' }}>{w.members}</td>
+                  <td style={{ textAlign: 'right' }}>{w.contacts}</td>
+                  <td style={{ textAlign: 'right' }}>{w.tasks}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <span style={{ color: w.completionRate > 50 ? chartColors.green : w.completionRate > 20 ? chartColors.orange : chartColors.red }}>{w.completionRate}%</span>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{w.messages}</td>
+                  <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatDate(w.lastActivity)}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ flex: 1, height: '6px', background: 'var(--bg-primary)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ width: `${(w.activityScore / maxScore) * 100}%`, height: '100%', background: chartColors.primary, borderRadius: '3px' }}></div>
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', minWidth: '30px' }}>{w.activityScore}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

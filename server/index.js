@@ -28,6 +28,7 @@ const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { initializeEmail } = require('./services/adminEmailService');
+const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
@@ -81,6 +82,9 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // Apply general API rate limiting
 app.use('/api', apiLimiter);
+
+// Track API requests for admin metrics
+app.use('/api', trackRequest);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

@@ -748,4 +748,305 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
   }
 });
 
+// ─── P3: CHARTS DATA ──────────────────────────────────────────
+// User growth over time (registrations per day for last 90 days)
+router.get('/charts/user-growth', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 90;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    const growth = await User.aggregate([
+      { $match: { createdAt: { $gte: startDate }, email: { $ne: SUPER_ADMIN_EMAIL } } },
+      { $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        count: { $sum: 1 }
+      }},
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Fill gaps (days with 0 registrations)
+    const result = [];
+    let cumulative = await User.countDocuments({
+      createdAt: { $lt: startDate },
+      email: { $ne: SUPER_ADMIN_EMAIL }
+    });
+    const dataMap = {};
+    growth.forEach(g => { dataMap[g._id] = g.count; });
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const key = d.toISOString().slice(0, 10);
+      const daily = dataMap[key] || 0;
+      cumulative += daily;
+      result.push({ date: key, daily, cumulative });
+    }
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Charts user growth error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// Activity over time (audit log entries per day for last 30 days)
+router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    const activity = await AuditLog.aggregate([
+      { $match: { createdAt: { $gte: startDate } } },
+      { $group: {
+        _id: {
+          date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          category: '$category'
+        },
+        count: { $sum: 1 }
+      }},
+      { $sort: { '_id.date': 1 } }
+    ]);
+
+    // Group by date with category breakdown
+    const dateMap = {};
+    activity.forEach(a => {
+      if (!dateMap[a._id.date]) dateMap[a._id.date] = { date: a._id.date, total: 0 };
+      dateMap[a._id.date][a._id.category] = a.count;
+      dateMap[a._id.date].total += a.count;
+    });
+
+    // Fill gaps
+    const result = [];
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const key = d.toISOString().slice(0, 10);
+      result.push(dateMap[key] || { date: key, total: 0 });
+    }
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Charts activity error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ─── P3: REAL-TIME ACTIVITY FEED ──────────────────────────────
+router.get('/activity-feed', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const after = req.query.after; // ISO date — for polling new entries
+
+    const query = {};
+    if (after) query.createdAt = { $gt: new Date(after) };
+
+    const logs = await AuditLog.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json(logs.map(l => ({
+      id: l._id,
+      action: l.action,
+      category: l.category,
+      username: l.username,
+      email: l.email,
+      targetType: l.targetType,
+      targetName: l.targetName,
+      details: l.details,
+      createdAt: l.createdAt
+    })));
+  } catch (error) {
+    logger.error('Activity feed error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ─── P3: API USAGE METRICS ───────────────────────────────────
+router.get('/api-metrics', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { getMetrics } = require('../services/apiMetrics');
+    res.json(getMetrics());
+  } catch (error) {
+    logger.error('API metrics error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ─── P3: STORAGE METRICS ─────────────────────────────────────
+router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+
+    // Get collection stats
+    const collections = ['users', 'workspaces', 'contacts', 'tasks', 'messages', 'notifications', 'auditlogs', 'pushsubscriptions', 'apnsdevices', 'pages', 'workspacemembers'];
+    const collectionStats = [];
+
+    for (const name of collections) {
+      try {
+        const stats = await db.command({ collStats: name });
+        collectionStats.push({
+          name,
+          count: stats.count,
+          size: stats.size,
+          avgObjSize: stats.avgObjSize || 0,
+          storageSize: stats.storageSize,
+          indexSize: stats.totalIndexSize
+        });
+      } catch {
+        // Collection might not exist yet
+      }
+    }
+
+    // Storage per workspace (contacts + tasks + messages)
+    const workspaceStorage = await Promise.all([
+      Contact.aggregate([
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      Task.aggregate([
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      Message.aggregate([
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ])
+    ]);
+
+    const wsMap = {};
+    const [contactCounts, taskCounts, messageCounts] = workspaceStorage;
+    contactCounts.forEach(c => {
+      if (!c._id) return;
+      const id = c._id.toString();
+      if (!wsMap[id]) wsMap[id] = { contacts: 0, tasks: 0, messages: 0 };
+      wsMap[id].contacts = c.count;
+    });
+    taskCounts.forEach(t => {
+      if (!t._id) return;
+      const id = t._id.toString();
+      if (!wsMap[id]) wsMap[id] = { contacts: 0, tasks: 0, messages: 0 };
+      wsMap[id].tasks = t.count;
+    });
+    messageCounts.forEach(m => {
+      if (!m._id) return;
+      const id = m._id.toString();
+      if (!wsMap[id]) wsMap[id] = { contacts: 0, tasks: 0, messages: 0 };
+      wsMap[id].messages = m.count;
+    });
+
+    // Get workspace names
+    const workspaceIds = Object.keys(wsMap);
+    const workspaces = await Workspace.find({ _id: { $in: workspaceIds } }).select('name slug color').lean();
+    const wsNameMap = {};
+    workspaces.forEach(w => { wsNameMap[w._id.toString()] = w; });
+
+    // Estimate storage per workspace using avg object sizes
+    const avgContactSize = collectionStats.find(c => c.name === 'contacts')?.avgObjSize || 500;
+    const avgTaskSize = collectionStats.find(c => c.name === 'tasks')?.avgObjSize || 300;
+    const avgMessageSize = collectionStats.find(c => c.name === 'messages')?.avgObjSize || 400;
+
+    const perWorkspace = Object.entries(wsMap).map(([id, counts]) => ({
+      id,
+      name: wsNameMap[id]?.name || '—',
+      slug: wsNameMap[id]?.slug || '',
+      color: wsNameMap[id]?.color || '#6B7280',
+      ...counts,
+      totalDocs: counts.contacts + counts.tasks + counts.messages,
+      estimatedSize: (counts.contacts * avgContactSize) + (counts.tasks * avgTaskSize) + (counts.messages * avgMessageSize)
+    })).sort((a, b) => b.totalDocs - a.totalDocs);
+
+    // Total DB size
+    const dbStats = await db.command({ dbStats: 1 });
+
+    res.json({
+      database: {
+        dataSize: dbStats.dataSize,
+        storageSize: dbStats.storageSize,
+        indexSize: dbStats.indexSize,
+        collections: dbStats.collections
+      },
+      collections: collectionStats.sort((a, b) => b.size - a.size),
+      perWorkspace
+    });
+  } catch (error) {
+    logger.error('Storage metrics error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ─── P3: WORKSPACE COMPARISON ─────────────────────────────────
+router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const workspaces = await Workspace.find().select('name slug color ownerId createdAt').lean();
+    const wsIds = workspaces.map(w => w._id);
+
+    const [contactStats, taskStats, messageStats, memberStats] = await Promise.all([
+      Contact.aggregate([
+        { $match: { workspaceId: { $in: wsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 }, recent: { $max: '$createdAt' } } }
+      ]),
+      Task.aggregate([
+        { $match: { workspaceId: { $in: wsIds } } },
+        { $group: {
+          _id: '$workspaceId',
+          total: { $sum: 1 },
+          completed: { $sum: { $cond: ['$completed', 1, 0] } },
+          recent: { $max: '$createdAt' }
+        }}
+      ]),
+      Message.aggregate([
+        { $match: { workspaceId: { $in: wsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 }, recent: { $max: '$createdAt' } } }
+      ]),
+      WorkspaceMember.aggregate([
+        { $match: { workspaceId: { $in: wsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ])
+    ]);
+
+    // Build maps
+    const cMap = {}, tMap = {}, mMap = {}, mbMap = {};
+    contactStats.forEach(c => { cMap[c._id.toString()] = c; });
+    taskStats.forEach(t => { tMap[t._id.toString()] = t; });
+    messageStats.forEach(m => { mMap[m._id.toString()] = m; });
+    memberStats.forEach(m => { mbMap[m._id.toString()] = m; });
+
+    // Owner info
+    const ownerIds = [...new Set(workspaces.map(w => w.ownerId.toString()))];
+    const owners = await User.find({ _id: { $in: ownerIds } }).select('username').lean();
+    const ownerMap = {};
+    owners.forEach(o => { ownerMap[o._id.toString()] = o.username; });
+
+    const result = workspaces.map(w => {
+      const id = w._id.toString();
+      const c = cMap[id] || { count: 0 };
+      const t = tMap[id] || { total: 0, completed: 0 };
+      const m = mMap[id] || { count: 0 };
+      const mb = mbMap[id] || { count: 0 };
+
+      // Most recent activity across all types
+      const lastActivity = [c.recent, t.recent, m.recent].filter(Boolean).sort((a, b) => b - a)[0];
+
+      return {
+        id,
+        name: w.name,
+        slug: w.slug,
+        color: w.color,
+        owner: ownerMap[w.ownerId.toString()] || '—',
+        createdAt: w.createdAt,
+        members: mb.count,
+        contacts: c.count,
+        tasks: t.total,
+        completedTasks: t.completed,
+        completionRate: t.total > 0 ? Math.round((t.completed / t.total) * 100) : 0,
+        messages: m.count,
+        lastActivity,
+        // Score: weighted activity metric
+        activityScore: c.count * 2 + t.total * 3 + m.count * 1
+      };
+    }).sort((a, b) => b.activityScore - a.activityScore);
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Workspace comparison error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
 module.exports = router;
