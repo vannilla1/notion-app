@@ -168,6 +168,9 @@ function WorkspaceMembers() {
           <button className="btn btn-secondary" onClick={() => navigate('/tasks')}>
             Projekty
           </button>
+          <button className="btn btn-secondary" onClick={() => navigate('/messages')}>
+            Správy
+          </button>
           <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
         </div>
       </header>
