@@ -216,7 +216,7 @@ function Dashboard() {
       approvedMessages: messages.received.filter(m => m.status === 'approved').length,
       rejectedMessages: messages.received.filter(m => m.status === 'rejected').length,
       commentedMessages: messages.received.filter(m => m.status === 'commented').length,
-      pollMessages: messages.received.filter(m => m.type === 'poll').length,
+      pollMessages: [...messages.received, ...messages.sent].filter(m => m.type === 'poll').length,
       totalSent: messages.sent.length,
       lowPriorityTasks: activeTasks.filter(t => t.priority === 'low').length,
       mediumPriorityTasks: activeTasks.filter(t => t.priority === 'medium').length,
@@ -279,11 +279,13 @@ function Dashboard() {
       case 'messages-rejected':
       case 'messages-commented':
       case 'messages-poll': {
-        const src = messageTab === 'sent' ? messages.sent : messages.received;
         const statusKey = detailView.replace('messages-', '');
+        const src = statusKey === 'poll'
+          ? [...messages.received, ...messages.sent]
+          : (messageTab === 'sent' ? messages.sent : messages.received);
         const filtered = statusKey === 'all' ? src : statusKey === 'poll' ? src.filter(m => m.type === 'poll') : src.filter(m => m.status === statusKey);
         const statusLabels = { all: 'Všetky', pending: 'Čakajúce', approved: 'Schválené', rejected: 'Zamietnuté', commented: 'Komentované', poll: 'Ankety' };
-        const tabLabel = messageTab === 'sent' ? 'Odoslané' : 'Prijaté';
+        const tabLabel = statusKey === 'poll' ? 'Všetky' : (messageTab === 'sent' ? 'Odoslané' : 'Prijaté');
         return { type: 'messages', items: filtered, title: `${tabLabel} — ${statusLabels[statusKey]} správy` };
       }
       default:
