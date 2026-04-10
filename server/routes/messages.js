@@ -776,6 +776,115 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
   });
 });
 
+// PUT /api/messages/:id/comment/:commentId — edit comment (only author)
+router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Text komentára je povinný' });
+    }
+
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [
+        { fromUserId: req.user.id },
+        { toUserId: req.user.id }
+      ]
+    });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Odkaz nenájdený' });
+    }
+
+    const comment = message.comments.id(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Komentár nenájdený' });
+    }
+
+    // Only author can edit
+    if (comment.userId.toString() !== req.user.id.toString()) {
+      return res.status(403).json({ message: 'Môžete upraviť len vlastný komentár' });
+    }
+
+    comment.text = text.trim().substring(0, 2000);
+    await message.save();
+
+    // Notify the other party
+    const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
+      ? message.toUserId.toString()
+      : message.fromUserId.toString();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user-${notifyUserId}`).emit('message-updated', {
+        id: message._id.toString(),
+        status: message.status
+      });
+    }
+
+    res.json(stripAttachmentData(message));
+  } catch (error) {
+    logger.error('Edit comment error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// DELETE /api/messages/:id/comment/:commentId — delete comment (only author)
+router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [
+        { fromUserId: req.user.id },
+        { toUserId: req.user.id }
+      ]
+    });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Odkaz nenájdený' });
+    }
+
+    const comment = message.comments.id(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Komentár nenájdený' });
+    }
+
+    // Only author can delete
+    if (comment.userId.toString() !== req.user.id.toString()) {
+      return res.status(403).json({ message: 'Môžete vymazať len vlastný komentár' });
+    }
+
+    message.comments.pull(req.params.commentId);
+
+    // If status was 'commented' and no comments remain, revert to 'pending'
+    if (message.status === 'commented' && message.comments.length === 0) {
+      message.status = 'pending';
+    }
+
+    await message.save();
+
+    // Notify the other party
+    const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
+      ? message.toUserId.toString()
+      : message.fromUserId.toString();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user-${notifyUserId}`).emit('message-updated', {
+        id: message._id.toString(),
+        status: message.status
+      });
+    }
+
+    res.json(stripAttachmentData(message));
+  } catch (error) {
+    logger.error('Delete comment error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // GET /api/messages/:id/attachment — download attachment
 router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {

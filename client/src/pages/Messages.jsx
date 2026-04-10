@@ -67,6 +67,8 @@ function Messages() {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
 
   // File attachments
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -292,6 +294,31 @@ function Messages() {
       setSelectedMessage(res.data);
       setCommentText('');
       setCommentAttachment(null);
+      fetchMessages();
+      fetchPendingCount();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba');
+    }
+  };
+
+  const handleEditComment = async (messageId, commentId, newText) => {
+    if (!newText.trim()) return;
+    try {
+      const res = await api.put(`/api/messages/${messageId}/comment/${commentId}`, { text: newText.trim() });
+      setSelectedMessage(res.data);
+      setEditingCommentId(null);
+      setEditingCommentText('');
+      fetchMessages();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba');
+    }
+  };
+
+  const handleDeleteComment = async (messageId, commentId) => {
+    if (!window.confirm('Naozaj chcete vymazať tento komentár?')) return;
+    try {
+      const res = await api.delete(`/api/messages/${messageId}/comment/${commentId}`);
+      setSelectedMessage(res.data);
       fetchMessages();
       fetchPendingCount();
     } catch (err) {
@@ -629,6 +656,12 @@ function Messages() {
               uploadingFile={uploadingFile}
               getFileIcon={getFileIcon}
               formatFileSize={formatFileSize}
+              onEditComment={handleEditComment}
+              onDeleteComment={handleDeleteComment}
+              editingCommentId={editingCommentId}
+              setEditingCommentId={setEditingCommentId}
+              editingCommentText={editingCommentText}
+              setEditingCommentText={setEditingCommentText}
             />
           ) : (
             <MessageList
@@ -869,7 +902,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1218,36 +1251,83 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
 
           {msg.comments && msg.comments.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-              {msg.comments.map((c, i) => (
-                <div key={c._id || i} style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <strong>{c.username}</strong>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDateTime(c.createdAt)}</span>
-                  </div>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
-                  {c.attachment?.originalName && (
-                    <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>📎</span>
-                      <a href="#" onClick={(e) => {
-                          e.preventDefault();
-                          api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
-                            .then(res => {
-                              const url = URL.createObjectURL(res.data);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = c.attachment.originalName;
-                              a.click();
-                              URL.revokeObjectURL(url);
-                            });
-                        }}
-                        style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
-                        {c.attachment.originalName}
-                      </a>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
+              {msg.comments.map((c, i) => {
+                const isOwn = (c.userId?.toString() || c.userId) === userId;
+                const isEditing = editingCommentId === c._id;
+                return (
+                  <div key={c._id || i} style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <strong>{c.username}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDateTime(c.createdAt)}</span>
+                        {isOwn && !isEditing && (
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              onClick={() => { setEditingCommentId(c._id); setEditingCommentText(c.text); }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              title="Upraviť komentár"
+                            >✏️</button>
+                            <button
+                              onClick={() => onDeleteComment(msg.id || msg._id, c._id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              title="Vymazať komentár"
+                            >🗑️</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <input
+                          type="text"
+                          value={editingCommentText}
+                          onChange={e => setEditingCommentText(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
+                            if (e.key === 'Escape') { setEditingCommentId(null); setEditingCommentText(''); }
+                          }}
+                          style={{ flex: 1, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
+                          autoFocus
+                        />
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => onEditComment(msg.id || msg._id, c._id, editingCommentText)}
+                          disabled={!editingCommentText.trim()}
+                          style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                        >Uložiť</button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => { setEditingCommentId(null); setEditingCommentText(''); }}
+                          style={{ fontSize: '12px', padding: '4px 10px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                        >Zrušiť</button>
+                      </div>
+                    ) : (
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                    )}
+                    {c.attachment?.originalName && (
+                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>📎</span>
+                        <a href="#" onClick={(e) => {
+                            e.preventDefault();
+                            api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
+                              .then(res => {
+                                const url = URL.createObjectURL(res.data);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = c.attachment.originalName;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              });
+                          }}
+                          style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
+                          {c.attachment.originalName}
+                        </a>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div ref={commentsEndRef} />
             </div>
           )}
