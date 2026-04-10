@@ -151,6 +151,15 @@ function BillingPage() {
         </div>
         <div className="crm-header-right">
           <WorkspaceSwitcher />
+          <button className="btn btn-secondary" onClick={() => navigate('/crm')}>
+            Kontakty
+          </button>
+          <button className="btn btn-secondary" onClick={() => navigate('/tasks')}>
+            Projekty
+          </button>
+          <button className="btn btn-secondary" onClick={() => navigate('/messages')}>
+            Správy
+          </button>
           <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>
