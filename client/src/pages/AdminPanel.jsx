@@ -103,7 +103,7 @@ function OverviewTab() {
   if (loading) return <div className="sa-loading">Načítavam štatistiky...</div>;
   if (!stats) return <div className="sa-error">Nepodarilo sa načítať štatistiky</div>;
 
-  const planLabels = { free: 'Free', team: 'Tím', pro: 'Pro', trial: 'Trial' };
+  const planLabels = { free: 'Free', team: 'Tím', pro: 'Pro' };
 
   const formatUptime = (seconds) => {
     if (!seconds) return '—';
@@ -445,7 +445,6 @@ function UsersTab() {
                     <option value="free">Free</option>
                     <option value="team">Tím</option>
                     <option value="pro">Pro</option>
-                    <option value="trial">Trial</option>
                   </select>
                   {u.discount && (
                     <span title={u.discount.type === 'percentage' ? `${u.discount.value}%` : u.discount.type === 'fixed' ? `−${u.discount.value}€` : u.discount.type === 'freeMonths' ? `${u.discount.value} mes.` : `→${u.discount.targetPlan?.toUpperCase()}`}
