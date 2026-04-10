@@ -606,7 +606,7 @@ function Messages() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              📋 Všetky {pendingCount > 0 && <span style={{ background: tab === 'all' ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white', borderRadius: '10px', padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>{pendingCount}</span>}
+              Všetky {pendingCount > 0 && <span style={{ background: tab === 'all' ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white', borderRadius: '10px', padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>{pendingCount}</span>}
             </button>
             <button
               onClick={() => { setTab('received'); setSelectedMessage(null); }}
@@ -619,7 +619,7 @@ function Messages() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              📥 Prijaté
+              Prijaté
             </button>
             <button
               onClick={() => { setTab('sent'); setSelectedMessage(null); }}
@@ -632,7 +632,7 @@ function Messages() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              📤 Odoslané
+              Odoslané
             </button>
           </div>
 
