@@ -9076,10 +9076,10 @@ body.ios-app {
 
 /* ==================== Workspace Members Page ==================== */
 .wm-page {
-  height: 100vh;
+  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg-secondary);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  padding-bottom: max(80px, calc(60px + env(safe-area-inset-bottom, 20px)));
 }
 
 .wm-page .crm-header {
