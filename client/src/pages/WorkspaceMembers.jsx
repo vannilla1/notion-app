@@ -149,7 +149,7 @@ function WorkspaceMembers() {
   };
 
   return (
-    <div className="wm-page">
+    <div className="crm-container">
       <header className="crm-header">
         <div className="crm-header-left">
           <HeaderLogo />
@@ -169,7 +169,9 @@ function WorkspaceMembers() {
         </div>
       </header>
 
-      <div className="workspace-members-content">
+      <div className="crm-content">
+        <main className="crm-main">
+          <div className="workspace-members-content">
         <div className="wm-header-info">
           <h2 className="wm-title">Členovia prostredia</h2>
           <div className="wm-stats-row">
@@ -375,6 +377,8 @@ function WorkspaceMembers() {
             </div>
           )}
         </div>
+          </div>
+        </main>
       </div>
     </div>
   );
