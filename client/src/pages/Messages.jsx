@@ -85,8 +85,9 @@ function Messages() {
     approved: messages.filter(m => m.status === 'approved'),
     rejected: messages.filter(m => m.status === 'rejected'),
     commented: messages.filter(m => m.status === 'commented'),
+    poll: messages.filter(m => m.type === 'poll'),
   }), [messages]);
-  const { pending: pendingMessages, approved: approvedMessages, rejected: rejectedMessages, commented: commentedMessages } = messageStats;
+  const { pending: pendingMessages, approved: approvedMessages, rejected: rejectedMessages, commented: commentedMessages, poll: pollMessages } = messageStats;
 
   useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
 
@@ -175,8 +176,10 @@ function Messages() {
 
   const fetchMessages = async () => {
     try {
-      const res = await api.get('/api/messages', { params: { tab, status: statusFilter } });
-      setMessages(res.data);
+      const apiStatus = statusFilter === 'poll' ? 'all' : statusFilter;
+      const res = await api.get('/api/messages', { params: { tab, status: apiStatus } });
+      const data = statusFilter === 'poll' ? res.data.filter(m => m.type === 'poll') : res.data;
+      setMessages(data);
       // Update selectedMessage if it's in the new list (keeps detail view fresh)
       setSelectedMessage(prev => {
         if (!prev) return null;
@@ -559,6 +562,18 @@ function Messages() {
               </span>
               <span className="stat-value">{commentedMessages.length}</span>
             </div>
+
+            <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa typu</h4>
+            <div
+              className={`stat-item clickable priority-stat ${statusFilter === 'poll' ? 'active' : ''}`}
+              onClick={() => { setStatusFilter('poll'); setSidebarOpen(false); }}
+            >
+              <span className="stat-label">
+                <span className="priority-dot" style={{ backgroundColor: '#EC4899' }}></span>
+                Ankety
+              </span>
+              <span className="stat-value">{pollMessages.length}</span>
+            </div>
           </div>
         </aside>
 
@@ -605,18 +620,18 @@ function Messages() {
 
           {/* Status filter */}
           <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-            {['all', 'pending', 'approved', 'rejected', 'commented'].map(s => (
+            {['all', 'pending', 'approved', 'rejected', 'commented', 'poll'].map(s => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
                 style={{
                   padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
-                  background: statusFilter === s ? 'var(--accent-color)' : 'var(--bg-card)',
+                  background: statusFilter === s ? (s === 'poll' ? '#EC4899' : 'var(--accent-color)') : 'var(--bg-card)',
                   color: statusFilter === s ? 'white' : 'var(--text-secondary)',
                   cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
                 }}
               >
-                {s === 'all' ? 'Všetky' : statusConfig[s]?.label || s}
+                {s === 'all' ? 'Všetky' : s === 'poll' ? '📊 Ankety' : statusConfig[s]?.label || s}
               </button>
             ))}
           </div>
