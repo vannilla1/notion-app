@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
@@ -17,14 +17,80 @@ import AdminPanel from './pages/AdminPanel';
 import AdminLogin from './pages/AdminLogin';
 import NotificationToast from './components/NotificationToast';
 import BottomNav from './components/BottomNav';
+import api from './api/api';
+import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
+
+// Map notification type prefix to section key
+const typeToSection = (type) => {
+  if (!type) return null;
+  if (type.startsWith('contact.')) return 'crm';
+  if (type.startsWith('task.') || type.startsWith('subtask.')) return 'tasks';
+  if (type.startsWith('message.')) return 'messages';
+  return null;
+};
+
+// Map route path to section key
+const pathToSection = (path) => {
+  if (path === '/crm') return 'crm';
+  if (path === '/tasks') return 'tasks';
+  if (path === '/messages') return 'messages';
+  return null;
+};
 
 function AppContent() {
   const { isAuthenticated, loading } = useAuth();
   const { needsWorkspace, loading: workspaceLoading } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
+  const { socket, isConnected } = useSocket();
+
+  // Unread notification counts per section
+  const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
+  const prevPathRef = useRef(location.pathname);
+
+  const fetchUnreadCounts = useCallback(async () => {
+    try {
+      const res = await api.get('/api/notifications/unread-by-section');
+      setUnreadCounts(res.data);
+    } catch (err) { /* ignore */ }
+  }, []);
+
+  // Fetch unread counts on auth
+  useEffect(() => {
+    if (isAuthenticated) fetchUnreadCounts();
+  }, [isAuthenticated, fetchUnreadCounts]);
+
+  // Increment count on new notification via socket
+  useEffect(() => {
+    if (!socket || !isConnected || !isAuthenticated) return;
+    const handleNotification = (notification) => {
+      const section = typeToSection(notification.type);
+      if (section) {
+        // Don't increment if user is already viewing that section
+        const currentSection = pathToSection(location.pathname);
+        if (currentSection !== section) {
+          setUnreadCounts(prev => ({ ...prev, [section]: prev[section] + 1 }));
+        }
+      }
+    };
+    socket.on('notification', handleNotification);
+    return () => socket.off('notification', handleNotification);
+  }, [socket, isConnected, isAuthenticated, location.pathname]);
+
+  // Mark section as read when navigating to it
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const section = pathToSection(location.pathname);
+    const prevSection = pathToSection(prevPathRef.current);
+    prevPathRef.current = location.pathname;
+
+    if (section && section !== prevSection && unreadCounts[section] > 0) {
+      setUnreadCounts(prev => ({ ...prev, [section]: 0 }));
+      api.put(`/api/notifications/read-by-section/${section}`).catch(() => {});
+    }
+  }, [location.pathname, isAuthenticated]);
 
   // Initialize push notifications when user is authenticated
   useEffect(() => {
@@ -252,7 +318,7 @@ function AppContent() {
   return (
     <>
       {isAuthenticated && <NotificationToast />}
-      {isAuthenticated && <BottomNav />}
+      {isAuthenticated && <BottomNav unreadCounts={unreadCounts} />}
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route

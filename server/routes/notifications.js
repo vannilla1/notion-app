@@ -65,6 +65,62 @@ router.get('/unread-count', authenticateToken, async (req, res) => {
   }
 });
 
+// Get unread counts grouped by section
+router.get('/unread-by-section', authenticateToken, async (req, res) => {
+  try {
+    const counts = await Notification.aggregate([
+      { $match: { userId: new (require('mongoose').Types.ObjectId)(req.user.id), read: false } },
+      {
+        $addFields: {
+          section: {
+            $switch: {
+              branches: [
+                { case: { $regexMatch: { input: '$type', regex: /^contact\./ } }, then: 'crm' },
+                { case: { $regexMatch: { input: '$type', regex: /^(task\.|subtask\.)/ } }, then: 'tasks' },
+                { case: { $regexMatch: { input: '$type', regex: /^message\./ } }, then: 'messages' }
+              ],
+              default: 'other'
+            }
+          }
+        }
+      },
+      { $group: { _id: '$section', count: { $sum: 1 } } }
+    ]);
+
+    const result = { crm: 0, tasks: 0, messages: 0 };
+    counts.forEach(c => { if (result.hasOwnProperty(c._id)) result[c._id] = c.count; });
+    res.json(result);
+  } catch (error) {
+    logger.error('[Notifications] Error counting by section', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri počítaní notifikácií' });
+  }
+});
+
+// Mark all notifications in a section as read
+router.put('/read-by-section/:section', authenticateToken, async (req, res) => {
+  const sectionMap = {
+    crm: /^contact\./,
+    tasks: /^(task\.|subtask\.)/,
+    messages: /^message\./
+  };
+
+  const regex = sectionMap[req.params.section];
+  if (!regex) {
+    return res.status(400).json({ message: 'Neplatná sekcia' });
+  }
+
+  try {
+    const result = await Notification.updateMany(
+      { userId: req.user.id, read: false, type: { $regex: regex } },
+      { read: true }
+    );
+    res.json({ success: true, modified: result.modifiedCount });
+  } catch (error) {
+    logger.error('[Notifications] Error marking section as read', { error: error.message, section: req.params.section });
+    res.status(500).json({ message: 'Chyba pri označovaní sekcie' });
+  }
+});
+
 // Mark notification as read
 router.put('/:id/read', authenticateToken, async (req, res) => {
   try {

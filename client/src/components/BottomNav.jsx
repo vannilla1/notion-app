@@ -32,28 +32,44 @@ const icons = {
 };
 
 const tabs = [
-  { path: '/app', icon: icons.dashboard, label: 'Prehľad' },
-  { path: '/crm', icon: icons.contacts, label: 'Kontakty' },
-  { path: '/tasks', icon: icons.projects, label: 'Projekty' },
-  { path: '/messages', icon: icons.messages, label: 'Správy' },
+  { path: '/app', icon: icons.dashboard, label: 'Prehľad', section: null },
+  { path: '/crm', icon: icons.contacts, label: 'Kontakty', section: 'crm' },
+  { path: '/tasks', icon: icons.projects, label: 'Projekty', section: 'tasks' },
+  { path: '/messages', icon: icons.messages, label: 'Správy', section: 'messages' },
 ];
 
-function BottomNav() {
+function BottomNav({ unreadCounts = {} }) {
   const navigate = useNavigate();
   const location = useLocation();
 
   return (
     <nav className="bottom-nav">
-      {tabs.map(tab => (
-        <button
-          key={tab.path}
-          className={`bottom-nav-tab ${location.pathname === tab.path ? 'active' : ''}`}
-          onClick={() => navigate(tab.path)}
-        >
-          <span className="bottom-nav-icon">{tab.icon}</span>
-          <span className="bottom-nav-label">{tab.label}</span>
-        </button>
-      ))}
+      {tabs.map(tab => {
+        const count = tab.section ? (unreadCounts[tab.section] || 0) : 0;
+        return (
+          <button
+            key={tab.path}
+            className={`bottom-nav-tab ${location.pathname === tab.path ? 'active' : ''}`}
+            onClick={() => navigate(tab.path)}
+          >
+            <span className="bottom-nav-icon" style={{ position: 'relative' }}>
+              {tab.icon}
+              {count > 0 && (
+                <span style={{
+                  position: 'absolute', top: '-6px', right: '-10px',
+                  background: '#EF4444', color: 'white', fontSize: '10px',
+                  fontWeight: 700, minWidth: '16px', height: '16px',
+                  borderRadius: '8px', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', padding: '0 4px', lineHeight: 1
+                }}>
+                  {count > 99 ? '99+' : count}
+                </span>
+              )}
+            </span>
+            <span className="bottom-nav-label">{tab.label}</span>
+          </button>
+        );
+      })}
     </nav>
   );
 }
