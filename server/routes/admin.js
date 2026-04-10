@@ -8,6 +8,8 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const logger = require('../utils/logger');
+const AuditLog = require('../models/AuditLog');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -199,10 +201,19 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
       return res.status(400).json({ message: 'Nemôžete odstrániť vlastnú admin rolu' });
     }
 
+    const oldRole = targetUser.role;
     targetUser.role = role;
     await targetUser.save();
 
     logger.info('Admin role change', { targetUserId: req.params.userId, newRole: role, changedBy: req.user.id });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'user.role_changed', category: 'user',
+      targetType: 'user', targetId: req.params.userId, targetName: targetUser.username,
+      details: { oldRole, newRole: role },
+      ipAddress: req.ip, userAgent: req.get('user-agent')
+    });
 
     res.json({ message: 'Rola bola aktualizovaná', role });
   } catch (error) {
@@ -224,10 +235,19 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
       return res.status(404).json({ message: 'Používateľ nenájdený' });
     }
 
+    const oldPlan = targetUser.subscription?.plan || 'free';
     targetUser.subscription = { plan };
     await targetUser.save();
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'user.plan_changed', category: 'billing',
+      targetType: 'user', targetId: req.params.userId, targetName: targetUser.username,
+      details: { oldPlan, newPlan: plan },
+      ipAddress: req.ip, userAgent: req.get('user-agent')
+    });
 
     res.json({ message: 'Plán bol aktualizovaný', plan });
   } catch (error) {
@@ -252,6 +272,10 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
       return res.status(400).json({ message: 'Nemôžete vymazať iného admina' });
     }
 
+    // Capture info before deletion
+    const deletedUsername = targetUser.username;
+    const deletedEmail = targetUser.email;
+
     // Remove workspace memberships
     await WorkspaceMember.deleteMany({ userId: targetUser._id });
 
@@ -259,6 +283,14 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
     await User.findByIdAndDelete(targetUser._id);
 
     logger.info('Admin delete user', { targetUserId: req.params.userId, deletedBy: req.user.id });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'user.deleted', category: 'user',
+      targetType: 'user', targetId: req.params.userId, targetName: deletedUsername,
+      details: { email: deletedEmail },
+      ipAddress: req.ip, userAgent: req.get('user-agent')
+    });
 
     // Notify via socket
     const io = req.app.get('io');
@@ -384,6 +416,62 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
   } catch (error) {
     logger.error('Admin sync diagnostics error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri načítaní diagnostiky' });
+  }
+});
+
+// ─── AUDIT LOG ─────────────────────────────────────────────────
+// GET /api/admin/audit-log — paginated, filterable audit log
+router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 50, category, action, userId, from, to, search } = req.query;
+    const parsedPage = Math.max(parseInt(page) || 1, 1);
+    const parsedLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 100);
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const query = {};
+    if (category) query.category = category;
+    if (action) query.action = action;
+    if (userId) query.userId = userId;
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = new Date(from);
+      if (to) query.createdAt.$lte = new Date(to);
+    }
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { targetName: { $regex: search, $options: 'i' } },
+        { action: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const [logs, total] = await Promise.all([
+      AuditLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(parsedLimit).lean(),
+      AuditLog.countDocuments(query)
+    ]);
+
+    res.json({
+      logs: logs.map(l => ({ ...l, id: l._id.toString() })),
+      total,
+      page: parsedPage,
+      pages: Math.ceil(total / parsedLimit)
+    });
+  } catch (error) {
+    logger.error('Admin audit log error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri načítaní audit logu' });
+  }
+});
+
+// GET /api/admin/audit-log/categories — get available categories and actions for filtering
+router.get('/audit-log/categories', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const categories = await AuditLog.distinct('category');
+    const actions = await AuditLog.distinct('action');
+    res.json({ categories, actions });
+  } catch (error) {
+    logger.error('Admin audit log categories error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
   }
 });
 
