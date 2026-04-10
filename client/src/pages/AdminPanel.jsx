@@ -73,13 +73,17 @@ function AdminPanel() {
 // ─── OVERVIEW TAB ───────────────────────────────────────────────
 function OverviewTab() {
   const [stats, setStats] = useState(null);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    adminApi.get('/api/admin/stats')
-      .then(res => setStats(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      adminApi.get('/api/admin/stats').then(res => res.data).catch(() => null),
+      adminApi.get('/api/admin/health').then(res => res.data).catch(() => null)
+    ]).then(([s, h]) => {
+      setStats(s);
+      setHealth(h);
+    }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="sa-loading">Načítavam štatistiky...</div>;
@@ -87,8 +91,57 @@ function OverviewTab() {
 
   const planLabels = { free: 'Free', team: 'Tím', pro: 'Pro', trial: 'Trial' };
 
+  const formatUptime = (seconds) => {
+    if (!seconds) return '—';
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  const formatMB = (bytes) => bytes ? `${Math.round(bytes / 1024 / 1024)} MB` : '—';
+
   return (
     <div className="sa-overview">
+      {/* System Health */}
+      {health && (
+        <div className="sa-health-card" style={{ marginBottom: '20px', padding: '16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: health.database?.status === 'connected' ? '#22C55E' : '#EF4444' }}></span>
+              Stav systému
+            </h3>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{new Date(health.timestamp).toLocaleString('sk-SK')}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Uptime</div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatUptime(health.uptime)}</div>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RAM (heap)</div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatMB(health.memory?.heapUsed)} / {formatMB(health.memory?.heapTotal)}</div>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RAM (RSS)</div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatMB(health.memory?.rss)}</div>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>MongoDB</div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: health.database?.status === 'connected' ? '#22C55E' : '#EF4444' }}>{health.database?.status === 'connected' ? 'OK' : 'Offline'}</div>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Node.js</div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{health.nodeVersion || '—'}</div>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Prostredie</div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{health.environment || '—'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="sa-stats-grid">
         <StatCard icon="👥" label="Používatelia" value={stats.totalUsers} sub={`+${stats.recentRegistrations} za 30 dní`} />
         <StatCard icon="🏢" label="Workspace-y" value={stats.totalWorkspaces} sub={`${stats.activeWorkspaces} aktívnych`} />
@@ -148,6 +201,10 @@ function UsersTab() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [userDetail, setUserDetail] = useState(null);
   const [userDetailLoading, setUserDetailLoading] = useState(false);
+  const [checkedIds, setCheckedIds] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState('');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -203,6 +260,42 @@ function UsersTab() {
     }
   };
 
+  const toggleCheck = (id, e) => {
+    e.stopPropagation();
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    const selectableIds = filtered.filter(u => u.email !== 'support@prplcrm.eu').map(u => u.id);
+    setCheckedIds(prev => prev.size === selectableIds.length ? new Set() : new Set(selectableIds));
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction || !bulkValue || checkedIds.size === 0) return;
+    const label = bulkAction === 'plan' ? 'plán' : 'rolu';
+    if (!window.confirm(`Zmeniť ${label} pre ${checkedIds.size} používateľov na "${bulkValue}"?`)) return;
+    setBulkLoading(true);
+    try {
+      await adminApi.put('/api/admin/users/bulk', {
+        userIds: [...checkedIds],
+        action: bulkAction,
+        value: bulkValue
+      });
+      setUsers(prev => prev.map(u => checkedIds.has(u.id) ? { ...u, [bulkAction]: bulkValue } : u));
+      setCheckedIds(new Set());
+      setBulkAction('');
+      setBulkValue('');
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri hromadnej akcii');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   const filtered = users.filter(u =>
     u.username.toLowerCase().includes(search.toLowerCase()) ||
     u.email.toLowerCase().includes(search.toLowerCase())
@@ -230,10 +323,54 @@ function UsersTab() {
         </button>
       </div>
 
+      {/* Bulk action bar */}
+      {checkedIds.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '12px', background: 'var(--primary-light, #EDE9FE)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--primary, #8B5CF6)' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>{checkedIds.size} vybraných</span>
+          <select value={bulkAction} onChange={e => { setBulkAction(e.target.value); setBulkValue(''); }}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+            <option value="">Hromadná akcia...</option>
+            <option value="plan">Zmeniť plán</option>
+            <option value="role">Zmeniť rolu</option>
+          </select>
+          {bulkAction === 'plan' && (
+            <select value={bulkValue} onChange={e => setBulkValue(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+              <option value="">Vybrať plán...</option>
+              <option value="free">Free</option>
+              <option value="team">Tím</option>
+              <option value="pro">Pro</option>
+            </select>
+          )}
+          {bulkAction === 'role' && (
+            <select value={bulkValue} onChange={e => setBulkValue(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+              <option value="">Vybrať rolu...</option>
+              <option value="admin">Admin</option>
+              <option value="manager">Manažér</option>
+              <option value="user">Používateľ</option>
+            </select>
+          )}
+          <button className="btn btn-primary" style={{ fontSize: '12px', padding: '4px 12px' }}
+            disabled={!bulkAction || !bulkValue || bulkLoading}
+            onClick={handleBulkApply}>
+            {bulkLoading ? 'Aplikujem...' : 'Aplikovať'}
+          </button>
+          <button style={{ background: 'none', border: 'none', fontSize: '13px', cursor: 'pointer', color: 'var(--text-muted)', marginLeft: 'auto' }}
+            onClick={() => { setCheckedIds(new Set()); setBulkAction(''); setBulkValue(''); }}>
+            Zrušiť výber
+          </button>
+        </div>
+      )}
+
       <div className="users-table-wrapper">
         <table className="users-table">
           <thead>
             <tr>
+              <th style={{ width: '36px' }}>
+                <input type="checkbox" onChange={toggleAll}
+                  checked={filtered.filter(u => u.email !== 'support@prplcrm.eu').length > 0 && filtered.filter(u => u.email !== 'support@prplcrm.eu').every(u => checkedIds.has(u.id))} />
+              </th>
               <th>Používateľ</th>
               <th>Email</th>
               <th>Rola</th>
@@ -247,6 +384,11 @@ function UsersTab() {
           <tbody>
             {filtered.map(u => (
               <tr key={u.id} className={u.email === 'support@prplcrm.eu' ? 'current-user' : ''} onClick={() => openUserDetail(u.id)} style={{ cursor: 'pointer' }}>
+                <td onClick={e => e.stopPropagation()}>
+                  {u.email !== 'support@prplcrm.eu' && (
+                    <input type="checkbox" checked={checkedIds.has(u.id)} onChange={e => toggleCheck(u.id, e)} />
+                  )}
+                </td>
                 <td>
                   <div className="user-cell">
                     {u.avatar ? (
@@ -418,6 +560,12 @@ function UsersTab() {
                   </div>
                 )}
 
+                {/* Subscription management */}
+                <SubscriptionEditor user={userDetail.user} onUpdate={(sub) => {
+                  setUserDetail(prev => ({ ...prev, user: { ...prev.user, subscription: sub } }));
+                  setUsers(prev => prev.map(u => u.id === userDetail.user._id ? { ...u, plan: sub.plan } : u));
+                }} />
+
                 {/* Google integrations */}
                 {(userDetail.user.googleCalendar?.enabled || userDetail.user.googleTasks?.enabled) && (
                   <div>
@@ -459,6 +607,20 @@ function WorkspacesTab() {
       .then(res => setWsDetail(res.data))
       .catch(() => {})
       .finally(() => setWsDetailLoading(false));
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!wsDetail) return;
+    const name = wsDetail.workspace.name;
+    if (!window.confirm(`Naozaj vymazať workspace "${name}"?\n\nToto vymaže VŠETKY kontakty, úlohy, správy a členstvá v tomto workspace. Táto akcia je NEVRATNÁ.`)) return;
+    try {
+      await adminApi.delete(`/api/admin/workspaces/${selectedWs}`);
+      setWorkspaces(prev => prev.filter(w => w.id !== selectedWs));
+      setSelectedWs(null);
+      setWsDetail(null);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri mazaní workspace');
+    }
   };
 
   if (loading) return <div className="sa-loading">Načítavam workspace-y...</div>;
@@ -583,11 +745,108 @@ function WorkspacesTab() {
                     </div>
                   </div>
                 )}
+
+                {/* Delete workspace */}
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '8px' }}>
+                  <button className="btn btn-danger" style={{ fontSize: '13px', width: '100%' }} onClick={handleDeleteWorkspace}>
+                    Vymazať workspace a všetky dáta
+                  </button>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px' }}>
+                    Táto akcia je nevratná. Vymaže kontakty, úlohy, správy a členstvá.
+                  </p>
+                </div>
               </div>
             ) : null}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION EDITOR ─────────────────────────────────────────
+function SubscriptionEditor({ user, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [plan, setPlan] = useState(user.subscription?.plan || 'free');
+  const [paidUntil, setPaidUntil] = useState(user.subscription?.paidUntil ? new Date(user.subscription.paidUntil).toISOString().split('T')[0] : '');
+  const [trialEndsAt, setTrialEndsAt] = useState(user.subscription?.trialEndsAt ? new Date(user.subscription.trialEndsAt).toISOString().split('T')[0] : '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await adminApi.put(`/api/admin/users/${user._id}/subscription`, {
+        plan,
+        paidUntil: paidUntil || null,
+        trialEndsAt: trialEndsAt || null
+      });
+      onUpdate(res.data.subscription);
+      setEditing(false);
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri ukladaní');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sub = user.subscription || {};
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
+
+  if (!editing) {
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <h4 style={{ fontSize: '14px', fontWeight: 600 }}>Predplatné</h4>
+          <button onClick={() => setEditing(true)} style={{ background: 'none', border: 'none', fontSize: '12px', cursor: 'pointer', color: 'var(--primary, #8B5CF6)', fontWeight: 500 }}>Upraviť</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', fontSize: '12px' }}>
+          <div style={{ padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Plán</div>
+            <div style={{ fontWeight: 600 }}>{(sub.plan || 'free').toUpperCase()}</div>
+          </div>
+          <div style={{ padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Platené do</div>
+            <div style={{ fontWeight: 600 }}>{formatDate(sub.paidUntil)}</div>
+          </div>
+          <div style={{ padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Stripe</div>
+            <div style={{ fontWeight: 600 }}>{sub.stripeSubscriptionId ? 'Aktívne' : '—'}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Predplatné — úprava</h4>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', width: '80px', color: 'var(--text-muted)' }}>Plán</label>
+          <select value={plan} onChange={e => setPlan(e.target.value)}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }}>
+            <option value="free">Free</option>
+            <option value="team">Tím</option>
+            <option value="pro">Pro</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', width: '80px', color: 'var(--text-muted)' }}>Platené do</label>
+          <input type="date" value={paidUntil} onChange={e => setPaidUntil(e.target.value)}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', width: '80px', color: 'var(--text-muted)' }}>Trial do</label>
+          <input type="date" value={trialEndsAt} onChange={e => setTrialEndsAt(e.target.value)}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
+        </div>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 12px' }} onClick={() => setEditing(false)}>Zrušiť</button>
+          <button className="btn btn-primary" style={{ fontSize: '12px', padding: '4px 12px' }} disabled={saving} onClick={handleSave}>
+            {saving ? 'Ukladám...' : 'Uložiť'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

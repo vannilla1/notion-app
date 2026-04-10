@@ -6,6 +6,7 @@ const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 const { loginLimiter, registerLimiter, passwordChangeLimiter } = require('../middleware/rateLimiter');
 const auditService = require('../services/auditService');
+const { notifyNewRegistration } = require('../services/adminEmailService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -108,6 +109,9 @@ router.post('/register', registerLimiter, async (req, res) => {
       userAgent: req.get('user-agent'),
       workspaceId: null
     });
+
+    // Admin email notification (fire and forget)
+    notifyNewRegistration(user);
   } catch (error) {
     logger.error('Registration error', { error: error.message, ip: req.ip });
     res.status(500).json({ message: 'Chyba servera' });

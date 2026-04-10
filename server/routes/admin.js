@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
@@ -641,6 +642,107 @@ router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, re
     res.send('\ufeff' + header + rows);
   } catch (error) {
     res.status(500).json({ message: 'Chyba pri exporte' });
+  }
+});
+
+// System health
+router.get('/health', authenticateToken, requireAdmin, async (req, res) => {
+  const mem = process.memoryUsage();
+  res.json({
+    uptime: process.uptime(),
+    memory: { rss: Math.round(mem.rss / 1024 / 1024), heapUsed: Math.round(mem.heapUsed / 1024 / 1024), heapTotal: Math.round(mem.heapTotal / 1024 / 1024) },
+    mongoStatus: mongoose.connection.readyState,
+    nodeVersion: process.version,
+    platform: process.platform
+  });
+});
+
+// Bulk update users (plan or role) — MUST be before /:userId routes
+router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userIds, action, value } = req.body;
+    if (!userIds?.length || !['plan', 'role'].includes(action)) return res.status(400).json({ message: 'Neplatné parametre' });
+
+    const validPlans = ['free', 'team', 'pro', 'trial'];
+    const validRoles = ['admin', 'manager', 'user'];
+    if (action === 'plan' && !validPlans.includes(value)) return res.status(400).json({ message: 'Neplatný plán' });
+    if (action === 'role' && !validRoles.includes(value)) return res.status(400).json({ message: 'Neplatná rola' });
+
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL });
+    const filteredIds = userIds.filter(id => id !== superAdmin?._id?.toString());
+
+    const updateQuery = action === 'plan' ? { 'subscription.plan': value } : { role: value };
+    const result = await User.updateMany({ _id: { $in: filteredIds } }, updateQuery);
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: action === 'plan' ? 'user.plan_changed' : 'user.role_changed',
+      category: action === 'plan' ? 'billing' : 'user',
+      targetType: 'user', targetName: `bulk (${filteredIds.length})`,
+      details: { bulkAction: true, newValue: value, count: filteredIds.length },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true, modified: result.modifiedCount });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri hromadnej úprave' });
+  }
+});
+
+// Update user subscription details
+router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
+
+    const { plan, trialEndsAt, paidUntil } = req.body;
+    const oldPlan = user.subscription?.plan;
+    if (plan) user.subscription.plan = plan;
+    if (trialEndsAt !== undefined) user.subscription.trialEndsAt = trialEndsAt || null;
+    if (paidUntil !== undefined) user.subscription.paidUntil = paidUntil || null;
+    await user.save();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'user.subscription_updated', category: 'billing',
+      targetType: 'user', targetId: req.params.userId, targetName: user.username,
+      details: { oldPlan, plan, trialEndsAt, paidUntil },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri úprave predplatného' });
+  }
+});
+
+// Delete workspace and all its data
+router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
+
+    const workspace = await Workspace.findById(id);
+    if (!workspace) return res.status(404).json({ message: 'Workspace nenájdený' });
+
+    await Promise.all([
+      Contact.deleteMany({ workspaceId: id }),
+      Task.deleteMany({ workspaceId: id }),
+      Message.deleteMany({ workspaceId: id }),
+      WorkspaceMember.deleteMany({ workspaceId: id }),
+      Workspace.findByIdAndDelete(id)
+    ]);
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'workspace.deleted', category: 'workspace',
+      targetType: 'workspace', targetId: id, targetName: workspace.name,
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba pri mazaní workspace' });
   }
 });
 

@@ -27,6 +27,7 @@ const contactFormRoutes = require('./routes/contact-form');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
+const { initializeEmail } = require('./services/adminEmailService');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
@@ -287,6 +288,9 @@ server.listen(PORT, () => {
       } catch (err) {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }
+
+      // Initialize admin email service
+      initializeEmail();
 
       // Defer schedulers - run after 30s to not compete with first requests
       setTimeout(() => {
