@@ -479,7 +479,11 @@ router.delete('/users/:userId', authenticateToken, async (req, res) => {
     await User.findByIdAndDelete(req.params.userId);
 
     const io = req.app.get('io');
-    io.emit('user-deleted', { userId: req.params.userId });
+    if (currentUser.currentWorkspaceId) {
+      io.to(`workspace-${currentUser.currentWorkspaceId}`).emit('user-deleted', { userId: req.params.userId });
+    } else {
+      io.to(`user-${req.params.userId}`).emit('user-deleted', { userId: req.params.userId });
+    }
 
     logger.info('User deleted', {
       deletedBy: req.user.id,
@@ -531,10 +535,17 @@ router.put('/users/:userId/role', authenticateToken, async (req, res) => {
     }
 
     const io = req.app.get('io');
-    io.emit('user-role-updated', {
-      userId: updatedUser._id,
-      role: updatedUser.role
-    });
+    if (currentUser.currentWorkspaceId) {
+      io.to(`workspace-${currentUser.currentWorkspaceId}`).emit('user-role-updated', {
+        userId: updatedUser._id,
+        role: updatedUser.role
+      });
+    } else {
+      io.to(`user-${req.params.userId}`).emit('user-role-updated', {
+        userId: updatedUser._id,
+        role: updatedUser.role
+      });
+    }
 
     logger.info('User role updated', {
       adminId: req.user.id,

@@ -402,7 +402,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
       const isNetwork = error.code === 'ERR_NETWORK' || !error.response;
       if ((isTimeout || isNetwork) && retries > 0) {
-        console.log(`Google Tasks status retry (${retries} left)...`);
         await new Promise(r => setTimeout(r, 3000));
         return fetchGoogleTasksStatus(retries - 1);
       }
@@ -464,7 +463,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           timeout: 30000 // 30 second timeout
         });
       } catch (e) {
-        console.log('Sync completed from Google skipped:', e.message);
+        // Sync completed from Google skipped
       }
 
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {

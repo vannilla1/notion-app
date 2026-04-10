@@ -523,7 +523,6 @@ function Tasks() {
       fetchTasks();
     } catch (error) {
       // Silently ignore errors (user may not have Google Tasks connected)
-      console.log('Google Tasks sync skipped:', error.response?.data?.message || error.message);
     }
   }, [fetchTasks]);
 
@@ -800,8 +799,6 @@ function Tasks() {
 
   // Helper function to process highlight
   const processHighlight = useCallback((taskId, subtaskId) => {
-    console.log('[Tasks] processHighlight called:', taskId, subtaskId, 'tasks loaded:', tasks.length);
-
     if (tasks.length > 0) {
       setHighlightedTaskId(taskId);
       setExpandedTask(taskId);
@@ -830,13 +827,11 @@ function Tasks() {
   // Listen for custom event from App.jsx (when notification clicked while on this page)
   useEffect(() => {
     const handleTaskHighlight = async (event) => {
-      console.log('[Tasks] Received task-highlight event:', event.detail);
       const { taskId, subtaskId, timestamp } = event.detail;
       if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = timestamp.toString();
 
         // Refresh tasks first to get latest data
-        console.log('[Tasks] Refreshing tasks before highlight...');
         await fetchTasks();
 
         // Then highlight the task (with small delay to ensure state updated)

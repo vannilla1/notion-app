@@ -214,7 +214,6 @@ function AppContent() {
         // Only refresh if was hidden for at least 3 seconds
         const hiddenFor = Date.now() - lastHidden;
         if (lastHidden > 0 && hiddenFor > 3000) {
-          console.log('[App] Resuming from background, refreshing data...');
           window.dispatchEvent(new CustomEvent('app-resumed', {
             detail: { timestamp: Date.now(), hiddenFor }
           }));

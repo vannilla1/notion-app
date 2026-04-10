@@ -41,7 +41,6 @@ function Login() {
             await fetchWorkspaces();
           }
         } catch (inviteErr) {
-          console.log('Auto-accept invite failed:', inviteErr.response?.data?.message);
           await fetchWorkspaces();
         }
         navigate('/app');

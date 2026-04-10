@@ -184,8 +184,6 @@ function CRM() {
 
   // Helper function to process contact highlight
   const processContactHighlight = useCallback((contactId) => {
-    console.log('[CRM] processContactHighlight called:', contactId, 'contacts loaded:', contacts.length);
-
     if (contacts.length > 0) {
       setExpandedContact(contactId);
       setHighlightedContactId(contactId);
@@ -209,13 +207,11 @@ function CRM() {
   // Listen for custom event from App.jsx (when notification clicked while on this page)
   useEffect(() => {
     const handleCrmHighlight = async (event) => {
-      console.log('[CRM] Received crm-highlight event:', event.detail);
       const { contactId, timestamp } = event.detail;
       if (timestamp && timestamp.toString() !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = timestamp.toString();
 
         // Refresh contacts first to get latest data
-        console.log('[CRM] Refreshing contacts before highlight...');
         await fetchContacts();
 
         // Then highlight the contact (with small delay to ensure state updated)

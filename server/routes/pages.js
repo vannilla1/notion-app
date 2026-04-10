@@ -64,7 +64,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Emit to socket
     const io = req.app.get('io');
-    io.emit('page-created', page);
+    io.to(`user-${req.user.id}`).emit('page-created', page);
 
     res.status(201).json(page);
   } catch (error) {
@@ -96,7 +96,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Emit to socket
     const io = req.app.get('io');
-    io.emit('page-updated', page);
+    io.to(`user-${req.user.id}`).emit('page-updated', page);
 
     res.json(page);
   } catch (error) {
@@ -131,7 +131,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Emit to socket
     const io = req.app.get('io');
-    io.emit('page-deleted', { pageId: req.params.id });
+    io.to(`user-${req.user.id}`).emit('page-deleted', { pageId: req.params.id });
 
     res.json({ message: 'Stránka bola vymazaná' });
   } catch (error) {

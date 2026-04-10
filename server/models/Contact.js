@@ -13,7 +13,10 @@ const subtaskSchema = new mongoose.Schema({
   subtasks: { type: Array, default: [] },
   assignedTo: { type: [String], default: [] }, // Array of User IDs
   createdAt: { type: String, default: () => new Date().toISOString() },
-  modifiedAt: { type: String, default: null }
+  modifiedAt: { type: String, default: null },
+  lastUrgencyLevel: String,
+  reminder: Number,
+  reminderSent: { type: Boolean, default: false }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -26,7 +29,10 @@ const taskSchema = new mongoose.Schema({
   assignedTo: { type: [String], default: [] }, // Array of User IDs
   subtasks: { type: [subtaskSchema], default: [] },
   createdAt: { type: String, default: () => new Date().toISOString() },
-  modifiedAt: { type: String, default: null }
+  modifiedAt: { type: String, default: null },
+  lastUrgencyLevel: String,
+  reminder: Number,
+  reminderSent: { type: Boolean, default: false }
 }, { _id: false });
 
 const fileSchema = new mongoose.Schema({

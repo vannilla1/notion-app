@@ -11,15 +11,6 @@ export const isPushSupported = () => {
   const hasPushManager = 'PushManager' in window;
   const hasNotification = 'Notification' in window;
 
-  // Debug logging for iOS troubleshooting
-  console.log('[Push] Support check:', {
-    serviceWorker: hasServiceWorker,
-    pushManager: hasPushManager,
-    notification: hasNotification,
-    standalone: window.navigator.standalone,
-    displayMode: window.matchMedia('(display-mode: standalone)').matches
-  });
-
   return hasServiceWorker && hasPushManager && hasNotification;
 };
 
@@ -56,7 +47,6 @@ export const registerPushServiceWorker = async () => {
       scope: '/'
     });
 
-    console.log('Push service worker registered:', registration);
     return registration;
   } catch (error) {
     console.error('Push service worker registration failed:', error);
@@ -127,7 +117,6 @@ export const subscribeToPush = async () => {
   // Send subscription to server
   const response = await api.post('/api/push/subscribe', subscription.toJSON());
 
-  console.log('Push subscription saved:', response.data);
   return subscription;
 };
 
@@ -153,7 +142,6 @@ export const unsubscribeFromPush = async () => {
 
     // Unsubscribe locally
     await subscription.unsubscribe();
-    console.log('Push subscription removed');
   }
 };
 
@@ -204,16 +192,13 @@ export const initializePush = async () => {
     if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
       if (event.data.newSubscription) {
         // Service worker already re-subscribed, just persist to server
-        console.log('[Push] Service worker auto-renewed subscription, persisting...');
         try {
           await api.post('/api/push/subscribe', event.data.newSubscription);
-          console.log('[Push] New subscription persisted to server');
         } catch (error) {
           console.error('[Push] Failed to persist renewed subscription:', error);
         }
       } else {
         // Service worker couldn't re-subscribe, do it from client
-        console.log('[Push] Subscription changed, re-subscribing from client...');
         try {
           await subscribeToPush();
         } catch (error) {
@@ -228,11 +213,9 @@ export const initializePush = async () => {
     const cache = await caches.open('push-subscription-cache');
     const cached = await cache.match('/_push_resubscribe');
     if (cached) {
-      console.log('[Push] Found cached re-subscription, persisting to server...');
       const newSub = await cached.json();
       await api.post('/api/push/subscribe', newSub);
       await cache.delete('/_push_resubscribe');
-      console.log('[Push] Cached re-subscription persisted successfully');
     }
   } catch (error) {
     console.error('[Push] Error processing cached re-subscription:', error);

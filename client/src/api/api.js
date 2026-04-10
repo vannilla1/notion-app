@@ -38,7 +38,6 @@ api.interceptors.response.use(
     if ((isTimeout || isNetwork || is503) && config._retryCount < 3) {
       config._retryCount += 1;
       const delay = config._retryCount * 3000; // 3s, 6s, 9s
-      console.log(`Server sa prebúdza... pokus ${config._retryCount}/3 (čakám ${delay/1000}s)`);
       await new Promise(r => setTimeout(r, delay));
       return api(config);
     }

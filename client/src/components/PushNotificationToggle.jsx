@@ -44,16 +44,13 @@ const PushNotificationToggle = () => {
       // Check push notification support
       const isSupported = isPushSupported();
       setPushSupported(isSupported);
-      console.log('[PushToggle] Push supported:', isSupported);
 
       if (isSupported) {
         const perm = getPermissionStatus();
         setPermission(perm);
-        console.log('[PushToggle] Permission status:', perm);
 
         const isSub = await isSubscribedToPush();
         setPushSubscribed(isSub);
-        console.log('[PushToggle] Is subscribed:', isSub);
       }
     } catch (err) {
       console.error('Error checking push status:', err);
@@ -82,14 +79,13 @@ const PushNotificationToggle = () => {
             setPermission('granted');
           } catch (pushErr) {
             // Push subscription failed but in-app notifications are still enabled
-            console.log('Push subscription failed:', pushErr.message);
           }
         } else if (!newEnabled && pushSubscribed) {
           try {
             await unsubscribeFromPush();
             setPushSubscribed(false);
           } catch (pushErr) {
-            console.log('Push unsubscription failed:', pushErr.message);
+            // Push unsubscription failed
           }
         }
       }

@@ -1,4 +1,5 @@
 const Task = require('../models/Task');
+const Contact = require('../models/Contact');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
 
@@ -401,7 +402,11 @@ const checkDueDates = async () => {
       }
     }
 
-    logger.info(`[DueDateChecker] Completed. Notifications sent: ${notificationsSent}, Tasks updated: ${tasksUpdated}`);
+    // Also check contact tasks
+    const contactResult = await checkContactDueDates();
+    notificationsSent += contactResult.notificationsSent;
+
+    logger.info(`[DueDateChecker] Completed. Notifications sent: ${notificationsSent}, Tasks updated: ${tasksUpdated}, Contacts updated: ${contactResult.contactsUpdated}`);
 
     return { notificationsSent, tasksUpdated };
   } catch (error) {
@@ -409,6 +414,149 @@ const checkDueDates = async () => {
       error: error.message,
       stack: error.stack
     });
+    throw error;
+  }
+};
+
+/**
+ * Check contact tasks for due date urgency changes and reminders
+ */
+const checkContactDueDates = async () => {
+  try {
+    const contacts = await Contact.find({
+      'tasks.0': { $exists: true }
+    });
+
+    let notificationsSent = 0;
+    let contactsUpdated = 0;
+
+    for (const contact of contacts) {
+      let contactModified = false;
+
+      for (const task of contact.tasks) {
+        if (task.completed) continue;
+
+        const changes = [];
+
+        // Check task due date
+        if (task.dueDate) {
+          const currentLevel = getUrgencyLevel(task.dueDate);
+          const storedLevel = task.lastUrgencyLevel || null;
+
+          if (currentLevel && currentLevel !== storedLevel) {
+            const levelOrder = { success: 1, warning: 2, danger: 3, overdue: 4 };
+            if ((levelOrder[currentLevel] || 0) > (levelOrder[storedLevel] || 0)) {
+              changes.push({ type: 'task', task, oldLevel: storedLevel, newLevel: currentLevel });
+            }
+          }
+        }
+
+        // Check subtasks
+        processSubtasks(task.subtasks, contact._id, changes);
+
+        // Send urgency notifications
+        for (const change of changes) {
+          const message = getUrgencyMessage(
+            change.oldLevel, change.newLevel,
+            change.type === 'task' ? change.task.title : change.subtask.title,
+            change.type === 'task' ? change.task.dueDate : change.subtask.dueDate
+          );
+
+          if (message) {
+            const usersToNotify = new Set();
+            if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
+            usersToNotify.add(contact.userId.toString());
+
+            for (const userId of usersToNotify) {
+              try {
+                await notificationService.createNotification({
+                  userId,
+                  type: change.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
+                  title: message.title,
+                  message: message.body,
+                  actorName: 'Systém',
+                  relatedType: 'contact',
+                  relatedId: contact._id.toString(),
+                  relatedName: contact.name || 'Kontakt',
+                  data: {
+                    contactId: contact._id.toString(),
+                    taskId: task.id,
+                    subtaskId: change.type === 'subtask' ? change.subtask.id : null
+                  }
+                });
+                notificationsSent++;
+              } catch (err) {
+                logger.error('[DueDateChecker] Contact task notification failed', { error: err.message });
+              }
+            }
+          }
+        }
+
+        // Custom reminders
+        const reminders = [];
+        const taskReminder = checkReminder(task);
+        if (taskReminder) reminders.push({ type: 'task', task, ...taskReminder });
+        processSubtaskReminders(task.subtasks, contact._id, reminders);
+
+        if (reminders.length > 0) {
+          if (taskReminder) task.reminderSent = true;
+          if (reminders.some(r => r.type === 'subtask')) {
+            task.subtasks = markSubtaskRemindersSent(task.subtasks);
+          }
+          contactModified = true;
+
+          for (const rem of reminders) {
+            const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
+            const msg = getReminderMessage(title, rem.dueDate, rem.daysRemaining);
+
+            const usersToNotify = new Set();
+            if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
+            usersToNotify.add(contact.userId.toString());
+
+            for (const userId of usersToNotify) {
+              try {
+                await notificationService.createNotification({
+                  userId,
+                  type: rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
+                  title: msg.title,
+                  message: msg.body,
+                  actorName: 'Systém',
+                  relatedType: 'contact',
+                  relatedId: contact._id.toString(),
+                  relatedName: contact.name || 'Kontakt',
+                  data: {
+                    contactId: contact._id.toString(),
+                    taskId: task.id,
+                    subtaskId: rem.type === 'subtask' ? rem.subtask.id : null
+                  }
+                });
+                notificationsSent++;
+              } catch (err) {
+                logger.error('[DueDateChecker] Contact task reminder failed', { error: err.message });
+              }
+            }
+          }
+        }
+
+        // Update urgency levels
+        if (changes.length > 0) {
+          const currentTaskLevel = getUrgencyLevel(task.dueDate);
+          task.lastUrgencyLevel = currentTaskLevel;
+          task.subtasks = updateSubtaskUrgencyLevels(task.subtasks);
+          contactModified = true;
+        }
+      }
+
+      if (contactModified) {
+        await contact.save();
+        contactsUpdated++;
+      }
+    }
+
+    logger.info(`[DueDateChecker] Contact tasks: ${notificationsSent} notifications, ${contactsUpdated} contacts updated`);
+    return { notificationsSent, contactsUpdated };
+  } catch (error) {
+    logger.error('[DueDateChecker] Error checking contact due dates', { error: error.message });
     throw error;
   }
 };
