@@ -23,7 +23,8 @@ const typeConfig = {
   approval: { label: 'Schválenie', icon: '🟡', color: '#F59E0B' },
   info: { label: 'Informácia', icon: '🔵', color: '#3B82F6' },
   request: { label: 'Žiadosť', icon: '🟠', color: '#F97316' },
-  proposal: { label: 'Návrh', icon: '🟢', color: '#10B981' }
+  proposal: { label: 'Návrh', icon: '🟢', color: '#10B981' },
+  poll: { label: 'Anketa', icon: '📊', color: '#EC4899' }
 };
 
 const statusConfig = {
@@ -53,7 +54,8 @@ function Messages() {
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState({
     toUserId: '', type: 'approval', subject: '', description: '',
-    linkedType: '', linkedId: '', linkedName: '', dueDate: ''
+    linkedType: '', linkedId: '', linkedName: '', dueDate: '',
+    pollOptions: ['', ''], pollMultipleChoice: false
   });
   const [attachment, setAttachment] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -240,6 +242,10 @@ function Messages() {
         formData.append('linkedName', form.linkedName);
       }
       if (form.dueDate) formData.append('dueDate', form.dueDate);
+      if (form.type === 'poll') {
+        formData.append('pollOptions', JSON.stringify(form.pollOptions.filter(o => o.trim())));
+        formData.append('pollMultipleChoice', form.pollMultipleChoice);
+      }
       if (attachment) formData.append('attachment', attachment);
 
       await api.post('/api/messages', formData, {
@@ -258,7 +264,7 @@ function Messages() {
   };
 
   const resetForm = () => {
-    setForm({ toUserId: '', type: 'approval', subject: '', description: '', linkedType: '', linkedId: '', linkedName: '', dueDate: '' });
+    setForm({ toUserId: '', type: 'approval', subject: '', description: '', linkedType: '', linkedId: '', linkedName: '', dueDate: '', pollOptions: ['', ''], pollMultipleChoice: false });
     setAttachment(null);
   };
 
@@ -353,6 +359,16 @@ function Messages() {
       linkedName = tasks.find(t => t.id === linkedId)?.title || '';
     }
     setForm(f => ({ ...f, linkedType, linkedId, linkedName }));
+  };
+
+  const handleVote = async (messageId, optionId) => {
+    try {
+      const res = await api.post(`/api/messages/${messageId}/vote`, { optionId });
+      setSelectedMessage(res.data);
+      fetchMessages();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri hlasovaní');
+    }
   };
 
   // File helpers
@@ -603,6 +619,7 @@ function Messages() {
               contacts={contacts}
               tasks={tasks}
               userId={user.id}
+              onVote={handleVote}
               onFileUpload={triggerMsgFileUpload}
               onFileDownload={handleMsgFileDownload}
               onFileDelete={handleMsgFileDelete}
@@ -677,6 +694,40 @@ function Messages() {
                   style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px', resize: 'vertical' }}
                   placeholder="Podrobnejší popis..." />
               </div>
+
+              {/* Poll options (only for poll type) */}
+              {form.type === 'poll' && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Možnosti ankety *</label>
+                  {form.pollOptions.map((opt, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', minWidth: '20px' }}>{i + 1}.</span>
+                      <input type="text" value={opt} onChange={e => {
+                        const newOpts = [...form.pollOptions];
+                        newOpts[i] = e.target.value;
+                        setForm(f => ({ ...f, pollOptions: newOpts }));
+                      }} maxLength={200} placeholder={`Možnosť ${i + 1}`}
+                        style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }} />
+                      {form.pollOptions.length > 2 && (
+                        <button type="button" onClick={() => {
+                          const newOpts = form.pollOptions.filter((_, j) => j !== i);
+                          setForm(f => ({ ...f, pollOptions: newOpts }));
+                        }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '16px', padding: '4px' }}>×</button>
+                      )}
+                    </div>
+                  ))}
+                  {form.pollOptions.length < 10 && (
+                    <button type="button" onClick={() => setForm(f => ({ ...f, pollOptions: [...f.pollOptions, ''] }))}
+                      style={{ background: 'none', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '6px 12px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-secondary)', width: '100%' }}>
+                      + Pridať možnosť
+                    </button>
+                  )}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={form.pollMultipleChoice} onChange={e => setForm(f => ({ ...f, pollMultipleChoice: e.target.checked }))} />
+                    Povoliť výber viacerých možností
+                  </label>
+                </div>
+              )}
 
               {/* Link to contact or task */}
               <div style={{ marginBottom: '12px' }}>
@@ -796,6 +847,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
                 </span>
               )}
               {(msg.attachment?.originalName || msg.files?.length > 0) && <span>📎 {(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)}</span>}
+              {msg.type === 'poll' && msg.pollOptions && <span>📊 {msg.pollOptions.reduce((s, o) => s + (o.votes?.length || 0), 0)} hlasov</span>}
               {msg.linkedName && <span>{msg.linkedType === 'contact' ? '👤' : '📋'} {msg.linkedName}</span>}
               {msg.comments?.length > 0 && <span>💬 {msg.comments.length}</span>}
             </div>
@@ -807,7 +859,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1009,6 +1061,62 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           </div>
         )}
 
+
+        {/* Poll section */}
+        {msg.type === 'poll' && msg.pollOptions && msg.pollOptions.length > 0 && (() => {
+          const totalVotes = msg.pollOptions.reduce((sum, opt) => sum + (opt.votes?.length || 0), 0);
+          const userVotedOptions = msg.pollOptions.filter(opt => opt.votes?.some(v => v.userId === userId)).map(opt => opt._id);
+          const hasVoted = userVotedOptions.length > 0;
+          return (
+            <div style={{ marginBottom: '16px', padding: '16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '16px' }}>📊</span>
+                <strong style={{ fontSize: '14px' }}>Anketa</strong>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {totalVotes} {totalVotes === 1 ? 'hlas' : totalVotes >= 2 && totalVotes <= 4 ? 'hlasy' : 'hlasov'}
+                  {msg.pollMultipleChoice && ' • viacero možností'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {msg.pollOptions.map(opt => {
+                  const voteCount = opt.votes?.length || 0;
+                  const pct = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+                  const isMyVote = userVotedOptions.includes(opt._id);
+                  return (
+                    <button key={opt._id} type="button"
+                      onClick={() => onVote(msg.id || msg._id, opt._id)}
+                      style={{
+                        position: 'relative', textAlign: 'left', padding: '10px 14px',
+                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                        border: isMyVote ? '2px solid var(--accent-color)' : '1px solid var(--border-color)',
+                        background: 'var(--bg-card)', overflow: 'hidden', fontSize: '14px',
+                        transition: 'all 0.2s ease'
+                      }}>
+                      <div style={{
+                        position: 'absolute', top: 0, left: 0, bottom: 0,
+                        width: `${pct}%`, background: isMyVote ? 'rgba(var(--accent-rgb, 99, 102, 241), 0.12)' : 'rgba(0,0,0,0.04)',
+                        transition: 'width 0.3s ease', borderRadius: 'var(--radius-sm)'
+                      }} />
+                      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: isMyVote ? 600 : 400 }}>
+                          {isMyVote && '✓ '}{opt.text}
+                        </span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px', whiteSpace: 'nowrap' }}>
+                          {voteCount} ({pct}%)
+                        </span>
+                      </div>
+                      {opt.votes?.length > 0 && (
+                        <div style={{ position: 'relative', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          {opt.votes.map(v => v.username).join(', ')}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Files section */}
         <div className="task-files-section" style={{ marginBottom: '16px' }}>

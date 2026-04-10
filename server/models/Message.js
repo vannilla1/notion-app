@@ -11,6 +11,15 @@ const fileSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
+const pollOptionSchema = new mongoose.Schema({
+  text: { type: String, required: true, maxlength: 200 },
+  votes: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    username: { type: String, required: true },
+    votedAt: { type: Date, default: Date.now }
+  }]
+}, { _id: true });
+
 const commentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   username: { type: String, required: true },
@@ -49,7 +58,7 @@ const messageSchema = new mongoose.Schema({
   // Content
   type: {
     type: String,
-    enum: ['approval', 'info', 'request', 'proposal'],
+    enum: ['approval', 'info', 'request', 'proposal', 'poll'],
     required: true
   },
   subject: {
@@ -91,6 +100,9 @@ const messageSchema = new mongoose.Schema({
   },
   // Rejection reason
   rejectionReason: { type: String, default: '' },
+  // Poll options (only for type 'poll')
+  pollOptions: { type: [pollOptionSchema], default: [] },
+  pollMultipleChoice: { type: Boolean, default: false },
   // Comments thread
   comments: { type: [commentSchema], default: [] },
   // Who resolved it and when

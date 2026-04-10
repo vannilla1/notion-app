@@ -28,7 +28,8 @@ const typeLabels = {
   approval: 'Schválenie',
   info: 'Informácia',
   request: 'Žiadosť',
-  proposal: 'Návrh'
+  proposal: 'Návrh',
+  poll: 'Anketa'
 };
 
 // Helper: strip attachment data for list views
@@ -186,8 +187,32 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         return res.status(400).json({ message: 'Príjemca, typ a predmet sú povinné' });
       }
 
-      if (!['approval', 'info', 'request', 'proposal'].includes(type)) {
+      if (!['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) {
         return res.status(400).json({ message: 'Neplatný typ odkazu' });
+      }
+
+      // Validate poll options
+      let parsedPollOptions = [];
+      let pollMultipleChoice = false;
+      if (type === 'poll') {
+        try {
+          parsedPollOptions = JSON.parse(req.body.pollOptions || '[]');
+        } catch {
+          parsedPollOptions = [];
+        }
+        if (!Array.isArray(parsedPollOptions) || parsedPollOptions.length < 2) {
+          return res.status(400).json({ message: 'Anketa musí mať aspoň 2 možnosti' });
+        }
+        if (parsedPollOptions.length > 10) {
+          return res.status(400).json({ message: 'Anketa môže mať maximálne 10 možností' });
+        }
+        parsedPollOptions = parsedPollOptions
+          .map(opt => ({ text: (typeof opt === 'string' ? opt : opt.text || '').trim().substring(0, 200) }))
+          .filter(opt => opt.text.length > 0);
+        if (parsedPollOptions.length < 2) {
+          return res.status(400).json({ message: 'Anketa musí mať aspoň 2 neprázdne možnosti' });
+        }
+        pollMultipleChoice = req.body.pollMultipleChoice === 'true' || req.body.pollMultipleChoice === true;
       }
 
       // Get recipient
@@ -228,6 +253,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         linkedId: linkedId || null,
         linkedName: linkedName || null,
         dueDate: dueDate || null,
+        pollOptions: type === 'poll' ? parsedPollOptions : [],
+        pollMultipleChoice: type === 'poll' ? pollMultipleChoice : false,
         status: 'pending'
       });
 
@@ -310,7 +337,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 
       if (subject !== undefined) message.subject = subject.trim().substring(0, 200);
       if (description !== undefined) message.description = description.trim().substring(0, 5000);
-      if (type !== undefined && ['approval', 'info', 'request', 'proposal'].includes(type)) message.type = type;
+      if (type !== undefined && ['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) message.type = type;
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
         message.linkedType = linkedType || null;
@@ -481,6 +508,77 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST /api/messages/:id/vote — vote on a poll option
+router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { optionId } = req.body;
+
+    if (!optionId) {
+      return res.status(400).json({ message: 'optionId je povinný' });
+    }
+
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      type: 'poll',
+      $or: [
+        { fromUserId: req.user.id },
+        { toUserId: req.user.id }
+      ]
+    });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Anketa nenájdená' });
+    }
+
+    const option = message.pollOptions.id(optionId);
+    if (!option) {
+      return res.status(404).json({ message: 'Možnosť nenájdená' });
+    }
+
+    const userId = req.user.id.toString();
+
+    if (message.pollMultipleChoice) {
+      // Toggle vote on this option
+      const existingVoteIdx = option.votes.findIndex(v => v.userId.toString() === userId);
+      if (existingVoteIdx >= 0) {
+        option.votes.splice(existingVoteIdx, 1);
+      } else {
+        option.votes.push({ userId: req.user.id, username: req.user.username });
+      }
+    } else {
+      // Single choice — remove vote from all options, then add to selected
+      const alreadyVotedHere = option.votes.some(v => v.userId.toString() === userId);
+      for (const opt of message.pollOptions) {
+        opt.votes = opt.votes.filter(v => v.userId.toString() !== userId);
+      }
+      if (!alreadyVotedHere) {
+        option.votes.push({ userId: req.user.id, username: req.user.username });
+      }
+    }
+
+    await message.save();
+
+    // Notify the other party
+    const notifyUserId = message.fromUserId.toString() === userId
+      ? message.toUserId.toString()
+      : message.fromUserId.toString();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user-${notifyUserId}`).emit('message-updated', {
+        id: message._id.toString(),
+        status: message.status
+      });
+    }
+
+    res.json(stripAttachmentData(message));
+  } catch (error) {
+    logger.error('Vote error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
