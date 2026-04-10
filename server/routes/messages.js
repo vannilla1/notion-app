@@ -521,6 +521,89 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
   }
 });
 
+// PUT /api/messages/:id/reopen — revert approval/rejection back to pending/commented
+router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const message = await Message.findOne({
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      status: { $in: ['approved', 'rejected'] }
+    });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Odkaz nenájdený alebo nie je schválený/zamietnutý' });
+    }
+
+    // Only workspace admin (owner/manager) or the recipient can reopen
+    const isAdmin = req.workspaceMember.canAdmin();
+    const isRecipient = message.toUserId.toString() === req.user.id.toString();
+    if (!isAdmin && !isRecipient) {
+      return res.status(403).json({ message: 'Nemáte oprávnenie zrušiť rozhodnutie' });
+    }
+
+    const previousStatus = message.status;
+    // If there are comments, set to 'commented', otherwise 'pending'
+    message.status = message.comments?.length > 0 ? 'commented' : 'pending';
+    message.resolvedBy = null;
+    message.resolvedAt = null;
+    message.rejectionReason = '';
+    // Clear readBy so it shows as unread again
+    message.readBy = [];
+    await message.save();
+
+    // Notify both parties
+    const otherUserId = message.fromUserId.toString() === req.user.id.toString()
+      ? message.toUserId.toString()
+      : message.fromUserId.toString();
+
+    try {
+      await notificationService.createNotification({
+        userId: otherUserId,
+        type: 'message.created',
+        title: '🔄 Rozhodnutie zrušené',
+        message: `${req.user.username} zrušil ${previousStatus === 'approved' ? 'schválenie' : 'zamietnutie'} odkazu "${message.subject}"`,
+        actorName: req.user.username,
+        relatedType: 'message',
+        relatedId: message._id.toString(),
+        relatedName: message.subject,
+        data: { messageId: message._id.toString() }
+      });
+    } catch (notifErr) {
+      logger.warn('Reopen notification failed', { error: notifErr.message });
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user-${message.fromUserId.toString()}`).emit('message-updated', {
+        id: message._id.toString(), status: message.status
+      });
+      io.to(`user-${message.toUserId.toString()}`).emit('message-updated', {
+        id: message._id.toString(), status: message.status
+      });
+    }
+
+    res.json(stripAttachmentData(message));
+
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'message.reopened',
+      category: 'message',
+      targetType: 'message',
+      targetId: message._id.toString(),
+      targetName: message.subject,
+      details: { subject: message.subject, previousStatus },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId || null
+    });
+  } catch (error) {
+    logger.error('Reopen message error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // POST /api/messages/:id/vote — vote on a poll option
 router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) => {
   try {

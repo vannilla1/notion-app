@@ -349,6 +349,18 @@ function Messages() {
     setForm(f => ({ ...f, linkedType, linkedId, linkedName }));
   };
 
+  const handleReopen = async (id) => {
+    if (!window.confirm('Naozaj chcete zrušiť rozhodnutie a vrátiť správu na diskusiu?')) return;
+    try {
+      const res = await api.put(`/api/messages/${id}/reopen`);
+      setSelectedMessage(res.data);
+      fetchMessages();
+      fetchPendingCount();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba');
+    }
+  };
+
   const handleVote = async (messageId, optionId) => {
     try {
       const res = await api.post(`/api/messages/${messageId}/vote`, { optionId });
@@ -607,7 +619,9 @@ function Messages() {
               contacts={contacts}
               tasks={tasks}
               userId={user.id}
+              onReopen={handleReopen}
               onVote={handleVote}
+              canReopen={(selectedMessage.status === 'approved' || selectedMessage.status === 'rejected') && (currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager' || isRecipient(selectedMessage))}
               onFileUpload={triggerMsgFileUpload}
               onFileDownload={handleMsgFileDownload}
               onFileDelete={handleMsgFileDelete}
@@ -854,7 +868,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1181,6 +1195,19 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
               style={{ background: 'var(--danger)', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px' }}>
               ❌ Zamietnuť
             </button>
+          </div>
+        )}
+
+        {/* Reopen action for admin/owner/manager */}
+        {canReopen && (
+          <div style={{ marginBottom: '16px' }}>
+            <button className="btn" onClick={() => onReopen(msg.id || msg._id)}
+              style={{ background: '#F59E0B', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🔄 Zrušiť rozhodnutie
+            </button>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              Správa sa vráti do stavu {msg.comments?.length > 0 ? '"Komentované"' : '"Čaká"'} a bude možné znovu rozhodnúť.
+            </p>
           </div>
         )}
 
