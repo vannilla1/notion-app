@@ -648,12 +648,14 @@ router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, re
 // System health
 router.get('/health', authenticateToken, requireAdmin, async (req, res) => {
   const mem = process.memoryUsage();
+  const stateMap = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
   res.json({
     uptime: process.uptime(),
-    memory: { rss: Math.round(mem.rss / 1024 / 1024), heapUsed: Math.round(mem.heapUsed / 1024 / 1024), heapTotal: Math.round(mem.heapTotal / 1024 / 1024) },
-    mongoStatus: mongoose.connection.readyState,
+    memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
+    database: { status: stateMap[mongoose.connection.readyState] || 'unknown' },
     nodeVersion: process.version,
-    platform: process.platform
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -710,7 +712,7 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
       ipAddress: req.ip
     });
 
-    res.json({ success: true });
+    res.json({ success: true, subscription: user.subscription });
   } catch (error) {
     res.status(500).json({ message: 'Chyba pri úprave predplatného' });
   }
