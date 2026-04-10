@@ -796,7 +796,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
                 </span>
               )}
               {(msg.attachment?.originalName || msg.files?.length > 0) && <span>📎 {(msg.files?.length || 0) + (msg.attachment?.originalName ? 1 : 0)}</span>}
-              {msg.linkedName && <span>🔗 {msg.linkedName}</span>}
+              {msg.linkedName && <span>{msg.linkedType === 'contact' ? '👤' : '📋'} {msg.linkedName}</span>}
               {msg.comments?.length > 0 && <span>💬 {msg.comments.length}</span>}
             </div>
           </div>
@@ -997,7 +997,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                 if (msg.linkedType === 'contact') navigate(`/crm?expandContact=${msg.linkedId}`);
                 if (msg.linkedType === 'task') navigate(`/tasks?highlightTask=${msg.linkedId}`);
               }}>
-              <strong>🔗</strong> {msg.linkedName}
+              <strong>{msg.linkedType === 'contact' ? '👤 Kontakt:' : '📋 Projekt:'}</strong> {msg.linkedName}
             </div>
           )}
         </div>
