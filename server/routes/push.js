@@ -335,6 +335,16 @@ router.post('/apns/register', authenticateToken, async (req, res) => {
       { upsert: true, new: true }
     );
 
+    // Remove iOS web push subscriptions for this user to prevent duplicate notifications
+    // (APNs handles push on iOS, web push subscription from WKWebView is redundant)
+    const removed = await PushSubscription.deleteMany({
+      userId,
+      endpoint: { $regex: /web\.push\.apple\.com|windows\.push\.apple\.com/ }
+    });
+    if (removed.deletedCount > 0) {
+      logger.info('[APNs] Cleaned up iOS web push subscriptions', { userId, removed: removed.deletedCount });
+    }
+
     logger.info('[APNs] Device registered', { userId, tokenPrefix: normalized.substring(0, 8) });
     res.json({ message: 'Device registered' });
   } catch (error) {

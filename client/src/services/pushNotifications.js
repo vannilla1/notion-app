@@ -6,7 +6,18 @@ const PUSH_SW_PATH = '/sw-push.js';
  * Check if push notifications are supported
  * Note: iOS Safari requires PWA mode (added to home screen) for push notifications
  */
+/**
+ * Detect if running inside native iOS app (WKWebView)
+ * Native app handles push via APNs, so web push should be skipped to avoid duplicates
+ */
+export const isNativeIOSApp = () => {
+  return !!(window.webkit?.messageHandlers);
+};
+
 export const isPushSupported = () => {
+  // Skip web push in native iOS app — APNs handles push notifications there
+  if (isNativeIOSApp()) return false;
+
   const hasServiceWorker = 'serviceWorker' in navigator;
   const hasPushManager = 'PushManager' in window;
   const hasNotification = 'Notification' in window;
