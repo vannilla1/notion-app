@@ -118,88 +118,32 @@ function AppContent() {
     return () => observer.disconnect();
   }, []);
 
-  // Handle URL query params for deep linking from push notifications
-  // Store pending navigation while not authenticated
+  // Deep link handling for push notifications
+  // Each page (CRM, Tasks, Messages) handles its own URL params via location.search useEffects.
+  // App.jsx only handles: (1) storing deep links when not authenticated, (2) restoring them after login.
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-
-    // Get the timestamp param (used to force re-navigation)
-    const navTimestamp = params.get('_t');
-
-    // If we have deep link params but not authenticated, store them for later
+    // Store deep link if user lands on a deep link URL but isn't authenticated yet
     if (!isAuthenticated && !loading) {
+      const params = new URLSearchParams(location.search);
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
           (location.pathname === '/tasks' && params.get('highlightTask')) ||
           (location.pathname === '/messages' && params.get('highlight'))) {
         sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
       }
-      return;
     }
+  }, [location.pathname, location.search, isAuthenticated, loading]);
 
+  // Restore pending deep link after login
+  useEffect(() => {
     if (!isAuthenticated) return;
-
-    // Check for pending deep link from before login
     const pendingLink = sessionStorage.getItem('pendingDeepLink');
     if (pendingLink) {
       sessionStorage.removeItem('pendingDeepLink');
-      const pendingUrl = new URL(pendingLink, window.location.origin);
-      const pendingParams = new URLSearchParams(pendingUrl.search);
-
-      if (pendingUrl.pathname === '/crm' && pendingParams.get('expandContact')) {
-        navigate('/crm', {
-          state: {
-            expandContactId: pendingParams.get('expandContact'),
-            navTimestamp: Date.now()
-          },
-          replace: true
-        });
-        return;
-      }
-      if (pendingUrl.pathname === '/tasks' && pendingParams.get('highlightTask')) {
-        navigate('/tasks', {
-          state: {
-            highlightTaskId: pendingParams.get('highlightTask'),
-            highlightSubtaskId: pendingParams.get('subtask') || null,
-            navTimestamp: Date.now()
-          },
-          replace: true
-        });
-        return;
-      }
-      if (pendingUrl.pathname === '/messages' && pendingParams.get('highlight')) {
-        navigate('/messages?highlight=' + pendingParams.get('highlight') + '&_t=' + Date.now(), { replace: true });
-        return;
-      }
+      // Navigate using URL params — target pages handle the rest
+      const sep = pendingLink.includes('?') ? '&' : '?';
+      navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
     }
-
-    // Handle CRM contact expansion
-    if (location.pathname === '/crm' && params.get('expandContact')) {
-      const contactId = params.get('expandContact');
-      // Navigate with state and clear the query param
-      navigate('/crm', {
-        state: {
-          expandContactId: contactId,
-          navTimestamp: navTimestamp || Date.now()
-        },
-        replace: true
-      });
-    }
-
-    // Handle task highlighting
-    if (location.pathname === '/tasks' && params.get('highlightTask')) {
-      const taskId = params.get('highlightTask');
-      const subtaskId = params.get('subtask');
-      // Navigate with state and clear the query param
-      navigate('/tasks', {
-        state: {
-          highlightTaskId: taskId,
-          highlightSubtaskId: subtaskId || null,
-          navTimestamp: navTimestamp || Date.now()
-        },
-        replace: true
-      });
-    }
-  }, [location, isAuthenticated, loading, navigate]);
+  }, [isAuthenticated, navigate]);
 
   // Refresh data when app returns from background (iOS / tab switch)
   useEffect(() => {
@@ -268,7 +212,7 @@ function AppContent() {
     return () => {
       navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
     };
-  }, [isAuthenticated, navigate, location.pathname]);
+  }, [isAuthenticated, navigate]);
 
   if (loading || (isAuthenticated && workspaceLoading)) {
     return (

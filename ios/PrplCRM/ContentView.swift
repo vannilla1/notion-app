@@ -375,6 +375,9 @@ struct WebView: UIViewRepresentable {
                 // Add timestamp to force re-navigation
                 var sep = path.includes('?') ? '&' : '?';
                 var fullPath = path + sep + '_t=' + Date.now();
+                // Store in sessionStorage as backup — if React isn't ready yet or user
+                // isn't authenticated, App.jsx will pick this up after login/hydration
+                try { sessionStorage.setItem('pendingDeepLink', fullPath); } catch(e) {}
                 // Use history.pushState + popstate event — this triggers React Router
                 // without doing a full page reload (which would destroy React state)
                 window.history.pushState({}, '', fullPath);
@@ -525,10 +528,12 @@ struct WebView: UIViewRepresentable {
                 }
 
                 // Execute deferred deep link from cold start notification tap
+                // 2s delay gives React time to hydrate; sessionStorage backup ensures
+                // the deep link isn't lost even if React takes longer
                 if let deepLinkJS = pendingDeepLinkJS {
                     pendingDeepLinkJS = nil
                     print("[Push] Executing deferred deep link after page load")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                         webView.evaluateJavaScript(deepLinkJS, completionHandler: nil)
                     }
                 }
