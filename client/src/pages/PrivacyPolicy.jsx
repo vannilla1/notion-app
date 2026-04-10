@@ -102,7 +102,7 @@ export default function PrivacyPolicy() {
           Späť na hlavnú stránku
         </button>
         <Link
-          to="/terms"
+          to="/vop"
           style={{
             background: '#f1f5f9', color: '#1e293b', border: 'none', padding: '10px 24px',
             borderRadius: '8px', fontSize: '14px', cursor: 'pointer', textDecoration: 'none',

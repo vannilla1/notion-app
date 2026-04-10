@@ -271,7 +271,7 @@ function AppContent() {
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />
         <Route path="/invite/:token" element={<AcceptInvite />} />
-        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/ochrana-udajov" element={<PrivacyPolicy />} />
         <Route path="/vop" element={<TermsOfService />} />
       </Routes>
     </>

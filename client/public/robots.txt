@@ -3,7 +3,7 @@
 
 User-agent: *
 Allow: /
-Allow: /privacy
+Allow: /ochrana-udajov
 Allow: /vop
 
 # Block internal app pages from indexing

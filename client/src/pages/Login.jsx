@@ -126,7 +126,7 @@ function Login() {
               Registráciou súhlasíte s{' '}
               <Link to="/vop" style={{ color: 'var(--accent-color, #6366f1)' }}>Obchodnými podmienkami</Link>
               {' '}a{' '}
-              <Link to="/privacy" style={{ color: 'var(--accent-color, #6366f1)' }}>Zásadami ochrany osobných údajov</Link>.
+              <Link to="/ochrana-udajov" style={{ color: 'var(--accent-color, #6366f1)' }}>Zásadami ochrany osobných údajov</Link>.
             </p>
           )}
         </form>
@@ -149,7 +149,7 @@ function Login() {
           )}
         </div>
 
-        <a href="/privacy" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+        <a href="/ochrana-udajov" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
           Zásady ochrany osobných údajov
         </a>
       </div>

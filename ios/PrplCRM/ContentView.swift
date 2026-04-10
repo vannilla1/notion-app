@@ -637,8 +637,8 @@ struct WebView: UIViewRepresentable {
                     decisionHandler(.cancel)
                     return
                 }
-                // Block /privacy and other marketing pages in the app
-                if path == "/privacy" {
+                // Block /ochrana-udajov and other marketing pages in the app
+                if path == "/ochrana-udajov" {
                     UIApplication.shared.open(url)
                     decisionHandler(.cancel)
                     return
