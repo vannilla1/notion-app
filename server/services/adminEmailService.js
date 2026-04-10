@@ -23,7 +23,7 @@ const sendAdminEmail = async (subject, html) => {
   const adminEmail = process.env.ADMIN_EMAIL || 'support@prplcrm.eu';
   try {
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || '"PrplCRM System" <noreply@prplcrm.eu>',
+      from: process.env.SMTP_FROM || '"PrplCRM System" <hello@prplcrm.eu>',
       to: adminEmail,
       subject: `[PrplCRM Admin] ${subject}`,
       html
@@ -110,7 +110,7 @@ const sendInvitationEmail = async ({ toEmail, inviterName, workspaceName, role, 
 
   try {
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || '"PrplCRM" <noreply@prplcrm.eu>',
+      from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
       to: toEmail,
       subject: `Pozvánka do prostredia ${workspaceName} — PrplCRM`,
       html
