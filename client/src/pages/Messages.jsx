@@ -41,7 +41,7 @@ function Messages() {
   const location = useLocation();
   const { socket, isConnected } = useSocket();
 
-  const [messages, setMessages] = useState([]);
+  const [allMessages, setAllMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('received'); // received | sent
   const [statusFilter, setStatusFilter] = useState('all');
@@ -78,25 +78,32 @@ function Messages() {
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Stats for sidebar (memoized)
-  const receivedMessages = messages;
+  // Filtered messages for display
+  const messages = useMemo(() => {
+    if (statusFilter === 'all') return allMessages;
+    if (statusFilter === 'poll') return allMessages.filter(m => m.type === 'poll');
+    return allMessages.filter(m => m.status === statusFilter);
+  }, [allMessages, statusFilter]);
+
+  // Stats for sidebar (always from all messages)
+  const receivedMessages = allMessages;
   const messageStats = useMemo(() => ({
-    pending: messages.filter(m => m.status === 'pending'),
-    approved: messages.filter(m => m.status === 'approved'),
-    rejected: messages.filter(m => m.status === 'rejected'),
-    commented: messages.filter(m => m.status === 'commented'),
-    poll: messages.filter(m => m.type === 'poll'),
-  }), [messages]);
+    pending: allMessages.filter(m => m.status === 'pending'),
+    approved: allMessages.filter(m => m.status === 'approved'),
+    rejected: allMessages.filter(m => m.status === 'rejected'),
+    commented: allMessages.filter(m => m.status === 'commented'),
+    poll: allMessages.filter(m => m.type === 'poll'),
+  }), [allMessages]);
   const { pending: pendingMessages, approved: approvedMessages, rejected: rejectedMessages, commented: commentedMessages, poll: pollMessages } = messageStats;
 
-  useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab, statusFilter]);
+  useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab]);
 
   // Refresh when app returns from background (iOS / tab switch)
   useEffect(() => {
     const handleResume = () => { fetchMessages(); fetchPendingCount(); };
     window.addEventListener('app-resumed', handleResume);
     return () => window.removeEventListener('app-resumed', handleResume);
-  }, [tab, statusFilter]);
+  }, [tab]);
 
   useEffect(() => {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
@@ -119,7 +126,7 @@ function Messages() {
       socket.off('message-deleted', refresh);
       if (msgFetchTimerRef.current) clearTimeout(msgFetchTimerRef.current);
     };
-  }, [socket, isConnected, tab, statusFilter]);
+  }, [socket, isConnected, tab]);
 
   // Deep link tab (only on URL change, not on messages change)
   useEffect(() => {
@@ -176,10 +183,8 @@ function Messages() {
 
   const fetchMessages = async () => {
     try {
-      const apiStatus = statusFilter === 'poll' ? 'all' : statusFilter;
-      const res = await api.get('/api/messages', { params: { tab, status: apiStatus } });
-      const data = statusFilter === 'poll' ? res.data.filter(m => m.type === 'poll') : res.data;
-      setMessages(data);
+      const res = await api.get('/api/messages', { params: { tab, status: 'all' } });
+      setAllMessages(res.data);
       // Update selectedMessage if it's in the new list (keeps detail view fresh)
       setSelectedMessage(prev => {
         if (!prev) return null;
