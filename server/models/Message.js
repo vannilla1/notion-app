@@ -105,6 +105,8 @@ const messageSchema = new mongoose.Schema({
   pollMultipleChoice: { type: Boolean, default: false },
   // Comments thread
   comments: { type: [commentSchema], default: [] },
+  // Read tracking — array of userIds who have opened/read this message
+  readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   // Who resolved it and when
   resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   resolvedAt: { type: Date, default: null }

@@ -129,13 +129,14 @@ router.get('/by-linked', authenticateToken, requireWorkspace, async (req, res) =
   }
 });
 
-// GET /api/messages/pending-count — count pending messages for current user
+// GET /api/messages/pending-count — count unread pending messages for current user
 router.get('/pending-count', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const count = await Message.countDocuments({
       workspaceId: req.workspaceId,
       toUserId: req.user.id,
-      status: 'pending'
+      status: 'pending',
+      readBy: { $ne: req.user.id }
     });
     res.json({ count });
   } catch (error) {
@@ -161,6 +162,14 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
+    }
+
+    // Mark as read by this user (fire and forget)
+    if (!message.readBy?.includes(req.user.id)) {
+      Message.updateOne(
+        { _id: message._id },
+        { $addToSet: { readBy: req.user.id } }
+      ).catch(() => {});
     }
 
     res.json(stripAttachmentData(message));

@@ -620,7 +620,14 @@ function Messages() {
               messages={messages}
               loading={loading}
               tab={tab}
-              onSelect={setSelectedMessage}
+              onSelect={(msg) => {
+                setSelectedMessage(msg);
+                // Fetch full message detail (triggers readBy on backend), then refresh count
+                api.get(`/api/messages/${msg.id || msg._id}`).then(res => {
+                  setSelectedMessage(res.data);
+                  fetchPendingCount();
+                }).catch(() => {});
+              }}
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               userId={user.id}
