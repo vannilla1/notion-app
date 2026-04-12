@@ -106,9 +106,21 @@ const populateAssignedUsers = async (assignedToIds) => {
 
 // Get all tasks (including tasks from contacts) - for current workspace
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
+  const fetchWithRetry = async (queryFn) => {
+    try {
+      return await queryFn();
+    } catch (err) {
+      if (err.name === 'MongoNetworkTimeoutError' || err.message?.includes('timed out')) {
+        logger.warn('Query timeout, retrying...', { workspaceId: req.workspaceId?.toString() });
+        return await queryFn();
+      }
+      throw err;
+    }
+  };
+
   try {
     // Only get truly global tasks (without contact assignments) for this workspace
-    const globalTasks = await Task.find({
+    const globalTasks = await fetchWithRetry(() => Task.find({
       workspaceId: req.workspaceId,
       $or: [
         { contactIds: { $exists: false } },
@@ -118,12 +130,12 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       $and: [
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
-    }).maxTimeMS(15000).lean();
+    }).maxTimeMS(15000).lean());
     // Only fetch contacts with tasks - use inclusion projection to skip large files entirely
-    const contacts = await Contact.find(
+    const contacts = await fetchWithRetry(() => Contact.find(
       { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
       { name: 1, tasks: 1 }
-    ).maxTimeMS(15000).lean();
+    ).maxTimeMS(15000).lean());
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
@@ -200,7 +212,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json(allTasks);
   } catch (error) {
-    console.error('GET /tasks error:', error.message, error.stack);
+    logger.error('GET /tasks error', { error: error.message, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });

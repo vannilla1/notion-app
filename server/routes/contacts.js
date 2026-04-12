@@ -114,20 +114,31 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
 
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
+  const fetchContacts = () => Contact.find(
+    { workspaceId: req.workspaceId },
+    { files: 0 }
+  ).sort({ name: 1 }).maxTimeMS(15000).lean();
+
   try {
-    // Exclude files.data field from query - it contains large Base64 data
-    const contacts = await Contact.find(
-      { workspaceId: req.workspaceId },
-      { 'files.data': 0 }
-    ).sort({ name: 1 }).maxTimeMS(15000).lean();
-    // Add id field to each contact
+    let contacts;
+    try {
+      contacts = await fetchContacts();
+    } catch (firstError) {
+      // Retry once on timeout
+      if (firstError.name === 'MongoNetworkTimeoutError' || firstError.message?.includes('timed out')) {
+        logger.warn('GET /contacts timeout, retrying...', { workspaceId: req.workspaceId?.toString() });
+        contacts = await fetchContacts();
+      } else {
+        throw firstError;
+      }
+    }
     const contactsWithId = contacts.map(contact => ({
       ...contact,
       id: contact._id.toString()
     }));
     res.json(contactsWithId);
   } catch (error) {
-    console.error('GET /contacts error:', error.message, error.stack);
+    logger.error('GET /contacts error', { error: error.message, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
