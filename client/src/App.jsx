@@ -214,7 +214,11 @@ function AppContent() {
     };
   }, [isAuthenticated, navigate]);
 
-  if (loading || (isAuthenticated && workspaceLoading)) {
+  // Public pages render immediately without waiting for auth/workspace
+  const publicPages = ['/', '/login', '/ochrana-udajov', '/vop', '/invite', '/admin'];
+  const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
+
+  if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading))) {
     return (
       <div style={{
         display: 'flex',
