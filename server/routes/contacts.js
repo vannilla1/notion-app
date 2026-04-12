@@ -145,20 +145,32 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
 });
 
 // Get all contacts (for current workspace) - sorted alphabetically by name
+// Uses batched loading to avoid MongoDB timeout on large document collections
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // Use aggregation pipeline - more efficient for large documents with embedded files
-    const contacts = await Contact.aggregate([
-      { $match: { workspaceId: req.workspaceId } },
-      { $project: {
-        name: 1, email: 1, phone: 1, company: 1, website: 1,
-        notes: 1, status: 1, tasks: 1, userId: 1,
-        createdAt: 1, updatedAt: 1
-      }},
-      { $sort: { name: 1 } }
-    ]).option({ maxTimeMS: 45000 });
+    const BATCH_SIZE = 5;
+    const allContacts = [];
+    let skip = 0;
 
-    const contactsWithId = contacts.map(contact => ({
+    while (true) {
+      const batch = await Contact.aggregate([
+        { $match: { workspaceId: req.workspaceId } },
+        { $sort: { name: 1 } },
+        { $skip: skip },
+        { $limit: BATCH_SIZE },
+        { $project: {
+          name: 1, email: 1, phone: 1, company: 1, website: 1,
+          notes: 1, status: 1, tasks: 1, userId: 1,
+          createdAt: 1, updatedAt: 1
+        }}
+      ]).option({ maxTimeMS: 30000 });
+
+      allContacts.push(...batch);
+      if (batch.length < BATCH_SIZE) break;
+      skip += BATCH_SIZE;
+    }
+
+    const contactsWithId = allContacts.map(contact => ({
       ...contact,
       id: contact._id.toString()
     }));

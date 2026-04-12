@@ -106,21 +106,9 @@ const populateAssignedUsers = async (assignedToIds) => {
 
 // Get all tasks (including tasks from contacts) - for current workspace
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
-  const fetchWithRetry = async (queryFn) => {
-    try {
-      return await queryFn();
-    } catch (err) {
-      if (err.name === 'MongoNetworkTimeoutError' || err.message?.includes('timed out')) {
-        logger.warn('Query timeout, retrying...', { workspaceId: req.workspaceId?.toString() });
-        return await queryFn();
-      }
-      throw err;
-    }
-  };
-
   try {
     // Only get truly global tasks (without contact assignments) for this workspace
-    const globalTasks = await fetchWithRetry(() => Task.find({
+    const globalTasks = await Task.find({
       workspaceId: req.workspaceId,
       $or: [
         { contactIds: { $exists: false } },
@@ -130,12 +118,24 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       $and: [
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
-    }).maxTimeMS(30000).lean());
-    // Use aggregation to only fetch name+tasks, skipping large files entirely
-    const contacts = await fetchWithRetry(() => Contact.aggregate([
-      { $match: { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } } },
-      { $project: { name: 1, tasks: 1 } }
-    ]).option({ maxTimeMS: 45000 }));
+    }).maxTimeMS(30000).lean();
+
+    // Batched loading of contacts with tasks to avoid timeout on large collections
+    const BATCH_SIZE = 5;
+    const contacts = [];
+    let skip = 0;
+    while (true) {
+      const batch = await Contact.aggregate([
+        { $match: { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } } },
+        { $sort: { name: 1 } },
+        { $skip: skip },
+        { $limit: BATCH_SIZE },
+        { $project: { name: 1, tasks: 1 } }
+      ]).option({ maxTimeMS: 30000 });
+      contacts.push(...batch);
+      if (batch.length < BATCH_SIZE) break;
+      skip += BATCH_SIZE;
+    }
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
