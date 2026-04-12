@@ -376,6 +376,83 @@ router.post('/recover-files', authenticateToken, requireWorkspace, async (req, r
   }
 });
 
+// Cleanup: remove metadata for files that have no data (lost during migration)
+router.post('/cleanup-lost-files', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const contacts = await Contact.find({ workspaceId: req.workspaceId });
+    let removed = 0;
+    let kept = 0;
+
+    for (const contact of contacts) {
+      let modified = false;
+      const originalCount = (contact.files || []).length;
+
+      // Filter out files that have no data in ContactFile
+      if (contact.files && contact.files.length > 0) {
+        const validFiles = [];
+        for (const f of contact.files) {
+          const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+          if (cf || (f.data && f.data.length > 100)) {
+            validFiles.push(f);
+            kept++;
+          } else {
+            removed++;
+            logger.info('Removing lost file metadata', { contactName: contact.name, fileId: f.id, fileName: f.originalName });
+          }
+        }
+        if (validFiles.length !== originalCount) {
+          contact.files = validFiles;
+          modified = true;
+        }
+      }
+
+      // Also clean task/subtask files (recursive)
+      const cleanTaskFiles = async (tasks) => {
+        if (!Array.isArray(tasks)) return false;
+        let changed = false;
+        for (const t of tasks) {
+          if (Array.isArray(t.files) && t.files.length > 0) {
+            const valid = [];
+            for (const f of t.files) {
+              const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+              if (cf || (f.data && f.data.length > 100)) {
+                valid.push(f);
+                kept++;
+              } else {
+                removed++;
+                logger.info('Removing lost task file metadata', { fileId: f.id, fileName: f.originalName });
+              }
+            }
+            if (valid.length !== t.files.length) {
+              t.files = valid;
+              changed = true;
+            }
+          }
+          if (Array.isArray(t.subtasks)) {
+            if (await cleanTaskFiles(t.subtasks)) changed = true;
+          }
+        }
+        return changed;
+      };
+      if (await cleanTaskFiles(contact.tasks)) {
+        contact.markModified('tasks');
+        modified = true;
+      }
+
+      if (modified) await contact.save();
+    }
+
+    // Invalidate workspace cache so fresh data loads
+    const { invalidateCache } = require('../middleware/workspace');
+    invalidateCache(req.user.id);
+
+    res.json({ removed, kept, message: `Vymazaných ${removed} stratených súborov, ${kept} ponechaných.` });
+  } catch (error) {
+    logger.error('Cleanup lost files error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
