@@ -230,9 +230,9 @@ router.get('/test-download', authenticateToken, requireWorkspace, async (req, re
 // Debug endpoint — check all files in workspace (metadata + ContactFile status)
 router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // Load contacts WITH data field to check if data still exists in documents
     const contacts = await Contact.find(
-      { workspaceId: req.workspaceId },
-      { name: 1, 'files.id': 1, 'files.originalName': 1, 'files.size': 1, 'tasks.id': 1, 'tasks.title': 1, 'tasks.files': 1, 'tasks.subtasks': 1 }
+      { workspaceId: req.workspaceId }
     ).lean();
 
     const allFiles = [];
@@ -241,6 +241,7 @@ router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res)
       // Contact-level files
       for (const f of (c.files || [])) {
         const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+        const hasDataInDoc = !!(f.data && f.data.length > 100);
         allFiles.push({
           type: 'contact-file',
           contactName: c.name,
@@ -248,15 +249,18 @@ router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res)
           fileId: f.id,
           fileName: f.originalName,
           size: f.size,
-          inContactFile: !!cf
+          inContactFile: !!cf,
+          hasDataInDoc,
+          dataStatus: cf ? 'OK-in-CF' : hasDataInDoc ? 'RECOVERABLE-in-doc' : 'LOST'
         });
       }
 
-      // Contact task files
+      // Contact task files (recursive scan)
       const scanTasks = (tasks, depth = 0) => {
         if (!Array.isArray(tasks)) return;
         for (const t of tasks) {
           for (const f of (t.files || [])) {
+            const hasData = !!(f.data && f.data.length > 100);
             allFiles.push({
               type: `task-file-depth-${depth}`,
               contactName: c.name,
@@ -264,6 +268,8 @@ router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res)
               fileId: f.id,
               fileName: f.originalName,
               size: f.size,
+              hasDataInDoc: hasData,
+              dataStatus: hasData ? 'RECOVERABLE-in-doc' : 'check-CF'
             });
           }
           if (Array.isArray(t.subtasks)) scanTasks(t.subtasks, depth + 1);
@@ -272,21 +278,100 @@ router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res)
       scanTasks(c.tasks);
     }
 
-    // Also list all ContactFile entries
+    // Check CF for task files
+    for (const f of allFiles) {
+      if (f.dataStatus === 'check-CF') {
+        const cf = await ContactFile.findOne({ fileId: f.fileId }, { _id: 1 }).lean();
+        f.inContactFile = !!cf;
+        f.dataStatus = cf ? 'OK-in-CF' : 'LOST';
+      }
+    }
+
     const cfEntries = await ContactFile.find({}, { fileId: 1, contactId: 1, _id: 0 }).lean();
+
+    const okCount = allFiles.filter(f => f.dataStatus === 'OK-in-CF').length;
+    const recoverableCount = allFiles.filter(f => f.dataStatus === 'RECOVERABLE-in-doc').length;
+    const lostCount = allFiles.filter(f => f.dataStatus === 'LOST').length;
 
     res.json({
       filesInDocuments: allFiles,
       filesInContactFileCollection: cfEntries,
       summary: {
-        docFiles: allFiles.length,
-        cfFiles: cfEntries.length,
-        docFilesWithCF: allFiles.filter(f => f.inContactFile).length,
-        docFilesWithoutCF: allFiles.filter(f => f.inContactFile === false).length
+        total: allFiles.length,
+        ok: okCount,
+        recoverable: recoverableCount,
+        lost: lostCount,
+        cfFiles: cfEntries.length
       }
     });
   } catch (error) {
     logger.error('Debug files error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Recovery endpoint: migrate files that still have data in documents to ContactFile
+router.post('/recover-files', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }).lean();
+    let recovered = 0;
+    let alreadyOk = 0;
+    let noData = 0;
+
+    for (const c of contacts) {
+      let modified = false;
+
+      // Contact-level files
+      for (const f of (c.files || [])) {
+        if (f.data && f.data.length > 100) {
+          const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+          if (!exists) {
+            try {
+              await ContactFile.create({ contactId: c._id, fileId: f.id, data: f.data });
+              recovered++;
+              logger.info('Recovered file', { contactName: c.name, fileId: f.id, fileName: f.originalName });
+            } catch (err) {
+              logger.error('Failed to recover file', { fileId: f.id, error: err.message });
+            }
+          } else {
+            alreadyOk++;
+          }
+        } else {
+          const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+          if (!exists) noData++;
+          else alreadyOk++;
+        }
+      }
+
+      // Contact task/subtask files (recursive)
+      const recoverTaskFiles = async (tasks) => {
+        if (!Array.isArray(tasks)) return;
+        for (const t of tasks) {
+          for (const f of (t.files || [])) {
+            if (f.data && f.data.length > 100) {
+              const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+              if (!exists) {
+                try {
+                  await ContactFile.create({ contactId: c._id, fileId: f.id, data: f.data });
+                  recovered++;
+                  logger.info('Recovered task file', { fileId: f.id, fileName: f.originalName });
+                } catch (err) {
+                  logger.error('Failed to recover task file', { fileId: f.id, error: err.message });
+                }
+              } else {
+                alreadyOk++;
+              }
+            }
+          }
+          if (Array.isArray(t.subtasks)) await recoverTaskFiles(t.subtasks);
+        }
+      };
+      await recoverTaskFiles(c.tasks);
+    }
+
+    res.json({ recovered, alreadyOk, noData, message: `Obnovených: ${recovered}, OK: ${alreadyOk}, Stratených: ${noData}` });
+  } catch (error) {
+    logger.error('Recover files error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

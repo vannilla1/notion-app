@@ -357,9 +357,10 @@ server.listen(PORT, () => {
           for await (const contact of contactCursor) {
             let modified = false;
 
-            // Contact-level files
+            // Contact-level files: only strip data for SUCCESSFULLY migrated files
             const filesToMigrate = (contact.files || []).filter(f => f.data);
             if (filesToMigrate.length > 0) {
+              const migratedFileIds = new Set();
               for (const file of filesToMigrate) {
                 try {
                   await ContactFile.updateOne(
@@ -367,16 +368,23 @@ server.listen(PORT, () => {
                     { $setOnInsert: { contactId: contact._id, fileId: file.id, data: file.data } },
                     { upsert: true }
                   );
+                  migratedFileIds.add(file.id);
                   migratedFiles++;
                 } catch (fileErr) {
-                  logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
+                  logger.warn('File migration skip — keeping data in doc', { fileId: file.id, error: fileErr.message });
+                  // DO NOT strip data — it's the only copy!
                 }
               }
-              contact.files = contact.files.map(f => ({
-                id: f.id, originalName: f.originalName, mimetype: f.mimetype,
-                size: f.size, uploadedAt: f.uploadedAt
-              }));
-              modified = true;
+              // Only strip data from files that were successfully saved to ContactFile
+              if (migratedFileIds.size > 0) {
+                contact.files = contact.files.map(f => {
+                  if (migratedFileIds.has(f.id)) {
+                    return { id: f.id, originalName: f.originalName, mimetype: f.mimetype, size: f.size, uploadedAt: f.uploadedAt };
+                  }
+                  return f; // Keep data for files that failed to migrate
+                });
+                modified = true;
+              }
             }
 
             // Contact task/subtask files
@@ -393,8 +401,8 @@ server.listen(PORT, () => {
                         );
                         migratedFiles++;
                       } catch (fileErr) {
-                        logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
-                        continue;
+                        logger.warn('Task file migration skip — keeping data in doc', { fileId: file.id, error: fileErr.message });
+                        continue; // DO NOT strip data — it's the only copy!
                       }
                       delete file.data;
                       modified = true;
