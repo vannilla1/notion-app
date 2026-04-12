@@ -423,9 +423,16 @@ const checkDueDates = async () => {
  */
 const checkContactDueDates = async () => {
   try {
-    const contacts = await Contact.find({
-      'tasks.0': { $exists: true }
-    });
+    const contacts = await Contact.find(
+      {
+        'tasks.0': { $exists: true },
+        'tasks': { $elemMatch: { completed: { $ne: true }, $or: [
+          { dueDate: { $exists: true, $ne: null } },
+          { reminder: { $exists: true, $ne: null } }
+        ]}}
+      },
+      { 'files.data': 0, 'files': 0 }
+    ).lean();
 
     let notificationsSent = 0;
     let contactsUpdated = 0;
@@ -548,7 +555,7 @@ const checkContactDueDates = async () => {
       }
 
       if (contactModified) {
-        await contact.save();
+        await Contact.updateOne({ _id: contact._id }, { tasks: contact.tasks });
         contactsUpdated++;
       }
     }
