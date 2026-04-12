@@ -423,16 +423,16 @@ const checkDueDates = async () => {
  */
 const checkContactDueDates = async () => {
   try {
-    const contacts = await Contact.find(
-      {
+    const contacts = await Contact.aggregate([
+      { $match: {
         'tasks.0': { $exists: true },
         'tasks': { $elemMatch: { completed: { $ne: true }, $or: [
           { dueDate: { $exists: true, $ne: null } },
           { reminder: { $exists: true, $ne: null } }
         ]}}
-      },
-      { 'files': 0 }
-    ).maxTimeMS(20000).lean();
+      }},
+      { $project: { name: 1, tasks: 1, workspaceId: 1, userId: 1 } }
+    ]).maxTimeMS(30000);
 
     let notificationsSent = 0;
     let contactsUpdated = 0;

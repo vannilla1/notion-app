@@ -112,26 +112,52 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
+// Diagnostic endpoint to check workspace data size
+router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const stats = await Contact.aggregate([
+      { $match: { workspaceId: req.workspaceId } },
+      { $project: {
+        docSize: { $bsonSize: '$$ROOT' },
+        filesCount: { $size: { $ifNull: ['$files', []] } },
+        tasksCount: { $size: { $ifNull: ['$tasks', []] } },
+        name: 1
+      }},
+      { $sort: { docSize: -1 } }
+    ]).maxTimeMS(45000);
+
+    const totalSize = stats.reduce((sum, s) => sum + s.docSize, 0);
+    res.json({
+      contactCount: stats.length,
+      totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
+      avgSizeKB: stats.length ? (totalSize / stats.length / 1024).toFixed(2) : 0,
+      top5: stats.slice(0, 5).map(s => ({
+        name: s.name,
+        sizeMB: (s.docSize / 1024 / 1024).toFixed(2),
+        filesCount: s.filesCount,
+        tasksCount: s.tasksCount
+      }))
+    });
+  } catch (error) {
+    logger.error('Diagnostics error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
-  const fetchContacts = () => Contact.find(
-    { workspaceId: req.workspaceId },
-    { files: 0 }
-  ).sort({ name: 1 }).maxTimeMS(30000).lean();
-
   try {
-    let contacts;
-    try {
-      contacts = await fetchContacts();
-    } catch (firstError) {
-      // Retry once on timeout
-      if (firstError.name === 'MongoNetworkTimeoutError' || firstError.message?.includes('timed out')) {
-        logger.warn('GET /contacts timeout, retrying...', { workspaceId: req.workspaceId?.toString() });
-        contacts = await fetchContacts();
-      } else {
-        throw firstError;
-      }
-    }
+    // Use aggregation pipeline - more efficient for large documents with embedded files
+    const contacts = await Contact.aggregate([
+      { $match: { workspaceId: req.workspaceId } },
+      { $project: {
+        name: 1, email: 1, phone: 1, company: 1, website: 1,
+        notes: 1, status: 1, tasks: 1, userId: 1,
+        createdAt: 1, updatedAt: 1
+      }},
+      { $sort: { name: 1 } }
+    ]).maxTimeMS(45000);
+
     const contactsWithId = contacts.map(contact => ({
       ...contact,
       id: contact._id.toString()

@@ -131,11 +131,11 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
     }).maxTimeMS(30000).lean());
-    // Only fetch contacts with tasks - use inclusion projection to skip large files entirely
-    const contacts = await fetchWithRetry(() => Contact.find(
-      { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
-      { name: 1, tasks: 1 }
-    ).maxTimeMS(30000).lean());
+    // Use aggregation to only fetch name+tasks, skipping large files entirely
+    const contacts = await fetchWithRetry(() => Contact.aggregate([
+      { $match: { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } } },
+      { $project: { name: 1, tasks: 1 } }
+    ]).maxTimeMS(45000));
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
