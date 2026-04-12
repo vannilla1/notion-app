@@ -461,7 +461,16 @@ function Messages() {
       const response = await api.get(`/api/messages/${messageId}/files/${fileId}/download`, { responseType: 'blob' });
       downloadBlob(response.data, fileName);
     } catch (error) {
-      alert('Chyba pri sťahovaní súboru');
+      let msg = 'Chyba pri sťahovaní súboru';
+      try {
+        if (error.response?.data instanceof Blob) {
+          const text = await error.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        }
+      } catch {}
+      console.error('File download error:', error.response?.status, msg);
+      alert(msg);
     }
   };
 

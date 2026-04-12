@@ -2450,63 +2450,93 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     const subtaskId = req.query.subtaskId;
     let fileMeta;
 
+    logger.info('Task file download request', { taskId, fileId, subtaskId });
+
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
-      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      const task = await Task.findOne(
+        { _id: taskId, workspaceId: req.workspaceId },
+        { files: 1, subtasks: 1 }
+      ).lean();
       if (task) {
         if (subtaskId) {
           const subtask = findSubtaskById(task.subtasks, subtaskId);
           if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
         } else {
-          fileMeta = task.files.find(f => f.id === fileId);
+          fileMeta = (task.files || []).find(f => f.id === fileId);
         }
+        if (fileMeta) logger.info('Task file download: found in global Task', { taskId, fileId });
       }
     }
 
     // If not found, search in contact tasks (handles UUID task IDs)
     if (!fileMeta) {
-      const contact = await Contact.findOne({
-        workspaceId: req.workspaceId,
-        'tasks.id': taskId
-      });
-      if (contact) {
-        const contactTask = contact.tasks.find(t => t.id === taskId);
-        if (contactTask) {
-          if (subtaskId) {
-            const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
-            if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
-          } else {
-            fileMeta = (contactTask.files || []).find(f => f.id === fileId);
-          }
+      // Use projection to avoid loading large documents
+      const contact = await Contact.findOne(
+        { workspaceId: req.workspaceId, 'tasks.id': taskId },
+        { 'tasks.$': 1 }
+      ).lean();
+      if (contact && contact.tasks?.[0]) {
+        const contactTask = contact.tasks[0];
+        if (subtaskId) {
+          const subtask = findSubtaskById(contactTask.subtasks || [], subtaskId);
+          if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
+        } else {
+          fileMeta = (contactTask.files || []).find(f => f.id === fileId);
         }
+        if (fileMeta) logger.info('Task file download: found in contact task', { taskId, fileId });
+        else logger.warn('Task file download: contact task found but no file', {
+          taskId, fileId, subtaskId,
+          taskFiles: (contactTask.files || []).map(f => f.id),
+          subtaskCount: (contactTask.subtasks || []).length
+        });
       }
     }
 
-    if (!fileMeta) return res.status(404).json({ message: 'Súbor nenájdený' });
+    if (!fileMeta) {
+      logger.warn('Task file download: file metadata not found anywhere', { taskId, fileId, subtaskId });
+
+      // Last resort: try ContactFile directly (file metadata may have been lost but data is safe)
+      const directCF = await ContactFile.findOne({ fileId }, { data: 1 }).lean();
+      if (directCF) {
+        logger.info('Task file download: found in ContactFile by direct lookup (metadata was lost)', { fileId });
+        const fileBuffer = Buffer.from(directCF.data, 'base64');
+        res.set({
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${fileId}"`,
+          'Content-Length': fileBuffer.length
+        });
+        return res.send(fileBuffer);
+      }
+
+      return res.status(404).json({ message: 'Súbor nenájdený' });
+    }
 
     // Try ContactFile collection first, fall back to legacy embedded data
     let base64Data;
     const contactFile = await ContactFile.findOne({ fileId }, { data: 1 }).lean();
     if (contactFile) {
       base64Data = contactFile.data;
+      logger.info('Task file download: data from ContactFile', { fileId, dataLen: base64Data?.length });
     } else if (fileMeta.data) {
       // Legacy: data still embedded — migrate on-the-fly
       base64Data = fileMeta.data;
+      logger.info('Task file download: using legacy embedded data, migrating', { fileId });
       ContactFile.updateOne(
         { fileId },
         { $setOnInsert: { fileId, data: base64Data } },
         { upsert: true }
-      ).catch(() => {}); // Fire-and-forget — just ensure it's saved for next time
+      ).catch(() => {});
     } else {
-      return res.status(404).json({ message: 'Dáta súboru nenájdené' });
+      logger.error('Task file download: NO DATA anywhere', { taskId, fileId, fileName: fileMeta.originalName });
+      return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
     const fileBuffer = Buffer.from(base64Data, 'base64');
     res.set({
       'Content-Type': fileMeta.mimetype,
       'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
-      'Content-Length': fileBuffer.length,
-      'Cross-Origin-Resource-Policy': 'cross-origin'
+      'Content-Length': fileBuffer.length
     });
     res.send(fileBuffer);
   } catch (error) {

@@ -1748,7 +1748,19 @@ function Tasks() {
       const response = await api.get(url, { responseType: 'blob' });
       downloadBlob(response.data, fileName);
     } catch (error) {
-      alert('Chyba pri sťahovaní súboru');
+      // Try to read error message from blob response
+      let msg = 'Chyba pri sťahovaní súboru';
+      try {
+        if (error.response?.data instanceof Blob) {
+          const text = await error.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        } else if (error.response?.data?.message) {
+          msg = error.response.data.message;
+        }
+      } catch {}
+      console.error('File download error:', error.response?.status, msg);
+      alert(msg);
     }
   };
 

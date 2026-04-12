@@ -441,10 +441,22 @@ function CRM() {
     }
   };
 
-  const downloadFile = (contactId, fileId, fileName) => {
-    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' })
-      .then(response => downloadBlob(response.data, fileName))
-      .catch(() => alert('Chyba pri sťahovaní súboru'));
+  const downloadFile = async (contactId, fileId, fileName) => {
+    try {
+      const response = await api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' });
+      downloadBlob(response.data, fileName);
+    } catch (error) {
+      let msg = 'Chyba pri sťahovaní súboru';
+      try {
+        if (error.response?.data instanceof Blob) {
+          const text = await error.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        }
+      } catch {}
+      console.error('File download error:', error.response?.status, msg);
+      alert(msg);
+    }
   };
 
   const exportContactsCsv = () => {

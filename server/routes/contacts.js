@@ -210,6 +210,87 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
   }
 });
 
+// Test download endpoint — returns a small hardcoded file to verify download pipeline
+router.get('/test-download', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const testContent = 'Test file download works! ' + new Date().toISOString();
+    const buf = Buffer.from(testContent, 'utf-8');
+    res.set({
+      'Content-Type': 'text/plain',
+      'Content-Disposition': 'attachment; filename="test-download.txt"',
+      'Content-Length': buf.length
+    });
+    res.send(buf);
+  } catch (error) {
+    logger.error('Test download error', { error: error.message });
+    res.status(500).json({ message: 'Test download failed' });
+  }
+});
+
+// Debug endpoint — check all files in workspace (metadata + ContactFile status)
+router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId },
+      { name: 1, 'files.id': 1, 'files.originalName': 1, 'files.size': 1, 'tasks.id': 1, 'tasks.title': 1, 'tasks.files': 1, 'tasks.subtasks': 1 }
+    ).lean();
+
+    const allFiles = [];
+
+    for (const c of contacts) {
+      // Contact-level files
+      for (const f of (c.files || [])) {
+        const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
+        allFiles.push({
+          type: 'contact-file',
+          contactName: c.name,
+          contactId: c._id,
+          fileId: f.id,
+          fileName: f.originalName,
+          size: f.size,
+          inContactFile: !!cf
+        });
+      }
+
+      // Contact task files
+      const scanTasks = (tasks, depth = 0) => {
+        if (!Array.isArray(tasks)) return;
+        for (const t of tasks) {
+          for (const f of (t.files || [])) {
+            allFiles.push({
+              type: `task-file-depth-${depth}`,
+              contactName: c.name,
+              taskTitle: t.title || t.id,
+              fileId: f.id,
+              fileName: f.originalName,
+              size: f.size,
+            });
+          }
+          if (Array.isArray(t.subtasks)) scanTasks(t.subtasks, depth + 1);
+        }
+      };
+      scanTasks(c.tasks);
+    }
+
+    // Also list all ContactFile entries
+    const cfEntries = await ContactFile.find({}, { fileId: 1, contactId: 1, _id: 0 }).lean();
+
+    res.json({
+      filesInDocuments: allFiles,
+      filesInContactFileCollection: cfEntries,
+      summary: {
+        docFiles: allFiles.length,
+        cfFiles: cfEntries.length,
+        docFilesWithCF: allFiles.filter(f => f.inContactFile).length,
+        docFilesWithoutCF: allFiles.filter(f => f.inContactFile === false).length
+      }
+    });
+  } catch (error) {
+    logger.error('Debug files error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
@@ -894,40 +975,70 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 // Download file (from ContactFile collection or legacy Contact.files.data)
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    const { id: contactId, fileId } = req.params;
+    logger.info('Contact file download request', { contactId, fileId });
+
     // Load contact with file metadata only (no Base64 data)
     const contact = await Contact.findOne(
-      { _id: req.params.id, workspaceId: req.workspaceId },
-      { files: 1 }
+      { _id: contactId, workspaceId: req.workspaceId },
+      { files: 1, 'tasks.id': 1, 'tasks.files': 1, 'tasks.subtasks': 1 }
     ).lean();
     if (!contact) {
+      logger.warn('Contact file download: contact not found', { contactId });
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const fileMeta = (contact.files || []).find(f => f.id === req.params.fileId);
+    // Search in contact-level files first
+    let fileMeta = (contact.files || []).find(f => f.id === fileId);
+
+    // If not found, search in contact task files
     if (!fileMeta) {
+      const findFileInTasks = (tasks) => {
+        if (!Array.isArray(tasks)) return null;
+        for (const t of tasks) {
+          const f = (t.files || []).find(f => f.id === fileId);
+          if (f) return f;
+          if (Array.isArray(t.subtasks)) {
+            const found = findFileInTasks(t.subtasks);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      fileMeta = findFileInTasks(contact.tasks);
+    }
+
+    if (!fileMeta) {
+      logger.warn('Contact file download: file metadata not found', {
+        contactId, fileId,
+        contactFileCount: (contact.files || []).length,
+        contactFileIds: (contact.files || []).map(f => f.id),
+      });
       return res.status(404).json({ message: 'File not found' });
     }
 
     // Try ContactFile collection first, fall back to legacy embedded data
     let base64Data;
     const contactFile = await ContactFile.findOne(
-      { fileId: req.params.fileId },
+      { fileId },
       { data: 1 }
     ).lean();
 
     if (contactFile) {
       base64Data = contactFile.data;
+      logger.info('Contact file download: found in ContactFile', { fileId, dataLen: base64Data?.length });
     } else if (fileMeta.data) {
       // Legacy: data still embedded — migrate on-the-fly
       base64Data = fileMeta.data;
+      logger.info('Contact file download: using legacy embedded data, migrating', { fileId });
       ContactFile.updateOne(
-        { fileId: req.params.fileId },
-        { $setOnInsert: { contactId: req.params.id, fileId: req.params.fileId, data: base64Data } },
+        { fileId },
+        { $setOnInsert: { contactId, fileId, data: base64Data } },
         { upsert: true }
       ).catch(() => {});
     } else {
-      logger.error('File data not found', { contactId: req.params.id, fileId: req.params.fileId });
-      return res.status(404).json({ message: 'File data not found' });
+      logger.error('Contact file download: NO DATA anywhere', { contactId, fileId, fileName: fileMeta.originalName });
+      return res.status(404).json({ message: 'File data not found — file may need to be re-uploaded' });
     }
 
     const fileBuffer = Buffer.from(base64Data, 'base64');
@@ -940,6 +1051,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
 
     res.send(fileBuffer);
   } catch (error) {
+    logger.error('Contact file download error', { error: error.message, stack: error.stack, contactId: req.params.id, fileId: req.params.fileId });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

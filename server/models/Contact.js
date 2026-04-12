@@ -1,6 +1,16 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
+// File metadata schema (data stored in ContactFile collection, only metadata here)
+const fileSchema = new mongoose.Schema({
+  id: String,
+  originalName: String,
+  mimetype: String,
+  size: Number,
+  data: String, // Legacy: Base64 data (now stored in ContactFile collection)
+  uploadedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 // BUGFIX: Changed from Mixed type to proper Array for type consistency
 // This prevents potential data loss from type coercion issues
 const subtaskSchema = new mongoose.Schema({
@@ -12,6 +22,7 @@ const subtaskSchema = new mongoose.Schema({
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
   assignedTo: { type: [String], default: [] }, // Array of User IDs
+  files: { type: [fileSchema], default: [] }, // Subtask file attachments
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: String,
@@ -28,20 +39,12 @@ const taskSchema = new mongoose.Schema({
   dueDate: String,
   assignedTo: { type: [String], default: [] }, // Array of User IDs
   subtasks: { type: [subtaskSchema], default: [] },
+  files: { type: [fileSchema], default: [] }, // Task file attachments
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: String,
   reminder: Number,
   reminderSent: { type: Boolean, default: false }
-}, { _id: false });
-
-const fileSchema = new mongoose.Schema({
-  id: String,
-  originalName: String,
-  mimetype: String,
-  size: Number,
-  data: String, // Base64 encoded file data
-  uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
 const contactSchema = new mongoose.Schema({

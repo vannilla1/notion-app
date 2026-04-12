@@ -112,7 +112,16 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
       });
       downloadBlob(response.data, fileName);
     } catch (err) {
-      console.error('File download failed:', err);
+      let msg = 'Chyba pri sťahovaní súboru';
+      try {
+        if (err.response?.data instanceof Blob) {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        }
+      } catch {}
+      console.error('File download failed:', err.response?.status, msg);
+      alert(msg);
     }
   };
 

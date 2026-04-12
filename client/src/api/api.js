@@ -30,12 +30,15 @@ api.interceptors.response.use(
 
     config._retryCount = config._retryCount || 0;
 
+    // Don't retry blob/file download requests — they're large and retrying wastes connections
+    const isBlob = config.responseType === 'blob';
+
     const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
     const isNetwork = error.code === 'ERR_NETWORK' || (!error.response && error.message !== 'canceled');
     const is503 = error.response?.status === 503;
 
-    // Retry on timeout, network error, or 503 (server waking up)
-    if ((isTimeout || isNetwork || is503) && config._retryCount < 3) {
+    // Retry on timeout, network error, or 503 (server waking up) — but NOT for blob requests
+    if (!isBlob && (isTimeout || isNetwork || is503) && config._retryCount < 3) {
       config._retryCount += 1;
       const delay = config._retryCount * 3000; // 3s, 6s, 9s
       await new Promise(r => setTimeout(r, delay));
