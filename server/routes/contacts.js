@@ -154,6 +154,37 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
       cfIndexes = [{ error: e.message }];
     }
 
+    // Test download: find a contact with files and try to load from ContactFile
+    let downloadTest = null;
+    try {
+      const contactWithFiles = await Contact.findOne(
+        { workspaceId: req.workspaceId, 'files.0': { $exists: true } },
+        { files: 1, name: 1 }
+      ).lean();
+      if (contactWithFiles && contactWithFiles.files[0]) {
+        const testFile = contactWithFiles.files[0];
+        const cfEntry = await ContactFile.findOne({ fileId: testFile.id }, { _id: 1, fileId: 1 }).lean();
+        downloadTest = {
+          contactName: contactWithFiles.name,
+          fileId: testFile.id,
+          fileName: testFile.originalName,
+          hasDataInDoc: !!testFile.data,
+          foundInContactFile: !!cfEntry,
+          cfFileId: cfEntry?.fileId || null
+        };
+      }
+    } catch (e) {
+      downloadTest = { error: e.message };
+    }
+
+    // List all ContactFile entries (just fileIds, no data)
+    let cfFiles = [];
+    try {
+      cfFiles = await ContactFile.find({}, { fileId: 1, contactId: 1, _id: 0 }).lean();
+    } catch (e) {
+      cfFiles = [{ error: e.message }];
+    }
+
     res.json({
       contactCount: stats.length,
       totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
@@ -169,7 +200,9 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
         count: contactFileCount,
         totalSizeMB: contactFileStats[0] ? (contactFileStats[0].totalSize / 1024 / 1024).toFixed(2) : '0',
       },
-      cfIndexes: cfIndexes.map(i => i.name || i.error)
+      cfIndexes: cfIndexes.map(i => i.name || i.error),
+      downloadTest,
+      cfFiles
     });
   } catch (error) {
     logger.error('Diagnostics error', { error: error.message });

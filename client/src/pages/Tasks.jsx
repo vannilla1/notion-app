@@ -531,9 +531,9 @@ function Tasks() {
     fetchTasks();
     fetchContacts();
     fetchUsers();
-    // Sync completed tasks from Google Tasks (if connected)
-    syncCompletedFromGoogle();
-  }, [fetchTasks, fetchContacts, fetchUsers, syncCompletedFromGoogle]);
+    // Google Tasks sync is handled by background polling (5min interval)
+    // Don't sync on every page load — it overloads Atlas M0
+  }, [fetchTasks, fetchContacts, fetchUsers]);
 
   // Refresh when app returns from background
   useEffect(() => {

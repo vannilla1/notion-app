@@ -2016,11 +2016,11 @@ const pollGoogleTasksChanges = async () => {
 
 const startGoogleTasksPolling = (io) => {
   pollingIo = io;
-  // Poll every 30 seconds for near-realtime bidirectional sync
-  pollingInterval = setInterval(pollGoogleTasksChanges, 30000);
-  // Run first poll after 15 seconds (let server stabilize)
-  setTimeout(pollGoogleTasksChanges, 15000);
-  logger.info('[Google Tasks Poll] Bidirectional polling started (30s interval)');
+  // Poll every 5 minutes (Atlas M0 can't handle 30s polling — too many IOPS)
+  pollingInterval = setInterval(pollGoogleTasksChanges, 300000);
+  // Run first poll after 90 seconds (let server stabilize)
+  setTimeout(pollGoogleTasksChanges, 90000);
+  logger.info('[Google Tasks Poll] Bidirectional polling started (5min interval)');
 };
 
 const stopGoogleTasksPolling = () => {
