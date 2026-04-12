@@ -13,6 +13,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 import FilePreviewImage from '../components/FilePreviewImage';
+import FilePreviewModal from '../components/FilePreviewModal';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -448,6 +449,7 @@ function Tasks() {
 
   // File attachment states
   const [uploadingFile, setUploadingFile] = useState(null); // taskId or subtaskId being uploaded to
+  const [previewFile, setPreviewFile] = useState(null); // { file, downloadUrl } for preview modal
   const taskFileInputRef = useRef(null);
   const subtaskFileInputRef = useRef(null);
   const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
@@ -1573,24 +1575,24 @@ function Tasks() {
           {/* Subtask files */}
           {subtask.files?.length > 0 && (
             <div className="subtask-files-list" style={{ marginLeft: depth * 16 + 24 }}>
-              {subtask.files.map(file => (
-                <div key={file.id} className="task-file-item task-file-item-sm">
-                  {isImage(file.mimetype) ? (
-                    <div className="file-preview file-preview-xs">
-                      <FilePreviewImage
-                        downloadUrl={`/api/tasks/${task.id || task._id}/files/${file.id}/download?subtaskId=${subtask.id}`}
-                        alt={file.originalName}
-                      />
-                    </div>
-                  ) : (
-                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                  )}
-                  <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
-                  <span className="task-file-size">{formatFileSize(file.size)}</span>
-                  <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
-                  <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
-                </div>
-              ))}
+              {subtask.files.map(file => {
+                const dlUrl = `/api/tasks/${task.id || task._id}/files/${file.id}/download?subtaskId=${subtask.id}`;
+                return (
+                  <div key={file.id} className="task-file-item task-file-item-sm">
+                    {isImage(file.mimetype) ? (
+                      <div className="file-preview file-preview-xs" style={{ cursor: 'pointer' }} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>
+                        <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
+                      </div>
+                    ) : (
+                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                    )}
+                    <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
+                    <span className="task-file-size">{formatFileSize(file.size)}</span>
+                    <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
+                    <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -2721,24 +2723,24 @@ function Tasks() {
                             </div>
                             {task.files?.length > 0 && (
                               <div className="task-files-list">
-                                {task.files.map(file => (
-                                  <div key={file.id} className="task-file-item">
-                                    {isImage(file.mimetype) ? (
-                                      <div className="file-preview file-preview-sm">
-                                        <FilePreviewImage
-                                          downloadUrl={`/api/tasks/${task.id || task._id}/files/${file.id}/download`}
-                                          alt={file.originalName}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                                    )}
-                                    <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
-                                    <span className="task-file-size">{formatFileSize(file.size)}</span>
-                                    <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
-                                    <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
-                                  </div>
-                                ))}
+                                {task.files.map(file => {
+                                  const dlUrl = `/api/tasks/${task.id || task._id}/files/${file.id}/download`;
+                                  return (
+                                    <div key={file.id} className="task-file-item">
+                                      {isImage(file.mimetype) ? (
+                                        <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>
+                                          <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
+                                        </div>
+                                      ) : (
+                                        <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                                      )}
+                                      <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
+                                      <span className="task-file-size">{formatFileSize(file.size)}</span>
+                                      <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+                                      <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -2932,6 +2934,15 @@ function Tasks() {
         title="Správa projektov"
         tips={tasksHelpTips}
       />
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile.file}
+          downloadUrl={previewFile.downloadUrl}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </div>
   );
 }

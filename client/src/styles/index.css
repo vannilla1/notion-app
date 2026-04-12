@@ -1880,6 +1880,15 @@ body {
   color: var(--text-primary);
 }
 
+.task-file-name-clickable {
+  cursor: pointer;
+}
+
+.task-file-name-clickable:hover {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+
 .task-file-size {
   flex-shrink: 0;
   font-size: 11px;

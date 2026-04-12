@@ -10,6 +10,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import { useWorkspace } from '../context/WorkspaceContext';
 import FilePreviewImage from '../components/FilePreviewImage';
+import FilePreviewModal from '../components/FilePreviewModal';
 
 const messagesHelpTips = [
   { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie, žiadosti alebo ankety. Správy sa zobrazujú v troch taboch: Všetky (prijaté aj odoslané pokope), Prijaté a Odoslané.' },
@@ -76,6 +77,7 @@ function Messages() {
 
   // File attachments
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null); // { file, downloadUrl } for preview modal
   const msgFileInputRef = useRef(null);
   const [activeFileMessageId, setActiveFileMessageId] = useState(null);
 
@@ -726,9 +728,11 @@ function Messages() {
               onFileUpload={triggerMsgFileUpload}
               onFileDownload={handleMsgFileDownload}
               onFileDelete={handleMsgFileDelete}
+              onPreviewFile={setPreviewFile}
               uploadingFile={uploadingFile}
               getFileIcon={getFileIcon}
               formatFileSize={formatFileSize}
+              isImage={isImage}
               onEditComment={handleEditComment}
               onDeleteComment={handleDeleteComment}
               editingCommentId={editingCommentId}
@@ -894,6 +898,15 @@ function Messages() {
       )}
 
       {/* Reject dialog */}
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile.file}
+          downloadUrl={previewFile.downloadUrl}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
+
       {showRejectDialog && selectedMessage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowRejectDialog(false); }}>
@@ -977,7 +990,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, uploadingFile, getFileIcon, formatFileSize, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1255,47 +1268,47 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           {(msg.attachment?.originalName || (msg.files && msg.files.length > 0)) && (
             <div className="task-files-list">
               {/* Legacy single attachment */}
-              {msg.attachment?.originalName && (
-                <div className="task-file-item">
-                  {isImage(msg.attachment.mimetype) ? (
-                    <div className="file-preview file-preview-sm">
-                      <FilePreviewImage
-                        downloadUrl={`/api/messages/${msg.id || msg._id}/attachment`}
-                        alt={msg.attachment.originalName}
-                      />
-                    </div>
-                  ) : (
-                    <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
-                  )}
-                  <span className="task-file-name" title={msg.attachment.originalName}>{msg.attachment.originalName}</span>
-                  <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
-                  <button className="btn-icon-sm" onClick={() => {
-                    api.get(`/api/messages/${msg.id || msg._id}/attachment`, { responseType: 'blob' })
-                      .then(res => downloadBlob(res.data, msg.attachment.originalName));
-                  }} title="Stiahnuť">⬇️</button>
-                </div>
-              )}
+              {msg.attachment?.originalName && (() => {
+                const legacyDlUrl = `/api/messages/${msg.id || msg._id}/attachment`;
+                return (
+                  <div className="task-file-item">
+                    {isImage(msg.attachment.mimetype) ? (
+                      <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>
+                        <FilePreviewImage downloadUrl={legacyDlUrl} alt={msg.attachment.originalName} />
+                      </div>
+                    ) : (
+                      <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
+                    )}
+                    <span className="task-file-name task-file-name-clickable" title={msg.attachment.originalName} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>{msg.attachment.originalName}</span>
+                    <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
+                    <button className="btn-icon-sm" onClick={() => {
+                      api.get(legacyDlUrl, { responseType: 'blob' })
+                        .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                    }} title="Stiahnuť">⬇️</button>
+                  </div>
+                );
+              })()}
               {/* Multi-file attachments */}
-              {msg.files?.map(file => (
-                <div key={file.id} className="task-file-item">
-                  {isImage(file.mimetype) ? (
-                    <div className="file-preview file-preview-sm">
-                      <FilePreviewImage
-                        downloadUrl={`/api/messages/${msg.id || msg._id}/files/${file.id}/download`}
-                        alt={file.originalName}
-                      />
-                    </div>
-                  ) : (
-                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                  )}
-                  <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
-                  <span className="task-file-size">{formatFileSize(file.size)}</span>
-                  <button className="btn-icon-sm" onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
-                  {(isSender || isRecipient) && (
-                    <button className="btn-icon-sm btn-delete" onClick={() => onFileDelete(msg.id || msg._id, file.id)} title="Vymazať">×</button>
-                  )}
-                </div>
-              ))}
+              {msg.files?.map(file => {
+                const dlUrl = `/api/messages/${msg.id || msg._id}/files/${file.id}/download`;
+                return (
+                  <div key={file.id} className="task-file-item">
+                    {isImage(file.mimetype) ? (
+                      <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => onPreviewFile({ file, downloadUrl: dlUrl })}>
+                        <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
+                      </div>
+                    ) : (
+                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                    )}
+                    <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => onPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
+                    <span className="task-file-size">{formatFileSize(file.size)}</span>
+                    <button className="btn-icon-sm" onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+                    {(isSender || isRecipient) && (
+                      <button className="btn-icon-sm btn-delete" onClick={() => onFileDelete(msg.id || msg._id, file.id)} title="Vymazať">×</button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
