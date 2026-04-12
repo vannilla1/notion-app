@@ -24,7 +24,9 @@ export const WorkspaceProvider = ({ children }) => {
   // Fetch workspaces
   const fetchWorkspaces = useCallback(async () => {
     if (!isAuthenticated) {
-      setLoading(false);
+      // Don't set loading=false here — App.jsx only checks workspaceLoading
+      // when isAuthenticated is true, so keeping it true prevents flash
+      // between auth resolving and workspace fetch starting.
       return;
     }
 
@@ -70,7 +72,9 @@ export const WorkspaceProvider = ({ children }) => {
       setCurrentWorkspace(null);
       setCurrentWorkspaceId(null);
       setNeedsWorkspace(false);
-      setLoading(false);
+      // Don't set loading=false — App.jsx condition: loading || (isAuthenticated && workspaceLoading)
+      // When isAuthenticated=false, workspaceLoading is irrelevant, so keeping it true is safe
+      // and prevents the 1-frame flash when auth resolves before workspace fetch starts.
     }
   }, [isAuthenticated, fetchWorkspaces]);
 
