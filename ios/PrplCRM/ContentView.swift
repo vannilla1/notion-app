@@ -12,7 +12,21 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             WebView(
-                url: URL(string: "https://prplcrm.eu/app")!,
+                url: {
+                    // If app launched from notification tap, load deep link URL directly
+                    // instead of /app — avoids double navigation on cold start
+                    if let deepLink = pushManager.pendingDeepLink {
+                        let base = "https://prplcrm.eu"
+                        let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
+                        let sep = link.contains("?") ? "&" : "?"
+                        let fullUrl = base + link + sep + "_t=\(Int(Date().timeIntervalSince1970 * 1000))"
+                        pushManager.pendingDeepLink = nil
+                        if let url = URL(string: fullUrl) {
+                            return url
+                        }
+                    }
+                    return URL(string: "https://prplcrm.eu/app")!
+                }(),
                 isLoading: $isLoading,
                 loadError: $loadError,
                 pushManager: pushManager
@@ -375,13 +389,12 @@ struct WebView: UIViewRepresentable {
                 // Add timestamp to force re-navigation
                 var sep = path.includes('?') ? '&' : '?';
                 var fullPath = path + sep + '_t=' + Date.now();
-                // Store in sessionStorage as backup — if React isn't ready yet or user
-                // isn't authenticated, App.jsx will pick this up after login/hydration
+                // Store in sessionStorage as backup — App.jsx reads this after
+                // auth hydration completes and navigates via React Router
                 try { sessionStorage.setItem('pendingDeepLink', fullPath); } catch(e) {}
-                // Use history.pushState + popstate event — this triggers React Router
-                // without doing a full page reload (which would destroy React state)
-                window.history.pushState({}, '', fullPath);
-                window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+                // Full navigation — 100% reliable with React Router.
+                // React will hydrate, read the URL params, and navigate correctly.
+                window.location.href = fullPath;
             })();
             """
 
@@ -527,13 +540,14 @@ struct WebView: UIViewRepresentable {
                     self.parent.isLoading = false
                 }
 
-                // Execute deferred deep link from cold start notification tap
-                // 2s delay gives React time to hydrate; sessionStorage backup ensures
-                // the deep link isn't lost even if React takes longer
+                // Safety net: if a deep link was deferred (edge case where
+                // updateUIView fires before didFinish), execute it now.
+                // Normally cold-start deep links are handled by loading the
+                // deep link URL directly in ContentView.
                 if let deepLinkJS = pendingDeepLinkJS {
                     pendingDeepLinkJS = nil
                     print("[Push] Executing deferred deep link after page load")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         webView.evaluateJavaScript(deepLinkJS, completionHandler: nil)
                     }
                 }
