@@ -4,13 +4,46 @@ const Workspace = require('../models/Workspace');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+// In-memory cache for workspace validation (reduces 3 DB queries to 0 per request)
+// Key: `${userId}:${workspaceId}`, Value: { workspace, membership, cachedAt }
+const workspaceCache = new Map();
+const CACHE_TTL = 60000; // 60 seconds
+
+const getCached = (userId) => {
+  const entry = workspaceCache.get(userId);
+  if (entry && Date.now() - entry.cachedAt < CACHE_TTL) return entry;
+  workspaceCache.delete(userId);
+  return null;
+};
+
+const setCache = (userId, data) => {
+  workspaceCache.set(userId, { ...data, cachedAt: Date.now() });
+  // Limit cache size
+  if (workspaceCache.size > 200) {
+    const firstKey = workspaceCache.keys().next().value;
+    workspaceCache.delete(firstKey);
+  }
+};
+
+const invalidateCache = (userId) => workspaceCache.delete(userId);
+
 /**
  * Middleware to check if user has access to current workspace
  * Sets req.workspace and req.workspaceMember
+ * Uses in-memory cache to avoid 3 DB queries per request
  */
 const requireWorkspace = async (req, res, next) => {
   try {
     const userId = req.user.id;
+
+    // Check cache first (avoids 3 DB queries)
+    const cached = getCached(userId);
+    if (cached) {
+      req.workspace = cached.workspace;
+      req.workspaceMember = cached.membership;
+      req.workspaceId = cached.workspace._id;
+      return next();
+    }
 
     // Get user's current workspace
     const user = await User.findById(userId);
@@ -67,6 +100,7 @@ const requireWorkspace = async (req, res, next) => {
           req.workspace = retryWorkspace;
           req.workspaceMember = anyMembership;
           req.workspaceId = retryWorkspace._id;
+          setCache(userId, { workspace: retryWorkspace, membership: anyMembership });
           logger.info('Auto-recovered to valid workspace', { userId, workspaceId: retryWorkspace._id });
           return next();
         }
@@ -88,10 +122,11 @@ const requireWorkspace = async (req, res, next) => {
       });
     }
 
-    // Attach to request
+    // Attach to request + cache
     req.workspace = workspace;
     req.workspaceMember = membership;
     req.workspaceId = workspace._id;
+    setCache(userId, { workspace, membership });
 
     next();
   } catch (error) {
@@ -200,5 +235,6 @@ module.exports = {
   requireWorkspace,
   requireWorkspaceAdmin,
   requireWorkspaceOwner,
-  enforceWorkspaceLimits
+  enforceWorkspaceLimits,
+  invalidateCache
 };

@@ -6,7 +6,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
-const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner } = require('../middleware/workspace');
+const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
 
@@ -260,6 +260,7 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
 
     // Update current workspace with proper ObjectId
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
+    invalidateCache(req.user.id);
 
     logger.info('Workspace switched', { workspaceId: objectId, userId: req.user.id });
 
