@@ -755,6 +755,7 @@ function Messages() {
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               userId={user.id}
+              highlightedMessageIds={highlightedMessageIds}
             />
           )}
         </div>
@@ -930,7 +931,7 @@ function Messages() {
 }
 
 // --- Message List ---
-function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId }) {
+function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId, highlightedMessageIds }) {
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Načítavam...</div>;
   if (messages.length === 0) return (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
