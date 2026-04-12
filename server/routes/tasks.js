@@ -34,6 +34,7 @@ const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
+const { getCachedData, setCachedData, invalidateWorkspaceData } = require('../middleware/dataCache');
 
 const router = express.Router();
 
@@ -115,27 +116,46 @@ const populateAssignedUsers = async (assignedToIds) => {
   }));
 };
 
+// Auto-invalidate tasks cache after any mutation
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+    const origJson = res.json.bind(res);
+    res.json = (data) => {
+      if (res.statusCode < 400 && req.workspaceId) {
+        invalidateWorkspaceData(req.workspaceId, 'tasks');
+      }
+      return origJson(data);
+    };
+  }
+  next();
+});
+
 // Get all tasks (including tasks from contacts) - for current workspace
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // Only get truly global tasks (without contact assignments) for this workspace
-    const globalTasks = await Task.find({
-      workspaceId: req.workspaceId,
-      $or: [
-        { contactIds: { $exists: false } },
-        { contactIds: { $size: 0 } },
-        { contactIds: null }
-      ],
-      $and: [
-        { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
-      ]
-    }).maxTimeMS(30000).lean();
+    // Check cache first (avoids 3 DB queries for 30s)
+    const cached = getCachedData(req.workspaceId, 'tasks');
+    if (cached) return res.json(cached);
 
-    // Exclude file data at all nesting levels (can't use inclusion + exclusion together)
-    const contacts = await Contact.find(
-      { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
-      EXCLUDE_FILE_DATA
-    ).lean();
+    // Run both queries in parallel (saves 1-3s on Atlas M0)
+    const [globalTasks, contacts] = await Promise.all([
+      Task.find({
+        workspaceId: req.workspaceId,
+        $or: [
+          { contactIds: { $exists: false } },
+          { contactIds: { $size: 0 } },
+          { contactIds: null }
+        ],
+        $and: [
+          { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
+        ]
+      }).maxTimeMS(30000).lean(),
+
+      Contact.find(
+        { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
+        EXCLUDE_FILE_DATA
+      ).lean()
+    ]);
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
@@ -209,6 +229,9 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       // Fallback: by createdAt descending
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
+
+    // Cache result for 30s
+    setCachedData(req.workspaceId, 'tasks', allTasks);
 
     res.json(allTasks);
   } catch (error) {

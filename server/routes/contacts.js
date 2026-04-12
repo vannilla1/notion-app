@@ -11,6 +11,7 @@ const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
+const { getCachedData, setCachedData, invalidateWorkspaceData } = require('../middleware/dataCache');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
 const EXCLUDE_FILE_DATA = {
@@ -46,6 +47,22 @@ const autoDeleteContactFromGoogle = async (taskId) => {
 };
 
 const router = express.Router();
+
+// Auto-invalidate contacts cache after any mutation (POST/PUT/DELETE)
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+    const origJson = res.json.bind(res);
+    res.json = (data) => {
+      // Invalidate after successful response
+      if (res.statusCode < 400 && req.workspaceId) {
+        invalidateWorkspaceData(req.workspaceId, 'contacts');
+        invalidateWorkspaceData(req.workspaceId, 'tasks'); // contacts have embedded tasks
+      }
+      return origJson(data);
+    };
+  }
+  next();
+});
 
 // Multer config for file uploads - use memory storage for MongoDB
 const upload = multer({
@@ -456,6 +473,10 @@ router.post('/cleanup-lost-files', authenticateToken, requireWorkspace, async (r
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // Check cache first (avoids DB query for 30s)
+    const cached = getCachedData(req.workspaceId, 'contacts');
+    if (cached) return res.json(cached);
+
     // files.data is now stored in ContactFile collection, so Contact docs are small
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
@@ -466,6 +487,10 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       ...contact,
       id: contact._id.toString()
     }));
+
+    // Cache result for 30s
+    setCachedData(req.workspaceId, 'contacts', contactsWithId);
+
     res.json(contactsWithId);
   } catch (error) {
     logger.error('GET /contacts error', { error: error.message, workspaceId: req.workspaceId?.toString() });

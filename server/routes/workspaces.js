@@ -13,22 +13,25 @@ const { sendInvitationEmail } = require('../services/adminEmailService');
 // Get all workspaces user is member of
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const memberships = await WorkspaceMember.find({ userId: req.user.id })
-      .populate('workspaceId');
+    // Run both queries in parallel + only populate needed fields
+    const [memberships, user] = await Promise.all([
+      WorkspaceMember.find({ userId: req.user.id })
+        .populate('workspaceId', 'name slug description color'),
+      User.findById(req.user.id, 'currentWorkspaceId')
+    ]);
 
-    const workspaces = memberships.map(m => ({
-      id: m.workspaceId._id,
-      name: m.workspaceId.name,
-      slug: m.workspaceId.slug,
-      description: m.workspaceId.description,
-      color: m.workspaceId.color,
-      role: m.role,
-      joinedAt: m.joinedAt,
-      isOwner: m.role === 'owner'
-    }));
-
-    // Get current workspace
-    const user = await User.findById(req.user.id);
+    const workspaces = memberships
+      .filter(m => m.workspaceId) // Guard against deleted workspaces
+      .map(m => ({
+        id: m.workspaceId._id,
+        name: m.workspaceId.name,
+        slug: m.workspaceId.slug,
+        description: m.workspaceId.description,
+        color: m.workspaceId.color,
+        role: m.role,
+        joinedAt: m.joinedAt,
+        isOwner: m.role === 'owner'
+      }));
 
     res.json({
       workspaces,
