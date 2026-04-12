@@ -245,8 +245,8 @@ server.listen(PORT, () => {
       logger.warn('MongoDB not connected. Some features may not work.');
     } else {
       // Set Pro plan for team accounts (skip if user has active Stripe subscription)
+      const User = require('./models/User');
       try {
-        const User = require('./models/User');
         const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
         for (const email of proEmails) {
           const existing = await User.findOne({ email });

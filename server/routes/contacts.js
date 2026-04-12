@@ -117,7 +117,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   const fetchContacts = () => Contact.find(
     { workspaceId: req.workspaceId },
     { files: 0 }
-  ).sort({ name: 1 }).maxTimeMS(15000).lean();
+  ).sort({ name: 1 }).maxTimeMS(30000).lean();
 
   try {
     let contacts;

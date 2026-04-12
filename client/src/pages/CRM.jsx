@@ -164,13 +164,13 @@ function CRM() {
   }, []);
 
   useEffect(() => {
-    fetchContacts();
-    fetchGlobalTasks();
+    // Sequential to avoid overwhelming MongoDB with parallel Contact queries
+    fetchContacts().then(() => fetchGlobalTasks());
   }, [fetchContacts, fetchGlobalTasks]);
 
   // Refresh when app returns from background
   useEffect(() => {
-    const handleResume = () => { fetchContacts(); fetchGlobalTasks(); };
+    const handleResume = () => { fetchContacts().then(() => fetchGlobalTasks()); };
     window.addEventListener('app-resumed', handleResume);
     return () => window.removeEventListener('app-resumed', handleResume);
   }, [fetchContacts, fetchGlobalTasks]);
