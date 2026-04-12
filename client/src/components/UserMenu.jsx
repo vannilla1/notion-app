@@ -826,7 +826,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         await switchWorkspace(ws.id || ws._id);
                         setShowMobileWorkspaces(false);
                         setIsOpen(false);
-                        window.location.reload();
+                        window.location.href = '/app';
                       }}
                     >
                       <span
@@ -853,7 +853,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                             await createWorkspace(newWorkspaceName.trim());
                             setNewWorkspaceName('');
                             setCreatingWorkspace(false);
-                            window.location.reload();
+                            window.location.href = '/app';
                           }
                           if (e.key === 'Escape') {
                             setCreatingWorkspace(false);

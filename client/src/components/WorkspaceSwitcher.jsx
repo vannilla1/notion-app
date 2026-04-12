@@ -64,8 +64,8 @@ const WorkspaceSwitcher = () => {
     try {
       await switchWorkspace(workspaceId);
       setIsOpen(false);
-      // Reload the page to refresh all data for new workspace
-      window.location.reload();
+      // Navigate to dashboard and reload to refresh all data for new workspace
+      window.location.href = '/app';
     } catch (err) {
       console.error('Error switching workspace:', err);
     }
@@ -109,7 +109,7 @@ const WorkspaceSwitcher = () => {
       setIsCreating(false);
       setNewWorkspaceName('');
       setIsOpen(false);
-      window.location.reload();
+      window.location.href = '/app';
     } catch (err) {
       console.error('Error creating workspace:', err);
       alert('Chyba pri vytváraní prostredia');
