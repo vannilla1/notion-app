@@ -2,31 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
 import api from '../api/api';
 import { downloadBlob } from '../utils/fileDownload';
-
-function FilePreviewImage({ contactId, fileId, alt }) {
-  const [src, setSrc] = useState(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let url = null;
-    let cancelled = false;
-    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, {
-      responseType: 'blob',
-      timeout: 20000 // 20s timeout for thumbnail previews
-    })
-      .then(res => {
-        if (cancelled) return;
-        url = window.URL.createObjectURL(res.data);
-        setSrc(url);
-      })
-      .catch(() => { if (!cancelled) setError(true); });
-    return () => { cancelled = true; if (url) window.URL.revokeObjectURL(url); };
-  }, [contactId, fileId]);
-
-  if (error) return <div className="file-icon" title="Náhľad sa nepodarilo načítať">🖼️</div>;
-  if (!src) return <div className="file-icon">⏳</div>;
-  return <img src={src} alt={alt} />;
-}
+import FilePreviewImage from './FilePreviewImage';
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
@@ -344,8 +320,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                   {isImage(file.mimetype) ? (
                     <div className="file-preview">
                       <FilePreviewImage
-                        contactId={contact.id}
-                        fileId={file.id}
+                        downloadUrl={`/api/contacts/${contact.id}/files/${file.id}/download`}
                         alt={file.originalName}
                       />
                     </div>

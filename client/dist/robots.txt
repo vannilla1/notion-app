@@ -1,0 +1,26 @@
+# Prpl CRM - robots.txt
+# https://prplcrm.eu
+
+User-agent: *
+Allow: /
+Allow: /ochrana-udajov
+Allow: /vop
+
+# Block internal app pages from indexing
+Disallow: /app
+Disallow: /app/
+Disallow: /crm
+Disallow: /tasks
+Disallow: /messages
+Disallow: /workspace/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /login
+Disallow: /invite/
+Disallow: /api/
+
+# Sitemap
+Sitemap: https://prplcrm.eu/sitemap.xml
+
+# Crawl-delay for polite crawling
+Crawl-delay: 1

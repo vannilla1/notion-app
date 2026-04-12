@@ -12,6 +12,7 @@ import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSe
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
+import FilePreviewImage from '../components/FilePreviewImage';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -1574,7 +1575,16 @@ function Tasks() {
             <div className="subtask-files-list" style={{ marginLeft: depth * 16 + 24 }}>
               {subtask.files.map(file => (
                 <div key={file.id} className="task-file-item task-file-item-sm">
-                  <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  {isImage(file.mimetype) ? (
+                    <div className="file-preview file-preview-xs">
+                      <FilePreviewImage
+                        downloadUrl={`/api/tasks/${task.id || task._id}/files/${file.id}/download?subtaskId=${subtask.id}`}
+                        alt={file.originalName}
+                      />
+                    </div>
+                  ) : (
+                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  )}
                   <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
                   <span className="task-file-size">{formatFileSize(file.size)}</span>
                   <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
@@ -1731,6 +1741,8 @@ function Tasks() {
   };
 
   // File attachment handlers
+  const isImage = (mimetype) => mimetype?.startsWith('image/');
+
   const getFileIcon = (mimetype) => {
     if (mimetype?.startsWith('image/')) return '🖼️';
     if (mimetype?.includes('pdf')) return '📄';
@@ -2711,7 +2723,16 @@ function Tasks() {
                               <div className="task-files-list">
                                 {task.files.map(file => (
                                   <div key={file.id} className="task-file-item">
-                                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                                    {isImage(file.mimetype) ? (
+                                      <div className="file-preview file-preview-sm">
+                                        <FilePreviewImage
+                                          downloadUrl={`/api/tasks/${task.id || task._id}/files/${file.id}/download`}
+                                          alt={file.originalName}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                                    )}
                                     <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
                                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                                     <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>

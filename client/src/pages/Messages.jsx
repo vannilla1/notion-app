@@ -9,6 +9,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import { useWorkspace } from '../context/WorkspaceContext';
+import FilePreviewImage from '../components/FilePreviewImage';
 
 const messagesHelpTips = [
   { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie, žiadosti alebo ankety. Správy sa zobrazujú v troch taboch: Všetky (prijaté aj odoslané pokope), Prijaté a Odoslané.' },
@@ -436,6 +437,8 @@ function Messages() {
   };
 
   // File helpers
+  const isImage = (mimetype) => mimetype?.startsWith('image/');
+
   const getFileIcon = (mimetype) => {
     if (mimetype?.startsWith('image/')) return '🖼️';
     if (mimetype?.includes('pdf')) return '📄';
@@ -1254,7 +1257,16 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
               {/* Legacy single attachment */}
               {msg.attachment?.originalName && (
                 <div className="task-file-item">
-                  <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
+                  {isImage(msg.attachment.mimetype) ? (
+                    <div className="file-preview file-preview-sm">
+                      <FilePreviewImage
+                        downloadUrl={`/api/messages/${msg.id || msg._id}/attachment`}
+                        alt={msg.attachment.originalName}
+                      />
+                    </div>
+                  ) : (
+                    <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
+                  )}
                   <span className="task-file-name" title={msg.attachment.originalName}>{msg.attachment.originalName}</span>
                   <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
                   <button className="btn-icon-sm" onClick={() => {
@@ -1266,7 +1278,16 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
               {/* Multi-file attachments */}
               {msg.files?.map(file => (
                 <div key={file.id} className="task-file-item">
-                  <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  {isImage(file.mimetype) ? (
+                    <div className="file-preview file-preview-sm">
+                      <FilePreviewImage
+                        downloadUrl={`/api/messages/${msg.id || msg._id}/files/${file.id}/download`}
+                        alt={file.originalName}
+                      />
+                    </div>
+                  ) : (
+                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
+                  )}
                   <span className="task-file-name" title={file.originalName}>{file.originalName}</span>
                   <span className="task-file-size">{formatFileSize(file.size)}</span>
                   <button className="btn-icon-sm" onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
@@ -1379,24 +1400,34 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                       <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
                     )}
                     {c.attachment?.originalName && (
-                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>📎</span>
-                        <a href="#" onClick={(e) => {
-                            e.preventDefault();
-                            api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
-                              .then(res => {
-                                const url = URL.createObjectURL(res.data);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = c.attachment.originalName;
-                                a.click();
-                                URL.revokeObjectURL(url);
-                              });
-                          }}
-                          style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
-                          {c.attachment.originalName}
-                        </a>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
+                      <div style={{ marginTop: '6px' }}>
+                        {isImage(c.attachment.mimetype) && (
+                          <div className="file-preview file-preview-sm" style={{ marginBottom: '4px' }}>
+                            <FilePreviewImage
+                              downloadUrl={`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`}
+                              alt={c.attachment.originalName}
+                            />
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{isImage(c.attachment.mimetype) ? '🖼️' : '📎'}</span>
+                          <a href="#" onClick={(e) => {
+                              e.preventDefault();
+                              api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
+                                .then(res => {
+                                  const url = URL.createObjectURL(res.data);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = c.attachment.originalName;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                });
+                            }}
+                            style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
+                            {c.attachment.originalName}
+                          </a>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
+                        </div>
                       </div>
                     )}
                   </div>
