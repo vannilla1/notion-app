@@ -411,8 +411,8 @@ function Tasks() {
   const { socket, isConnected } = useSocket();
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
   const [highlightedSubtaskId, setHighlightedSubtaskId] = useState(null);
+  const [highlightedTaskIds, setHighlightedTaskIds] = useState(new Set());
   const taskRefs = useRef({});
-  // Store pending highlight from navigation (for when tasks haven't loaded yet)
   const pendingHighlightRef = useRef(null);
 
   // Form states
@@ -837,6 +837,37 @@ function Tasks() {
           setTimeout(() => processHighlight(urlTaskId, urlSubtaskId), 100);
         });
       }
+    }
+  }, [location.search]);
+
+  // Handle showUnread — highlight all tasks that have unread notifications
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const showUnread = params.get('showUnread');
+    const urlTimestamp = params.get('_t');
+
+    if (showUnread && urlTimestamp !== lastNavTimestampRef.current) {
+      lastNavTimestampRef.current = urlTimestamp || 'unread';
+      navigate(location.pathname, { replace: true, state: {} });
+
+      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
+        const taskNotifs = (res.data.notifications || []).filter(n =>
+          n.type?.startsWith('task.') || n.type?.startsWith('subtask.')
+        );
+        const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
+        if (ids.size > 0) {
+          setHighlightedTaskIds(ids);
+          // Expand first highlighted task
+          const firstId = [...ids][0];
+          setExpandedTask(firstId);
+          setTimeout(() => {
+            if (taskRefs.current[firstId]) {
+              taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 200);
+          setTimeout(() => setHighlightedTaskIds(new Set()), 4000);
+        }
+      }).catch(() => {});
     }
   }, [location.search]);
 
@@ -2471,7 +2502,7 @@ function Tasks() {
                       {({ dragListeners, isDragging }) => (
                     <div
                       ref={el => taskRefs.current[task.id] = el}
-                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''} ${isDragging ? 'dragging' : ''}`}
+                      className={`task-card ${task.completed ? 'completed' : ''} ${highlightedTaskId === task.id || highlightedTaskIds.has(task.id) ? 'highlighted' : ''} ${taskMatchesAssigned ? 'filter-match' : ''} ${isDragging ? 'dragging' : ''}`}
                     >
                       <div className="task-main" onClick={(e) => {
                         // Only expand if clicking on the main area, not on buttons/checkbox/drag handle

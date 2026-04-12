@@ -50,7 +50,15 @@ function BottomNav({ unreadCounts = {} }) {
           <button
             key={tab.path}
             className={`bottom-nav-tab ${location.pathname === tab.path ? 'active' : ''}`}
-            onClick={() => navigate(tab.path)}
+            onClick={() => {
+              const hasUnread = count > 0;
+              const isAlreadyOnPage = location.pathname === tab.path;
+              if (hasUnread || isAlreadyOnPage) {
+                navigate(`${tab.path}?showUnread=1&_t=${Date.now()}`);
+              } else {
+                navigate(tab.path);
+              }
+            }}
           >
             <span className="bottom-nav-icon" style={{ position: 'relative' }}>
               {tab.icon}

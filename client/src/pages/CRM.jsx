@@ -131,7 +131,7 @@ function CRM() {
 
   // Highlight state for push notification navigation
   const [highlightedContactId, setHighlightedContactId] = useState(null);
-  // Store pending highlight from navigation (for when contacts haven't loaded yet)
+  const [highlightedContactIds, setHighlightedContactIds] = useState(new Set());
   const pendingHighlightRef = useRef(null);
 
   // Define fetch functions early so they can be used in useEffects
@@ -225,6 +225,35 @@ function CRM() {
           setTimeout(() => processContactHighlight(urlContactId), 100);
         });
       }
+    }
+  }, [location.search]);
+
+  // Handle showUnread — highlight all contacts that have unread notifications
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const showUnread = params.get('showUnread');
+    const urlTimestamp = params.get('_t');
+
+    if (showUnread && urlTimestamp !== lastNavTimestampRef.current) {
+      lastNavTimestampRef.current = urlTimestamp || 'unread';
+      navigate(location.pathname, { replace: true, state: {} });
+
+      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
+        const contactNotifs = (res.data.notifications || []).filter(n =>
+          n.type?.startsWith('contact.')
+        );
+        const ids = new Set(contactNotifs.map(n => n.relatedId).filter(Boolean));
+        if (ids.size > 0) {
+          setHighlightedContactIds(ids);
+          const firstId = [...ids][0];
+          setExpandedContact(firstId);
+          setTimeout(() => {
+            const el = document.querySelector(`[data-contact-id="${firstId}"]`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 200);
+          setTimeout(() => setHighlightedContactIds(new Set()), 4000);
+        }
+      }).catch(() => {});
     }
   }, [location.search]);
 
@@ -1424,7 +1453,7 @@ function CRM() {
               ) : (
                 <div className="contacts-list">
                   {filteredContacts.map(contact => (
-                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''} ${highlightedContactId === contact.id ? 'highlighted' : ''}`}>
+                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''} ${highlightedContactId === contact.id || highlightedContactIds.has(contact.id) ? 'highlighted' : ''}`}>
                       <div className="contact-main">
                         <div
                           className="contact-avatar"

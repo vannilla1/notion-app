@@ -80,6 +80,7 @@ function Messages() {
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [highlightedMessageIds, setHighlightedMessageIds] = useState(new Set());
 
   // Filtered messages for display
   const messages = useMemo(() => {
@@ -181,6 +182,31 @@ function Messages() {
         // Clear params from URL
         navigate(location.pathname, { replace: true });
       }
+    }
+  }, [location.search]);
+
+  // Handle showUnread — highlight all messages that have unread notifications
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const showUnread = params.get('showUnread');
+    const urlTimestamp = params.get('_t');
+
+    if (showUnread && urlTimestamp !== lastMsgHighlightRef.current) {
+      lastMsgHighlightRef.current = urlTimestamp || 'unread';
+      navigate(location.pathname, { replace: true, state: {} });
+
+      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
+        const msgNotifs = (res.data.notifications || []).filter(n =>
+          n.type?.startsWith('message.')
+        );
+        const ids = new Set(msgNotifs.map(n => n.relatedId).filter(Boolean));
+        if (ids.size > 0) {
+          setHighlightedMessageIds(ids);
+          const firstId = [...ids][0];
+          setSelectedMessage(allMessages.find(m => (m._id || m.id) === firstId) || null);
+          setTimeout(() => setHighlightedMessageIds(new Set()), 4000);
+        }
+      }).catch(() => {});
     }
   }, [location.search]);
 
@@ -908,9 +934,11 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
         return (
           <div key={msg.id || msg._id}
             onClick={() => onSelect(msg)}
+            className={highlightedMessageIds.has(msg.id || msg._id) ? 'highlighted' : ''}
             style={{
               padding: '12px 16px', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)',
-              background: 'var(--bg-card)', cursor: 'pointer', transition: 'var(--transition)',
+              background: highlightedMessageIds.has(msg.id || msg._id) ? 'var(--primary-light, #ede9fe)' : 'var(--bg-card)',
+              cursor: 'pointer', transition: 'var(--transition)',
               borderLeft: `3px solid ${type.color}`,
               opacity: msg.status === 'approved' || msg.status === 'rejected' ? 0.75 : 1
             }}
