@@ -92,24 +92,14 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       query.status = status;
     }
 
-    const messages = await Message.find(query, { 'attachment.data': 0, 'files.data': 0 })
+    const messages = await Message.find(query)
+      .select('-attachment.data -files.data -comments.attachment.data')
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
 
-    // Strip binary data from comments and add id field
-    const result = messages.map(m => {
-      if (m.comments) {
-        m.comments = m.comments.map(c => {
-          if (c.attachment && c.attachment.data) {
-            const { data, ...rest } = c.attachment;
-            c.attachment = rest;
-          }
-          return c;
-        });
-      }
-      return { ...m, id: m._id.toString() };
-    });
+    // Add id field
+    const result = messages.map(m => ({ ...m, id: m._id.toString() }));
 
     res.json(result);
   } catch (error) {
