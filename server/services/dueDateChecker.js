@@ -241,7 +241,7 @@ const checkDueDates = async () => {
         { reminder: { $exists: true, $ne: null } },
         { 'subtasks.reminder': { $exists: true, $ne: null } }
       ]
-    });
+    }).maxTimeMS(20000);
 
     logger.info(`[DueDateChecker] Found ${tasks.length} tasks to check`);
 
@@ -431,8 +431,8 @@ const checkContactDueDates = async () => {
           { reminder: { $exists: true, $ne: null } }
         ]}}
       },
-      { 'files.data': 0, 'files': 0 }
-    ).lean();
+      { 'files': 0 }
+    ).maxTimeMS(20000).lean();
 
     let notificationsSent = 0;
     let contactsUpdated = 0;

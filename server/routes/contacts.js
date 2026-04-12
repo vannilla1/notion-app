@@ -119,7 +119,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
       { 'files.data': 0 }
-    ).sort({ name: 1 }).lean();
+    ).sort({ name: 1 }).maxTimeMS(15000).lean();
     // Add id field to each contact
     const contactsWithId = contacts.map(contact => ({
       ...contact,
