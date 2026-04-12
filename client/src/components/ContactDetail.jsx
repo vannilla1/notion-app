@@ -5,21 +5,26 @@ import { downloadBlob } from '../utils/fileDownload';
 
 function FilePreviewImage({ contactId, fileId, alt }) {
   const [src, setSrc] = useState(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let url = null;
     let cancelled = false;
-    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' })
+    api.get(`/api/contacts/${contactId}/files/${fileId}/download`, {
+      responseType: 'blob',
+      timeout: 20000 // 20s timeout for thumbnail previews
+    })
       .then(res => {
         if (cancelled) return;
         url = window.URL.createObjectURL(res.data);
         setSrc(url);
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setError(true); });
     return () => { cancelled = true; if (url) window.URL.revokeObjectURL(url); };
   }, [contactId, fileId]);
 
-  if (!src) return <div className="file-icon">🖼️</div>;
+  if (error) return <div className="file-icon" title="Náhľad sa nepodarilo načítať">🖼️</div>;
+  if (!src) return <div className="file-icon">⏳</div>;
   return <img src={src} alt={alt} />;
 }
 

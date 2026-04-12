@@ -119,6 +119,7 @@ function CRM() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTextContent, setPreviewTextContent] = useState(null);
   const [previewError, setPreviewError] = useState(null);
+  const [downloadingFileId, setDownloadingFileId] = useState(null);
 
   // Linked messages
   const [linkedMessages, setLinkedMessages] = useState({});
@@ -442,13 +443,19 @@ function CRM() {
   };
 
   const downloadFile = async (contactId, fileId, fileName) => {
+    setDownloadingFileId(fileId);
     try {
-      const response = await api.get(`/api/contacts/${contactId}/files/${fileId}/download`, { responseType: 'blob' });
+      const response = await api.get(`/api/contacts/${contactId}/files/${fileId}/download`, {
+        responseType: 'blob',
+        timeout: 45000 // 45s for large files on Atlas M0
+      });
       downloadBlob(response.data, fileName);
     } catch (error) {
       let msg = 'Chyba pri sťahovaní súboru';
       try {
-        if (error.response?.data instanceof Blob) {
+        if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          msg = 'Časový limit vypršal — skúste znova';
+        } else if (error.response?.data instanceof Blob) {
           const text = await error.response.data.text();
           const json = JSON.parse(text);
           if (json.message) msg = json.message;
@@ -456,6 +463,8 @@ function CRM() {
       } catch {}
       console.error('File download error:', error.response?.status, msg);
       alert(msg);
+    } finally {
+      setDownloadingFileId(null);
     }
   };
 
@@ -510,19 +519,14 @@ function CRM() {
     setPreviewUrl(null);
     setPreviewError(null);
 
-    const token = localStorage.getItem('token');
-    const requestUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files/${file.id}/download`;
-
     try {
-      const response = await fetch(requestUrl, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      // Use axios with timeout for consistent behavior
+      const response = await api.get(
+        `/api/contacts/${contactId}/files/${file.id}/download`,
+        { responseType: 'blob', timeout: 30000 }
+      );
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const blob = await response.blob();
+      const blob = response.data;
 
       // Skontroluj či response obsahuje dáta
       if (!blob || blob.size === 0) {
@@ -543,7 +547,22 @@ function CRM() {
       setPreviewUrl(blobUrl);
     } catch (error) {
       console.error('Error loading preview:', error);
-      setPreviewError('Nepodarilo sa načítať súbor: ' + (error.message || 'Neznáma chyba'));
+      let msg = 'Neznáma chyba';
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        msg = 'Časový limit vypršal — súbor je príliš veľký alebo server je pomalý';
+      } else if (error.response?.status) {
+        msg = `Server vrátil chybu ${error.response.status}`;
+        try {
+          if (error.response?.data instanceof Blob) {
+            const text = await error.response.data.text();
+            const json = JSON.parse(text);
+            if (json.message) msg = json.message;
+          }
+        } catch {}
+      } else {
+        msg = error.message || 'Neznáma chyba';
+      }
+      setPreviewError('Nepodarilo sa načítať náhľad: ' + msg);
     } finally {
       setPreviewLoading(false);
     }
@@ -1618,8 +1637,9 @@ function CRM() {
                                         onClick={() => downloadFile(contact.id, file.id, file.originalName)}
                                         className="btn-icon-sm"
                                         title="Stiahnuť"
+                                        disabled={downloadingFileId === file.id}
                                       >
-                                        ⬇️
+                                        {downloadingFileId === file.id ? '⏳' : '⬇️'}
                                       </button>
                                       <button
                                         onClick={() => deleteFile(contact.id, file.id)}
@@ -1744,8 +1764,9 @@ function CRM() {
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => downloadFile(previewContact, previewFile.id, previewFile.originalName)}
+                  disabled={downloadingFileId === previewFile.id}
                 >
-                  ⬇️ Stiahnuť
+                  {downloadingFileId === previewFile.id ? '⏳ Sťahujem...' : '⬇️ Stiahnuť'}
                 </button>
                 <button className="btn-icon file-preview-close" onClick={closePreview}>×</button>
               </div>
