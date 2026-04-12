@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -62,9 +63,8 @@ const WorkspaceSwitcher = () => {
     }
 
     try {
-      await switchWorkspace(workspaceId);
-      setIsOpen(false);
-      // Navigate to dashboard and reload to refresh all data for new workspace
+      // Call API directly — skip React state updates since we're doing full page navigation
+      await switchWorkspaceApi(workspaceId);
       window.location.href = '/app';
     } catch (err) {
       console.error('Error switching workspace:', err);

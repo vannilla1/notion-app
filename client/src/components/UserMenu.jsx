@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 
 /**
  * Translate common API error messages to Slovak
@@ -823,9 +824,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       key={ws.id || ws._id}
                       className="mobile-workspace-item"
                       onClick={async () => {
-                        await switchWorkspace(ws.id || ws._id);
-                        setShowMobileWorkspaces(false);
-                        setIsOpen(false);
+                        // Call API directly — skip React state updates since we're doing full page navigation
+                        await switchWorkspaceApi(ws.id || ws._id);
                         window.location.href = '/app';
                       }}
                     >
