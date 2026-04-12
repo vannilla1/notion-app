@@ -135,7 +135,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     const contacts = await fetchWithRetry(() => Contact.aggregate([
       { $match: { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } } },
       { $project: { name: 1, tasks: 1 } }
-    ]).maxTimeMS(45000));
+    ]).option({ maxTimeMS: 45000 }));
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();

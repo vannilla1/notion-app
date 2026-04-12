@@ -124,7 +124,7 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
         name: 1
       }},
       { $sort: { docSize: -1 } }
-    ]).maxTimeMS(45000);
+    ]).option({ maxTimeMS: 45000 });
 
     const totalSize = stats.reduce((sum, s) => sum + s.docSize, 0);
     res.json({
@@ -156,7 +156,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
         createdAt: 1, updatedAt: 1
       }},
       { $sort: { name: 1 } }
-    ]).maxTimeMS(45000);
+    ]).option({ maxTimeMS: 45000 });
 
     const contactsWithId = contacts.map(contact => ({
       ...contact,

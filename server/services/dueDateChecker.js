@@ -432,7 +432,7 @@ const checkContactDueDates = async () => {
         ]}}
       }},
       { $project: { name: 1, tasks: 1, workspaceId: 1, userId: 1 } }
-    ]).maxTimeMS(30000);
+    ]).option({ maxTimeMS: 30000 });
 
     let notificationsSent = 0;
     let contactsUpdated = 0;
