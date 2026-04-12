@@ -12,6 +12,16 @@ const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
 
+// Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
+const EXCLUDE_FILE_DATA = {
+  'files.data': 0,
+  'tasks.files.data': 0,
+  'tasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.subtasks.subtasks.files.data': 0,
+};
+
 // Helper to sync contact tasks to both Google Calendar and Google Tasks
 const autoSyncContactToGoogle = async (taskData, action) => {
   await Promise.all([
@@ -151,7 +161,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     // files.data is now stored in ContactFile collection, so Contact docs are small
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
-      { 'files.data': 0 }
+      EXCLUDE_FILE_DATA
     ).sort({ name: 1 }).lean();
 
     const contactsWithId = contacts.map(contact => ({
@@ -170,7 +180,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
   try {
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
-      { 'files.data': 0, 'tasks.files.data': 0 }
+      EXCLUDE_FILE_DATA
     ).sort({ name: 1 }).lean();
 
     const escCsv = (val) => {
@@ -223,7 +233,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Exclude files.data field - it contains large Base64 data
     const contact = await Contact.findOne(
       { _id: req.params.id, workspaceId: req.workspaceId },
-      { 'files.data': 0 }
+      EXCLUDE_FILE_DATA
     ).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -829,9 +839,10 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 // Download file (from ContactFile collection or legacy Contact.files.data)
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // Load contact with file metadata only (no Base64 data)
     const contact = await Contact.findOne(
       { _id: req.params.id, workspaceId: req.workspaceId },
-      { 'files.$': 1 }
+      { files: 1 }
     ).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
@@ -845,15 +856,22 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     // Try ContactFile collection first, fall back to legacy embedded data
     let base64Data;
     const contactFile = await ContactFile.findOne(
-      { contactId: req.params.id, fileId: req.params.fileId },
+      { fileId: req.params.fileId },
       { data: 1 }
     ).lean();
 
     if (contactFile) {
       base64Data = contactFile.data;
     } else if (fileMeta.data) {
+      // Legacy: data still embedded — migrate on-the-fly
       base64Data = fileMeta.data;
+      ContactFile.updateOne(
+        { fileId: req.params.fileId },
+        { $setOnInsert: { contactId: req.params.id, fileId: req.params.fileId, data: base64Data } },
+        { upsert: true }
+      ).catch(() => {});
     } else {
+      logger.error('File data not found', { contactId: req.params.id, fileId: req.params.fileId });
       return res.status(404).json({ message: 'File data not found' });
     }
 

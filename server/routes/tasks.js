@@ -9,6 +9,16 @@ const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
 const User = require('../models/User');
 
+// Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
+const EXCLUDE_FILE_DATA = {
+  'files.data': 0,
+  'tasks.files.data': 0,
+  'tasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.subtasks.files.data': 0,
+  'tasks.subtasks.subtasks.subtasks.subtasks.files.data': 0,
+};
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
@@ -121,10 +131,10 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       ]
     }).maxTimeMS(30000).lean();
 
-    // files.data is now in ContactFile collection, Contact docs are small
+    // Exclude file data at all nesting levels (can't use inclusion + exclusion together)
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
-      { name: 1, tasks: 1 }
+      EXCLUDE_FILE_DATA
     ).lean();
 
     // Get all unique assigned user IDs for batch query
@@ -216,7 +226,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     // Get contact tasks
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
-      { 'files.data': 0, 'tasks.files.data': 0 }
+      EXCLUDE_FILE_DATA
     ).lean();
 
     const escCsv = (val) => {
@@ -1403,7 +1413,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // Task not found in global tasks, try to find in contacts
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1510,7 +1520,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     // If source is 'contact', delete from contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1585,7 +1595,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // If not found in global tasks, try contacts
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1680,7 +1690,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     // If not found in global tasks, search in contacts
     if (!originalTask) {
-      const allContacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+      const allContacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
       for (const contact of allContacts) {
         if (contact.tasks && contact.tasks.length > 0) {
           const found = contact.tasks.find(t => t.id === req.params.id);
@@ -1833,7 +1843,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     // If source is specified as contact, look in contacts first
     if (source === 'contact') {
-      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -1913,7 +1923,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     }
 
     // If not found in global, search in contacts
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -1996,7 +2006,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2122,7 +2132,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     }
 
     // Search in contacts
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2233,7 +2243,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2296,7 +2306,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     }
 
     // Search in contacts
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2500,7 +2510,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     });
     res.send(fileBuffer);
   } catch (error) {
-    logger.error('Task file download error', { error: error.message });
+    logger.error('Task file download error', { error: error.message, stack: error.stack, taskId: req.params.taskId, fileId: req.params.fileId, subtaskId: req.query.subtaskId });
     res.status(500).json({ message: 'Chyba pri sťahovaní súboru' });
   }
 });
