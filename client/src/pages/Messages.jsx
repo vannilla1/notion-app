@@ -9,7 +9,6 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import { useWorkspace } from '../context/WorkspaceContext';
-import FilePreviewImage from '../components/FilePreviewImage';
 import FilePreviewModal from '../components/FilePreviewModal';
 
 const messagesHelpTips = [
@@ -1272,13 +1271,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                 const legacyDlUrl = `/api/messages/${msg.id || msg._id}/attachment`;
                 return (
                   <div className="task-file-item">
-                    {isImage(msg.attachment.mimetype) ? (
-                      <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>
-                        <FilePreviewImage downloadUrl={legacyDlUrl} alt={msg.attachment.originalName} />
-                      </div>
-                    ) : (
-                      <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
-                    )}
+                    <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
                     <span className="task-file-name task-file-name-clickable" title={msg.attachment.originalName} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>{msg.attachment.originalName}</span>
                     <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
                     <button className="btn-icon-sm" onClick={() => {
@@ -1293,13 +1286,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                 const dlUrl = `/api/messages/${msg.id || msg._id}/files/${file.id}/download`;
                 return (
                   <div key={file.id} className="task-file-item">
-                    {isImage(file.mimetype) ? (
-                      <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => onPreviewFile({ file, downloadUrl: dlUrl })}>
-                        <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
-                      </div>
-                    ) : (
-                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                    )}
+                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
                     <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => onPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                     <button className="btn-icon-sm" onClick={() => onFileDownload(msg.id || msg._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
@@ -1414,31 +1401,15 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                     )}
                     {c.attachment?.originalName && (
                       <div style={{ marginTop: '6px' }}>
-                        {isImage(c.attachment.mimetype) && (
-                          <div className="file-preview file-preview-sm" style={{ marginBottom: '4px' }}>
-                            <FilePreviewImage
-                              downloadUrl={`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`}
-                              alt={c.attachment.originalName}
-                            />
-                          </div>
-                        )}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{isImage(c.attachment.mimetype) ? '🖼️' : '📎'}</span>
-                          <a href="#" onClick={(e) => {
-                              e.preventDefault();
-                              api.get(`/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment`, { responseType: 'blob' })
-                                .then(res => {
-                                  const url = URL.createObjectURL(res.data);
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = c.attachment.originalName;
-                                  a.click();
-                                  URL.revokeObjectURL(url);
-                                });
-                            }}
-                            style={{ fontSize: '12px', color: 'var(--accent-color)' }}>
+                          <span>{getFileIcon(c.attachment.mimetype)}</span>
+                          <span
+                            className="task-file-name-clickable"
+                            style={{ fontSize: '12px', color: 'var(--accent-color)', cursor: 'pointer' }}
+                            onClick={() => onPreviewFile({ file: c.attachment, downloadUrl: `/api/messages/${msg.id || msg._id}/comment/${c._id}/attachment` })}
+                          >
                             {c.attachment.originalName}
-                          </a>
+                          </span>
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({(c.attachment.size / 1024).toFixed(0)} KB)</span>
                         </div>
                       </div>

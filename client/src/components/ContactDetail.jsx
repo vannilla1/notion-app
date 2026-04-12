@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
 import api from '../api/api';
 import { downloadBlob } from '../utils/fileDownload';
-import FilePreviewImage from './FilePreviewImage';
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
@@ -317,16 +316,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
             <div className="files-grid">
               {contact.files.map(file => (
                 <div key={file.id} className="file-item">
-                  {isImage(file.mimetype) ? (
-                    <div className="file-preview">
-                      <FilePreviewImage
-                        downloadUrl={`/api/contacts/${contact.id}/files/${file.id}/download`}
-                        alt={file.originalName}
-                      />
-                    </div>
-                  ) : (
-                    <div className="file-icon">{getFileIcon(file.mimetype)}</div>
-                  )}
+                  <div className="file-icon">{getFileIcon(file.mimetype)}</div>
                   <div className="file-info">
                     <div className="file-name" title={file.originalName}>
                       {file.originalName}

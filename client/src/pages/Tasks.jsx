@@ -12,7 +12,6 @@ import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSe
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import FilePreviewImage from '../components/FilePreviewImage';
 import FilePreviewModal from '../components/FilePreviewModal';
 
 // Help tips for Tasks page
@@ -1579,13 +1578,7 @@ function Tasks() {
                 const dlUrl = `/api/tasks/${task.id || task._id}/files/${file.id}/download?subtaskId=${subtask.id}`;
                 return (
                   <div key={file.id} className="task-file-item task-file-item-sm">
-                    {isImage(file.mimetype) ? (
-                      <div className="file-preview file-preview-xs" style={{ cursor: 'pointer' }} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>
-                        <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
-                      </div>
-                    ) : (
-                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                    )}
+                    <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
                     <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                     <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
@@ -2727,13 +2720,7 @@ function Tasks() {
                                   const dlUrl = `/api/tasks/${task.id || task._id}/files/${file.id}/download`;
                                   return (
                                     <div key={file.id} className="task-file-item">
-                                      {isImage(file.mimetype) ? (
-                                        <div className="file-preview file-preview-sm" style={{ cursor: 'pointer' }} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>
-                                          <FilePreviewImage downloadUrl={dlUrl} alt={file.originalName} />
-                                        </div>
-                                      ) : (
-                                        <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
-                                      )}
+                                      <span className="task-file-icon">{getFileIcon(file.mimetype)}</span>
                                       <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                                       <span className="task-file-size">{formatFileSize(file.size)}</span>
                                       <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
