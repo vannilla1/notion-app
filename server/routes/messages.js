@@ -92,7 +92,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       query.status = status;
     }
 
-    const messages = await Message.find(query, { 'attachment.data': 0 })
+    const messages = await Message.find(query, { 'attachment.data': 0, 'files.data': 0, 'comments.attachment.data': 0 })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();

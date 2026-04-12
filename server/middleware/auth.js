@@ -2,6 +2,10 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+// In-memory user cache to reduce DB lookups on every request
+const userCache = new Map();
+const USER_CACHE_TTL = 30000; // 30 seconds
+
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
@@ -25,7 +29,21 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, SECRET_KEY, { algorithms: ['HS256'] });
-    const user = await User.findById(decoded.id);
+    const cacheKey = decoded.id;
+    const cached = userCache.get(cacheKey);
+    let user;
+    if (cached && Date.now() - cached.cachedAt < USER_CACHE_TTL) {
+      user = cached.user;
+    } else {
+      user = await User.findById(decoded.id);
+      if (user) {
+        userCache.set(cacheKey, { user, cachedAt: Date.now() });
+        if (userCache.size > 100) {
+          const firstKey = userCache.keys().next().value;
+          userCache.delete(firstKey);
+        }
+      }
+    }
 
     if (!user) {
       return res.status(401).json({ message: 'Neplatný token' });
