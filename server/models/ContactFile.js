@@ -4,13 +4,13 @@ const contactFileSchema = new mongoose.Schema({
   contactId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Contact',
-    required: true,
-    index: true
+    index: true,
+    default: null
   },
   fileId: {
     type: String,
     required: true,
-    index: true
+    unique: true
   },
   data: {
     type: String,
@@ -20,6 +20,7 @@ const contactFileSchema = new mongoose.Schema({
   timestamps: true
 });
 
-contactFileSchema.index({ contactId: 1, fileId: 1 }, { unique: true });
+// fileId is UUID — globally unique, primary lookup key
+contactFileSchema.index({ contactId: 1, fileId: 1 });
 
 module.exports = mongoose.model('ContactFile', contactFileSchema);

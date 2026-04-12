@@ -293,42 +293,148 @@ server.listen(PORT, () => {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }
 
-      // Migrate file data from Contact documents to ContactFile collection
-      // This dramatically reduces Contact document sizes (20MB → ~500KB)
-      // Uses cursor to process one document at a time (avoids timeout)
+      // Migrate file data from Contact/Task documents to ContactFile collection
+      // Handles: contact.files[], contact.tasks[].files[], nested subtask files, global Task files
       try {
         const ContactModel = require('./models/Contact');
         const ContactFile = require('./models/ContactFile');
-        const cursor = ContactModel.find(
-          { 'files.data': { $exists: true, $ne: null } }
-        ).cursor();
+        const TaskModel = require('./models/Task');
+
+        // Drop old compound unique index if it exists (replaced by fileId unique)
+        try {
+          await ContactFile.collection.dropIndex('contactId_1_fileId_1');
+          logger.info('Dropped old contactId_1_fileId_1 index');
+        } catch (idxErr) {
+          // Index doesn't exist — that's fine
+        }
 
         let migratedFiles = 0;
-        for await (const contact of cursor) {
-          const filesToMigrate = (contact.files || []).filter(f => f.data);
-          if (filesToMigrate.length === 0) continue;
 
-          for (const file of filesToMigrate) {
-            try {
-              await ContactFile.updateOne(
-                { contactId: contact._id, fileId: file.id },
-                { $setOnInsert: { data: file.data } },
-                { upsert: true }
-              );
-              migratedFiles++;
-            } catch (fileErr) {
-              logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
+        // Helper: recursively strip data from files in subtasks
+        const stripFilesDeep = (subtasks) => {
+          if (!Array.isArray(subtasks)) return false;
+          let modified = false;
+          for (const st of subtasks) {
+            if (Array.isArray(st.files)) {
+              for (const file of st.files) {
+                if (file.data && typeof file.data === 'string' && file.data.length > 100) {
+                  const fileId = file.id;
+                  // Fire-and-forget upsert
+                  ContactFile.updateOne(
+                    { fileId },
+                    { $setOnInsert: { fileId, data: file.data } },
+                    { upsert: true }
+                  ).catch(() => {});
+                  delete file.data;
+                  migratedFiles++;
+                  modified = true;
+                }
+              }
+            }
+            if (Array.isArray(st.subtasks) && st.subtasks.length > 0) {
+              if (stripFilesDeep(st.subtasks)) modified = true;
             }
           }
-          // Strip data from files, keep only metadata
-          const cleanFiles = contact.files.map(f => ({
-            id: f.id, originalName: f.originalName, mimetype: f.mimetype,
-            size: f.size, uploadedAt: f.uploadedAt
-          }));
-          await ContactModel.updateOne({ _id: contact._id }, { $set: { files: cleanFiles } });
+          return modified;
+        };
+
+        // 1. Contact files + task/subtask files (broad filter — recursive check inside)
+        const contactCursor = ContactModel.find({}).cursor();
+
+        for await (const contact of contactCursor) {
+          let modified = false;
+
+          // Contact files
+          const filesToMigrate = (contact.files || []).filter(f => f.data);
+          if (filesToMigrate.length > 0) {
+            for (const file of filesToMigrate) {
+              try {
+                await ContactFile.updateOne(
+                  { fileId: file.id },
+                  { $setOnInsert: { contactId: contact._id, fileId: file.id, data: file.data } },
+                  { upsert: true }
+                );
+                migratedFiles++;
+              } catch (fileErr) {
+                logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
+              }
+            }
+            contact.files = contact.files.map(f => ({
+              id: f.id, originalName: f.originalName, mimetype: f.mimetype,
+              size: f.size, uploadedAt: f.uploadedAt
+            }));
+            modified = true;
+          }
+
+          // Contact task/subtask files
+          if (Array.isArray(contact.tasks)) {
+            for (const task of contact.tasks) {
+              // Task-level files
+              if (Array.isArray(task.files)) {
+                for (const file of task.files) {
+                  if (file.data && typeof file.data === 'string' && file.data.length > 100) {
+                    try {
+                      await ContactFile.updateOne(
+                        { fileId: file.id },
+                        { $setOnInsert: { contactId: contact._id, fileId: file.id, data: file.data } },
+                        { upsert: true }
+                      );
+                      migratedFiles++;
+                    } catch (fileErr) {
+                      logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
+                    }
+                    delete file.data;
+                    modified = true;
+                  }
+                }
+              }
+              // Subtask files (recursive)
+              if (stripFilesDeep(task.subtasks)) modified = true;
+            }
+          }
+
+          if (modified) {
+            await ContactModel.updateOne({ _id: contact._id }, {
+              $set: { files: contact.files, tasks: contact.tasks }
+            });
+          }
         }
+
+        // 2. Global Task files (broad filter — recursive check inside)
+        const taskCursor = TaskModel.find({}).cursor();
+
+        for await (const task of taskCursor) {
+          let modified = false;
+
+          if (Array.isArray(task.files)) {
+            for (const file of task.files) {
+              if (file.data && typeof file.data === 'string' && file.data.length > 100) {
+                try {
+                  await ContactFile.updateOne(
+                    { fileId: file.id },
+                    { $setOnInsert: { fileId: file.id, data: file.data } },
+                    { upsert: true }
+                  );
+                  migratedFiles++;
+                } catch (fileErr) {
+                  logger.warn('Task file migration skip', { fileId: file.id, error: fileErr.message });
+                }
+                delete file.data;
+                modified = true;
+              }
+            }
+          }
+          if (stripFilesDeep(task.subtasks)) modified = true;
+
+          if (modified) {
+            await TaskModel.updateOne({ _id: task._id }, {
+              $set: { files: task.files, subtasks: task.subtasks }
+            });
+          }
+        }
+
         if (migratedFiles > 0) {
-          logger.info(`Migrated ${migratedFiles} files from Contact to ContactFile collection`);
+          logger.info(`Migrated ${migratedFiles} files to ContactFile collection`);
         }
       } catch (err) {
         logger.error('File migration error', { error: err.message });

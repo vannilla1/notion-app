@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const ContactFile = require('../models/ContactFile');
 const User = require('../models/User');
 
 const upload = multer({
@@ -2366,12 +2367,15 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const { taskId } = req.params;
       const subtaskId = req.query.subtaskId;
 
-      const fileData = {
-        id: uuidv4(),
+      const base64Data = req.file.buffer.toString('base64');
+      const fileId = uuidv4();
+
+      // Metadata only (no Base64 data in document — stored in ContactFile collection)
+      const fileMeta = {
+        id: fileId,
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
-        data: req.file.buffer.toString('base64'),
         uploadedAt: new Date()
       };
 
@@ -2379,17 +2383,19 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       if (mongoose.Types.ObjectId.isValid(taskId)) {
         const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
         if (task) {
+          // Save file data to ContactFile collection
+          await ContactFile.create({ fileId, data: base64Data });
+
           if (subtaskId) {
             const subtask = findSubtaskById(task.subtasks, subtaskId);
             if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
             if (!subtask.files) subtask.files = [];
-            subtask.files.push(fileData);
+            subtask.files.push(fileMeta);
             task.markModified('subtasks');
           } else {
-            task.files.push(fileData);
+            task.files.push(fileMeta);
           }
           await task.save();
-          const { data, ...fileMeta } = fileData;
           return res.json({ message: 'Súbor nahraný', file: fileMeta });
         }
       }
@@ -2404,19 +2410,21 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const contactTask = contact.tasks.find(t => t.id === taskId);
       if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
 
+      // Save file data to ContactFile collection
+      await ContactFile.create({ contactId: contact._id, fileId, data: base64Data });
+
       if (subtaskId) {
         const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
         if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
         if (!subtask.files) subtask.files = [];
-        subtask.files.push(fileData);
+        subtask.files.push(fileMeta);
       } else {
         if (!contactTask.files) contactTask.files = [];
-        contactTask.files.push(fileData);
+        contactTask.files.push(fileMeta);
       }
       contact.markModified('tasks');
       await contact.save();
 
-      const { data, ...fileMeta } = fileData;
       res.json({ message: 'Súbor nahraný', file: fileMeta });
     } catch (error) {
       logger.error('Task file upload error', { error: error.message });
@@ -2430,7 +2438,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
   try {
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
-    let file;
+    let fileMeta;
 
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
@@ -2438,15 +2446,15 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       if (task) {
         if (subtaskId) {
           const subtask = findSubtaskById(task.subtasks, subtaskId);
-          if (subtask) file = (subtask.files || []).find(f => f.id === fileId);
+          if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
         } else {
-          file = task.files.find(f => f.id === fileId);
+          fileMeta = task.files.find(f => f.id === fileId);
         }
       }
     }
 
     // If not found, search in contact tasks (handles UUID task IDs)
-    if (!file) {
+    if (!fileMeta) {
       const contact = await Contact.findOne({
         workspaceId: req.workspaceId,
         'tasks.id': taskId
@@ -2456,20 +2464,31 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         if (contactTask) {
           if (subtaskId) {
             const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
-            if (subtask) file = (subtask.files || []).find(f => f.id === fileId);
+            if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
           } else {
-            file = (contactTask.files || []).find(f => f.id === fileId);
+            fileMeta = (contactTask.files || []).find(f => f.id === fileId);
           }
         }
       }
     }
 
-    if (!file) return res.status(404).json({ message: 'Súbor nenájdený' });
+    if (!fileMeta) return res.status(404).json({ message: 'Súbor nenájdený' });
 
-    const fileBuffer = Buffer.from(file.data, 'base64');
+    // Try ContactFile collection first, fall back to legacy embedded data
+    let base64Data;
+    const contactFile = await ContactFile.findOne({ fileId }, { data: 1 }).lean();
+    if (contactFile) {
+      base64Data = contactFile.data;
+    } else if (fileMeta.data) {
+      base64Data = fileMeta.data;
+    } else {
+      return res.status(404).json({ message: 'Dáta súboru nenájdené' });
+    }
+
+    const fileBuffer = Buffer.from(base64Data, 'base64');
     res.set({
-      'Content-Type': file.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Type': fileMeta.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
       'Content-Length': fileBuffer.length,
       'Cross-Origin-Resource-Policy': 'cross-origin'
     });
@@ -2485,6 +2504,9 @@ router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asy
   try {
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
+
+    // Delete file data from ContactFile collection
+    await ContactFile.deleteOne({ fileId }).catch(() => {});
 
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
