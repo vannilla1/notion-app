@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
@@ -234,9 +235,22 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+      return res.status(400).json({ message: 'Neplatné ID pracovného prostredia' });
+    }
+
+    const objectId = new mongoose.Types.ObjectId(workspaceId);
+
+    // Verify workspace exists
+    const workspace = await Workspace.findById(objectId);
+    if (!workspace) {
+      return res.status(404).json({ message: 'Pracovné prostredie neexistuje' });
+    }
+
     // Verify membership
     const membership = await WorkspaceMember.findOne({
-      workspaceId,
+      workspaceId: objectId,
       userId: req.user.id
     });
 
@@ -244,12 +258,10 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Nie ste členom tohto pracovného prostredia' });
     }
 
-    // Update current workspace
-    await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspaceId });
+    // Update current workspace with proper ObjectId
+    await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
 
-    const workspace = await Workspace.findById(workspaceId);
-
-    logger.info('Workspace switched', { workspaceId, userId: req.user.id });
+    logger.info('Workspace switched', { workspaceId: objectId, userId: req.user.id });
 
     res.json({
       message: 'Pracovné prostredie bolo prepnuté',
