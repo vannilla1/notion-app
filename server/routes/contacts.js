@@ -127,7 +127,8 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     }));
     res.json(contactsWithId);
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    console.error('GET /contacts error:', error.message, error.stack);
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 

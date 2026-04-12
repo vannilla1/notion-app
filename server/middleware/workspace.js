@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const User = require('../models/User');
@@ -19,20 +20,57 @@ const requireWorkspace = async (req, res, next) => {
 
     // Check if user has a current workspace set
     if (!user.currentWorkspaceId) {
-      return res.status(400).json({
-        message: 'Nie ste členom žiadneho pracovného prostredia',
-        code: 'NO_WORKSPACE'
-      });
+      // Try to auto-assign first available workspace
+      const firstMembership = await WorkspaceMember.findOne({ userId });
+      if (firstMembership) {
+        await User.findByIdAndUpdate(userId, { currentWorkspaceId: firstMembership.workspaceId });
+        user.currentWorkspaceId = firstMembership.workspaceId;
+        logger.info('Auto-assigned workspace', { userId, workspaceId: firstMembership.workspaceId });
+      } else {
+        return res.status(400).json({
+          message: 'Nie ste členom žiadneho pracovného prostredia',
+          code: 'NO_WORKSPACE'
+        });
+      }
+    }
+
+    // Ensure currentWorkspaceId is a proper ObjectId
+    let workspaceObjId = user.currentWorkspaceId;
+    if (typeof workspaceObjId === 'string') {
+      if (!mongoose.Types.ObjectId.isValid(workspaceObjId)) {
+        await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
+        return res.status(400).json({
+          message: 'Neplatné ID pracovného prostredia',
+          code: 'NO_WORKSPACE'
+        });
+      }
+      workspaceObjId = new mongoose.Types.ObjectId(workspaceObjId);
+      // Fix the stored value
+      await User.findByIdAndUpdate(userId, { currentWorkspaceId: workspaceObjId });
+      logger.info('Fixed string workspaceId to ObjectId', { userId, workspaceId: workspaceObjId });
     }
 
     // Check membership
     const membership = await WorkspaceMember.findOne({
-      workspaceId: user.currentWorkspaceId,
+      workspaceId: workspaceObjId,
       userId: userId
     });
 
     if (!membership) {
-      // User's currentWorkspaceId is invalid, clear it
+      // User's currentWorkspaceId is invalid, try to find any valid workspace
+      const anyMembership = await WorkspaceMember.findOne({ userId });
+      if (anyMembership) {
+        await User.findByIdAndUpdate(userId, { currentWorkspaceId: anyMembership.workspaceId });
+        // Retry with the valid workspace
+        const retryWorkspace = await Workspace.findById(anyMembership.workspaceId);
+        if (retryWorkspace) {
+          req.workspace = retryWorkspace;
+          req.workspaceMember = anyMembership;
+          req.workspaceId = retryWorkspace._id;
+          logger.info('Auto-recovered to valid workspace', { userId, workspaceId: retryWorkspace._id });
+          return next();
+        }
+      }
       await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
       return res.status(400).json({
         message: 'Nie ste členom tohto pracovného prostredia',
@@ -41,7 +79,7 @@ const requireWorkspace = async (req, res, next) => {
     }
 
     // Get workspace details
-    const workspace = await Workspace.findById(user.currentWorkspaceId);
+    const workspace = await Workspace.findById(workspaceObjId);
     if (!workspace) {
       await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
       return res.status(400).json({
