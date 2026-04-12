@@ -15,6 +15,18 @@ if (!JWT_SECRET) {
 
 const SECRET_KEY = JWT_SECRET || 'dev-only-secret-change-in-production';
 
+// In-memory user cache (30s TTL) to reduce DB queries per request
+const userCache = new Map();
+const USER_CACHE_TTL = 30000;
+
+const getCachedUser = async (userId) => {
+  const cached = userCache.get(userId);
+  if (cached && Date.now() - cached.ts < USER_CACHE_TTL) return cached.user;
+  const user = await User.findById(userId).lean();
+  if (user) userCache.set(userId, { user, ts: Date.now() });
+  return user;
+};
+
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -25,7 +37,7 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, SECRET_KEY, { algorithms: ['HS256'] });
-    const user = await User.findById(decoded.id);
+    const user = await getCachedUser(decoded.id);
 
     if (!user) {
       return res.status(401).json({ message: 'Neplatný token' });
@@ -54,7 +66,7 @@ const authenticateSocket = async (socket, next) => {
 
   try {
     const decoded = jwt.verify(token, SECRET_KEY, { algorithms: ['HS256'] });
-    const user = await User.findById(decoded.id);
+    const user = await getCachedUser(decoded.id);
 
     if (!user) {
       return next(new Error('User not found'));
