@@ -10,7 +10,6 @@ const fileSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
-// BUGFIX: Added priority field to subtask schema for consistency
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
   title: String,

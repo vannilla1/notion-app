@@ -924,8 +924,6 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
-// Helper function to clone subtasks with new IDs
-// BUGFIX: Added priority field preservation and input validation
 const cloneSubtasksWithNewIds = (subtasks) => {
   if (!subtasks || !Array.isArray(subtasks)) return [];
   return subtasks.map(subtask => {
@@ -1667,8 +1665,6 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
 // ==================== DUPLICATE TASK ====================
 
-// Helper function to duplicate subtasks recursively with new IDs
-// BUGFIX: Added priority field preservation and input validation
 const duplicateSubtasksRecursive = (subtasks) => {
   if (!subtasks || !Array.isArray(subtasks)) return [];
   return subtasks.map(subtask => {
@@ -1825,7 +1821,6 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
-    // BUGFIX: Added priority field support for subtasks
     const now = new Date().toISOString();
     const subtask = {
       id: uuidv4(),
@@ -2002,8 +1997,6 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     const { title, completed, source, dueDate, notes, assignedTo } = req.body;
     const io = req.app.get('io');
 
-    // Helper to update subtask recursively
-    // BUGFIX: Preserve all existing fields including priority and nested subtasks
     // Returns { updated, originalAssignedTo } for assignment notification logic
     const updateSubtaskInTask = (task) => {
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);

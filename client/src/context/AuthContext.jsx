@@ -25,7 +25,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token]);
 
-  // Keep-alive ping every 10 minutes to prevent Render from sleeping
   useEffect(() => {
     if (!token) return;
     const interval = setInterval(() => {
@@ -36,11 +35,9 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
-      // API interceptor handles retries on timeout/network errors automatically
       const res = await api.get('/api/auth/me');
       setUser(res.data);
-    } catch (error) {
-      console.error('Failed to fetch user:', error);
+    } catch {
       localStorage.removeItem('token');
       setToken(null);
       setUser(null);
@@ -48,7 +45,6 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   };
-
 
   const login = async (email, password) => {
     const res = await api.post('/api/auth/login', { email, password });

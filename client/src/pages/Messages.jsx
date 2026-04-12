@@ -162,8 +162,8 @@ function Messages() {
         setStatusFilter('all');
       }
       setSelectedMessage(msg);
-    } catch (err) {
-      console.error('[Messages] Failed to fetch highlighted message:', err);
+    } catch {
+      // Silently fail — message may have been deleted
     }
   };
 
@@ -469,7 +469,6 @@ function Messages() {
           if (json.message) msg = json.message;
         }
       } catch {}
-      console.error('File download error:', error.response?.status, msg);
       alert(msg);
     }
   };

@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 
-// Check if notifications are enabled in localStorage
 const areNotificationsEnabled = () => {
   const setting = localStorage.getItem('notificationsEnabled');
-  // Default to true if not set
   return setting === null ? true : setting === 'true';
 };
 
@@ -15,15 +13,12 @@ function NotificationToast() {
   const { socket, isConnected } = useSocket();
   const navigate = useNavigate();
 
-  // Listen for changes to notification settings
   useEffect(() => {
     const handleStorageChange = () => {
       setNotificationsEnabled(areNotificationsEnabled());
     };
 
-    // Listen for custom event from PushNotificationToggle
     window.addEventListener('notificationSettingChanged', handleStorageChange);
-    // Also listen for storage changes from other tabs
     window.addEventListener('storage', handleStorageChange);
 
     return () => {
@@ -32,38 +27,30 @@ function NotificationToast() {
     };
   }, []);
 
-  // Add a new toast
   const addToast = useCallback((notification) => {
-    // Check if notifications are enabled (read fresh value)
     if (!areNotificationsEnabled()) {
       return;
     }
 
     const id = notification.id || Date.now().toString();
     setToasts(prev => {
-      // Prevent duplicates
       if (prev.some(t => t.id === id)) return prev;
-      // Limit to 5 toasts
       const newToasts = [...prev, { ...notification, id }];
       return newToasts.slice(-5);
     });
 
-    // Auto-remove after 5 seconds
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
   }, []);
 
-  // Remove a toast
   const removeToast = useCallback((id) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Handle click on toast
   const handleClick = useCallback((toast) => {
     removeToast(toast.id);
 
-    // Navigate based on notification type
     if (toast.relatedType === 'contact' && toast.data?.contactId) {
       navigate('/crm', { state: { expandContactId: toast.data.contactId } });
     } else if (toast.relatedType === 'task' && toast.data?.taskId) {
@@ -73,7 +60,6 @@ function NotificationToast() {
     }
   }, [navigate, removeToast]);
 
-  // Listen for notifications from socket
   useEffect(() => {
     if (!socket || !isConnected) return;
 
@@ -88,7 +74,6 @@ function NotificationToast() {
     };
   }, [socket, isConnected, addToast]);
 
-  // Get icon based on notification type
   const getIcon = (type) => {
     if (type?.startsWith('contact')) return '👤';
     if (type?.startsWith('task')) return '✅';
@@ -96,7 +81,6 @@ function NotificationToast() {
     return '🔔';
   };
 
-  // Get color class based on notification type
   const getColorClass = (type) => {
     if (type?.includes('created')) return 'toast-success';
     if (type?.includes('deleted')) return 'toast-danger';

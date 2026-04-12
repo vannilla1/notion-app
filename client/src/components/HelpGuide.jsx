@@ -1,28 +1,21 @@
 import { useState, useEffect } from 'react';
 
-// Check if user has seen help for a specific section
 const hasSeenHelp = (section) => {
   const seen = localStorage.getItem(`help_seen_${section}`);
   return seen === 'true';
 };
 
-// Mark help as seen for a specific section
 const markHelpAsSeen = (section) => {
   localStorage.setItem(`help_seen_${section}`, 'true');
 };
 
-// Reset all help (for testing or user request)
 export const resetAllHelp = () => {
   const keys = Object.keys(localStorage).filter(k => k.startsWith('help_seen_'));
   keys.forEach(k => localStorage.removeItem(k));
 };
 
-/**
- * HelpGuide component - shows a help modal with tips for each section
- */
 const HelpGuide = ({ section, tips, title, children }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [showButton, setShowButton] = useState(true);
 
   useEffect(() => {
     // Auto-show help if user hasn't seen it yet
@@ -42,18 +35,14 @@ const HelpGuide = ({ section, tips, title, children }) => {
 
   return (
     <>
-      {/* Help button */}
-      {showButton && (
-        <button
+      <button
           className="help-guide-btn"
           onClick={handleOpen}
           title="Zobraziť nápovedu"
-        >
-          ?
-        </button>
-      )}
+      >
+        ?
+      </button>
 
-      {/* Help modal */}
       {isOpen && (
         <div className="help-guide-overlay" onClick={handleClose}>
           <div className="help-guide-modal" onClick={e => e.stopPropagation()}>

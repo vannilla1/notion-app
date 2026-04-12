@@ -113,8 +113,8 @@ function Dashboard() {
       setContacts(contactsRes.data);
       setTasks(tasksRes.data);
       setMessages({ received: receivedRes.data, sent: sentRes.data });
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
+    } catch {
+      // Silently fail — dashboard shows empty/loading state
     } finally {
       setLoading(false);
     }

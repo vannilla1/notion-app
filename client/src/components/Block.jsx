@@ -38,7 +38,6 @@ function Block({ block, index, onUpdate, onAddBlock, onDeleteBlock, onChangeType
   const handleInput = (e) => {
     const content = e.target.textContent;
 
-    // Check for slash command
     if (content === '/') {
       setShowMenu(true);
       setMenuFilter('');
@@ -84,7 +83,6 @@ function Block({ block, index, onUpdate, onAddBlock, onDeleteBlock, onChangeType
       e.preventDefault();
       const newBlockId = await onAddBlock(block.id);
 
-      // Focus the new block
       setTimeout(() => {
         const newBlockEl = document.querySelector(`[data-block-id="${newBlockId}"]`);
         if (newBlockEl) {
@@ -97,13 +95,11 @@ function Block({ block, index, onUpdate, onAddBlock, onDeleteBlock, onChangeType
       e.preventDefault();
       const prevBlockId = await onDeleteBlock(block.id);
 
-      // Focus the previous block
       if (prevBlockId) {
         setTimeout(() => {
           const prevBlockEl = document.querySelector(`[data-block-id="${prevBlockId}"]`);
           if (prevBlockEl) {
             prevBlockEl.focus();
-            // Move cursor to end
             const range = document.createRange();
             const sel = window.getSelection();
             range.selectNodeContents(prevBlockEl);

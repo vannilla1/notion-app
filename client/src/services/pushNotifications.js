@@ -2,14 +2,6 @@ import api from '../api/api';
 
 const PUSH_SW_PATH = '/sw-push.js';
 
-/**
- * Check if push notifications are supported
- * Note: iOS Safari requires PWA mode (added to home screen) for push notifications
- */
-/**
- * Detect if running inside native iOS app (WKWebView)
- * Native app handles push via APNs, so web push should be skipped to avoid duplicates
- */
 export const isNativeIOSApp = () => {
   return !!(window.webkit?.messageHandlers);
 };
@@ -25,17 +17,11 @@ export const isPushSupported = () => {
   return hasServiceWorker && hasPushManager && hasNotification;
 };
 
-/**
- * Get current notification permission status
- */
 export const getPermissionStatus = () => {
   if (!isPushSupported()) return 'unsupported';
   return Notification.permission;
 };
 
-/**
- * Request notification permission
- */
 export const requestPermission = async () => {
   if (!isPushSupported()) {
     throw new Error('Push notifications are not supported');
@@ -45,37 +31,23 @@ export const requestPermission = async () => {
   return permission;
 };
 
-/**
- * Register the push service worker
- */
 export const registerPushServiceWorker = async () => {
   if (!isPushSupported()) {
     throw new Error('Push notifications are not supported');
   }
 
-  try {
-    const registration = await navigator.serviceWorker.register(PUSH_SW_PATH, {
-      scope: '/'
-    });
+  const registration = await navigator.serviceWorker.register(PUSH_SW_PATH, {
+    scope: '/'
+  });
 
-    return registration;
-  } catch (error) {
-    console.error('Push service worker registration failed:', error);
-    throw error;
-  }
+  return registration;
 };
 
-/**
- * Get VAPID public key from server
- */
 export const getVapidPublicKey = async () => {
   const response = await api.get('/api/push/vapid-public-key');
   return response.data.publicKey;
 };
 
-/**
- * Convert VAPID key to Uint8Array
- */
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -89,15 +61,11 @@ const urlBase64ToUint8Array = (base64String) => {
   return outputArray;
 };
 
-/**
- * Subscribe to push notifications
- */
 export const subscribeToPush = async () => {
   if (!isPushSupported()) {
     throw new Error('Push notifications are not supported');
   }
 
-  // Request permission if not granted
   if (Notification.permission === 'default') {
     const permission = await requestPermission();
     if (permission !== 'granted') {
@@ -109,31 +77,22 @@ export const subscribeToPush = async () => {
     throw new Error('Notification permission not granted');
   }
 
-  // Register service worker
   const registration = await registerPushServiceWorker();
-
-  // Wait for the service worker to be ready
   await navigator.serviceWorker.ready;
 
-  // Get VAPID public key
   const vapidPublicKey = await getVapidPublicKey();
   const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
 
-  // Subscribe to push
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey
   });
 
-  // Send subscription to server
-  const response = await api.post('/api/push/subscribe', subscription.toJSON());
+  await api.post('/api/push/subscribe', subscription.toJSON());
 
   return subscription;
 };
 
-/**
- * Unsubscribe from push notifications
- */
 export const unsubscribeFromPush = async () => {
   const registration = await navigator.serviceWorker.getRegistration(PUSH_SW_PATH);
 
@@ -144,21 +103,16 @@ export const unsubscribeFromPush = async () => {
   const subscription = await registration.pushManager.getSubscription();
 
   if (subscription) {
-    // Notify server
     try {
       await api.post('/api/push/unsubscribe', { endpoint: subscription.endpoint });
-    } catch (error) {
-      console.error('Error notifying server about unsubscribe:', error);
+    } catch {
+      // Server notification failed — proceed with local unsubscribe
     }
 
-    // Unsubscribe locally
     await subscription.unsubscribe();
   }
 };
 
-/**
- * Check if user is subscribed to push
- */
 export const isSubscribedToPush = async () => {
   if (!isPushSupported()) {
     return false;
@@ -174,52 +128,39 @@ export const isSubscribedToPush = async () => {
   return !!subscription;
 };
 
-/**
- * Get subscription count from server
- */
 export const getSubscriptionCount = async () => {
   const response = await api.get('/api/push/subscriptions');
   return response.data.count;
 };
 
-/**
- * Send test push notification
- */
 export const sendTestPush = async () => {
   const response = await api.post('/api/push/test');
   return response.data;
 };
 
-/**
- * Initialize push notifications (call this on app load)
- */
 export const initializePush = async () => {
   if (!isPushSupported()) {
     return false;
   }
 
-  // Listen for subscription change messages from service worker
   navigator.serviceWorker.addEventListener('message', async (event) => {
     if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
       if (event.data.newSubscription) {
-        // Service worker already re-subscribed, just persist to server
         try {
           await api.post('/api/push/subscribe', event.data.newSubscription);
-        } catch (error) {
-          console.error('[Push] Failed to persist renewed subscription:', error);
+        } catch {
+          // Failed to persist renewed subscription
         }
       } else {
-        // Service worker couldn't re-subscribe, do it from client
         try {
           await subscribeToPush();
-        } catch (error) {
-          console.error('[Push] Failed to re-subscribe after subscription change:', error);
+        } catch {
+          // Failed to re-subscribe after subscription change
         }
       }
     }
   });
 
-  // Check for cached re-subscription from service worker (when no window was open during change)
   try {
     const cache = await caches.open('push-subscription-cache');
     const cached = await cache.match('/_push_resubscribe');
@@ -228,11 +169,10 @@ export const initializePush = async () => {
       await api.post('/api/push/subscribe', newSub);
       await cache.delete('/_push_resubscribe');
     }
-  } catch (error) {
-    console.error('[Push] Error processing cached re-subscription:', error);
+  } catch {
+    // Failed to process cached re-subscription
   }
 
-  // Check if already subscribed
   const subscribed = await isSubscribedToPush();
 
   if (subscribed) {
@@ -244,8 +184,7 @@ export const initializePush = async () => {
     try {
       await subscribeToPush();
       return true;
-    } catch (error) {
-      console.error('Error re-subscribing to push:', error);
+    } catch {
       return false;
     }
   }

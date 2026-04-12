@@ -1,11 +1,7 @@
-import { useState, memo } from 'react';
+import { memo } from 'react';
 import PropTypes from 'prop-types';
 import { getStatusColor, getStatusLabel } from '../utils/constants';
 
-/**
- * ContactCard - Displays a single contact in the list
- * Memoized to prevent unnecessary re-renders
- */
 const ContactCard = memo(function ContactCard({
   contact,
   isExpanded,
@@ -80,9 +76,6 @@ const ContactCard = memo(function ContactCard({
   );
 });
 
-/**
- * ContactContent - Displays contact name and meta info
- */
 const ContactContent = memo(function ContactContent({ contact, onClick, getContactTasks }) {
   const allTasks = getContactTasks ? getContactTasks(contact) : [];
   const completedTasks = allTasks.filter(t => t.completed).length;
@@ -113,9 +106,6 @@ const ContactContent = memo(function ContactContent({ contact, onClick, getConta
   );
 });
 
-/**
- * ContactEditForm - Inline edit form for contact
- */
 const ContactEditForm = memo(function ContactEditForm({
   editForm,
   onEditFormChange,
@@ -196,9 +186,6 @@ const ContactEditForm = memo(function ContactEditForm({
   );
 });
 
-/**
- * ContactDetails - Expanded contact details section
- */
 export const ContactDetails = memo(function ContactDetails({ contact }) {
   return (
     <div className="contact-details">
@@ -241,7 +228,6 @@ export const ContactDetails = memo(function ContactDetails({ contact }) {
   );
 });
 
-// PropTypes for type safety
 ContactCard.propTypes = {
   contact: PropTypes.shape({
     id: PropTypes.string.isRequired,

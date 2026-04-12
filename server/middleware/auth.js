@@ -1,20 +1,18 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const logger = require('../utils/logger');
 
-// JWT_SECRET must be set in environment variables for security
-// In development, a fallback is used but production MUST set this
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
   if (process.env.NODE_ENV === 'production') {
-    console.error('FATAL: JWT_SECRET environment variable is not set in production!');
+    logger.error('FATAL: JWT_SECRET environment variable is not set in production!');
     process.exit(1);
   } else {
-    console.warn('WARNING: JWT_SECRET not set, using development fallback. DO NOT use in production!');
+    logger.warn('JWT_SECRET not set, using development fallback');
   }
 }
 
-// Use fallback only in development
 const SECRET_KEY = JWT_SECRET || 'dev-only-secret-change-in-production';
 
 const authenticateToken = async (req, res, next) => {

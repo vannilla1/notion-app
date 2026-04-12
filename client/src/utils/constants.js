@@ -1,8 +1,3 @@
-/**
- * Shared constants for status, priority, and other enums
- * Centralized to avoid duplication across components
- */
-
 // Contact statuses
 export const CONTACT_STATUS = {
   ACTIVE: 'active',
@@ -96,10 +91,6 @@ export const WORKSPACE_ROLE_LABELS = {
   admin: 'Admin',
   member: 'Člen'
 };
-
-/**
- * Helper functions to get labels and colors
- */
 
 export const getStatusLabel = (status) => {
   return CONTACT_STATUS_LABELS[status] || status || '-';

@@ -17,7 +17,6 @@ const WorkspaceSwitcher = () => {
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
 
-  // Detect mobile screen size
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth <= 768);
@@ -28,7 +27,6 @@ const WorkspaceSwitcher = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -41,7 +39,6 @@ const WorkspaceSwitcher = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Focus input when editing starts
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
@@ -49,7 +46,6 @@ const WorkspaceSwitcher = () => {
     }
   }, [isEditing]);
 
-  // Focus input when creating starts
   useEffect(() => {
     if (isCreating && createInputRef.current) {
       createInputRef.current.focus();
@@ -63,11 +59,10 @@ const WorkspaceSwitcher = () => {
     }
 
     try {
-      // Call API directly — skip React state updates since we're doing full page navigation
       await switchWorkspaceApi(workspaceId);
       window.location.href = '/app';
-    } catch (err) {
-      console.error('Error switching workspace:', err);
+    } catch {
+      // Switch failed — stay on current workspace
     }
   };
 
@@ -82,8 +77,8 @@ const WorkspaceSwitcher = () => {
     try {
       await updateWorkspace({ color });
       setColorPickerFor(null);
-    } catch (err) {
-      console.error('Error updating workspace color:', err);
+    } catch {
+      // Color update failed
     }
   };
 
@@ -110,8 +105,7 @@ const WorkspaceSwitcher = () => {
       setNewWorkspaceName('');
       setIsOpen(false);
       window.location.href = '/app';
-    } catch (err) {
-      console.error('Error creating workspace:', err);
+    } catch {
       alert('Chyba pri vytváraní prostredia');
     } finally {
       setSaving(false);
@@ -148,8 +142,7 @@ const WorkspaceSwitcher = () => {
       await updateWorkspace({ name: editName.trim() });
       setIsEditing(false);
       setEditName('');
-    } catch (err) {
-      console.error('Error updating workspace:', err);
+    } catch {
       alert('Chyba pri ukladaní názvu');
     } finally {
       setSaving(false);
@@ -164,7 +157,6 @@ const WorkspaceSwitcher = () => {
     }
   };
 
-  // Don't render on mobile - workspace info is shown in UserMenu instead
   if (isMobile || loading || !currentWorkspace) {
     return null;
   }
@@ -190,7 +182,6 @@ const WorkspaceSwitcher = () => {
             Pracovné prostredia
           </div>
 
-          {/* Current workspace with edit option */}
           <div className="workspace-current-section">
             {isEditing ? (
               <div className="workspace-edit-row">
@@ -268,7 +259,6 @@ const WorkspaceSwitcher = () => {
             )}
           </div>
 
-          {/* Other workspaces */}
           {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws) => (
             <button
               key={ws.id}
@@ -288,7 +278,6 @@ const WorkspaceSwitcher = () => {
             </button>
           ))}
 
-          {/* Create new workspace */}
           <div className="workspace-create-section">
             {isCreating ? (
               <div className="workspace-create-row">

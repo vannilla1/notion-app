@@ -6,9 +6,6 @@ import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 
-/**
- * Translate common API error messages to Slovak
- */
 const translateErrorMessage = (message) => {
   if (!message) return 'Neznáma chyba';
 
@@ -125,9 +122,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         email: response.data.email,
         color: response.data.color
       });
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      // Fallback - použiť lokálneho usera ak server zlyhá
+    } catch {
+      // Fallback - use local user if server fails
       if (user) {
         setProfile({
           id: user.id,
@@ -211,8 +207,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         feedUrl: response.data.feedUrl,
         loading: false
       });
-    } catch (error) {
-      console.error('Error fetching calendar feed status:', error);
+    } catch {
       setCalendarFeed(prev => ({ ...prev, loading: false }));
     }
   };
@@ -230,8 +225,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false
       });
       setMessage('Kalendár feed bol aktivovaný');
-    } catch (error) {
-      console.error('Error enabling calendar feed:', error);
+    } catch {
       setErrors({ general: 'Chyba pri aktivácii kalendár feedu' });
       setCalendarFeed(prev => ({ ...prev, loading: false }));
     }
@@ -250,8 +244,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false
       });
       setMessage('Kalendár feed bol deaktivovaný');
-    } catch (error) {
-      console.error('Error disabling calendar feed:', error);
+    } catch {
       setErrors({ general: 'Chyba pri deaktivácii kalendár feedu' });
       setCalendarFeed(prev => ({ ...prev, loading: false }));
     }
@@ -273,8 +266,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false
       });
       setMessage('Nový kalendár feed bol vygenerovaný');
-    } catch (error) {
-      console.error('Error regenerating calendar feed:', error);
+    } catch {
       setErrors({ general: 'Chyba pri generovaní nového odkazu' });
       setCalendarFeed(prev => ({ ...prev, loading: false }));
     }
@@ -287,7 +279,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  // Google Calendar functions
   const fetchGoogleCalendarStatus = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
@@ -301,8 +292,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false,
         syncing: false
       });
-    } catch (error) {
-      console.error('Error fetching Google Calendar status:', error);
+    } catch {
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
     }
   };
@@ -314,10 +304,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      // Redirect to Google OAuth
       window.location.href = response.data.authUrl;
-    } catch (error) {
-      console.error('Error connecting Google Calendar:', error);
+    } catch {
       setErrors({ general: 'Chyba pri pripájaní Google Calendar' });
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
     }
@@ -340,8 +328,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         syncing: false
       });
       setMessage('Google Calendar bol odpojený');
-    } catch (error) {
-      console.error('Error disconnecting Google Calendar:', error);
+    } catch {
       setErrors({ general: 'Chyba pri odpájaní' });
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
     }
@@ -357,7 +344,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     } catch (error) {
-      console.error('Error syncing Google Calendar:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
       setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
@@ -374,14 +360,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     } catch (error) {
-      console.error('Error cleaning up Google Calendar:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
       setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
   };
 
-  // Google Tasks functions
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
@@ -399,14 +383,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         quota: response.data.quota || null
       });
     } catch (error) {
-      // Retry on network/timeout errors (server cold-start)
       const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
       const isNetwork = error.code === 'ERR_NETWORK' || !error.response;
       if ((isTimeout || isNetwork) && retries > 0) {
         await new Promise(r => setTimeout(r, 3000));
         return fetchGoogleTasksStatus(retries - 1);
       }
-      console.error('Error fetching Google Tasks status:', error);
       setGoogleTasks(prev => ({ ...prev, loading: false }));
     }
   };
@@ -419,8 +401,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       window.location.href = response.data.authUrl;
-    } catch (error) {
-      console.error('Error connecting Google Tasks:', error);
+    } catch {
       setErrors({ general: 'Chyba pri pripájaní Google Tasks' });
       setGoogleTasks(prev => ({ ...prev, loading: false }));
     }
@@ -443,8 +424,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         syncing: false
       });
       setMessage('Google Tasks bol odpojený');
-    } catch (error) {
-      console.error('Error disconnecting Google Tasks:', error);
+    } catch {
       setErrors({ general: 'Chyba pri odpájaní' });
       setGoogleTasks(prev => ({ ...prev, loading: false }));
     }
@@ -456,14 +436,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
 
-      // First sync FROM Google (completed tasks) THEN sync TO Google
-      // This ensures bi-directional sync
       try {
         await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 30000 // 30 second timeout
         });
-      } catch (e) {
+      } catch {
         // Sync completed from Google skipped
       }
 
@@ -474,10 +452,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      // Refresh status to show updated quota and sync counts
       await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error syncing Google Tasks:', error);
       let errorMsg;
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         errorMsg = 'Synchronizácia trvala príliš dlho. Skúste to znova.';
@@ -496,13 +472,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasksMessage('');
       const token = localStorage.getItem('token');
 
-      // Step 1: Reset sync state
       await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 10000
       });
 
-      // Step 2: Run full sync
       const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 660000
@@ -512,7 +486,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error in reset and sync:', error);
       let errorMsg;
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         errorMsg = 'Synchronizácia trvala príliš dlho. Skúste to znova.';
@@ -536,10 +509,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      // Refresh status to show updated counts
       await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error cleaning up Google Tasks:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasksMessageType('error');
@@ -563,7 +534,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error removing tasks:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní projektov';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasksMessageType('error');
@@ -594,7 +564,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
       await fetchGoogleTasksStatus();
     } catch (error) {
-      console.error('Error deleting by search:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní';
       setGoogleTasksMessage(translateErrorMessage(errorMsg));
       setGoogleTasksMessageType('error');
@@ -624,8 +593,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       if (onUserUpdate) {
         onUserUpdate(response.data);
       }
-      // Zavrieť modálne okno po úspešnom uložení
-      setShowProfile(false);
+          setShowProfile(false);
     } catch (error) {
       setErrors({ general: error.response?.data?.message || 'Chyba pri ukladaní profilu' });
     }
@@ -797,7 +765,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               <span className="dropdown-email">{user?.email}</span>
             </div>
           </div>
-          {/* Mobile-only workspace switcher */}
           {currentWorkspace && (
             <>
               <div
@@ -824,8 +791,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       key={ws.id || ws._id}
                       className="mobile-workspace-item"
                       onClick={async () => {
-                        // Call API directly — skip React state updates since we're doing full page navigation
-                        await switchWorkspaceApi(ws.id || ws._id);
+                          await switchWorkspaceApi(ws.id || ws._id);
                         window.location.href = '/app';
                       }}
                     >
@@ -905,7 +871,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         </div>
       )}
 
-      {/* Profile Modal */}
       {showProfile && (
         <div className="modal-overlay" onClick={handleCloseProfile}>
           <div className="modal-content profile-modal" onClick={(e) => e.stopPropagation()}>
@@ -925,7 +890,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               </div>
             ) : (
               <div className="profile-content">
-                {/* Avatar Section */}
                 <div className="profile-avatar-section">
                   {profile.avatar ? (
                     <img
@@ -966,7 +930,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                   </div>
                 </div>
 
-                {/* Profile Form */}
                 <div className="profile-form">
                   <div className="form-group">
                     <label>Užívateľské meno</label>
@@ -1027,7 +990,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         </div>
       )}
 
-      {/* Password Change Modal */}
       {showPasswordChange && (
         <div className="modal-overlay" onClick={handleClosePasswordChange}>
           <div className="modal-content password-modal" onClick={(e) => e.stopPropagation()}>
@@ -1086,7 +1048,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         </div>
       )}
 
-      {/* Calendar Settings Modal */}
       {showCalendarSettings && (
         <div className="modal-overlay" onClick={handleCloseCalendarSettings}>
           <div className="modal-content calendar-modal" onClick={(e) => e.stopPropagation()}>
@@ -1096,7 +1057,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
-              {/* Push Notifications — hidden in native iOS app (uses APNs instead) */}
               {!document.body.classList.contains('ios-app') && (
               <div className="calendar-section push-notifications-section">
                 <h3>🔔 Push notifikácie</h3>
@@ -1107,7 +1067,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               </div>
               )}
 
-              {/* Google Calendar - Okamžitá synchronizácia */}
               <div className="calendar-section google-calendar-section">
                 <h3>🚀 Google Calendar (Okamžitá synchronizácia)</h3>
                 <p className="section-description">
@@ -1173,7 +1132,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 )}
               </div>
 
-              {/* Google Tasks - Projekty s odškrtávaním */}
               <div className="calendar-section google-tasks-section" style={{ marginTop: '24px' }}>
                 <h3>✅ Google Tasks (Projekty s odškrtávaním)</h3>
                 <p className="section-description">
@@ -1194,7 +1152,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </p>
                     )}
 
-                    {/* Pending tasks info */}
                     {googleTasks.pendingTasks && (
                       <div className="sync-status-info" style={{
                         marginTop: '12px',
@@ -1220,7 +1177,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
-                    {/* Quota info */}
                     {googleTasks.quota && (
                       <div style={{
                         marginTop: '12px',

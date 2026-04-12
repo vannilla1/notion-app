@@ -1,17 +1,10 @@
 import { useState, useCallback } from 'react';
 import api from '../api/api';
 
-/**
- * useContactOperations - Custom hook for contact CRUD operations
- * Centralizes contact-related API calls and state management
- */
 export const useContactOperations = (onContactsChange) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  /**
-   * Fetches all contacts from the API
-   */
   const fetchContacts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -24,16 +17,12 @@ export const useContactOperations = (onContactsChange) => {
     } catch (err) {
       const message = err.response?.data?.message || 'Chyba pri načítaní kontaktov';
       setError(message);
-      console.error('Failed to fetch contacts:', err);
       throw err;
     } finally {
       setLoading(false);
     }
   }, [onContactsChange]);
 
-  /**
-   * Creates a new contact
-   */
   const createContact = useCallback(async (contactData) => {
     setLoading(true);
     setError(null);
@@ -49,9 +38,6 @@ export const useContactOperations = (onContactsChange) => {
     }
   }, []);
 
-  /**
-   * Updates an existing contact
-   */
   const updateContact = useCallback(async (contactId, updateData) => {
     setLoading(true);
     setError(null);
@@ -67,9 +53,6 @@ export const useContactOperations = (onContactsChange) => {
     }
   }, []);
 
-  /**
-   * Deletes a contact
-   */
   const deleteContact = useCallback(async (contactId) => {
     setLoading(true);
     setError(null);
@@ -85,9 +68,6 @@ export const useContactOperations = (onContactsChange) => {
     }
   }, []);
 
-  /**
-   * Clears the current error
-   */
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -103,16 +83,10 @@ export const useContactOperations = (onContactsChange) => {
   };
 };
 
-/**
- * useTaskOperations - Custom hook for task CRUD operations
- */
 export const useTaskOperations = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  /**
-   * Fetches all global tasks
-   */
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -128,9 +102,6 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Creates a new task for a contact
-   */
   const createContactTask = useCallback(async (contactId, taskData) => {
     setError(null);
     try {
@@ -143,9 +114,6 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Updates a task
-   */
   const updateTask = useCallback(async (contactId, taskId, updateData, isGlobal = false) => {
     setError(null);
     try {
@@ -161,16 +129,10 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Toggles task completion
-   */
   const toggleTask = useCallback(async (contactId, taskId, currentCompleted, isGlobal = false) => {
     return updateTask(contactId, taskId, { completed: !currentCompleted }, isGlobal);
   }, [updateTask]);
 
-  /**
-   * Deletes a task
-   */
   const deleteTask = useCallback(async (contactId, taskId, isGlobal = false) => {
     setError(null);
     try {
@@ -186,9 +148,6 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Creates a subtask
-   */
   const createSubtask = useCallback(async (contactId, taskId, subtaskData, isGlobal = false) => {
     setError(null);
     try {
@@ -204,9 +163,6 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Toggles subtask completion
-   */
   const toggleSubtask = useCallback(async (contactId, taskId, subtaskId, currentCompleted, isGlobal = false) => {
     setError(null);
     try {
@@ -222,9 +178,6 @@ export const useTaskOperations = () => {
     }
   }, []);
 
-  /**
-   * Deletes a subtask
-   */
   const deleteSubtask = useCallback(async (contactId, taskId, subtaskId, isGlobal = false) => {
     setError(null);
     try {

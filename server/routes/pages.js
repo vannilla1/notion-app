@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const Page = require('../models/Page');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const pages = await Page.find({ userId: req.user.id });
     res.json(pages);
   } catch (error) {
+    logger.error('GET /pages error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -32,6 +34,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     res.json(page);
   } catch (error) {
+    logger.error('GET /pages/:id error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -41,7 +44,6 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const { title, icon, parentId, content } = req.body;
 
-    // If parentId provided, verify ownership
     if (parentId) {
       if (!isValidObjectId(parentId)) {
         return res.status(400).json({ message: 'Neplatné ID rodičovskej stránky' });
@@ -62,12 +64,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
     await page.save();
 
-    // Emit to socket
     const io = req.app.get('io');
     io.to(`user-${req.user.id}`).emit('page-created', page);
 
     res.status(201).json(page);
   } catch (error) {
+    logger.error('POST /pages error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -94,12 +96,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     await page.save();
 
-    // Emit to socket
     const io = req.app.get('io');
     io.to(`user-${req.user.id}`).emit('page-updated', page);
 
     res.json(page);
   } catch (error) {
+    logger.error('PUT /pages/:id error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -117,7 +119,6 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Stránka nenájdená' });
     }
 
-    // Delete all child pages recursively (only user's own pages)
     const deleteChildren = async (parentId) => {
       const children = await Page.find({ parentId, userId: req.user.id });
       for (const child of children) {
@@ -129,12 +130,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await deleteChildren(req.params.id);
     await Page.findByIdAndDelete(req.params.id);
 
-    // Emit to socket
     const io = req.app.get('io');
     io.to(`user-${req.user.id}`).emit('page-deleted', { pageId: req.params.id });
 
     res.json({ message: 'Stránka bola vymazaná' });
   } catch (error) {
+    logger.error('DELETE /pages/:id error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

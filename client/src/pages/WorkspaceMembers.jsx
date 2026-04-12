@@ -37,8 +37,8 @@ function WorkspaceMembers() {
       ]);
       setMembers(membersData);
       setInvitations(invitationsData);
-    } catch (error) {
-      console.error('Failed to fetch members:', error);
+    } catch {
+      // Silently fail — members list shows empty state
     } finally {
       setLoading(false);
     }

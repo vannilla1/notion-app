@@ -482,8 +482,8 @@ function Tasks() {
     try {
       const res = await api.get('/api/tasks');
       setTasks(res.data);
-    } catch (error) {
-      console.error('Failed to fetch tasks:', error);
+    } catch {
+      // Silently fail — task list shows empty/loading state
     } finally {
       setLoading(false);
     }
@@ -493,8 +493,8 @@ function Tasks() {
     try {
       const res = await api.get('/api/contacts');
       setContacts(res.data);
-    } catch (error) {
-      console.error('Failed to fetch contacts:', error);
+    } catch {
+      // Silently fail
     }
   }, []);
 
@@ -502,8 +502,8 @@ function Tasks() {
     try {
       const res = await api.get('/api/auth/users');
       setUsers(res.data);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
+    } catch {
+      // Silently fail
     }
   }, []);
 
@@ -517,13 +517,10 @@ function Tasks() {
   // Sync completed tasks from Google Tasks to CRM
   const syncCompletedFromGoogle = useCallback(async () => {
     try {
-      // This will silently sync completed tasks from Google Tasks
-      // No UI feedback needed - it runs in background
       await api.post('/api/google-tasks/sync-completed');
-      // Refresh tasks after sync to show updated completion status
       fetchTasks();
-    } catch (error) {
-      // Silently ignore errors (user may not have Google Tasks connected)
+    } catch {
+      // User may not have Google Tasks connected
     }
   }, [fetchTasks]);
 
@@ -1012,8 +1009,8 @@ function Tasks() {
       if (selectedTask?.id === taskId) {
         setSelectedTask(res.data);
       }
-    } catch (error) {
-      console.error('Failed to refresh task:', error);
+    } catch {
+      // Silently fail
     }
   };
 
@@ -1075,8 +1072,8 @@ function Tasks() {
         source: task.source
       });
       await fetchTasks();
-    } catch (error) {
-      console.error('Failed to toggle task:', error);
+    } catch {
+      // Silently fail
     }
   };
 
@@ -1085,8 +1082,7 @@ function Tasks() {
     try {
       await api.delete(`/api/tasks/${task.id}?source=${task.source || 'global'}`);
       await fetchTasks();
-    } catch (error) {
-      console.error('Failed to delete task:', error);
+    } catch {
       alert('Chyba pri mazaní projektu');
     }
   };
@@ -1194,8 +1190,8 @@ function Tasks() {
         source: task.source
       });
       await fetchTasks();
-    } catch (error) {
-      console.error('Failed to toggle subtask:', error);
+    } catch {
+      // Silently fail
     }
   };
 
@@ -1204,8 +1200,8 @@ function Tasks() {
     try {
       await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=${task.source || 'global'}`);
       await fetchTasks();
-    } catch (error) {
-      console.error('Failed to delete subtask:', error);
+    } catch {
+      // Silently fail
     }
   };
 
@@ -1758,7 +1754,6 @@ function Tasks() {
           msg = error.response.data.message;
         }
       } catch {}
-      console.error('File download error:', error.response?.status, msg);
       alert(msg);
     }
   };
@@ -1938,8 +1933,8 @@ function Tasks() {
         contactId: t.contactId || null
       }));
       await api.put('/api/tasks/reorder', { tasks: reorderData });
-    } catch (err) {
-      console.error('Reorder failed:', err);
+    } catch {
+      // Silently fail — optimistic update already applied
     }
   }, [sortedFilteredTasks]);
 
@@ -1991,8 +1986,8 @@ function Tasks() {
         contactId: task.contactId || null,
         subtasks: subtaskOrders
       });
-    } catch (err) {
-      console.error('Subtask reorder failed:', err);
+    } catch {
+      // Silently fail — optimistic update already applied
     }
   }, []);
 

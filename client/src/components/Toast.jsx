@@ -2,14 +2,8 @@ import { useState, useEffect, useCallback, createContext, useContext } from 'rea
 import PropTypes from 'prop-types';
 import './Toast.css';
 
-/**
- * Toast context for global toast notifications
- */
 const ToastContext = createContext(null);
 
-/**
- * Toast types
- */
 export const TOAST_TYPES = {
   SUCCESS: 'success',
   ERROR: 'error',
@@ -17,9 +11,6 @@ export const TOAST_TYPES = {
   INFO: 'info'
 };
 
-/**
- * ToastProvider - Provides toast context to children
- */
 export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
 
@@ -29,7 +20,6 @@ export const ToastProvider = ({ children }) => {
 
     setToasts(prev => [...prev, toast]);
 
-    // Auto-remove toast after duration
     if (duration > 0) {
       setTimeout(() => {
         removeToast(id);
@@ -86,9 +76,6 @@ ToastProvider.propTypes = {
   children: PropTypes.node.isRequired
 };
 
-/**
- * useToast - Hook to access toast functions
- */
 export const useToast = () => {
   const context = useContext(ToastContext);
   if (!context) {
@@ -97,9 +84,6 @@ export const useToast = () => {
   return context;
 };
 
-/**
- * ToastContainer - Renders all active toasts
- */
 const ToastContainer = ({ toasts, onRemove }) => {
   if (toasts.length === 0) return null;
 
@@ -121,9 +105,6 @@ ToastContainer.propTypes = {
   onRemove: PropTypes.func.isRequired
 };
 
-/**
- * ToastItem - Individual toast notification
- */
 const ToastItem = ({ toast, onRemove }) => {
   const [isExiting, setIsExiting] = useState(false);
 

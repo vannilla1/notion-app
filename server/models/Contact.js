@@ -11,8 +11,6 @@ const fileSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
-// BUGFIX: Changed from Mixed type to proper Array for type consistency
-// This prevents potential data loss from type coercion issues
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
   title: String,

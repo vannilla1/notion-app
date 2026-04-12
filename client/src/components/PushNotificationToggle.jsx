@@ -8,17 +8,13 @@ import {
   sendTestPush
 } from '../services/pushNotifications';
 
-// Check if notifications are enabled in localStorage
 const areNotificationsEnabled = () => {
   const setting = localStorage.getItem('notificationsEnabled');
-  // Default to true if not set
   return setting === null ? true : setting === 'true';
 };
 
-// Set notification enabled state
 const setNotificationsEnabled = (enabled) => {
   localStorage.setItem('notificationsEnabled', enabled.toString());
-  // Dispatch custom event for NotificationToast to listen
   window.dispatchEvent(new Event('notificationSettingChanged'));
 };
 
@@ -38,10 +34,8 @@ const PushNotificationToggle = () => {
   const checkStatus = async () => {
     setLoading(true);
     try {
-      // Check in-app notification setting
       setNotificationsEnabledState(areNotificationsEnabled());
 
-      // Check push notification support
       const isSupported = isPushSupported();
       setPushSupported(isSupported);
 
@@ -52,8 +46,8 @@ const PushNotificationToggle = () => {
         const isSub = await isSubscribedToPush();
         setPushSubscribed(isSub);
       }
-    } catch (err) {
-      console.error('Error checking push status:', err);
+    } catch {
+      // Status check failed
     } finally {
       setLoading(false);
     }
@@ -66,11 +60,9 @@ const PushNotificationToggle = () => {
     try {
       const newEnabled = !notificationsEnabled;
 
-      // Toggle in-app notifications
       setNotificationsEnabled(newEnabled);
       setNotificationsEnabledState(newEnabled);
 
-      // Also toggle push notifications if supported
       if (pushSupported && permission !== 'denied') {
         if (newEnabled && !pushSubscribed) {
           try {
@@ -90,7 +82,6 @@ const PushNotificationToggle = () => {
         }
       }
     } catch (err) {
-      console.error('Error toggling notifications:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -103,8 +94,7 @@ const PushNotificationToggle = () => {
       await sendTestPush();
       setTestSent(true);
       setTimeout(() => setTestSent(false), 3000);
-    } catch (err) {
-      console.error('Error sending test push:', err);
+    } catch {
       setError('Nepodarilo sa odoslať testovaciu notifikáciu');
     } finally {
       setLoading(false);
@@ -130,7 +120,6 @@ const PushNotificationToggle = () => {
         </button>
       </div>
 
-      {/* Show push status info */}
       {notificationsEnabled && (
         <div className="push-status-info">
           {!pushSupported ? (

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
+const logger = require('../utils/logger');
 
 // Rate limit: max 5 submissions per 15 minutes per IP
 const contactLimiter = rateLimit({
@@ -54,7 +55,7 @@ router.post('/', contactLimiter, async (req, res) => {
 
     res.json({ message: 'Správa bola úspešne odoslaná.' });
   } catch (err) {
-    console.error('Contact form error:', err);
+    logger.error('Contact form error', { error: err.message });
     res.status(500).json({ message: 'Nepodarilo sa odoslať správu. Skúste to znova.' });
   }
 });

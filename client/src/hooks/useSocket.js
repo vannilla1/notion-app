@@ -7,7 +7,6 @@ export const useSocket = () => {
   const { token, isAuthenticated } = useAuth();
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  // Track registered listeners to prevent memory leaks
   const listenersRef = useRef(new Map());
 
   useEffect(() => {
@@ -31,14 +30,11 @@ export const useSocket = () => {
       setIsConnected(false);
     });
 
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error.message);
-    });
+    newSocket.on('connect_error', () => {});
 
     setSocket(newSocket);
 
     return () => {
-      // Clean up all registered listeners
       listenersRef.current.forEach((callback, event) => {
         newSocket.off(event, callback);
       });
@@ -79,21 +75,17 @@ export const useSocket = () => {
     }
   }, [socket]);
 
-  // Helper to safely register event listeners with cleanup tracking
   const registerListener = useCallback((event, callback) => {
     if (!socket) return () => {};
 
-    // Remove existing listener for this event to prevent duplicates
     const existingCallback = listenersRef.current.get(event);
     if (existingCallback) {
       socket.off(event, existingCallback);
     }
 
-    // Register new listener
     socket.on(event, callback);
     listenersRef.current.set(event, callback);
 
-    // Return cleanup function
     return () => {
       socket.off(event, callback);
       listenersRef.current.delete(event);

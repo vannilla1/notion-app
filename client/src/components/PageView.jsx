@@ -55,8 +55,8 @@ function PageView({ pageId, onUpdate }) {
       setLoading(true);
       const res = await axios.get(`/api/pages/${pageId}`);
       setPage(res.data);
-    } catch (error) {
-      console.error('Failed to fetch page:', error);
+    } catch {
+      // Page fetch failed
     } finally {
       setLoading(false);
     }
@@ -72,8 +72,8 @@ function PageView({ pageId, onUpdate }) {
       try {
         const res = await axios.put(`/api/pages/${pageId}`, { title: newTitle });
         onUpdate(res.data);
-      } catch (error) {
-        console.error('Failed to update title:', error);
+      } catch {
+        // Title update failed
       }
     },
     [page, pageId, emitPageUpdate, onUpdate]
@@ -88,8 +88,8 @@ function PageView({ pageId, onUpdate }) {
     try {
       const res = await axios.put(`/api/pages/${pageId}`, { icon: newIcon });
       onUpdate(res.data);
-    } catch (error) {
-      console.error('Failed to update icon:', error);
+    } catch {
+      // Icon update failed
     }
   };
 
@@ -111,8 +111,8 @@ function PageView({ pageId, onUpdate }) {
           content,
           type
         });
-      } catch (error) {
-        console.error('Failed to update block:', error);
+      } catch {
+        // Block update failed
       }
     },
     [page, pageId, emitBlockUpdate]
@@ -141,8 +141,8 @@ function PageView({ pageId, onUpdate }) {
 
         setPage({ ...page, blocks });
         return newBlock.id;
-      } catch (error) {
-        console.error('Failed to add block:', error);
+      } catch {
+        // Block add failed
       }
     },
     [page, pageId]
@@ -162,8 +162,8 @@ function PageView({ pageId, onUpdate }) {
           blocks: page.blocks.filter((b) => b.id !== blockId)
         });
         return prevBlockId;
-      } catch (error) {
-        console.error('Failed to delete block:', error);
+      } catch {
+        // Block delete failed
       }
     },
     [page, pageId]

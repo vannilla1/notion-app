@@ -22,7 +22,6 @@ import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 
-// Map notification type prefix to section key
 const typeToSection = (type) => {
   if (!type) return null;
   if (type.startsWith('contact.')) return 'crm';
@@ -31,7 +30,6 @@ const typeToSection = (type) => {
   return null;
 };
 
-// Map route path to section key
 const pathToSection = (path) => {
   if (path === '/crm') return 'crm';
   if (path === '/tasks') return 'tasks';
@@ -46,7 +44,6 @@ function AppContent() {
   const location = useLocation();
   const { socket, isConnected } = useSocket();
 
-  // Unread notification counts per section
   const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
   const prevPathRef = useRef(location.pathname);
 
@@ -57,12 +54,10 @@ function AppContent() {
     } catch (err) { /* ignore */ }
   }, []);
 
-  // Fetch unread counts on auth
   useEffect(() => {
     if (isAuthenticated) fetchUnreadCounts();
   }, [isAuthenticated, fetchUnreadCounts]);
 
-  // Increment count on new notification via socket
   useEffect(() => {
     if (!socket || !isConnected || !isAuthenticated) return;
     const handleNotification = (notification) => {
@@ -79,7 +74,6 @@ function AppContent() {
     return () => socket.off('notification', handleNotification);
   }, [socket, isConnected, isAuthenticated, location.pathname]);
 
-  // Mark section as read when navigating to it
   useEffect(() => {
     if (!isAuthenticated) return;
     const section = pathToSection(location.pathname);
@@ -92,14 +86,12 @@ function AppContent() {
     }
   }, [location.pathname, isAuthenticated]);
 
-  // Initialize push notifications when user is authenticated
   useEffect(() => {
     if (isAuthenticated) {
       initializePush().catch(() => {});
     }
   }, [isAuthenticated]);
 
-  // Block background scroll when any modal is open (fixes iOS scroll-through)
   useEffect(() => {
     let scrollY = 0;
     const observer = new MutationObserver(() => {
@@ -118,11 +110,7 @@ function AppContent() {
     return () => observer.disconnect();
   }, []);
 
-  // Deep link handling for push notifications
-  // Each page (CRM, Tasks, Messages) handles its own URL params via location.search useEffects.
-  // App.jsx only handles: (1) storing deep links when not authenticated, (2) restoring them after login.
   useEffect(() => {
-    // Store deep link if user lands on a deep link URL but isn't authenticated yet
     if (!isAuthenticated && !loading) {
       const params = new URLSearchParams(location.search);
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
@@ -133,19 +121,16 @@ function AppContent() {
     }
   }, [location.pathname, location.search, isAuthenticated, loading]);
 
-  // Restore pending deep link after login
   useEffect(() => {
     if (!isAuthenticated) return;
     const pendingLink = sessionStorage.getItem('pendingDeepLink');
     if (pendingLink) {
       sessionStorage.removeItem('pendingDeepLink');
-      // Navigate using URL params — target pages handle the rest
       const sep = pendingLink.includes('?') ? '&' : '?';
       navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
-  // Refresh data when app returns from background (iOS / tab switch)
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -155,7 +140,6 @@ function AppContent() {
       if (document.hidden) {
         lastHidden = Date.now();
       } else {
-        // Only refresh if was hidden for at least 3 seconds
         const hiddenFor = Date.now() - lastHidden;
         if (lastHidden > 0 && hiddenFor > 3000) {
           window.dispatchEvent(new CustomEvent('app-resumed', {
@@ -169,7 +153,6 @@ function AppContent() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isAuthenticated]);
 
-  // Listen for messages from service worker (push notification clicks)
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -183,8 +166,6 @@ function AppContent() {
           const params = new URLSearchParams(urlObj.search);
           const navTs = (timestamp || Date.now()).toString();
 
-          // ALWAYS navigate via URL with _t param — this triggers useEffect in target page
-          // The _t param forces React Router to treat it as a new navigation even on same page
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
             const contactId = params.get('expandContact') || data.contactId;
             navigate(`/crm?expandContact=${contactId}&_t=${navTs}`);
@@ -200,8 +181,7 @@ function AppContent() {
           } else {
             navigate(path + (urlObj.search || ''));
           }
-        } catch (e) {
-          console.error('[App] Error parsing notification URL:', e);
+        } catch {
           if (url.startsWith('/')) navigate(url);
         }
       }
@@ -214,7 +194,6 @@ function AppContent() {
     };
   }, [isAuthenticated, navigate]);
 
-  // Public pages render immediately without waiting for auth/workspace
   const publicPages = ['/', '/login', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
 
@@ -233,7 +212,6 @@ function AppContent() {
     );
   }
 
-  // Show workspace setup if authenticated but needs workspace
   if (isAuthenticated && needsWorkspace) {
     return <WorkspaceSetup />;
   }
@@ -282,7 +260,6 @@ function AppContent() {
   );
 }
 
-// Wrap with WorkspaceProvider
 function App() {
   return (
     <WorkspaceProvider>

@@ -28,7 +28,6 @@ function ContactForm({ onSubmit, onCancel }) {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
 
-    // Real-time validation
     if (name === 'email') {
       if (value && !validateEmail(value)) {
         setErrors({ ...errors, email: 'Neplatný formát emailu (napr. meno@domena.sk)' });
@@ -51,7 +50,6 @@ function ContactForm({ onSubmit, onCancel }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Final validation
     const newErrors = {};
     if (!formData.name.trim()) {
       newErrors.name = 'Meno je povinné';

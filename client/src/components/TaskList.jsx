@@ -10,7 +10,6 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
   const [editingSubtask, setEditingSubtask] = useState(null);
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
 
-  // Helper to refresh contact data after changes
   const refreshContact = async () => {
     if (onContactRefresh) {
       await onContactRefresh();
@@ -39,8 +38,8 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
         completed: !completed
       });
       await refreshContact();
-    } catch (error) {
-      console.error('Failed to toggle task:', error);
+    } catch {
+      // Toggle failed
     }
   };
 
@@ -49,8 +48,8 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
     try {
       await api.delete(`/api/contacts/${contactId}/tasks/${taskId}`);
       await refreshContact();
-    } catch (error) {
-      console.error('Failed to delete task:', error);
+    } catch {
+      // Delete failed
     }
   };
 
@@ -76,8 +75,8 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
         completed: !completed
       });
       await refreshContact();
-    } catch (error) {
-      console.error('Failed to toggle subtask:', error);
+    } catch {
+      // Toggle failed
     }
   };
 
@@ -85,8 +84,8 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
     try {
       await api.delete(`/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`);
       await refreshContact();
-    } catch (error) {
-      console.error('Failed to delete subtask:', error);
+    } catch {
+      // Delete failed
     }
   };
 

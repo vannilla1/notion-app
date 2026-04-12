@@ -304,9 +304,6 @@ server.listen(PORT, () => {
         initializeCalendarWebhooks(io);
       }, 60000);
 
-      // File migration removed — all files already migrated to ContactFile collection (2026-04)
-      // The migration was running on EVERY server restart, scanning all contacts/tasks
-      // and consuming M0 free tier IOPS, causing slowdowns for the largest workspaces.
     }
   }).catch(err => {
     logger.error('MongoDB connection failed', { error: err.message });

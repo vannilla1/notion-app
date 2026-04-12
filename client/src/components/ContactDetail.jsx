@@ -55,7 +55,6 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
 
-    // Real-time validation
     if (name === 'email') {
       if (value && !validateEmail(value)) {
         setErrors({ ...errors, email: 'Neplatný formát emailu (napr. meno@domena.sk)' });
@@ -76,7 +75,6 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
   };
 
   const handleSave = async () => {
-    // Final validation
     const newErrors = {};
     if (formData.email && !validateEmail(formData.email)) {
       newErrors.email = 'Neplatný formát emailu';
@@ -125,7 +123,6 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
           if (json.message) msg = json.message;
         }
       } catch {}
-      console.error('File download failed:', err.response?.status, msg);
       alert(msg);
     }
   };
@@ -314,7 +311,6 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
           )}
         </div>
 
-        {/* Tasks Section */}
         <div className="contact-section">
           <TaskList
             contactId={contact.id}

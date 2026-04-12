@@ -64,17 +64,14 @@ router.use((req, res, next) => {
   next();
 });
 
-// Multer config for file uploads - use memory storage for MongoDB
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Allow most common file types
     const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
     const ext = file.originalname.toLowerCase().split('.').pop();
     const extAllowed = allowedExtensions.test(ext);
 
-    // Allow common mimetypes
     const allowedMimetypes = [
       'image/', 'application/pdf', 'application/msword',
       'application/vnd.openxmlformats-officedocument',
@@ -139,336 +136,6 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   }
   return null;
 };
-
-// Diagnostic endpoint to check workspace data size
-router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    const stats = await Contact.aggregate([
-      { $match: { workspaceId: req.workspaceId } },
-      { $project: {
-        docSize: { $bsonSize: '$$ROOT' },
-        filesCount: { $size: { $ifNull: ['$files', []] } },
-        tasksCount: { $size: { $ifNull: ['$tasks', []] } },
-        name: 1
-      }},
-      { $sort: { docSize: -1 } }
-    ]).option({ maxTimeMS: 45000 });
-
-    const totalSize = stats.reduce((sum, s) => sum + s.docSize, 0);
-
-    // Check ContactFile collection
-    const contactFileCount = await ContactFile.countDocuments();
-    const contactFileStats = await ContactFile.aggregate([
-      { $project: { dataSize: { $strLenBytes: '$data' }, fileId: 1 } },
-      { $group: { _id: null, totalSize: { $sum: '$dataSize' }, count: { $sum: 1 } } }
-    ]).option({ maxTimeMS: 30000 });
-
-    // Check indexes on ContactFile
-    let cfIndexes = [];
-    try {
-      cfIndexes = await ContactFile.collection.indexes();
-    } catch (e) {
-      cfIndexes = [{ error: e.message }];
-    }
-
-    // Test download: find a contact with files and try to load from ContactFile
-    let downloadTest = null;
-    try {
-      const contactWithFiles = await Contact.findOne(
-        { workspaceId: req.workspaceId, 'files.0': { $exists: true } },
-        { files: 1, name: 1 }
-      ).lean();
-      if (contactWithFiles && contactWithFiles.files[0]) {
-        const testFile = contactWithFiles.files[0];
-        const cfEntry = await ContactFile.findOne({ fileId: testFile.id }, { _id: 1, fileId: 1 }).lean();
-        downloadTest = {
-          contactName: contactWithFiles.name,
-          fileId: testFile.id,
-          fileName: testFile.originalName,
-          hasDataInDoc: !!testFile.data,
-          foundInContactFile: !!cfEntry,
-          cfFileId: cfEntry?.fileId || null
-        };
-      }
-    } catch (e) {
-      downloadTest = { error: e.message };
-    }
-
-    // List all ContactFile entries (just fileIds, no data)
-    let cfFiles = [];
-    try {
-      cfFiles = await ContactFile.find({}, { fileId: 1, contactId: 1, _id: 0 }).lean();
-    } catch (e) {
-      cfFiles = [{ error: e.message }];
-    }
-
-    res.json({
-      contactCount: stats.length,
-      totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
-      avgSizeKB: stats.length ? (totalSize / stats.length / 1024).toFixed(2) : 0,
-      top5: stats.slice(0, 5).map(s => ({
-        name: s.name,
-        sizeMB: (s.docSize / 1024 / 1024).toFixed(2),
-        sizeKB: (s.docSize / 1024).toFixed(1),
-        filesCount: s.filesCount,
-        tasksCount: s.tasksCount
-      })),
-      contactFiles: {
-        count: contactFileCount,
-        totalSizeMB: contactFileStats[0] ? (contactFileStats[0].totalSize / 1024 / 1024).toFixed(2) : '0',
-      },
-      cfIndexes: cfIndexes.map(i => i.name || i.error),
-      downloadTest,
-      cfFiles
-    });
-  } catch (error) {
-    logger.error('Diagnostics error', { error: error.message });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test download endpoint — returns a small hardcoded file to verify download pipeline
-router.get('/test-download', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    const testContent = 'Test file download works! ' + new Date().toISOString();
-    const buf = Buffer.from(testContent, 'utf-8');
-    res.set({
-      'Content-Type': 'text/plain',
-      'Content-Disposition': 'attachment; filename="test-download.txt"',
-      'Content-Length': buf.length
-    });
-    res.send(buf);
-  } catch (error) {
-    logger.error('Test download error', { error: error.message });
-    res.status(500).json({ message: 'Test download failed' });
-  }
-});
-
-// Debug endpoint — check all files in workspace (metadata + ContactFile status)
-router.get('/debug-files', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    // Load contacts WITH data field to check if data still exists in documents
-    const contacts = await Contact.find(
-      { workspaceId: req.workspaceId }
-    ).lean();
-
-    const allFiles = [];
-
-    for (const c of contacts) {
-      // Contact-level files
-      for (const f of (c.files || [])) {
-        const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-        const hasDataInDoc = !!(f.data && f.data.length > 100);
-        allFiles.push({
-          type: 'contact-file',
-          contactName: c.name,
-          contactId: c._id,
-          fileId: f.id,
-          fileName: f.originalName,
-          size: f.size,
-          inContactFile: !!cf,
-          hasDataInDoc,
-          dataStatus: cf ? 'OK-in-CF' : hasDataInDoc ? 'RECOVERABLE-in-doc' : 'LOST'
-        });
-      }
-
-      // Contact task files (recursive scan)
-      const scanTasks = (tasks, depth = 0) => {
-        if (!Array.isArray(tasks)) return;
-        for (const t of tasks) {
-          for (const f of (t.files || [])) {
-            const hasData = !!(f.data && f.data.length > 100);
-            allFiles.push({
-              type: `task-file-depth-${depth}`,
-              contactName: c.name,
-              taskTitle: t.title || t.id,
-              fileId: f.id,
-              fileName: f.originalName,
-              size: f.size,
-              hasDataInDoc: hasData,
-              dataStatus: hasData ? 'RECOVERABLE-in-doc' : 'check-CF'
-            });
-          }
-          if (Array.isArray(t.subtasks)) scanTasks(t.subtasks, depth + 1);
-        }
-      };
-      scanTasks(c.tasks);
-    }
-
-    // Check CF for task files
-    for (const f of allFiles) {
-      if (f.dataStatus === 'check-CF') {
-        const cf = await ContactFile.findOne({ fileId: f.fileId }, { _id: 1 }).lean();
-        f.inContactFile = !!cf;
-        f.dataStatus = cf ? 'OK-in-CF' : 'LOST';
-      }
-    }
-
-    const cfEntries = await ContactFile.find({}, { fileId: 1, contactId: 1, _id: 0 }).lean();
-
-    const okCount = allFiles.filter(f => f.dataStatus === 'OK-in-CF').length;
-    const recoverableCount = allFiles.filter(f => f.dataStatus === 'RECOVERABLE-in-doc').length;
-    const lostCount = allFiles.filter(f => f.dataStatus === 'LOST').length;
-
-    res.json({
-      filesInDocuments: allFiles,
-      filesInContactFileCollection: cfEntries,
-      summary: {
-        total: allFiles.length,
-        ok: okCount,
-        recoverable: recoverableCount,
-        lost: lostCount,
-        cfFiles: cfEntries.length
-      }
-    });
-  } catch (error) {
-    logger.error('Debug files error', { error: error.message });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Recovery endpoint: migrate files that still have data in documents to ContactFile
-router.post('/recover-files', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    const contacts = await Contact.find({ workspaceId: req.workspaceId }).lean();
-    let recovered = 0;
-    let alreadyOk = 0;
-    let noData = 0;
-
-    for (const c of contacts) {
-      let modified = false;
-
-      // Contact-level files
-      for (const f of (c.files || [])) {
-        if (f.data && f.data.length > 100) {
-          const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-          if (!exists) {
-            try {
-              await ContactFile.create({ contactId: c._id, fileId: f.id, data: f.data });
-              recovered++;
-              logger.info('Recovered file', { contactName: c.name, fileId: f.id, fileName: f.originalName });
-            } catch (err) {
-              logger.error('Failed to recover file', { fileId: f.id, error: err.message });
-            }
-          } else {
-            alreadyOk++;
-          }
-        } else {
-          const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-          if (!exists) noData++;
-          else alreadyOk++;
-        }
-      }
-
-      // Contact task/subtask files (recursive)
-      const recoverTaskFiles = async (tasks) => {
-        if (!Array.isArray(tasks)) return;
-        for (const t of tasks) {
-          for (const f of (t.files || [])) {
-            if (f.data && f.data.length > 100) {
-              const exists = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-              if (!exists) {
-                try {
-                  await ContactFile.create({ contactId: c._id, fileId: f.id, data: f.data });
-                  recovered++;
-                  logger.info('Recovered task file', { fileId: f.id, fileName: f.originalName });
-                } catch (err) {
-                  logger.error('Failed to recover task file', { fileId: f.id, error: err.message });
-                }
-              } else {
-                alreadyOk++;
-              }
-            }
-          }
-          if (Array.isArray(t.subtasks)) await recoverTaskFiles(t.subtasks);
-        }
-      };
-      await recoverTaskFiles(c.tasks);
-    }
-
-    res.json({ recovered, alreadyOk, noData, message: `Obnovených: ${recovered}, OK: ${alreadyOk}, Stratených: ${noData}` });
-  } catch (error) {
-    logger.error('Recover files error', { error: error.message });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Cleanup: remove metadata for files that have no data (lost during migration)
-router.post('/cleanup-lost-files', authenticateToken, requireWorkspace, async (req, res) => {
-  try {
-    const contacts = await Contact.find({ workspaceId: req.workspaceId });
-    let removed = 0;
-    let kept = 0;
-
-    for (const contact of contacts) {
-      let modified = false;
-      const originalCount = (contact.files || []).length;
-
-      // Filter out files that have no data in ContactFile
-      if (contact.files && contact.files.length > 0) {
-        const validFiles = [];
-        for (const f of contact.files) {
-          const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-          if (cf || (f.data && f.data.length > 100)) {
-            validFiles.push(f);
-            kept++;
-          } else {
-            removed++;
-            logger.info('Removing lost file metadata', { contactName: contact.name, fileId: f.id, fileName: f.originalName });
-          }
-        }
-        if (validFiles.length !== originalCount) {
-          contact.files = validFiles;
-          modified = true;
-        }
-      }
-
-      // Also clean task/subtask files (recursive)
-      const cleanTaskFiles = async (tasks) => {
-        if (!Array.isArray(tasks)) return false;
-        let changed = false;
-        for (const t of tasks) {
-          if (Array.isArray(t.files) && t.files.length > 0) {
-            const valid = [];
-            for (const f of t.files) {
-              const cf = await ContactFile.findOne({ fileId: f.id }, { _id: 1 }).lean();
-              if (cf || (f.data && f.data.length > 100)) {
-                valid.push(f);
-                kept++;
-              } else {
-                removed++;
-                logger.info('Removing lost task file metadata', { fileId: f.id, fileName: f.originalName });
-              }
-            }
-            if (valid.length !== t.files.length) {
-              t.files = valid;
-              changed = true;
-            }
-          }
-          if (Array.isArray(t.subtasks)) {
-            if (await cleanTaskFiles(t.subtasks)) changed = true;
-          }
-        }
-        return changed;
-      };
-      if (await cleanTaskFiles(contact.tasks)) {
-        contact.markModified('tasks');
-        modified = true;
-      }
-
-      if (modified) await contact.save();
-    }
-
-    // Invalidate workspace cache so fresh data loads
-    const { invalidateCache } = require('../middleware/workspace');
-    invalidateCache(req.user.id);
-
-    res.json({ removed, kept, message: `Vymazaných ${removed} stratených súborov, ${kept} ponechaných.` });
-  } catch (error) {
-    logger.error('Cleanup lost files error', { error: error.message });
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
@@ -701,8 +368,6 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    // Files are stored in MongoDB as Base64, no disk cleanup needed
-
     // Store contact data for notification before deletion
     const contactData = { _id: contact._id, name: contact.name };
 
@@ -826,7 +491,6 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       modifiedAt: new Date().toISOString()
     };
 
-    // BUGFIX: Mark tasks as modified to ensure Mongoose persists nested changes
     contact.markModified('tasks');
     await contact.save();
 
@@ -922,7 +586,6 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       }
     }
 
-    // BUGFIX: Added priority field support for subtasks
     const now = new Date().toISOString();
     const subtask = {
       id: uuidv4(),
@@ -1010,7 +673,6 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
-    // BUGFIX: Preserve all existing fields including priority and nested subtasks
     found.parent[found.index] = {
       ...found.subtask,
       id: found.subtask.id, // Ensure ID is preserved

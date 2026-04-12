@@ -1,10 +1,6 @@
 import { Component } from 'react';
 import PropTypes from 'prop-types';
 
-/**
- * ErrorBoundary - Catches JavaScript errors in child components
- * Prevents entire app from crashing due to component errors
- */
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -16,17 +12,12 @@ class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so next render shows fallback UI
     return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log error details
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
-
     this.setState({ errorInfo });
 
-    // Optional: Send error to logging service
     if (this.props.onError) {
       this.props.onError(error, errorInfo);
     }
@@ -42,12 +33,10 @@ class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
-      // Custom fallback UI if provided
       if (this.props.fallback) {
         return this.props.fallback;
       }
 
-      // Default error UI
       return (
         <div className="error-boundary">
           <div className="error-boundary-content">
@@ -97,9 +86,6 @@ ErrorBoundary.propTypes = {
   onError: PropTypes.func
 };
 
-/**
- * withErrorBoundary - HOC to wrap component with error boundary
- */
 export const withErrorBoundary = (WrappedComponent, errorBoundaryProps = {}) => {
   const WithErrorBoundary = (props) => (
     <ErrorBoundary {...errorBoundaryProps}>

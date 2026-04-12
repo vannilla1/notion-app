@@ -1,14 +1,3 @@
-/**
- * Shared formatting utilities
- * Used across client components for consistent data formatting
- */
-
-/**
- * Formats a date string to Slovak locale format
- * @param {string|Date} dateString - Date to format
- * @param {object} options - Intl.DateTimeFormat options
- * @returns {string} - Formatted date string
- */
 export const formatDate = (dateString, options = {}) => {
   if (!dateString) return '-';
 
@@ -26,11 +15,6 @@ export const formatDate = (dateString, options = {}) => {
   }
 };
 
-/**
- * Formats a date with time
- * @param {string|Date} dateString - Date to format
- * @returns {string} - Formatted date and time string
- */
 export const formatDateTime = (dateString) => {
   if (!dateString) return '-';
 
@@ -47,11 +31,6 @@ export const formatDateTime = (dateString) => {
   }
 };
 
-/**
- * Formats file size to human-readable format
- * @param {number} bytes - File size in bytes
- * @returns {string} - Formatted file size (e.g., "1.5 MB")
- */
 export const formatFileSize = (bytes) => {
   if (!bytes || bytes === 0) return '0 B';
 
@@ -62,11 +41,6 @@ export const formatFileSize = (bytes) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${units[i]}`;
 };
 
-/**
- * Formats a relative time (e.g., "pred 2 hodinami")
- * @param {string|Date} dateString - Date to format
- * @returns {string} - Relative time string
- */
 export const formatRelativeTime = (dateString) => {
   if (!dateString) return '';
 
@@ -85,22 +59,11 @@ export const formatRelativeTime = (dateString) => {
   return formatDate(dateString);
 };
 
-/**
- * Truncates text to specified length with ellipsis
- * @param {string} text - Text to truncate
- * @param {number} maxLength - Maximum length
- * @returns {string} - Truncated text
- */
 export const truncateText = (text, maxLength = 100) => {
   if (!text || text.length <= maxLength) return text || '';
   return `${text.substring(0, maxLength)}...`;
 };
 
-/**
- * Formats a number with thousands separator
- * @param {number} num - Number to format
- * @returns {string} - Formatted number
- */
 export const formatNumber = (num) => {
   if (num === null || num === undefined) return '0';
   return num.toLocaleString('sk-SK');

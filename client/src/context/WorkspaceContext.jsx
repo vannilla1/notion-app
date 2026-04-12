@@ -21,7 +21,6 @@ export const WorkspaceProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
 
-  // Fetch workspaces
   const fetchWorkspaces = useCallback(async () => {
     if (!isAuthenticated) {
       // Don't set loading=false here — App.jsx only checks workspaceLoading
@@ -52,7 +51,6 @@ export const WorkspaceProvider = ({ children }) => {
         setCurrentWorkspace(current);
       }
     } catch (err) {
-      console.error('Error fetching workspaces:', err);
       if (err.response?.data?.code === 'NO_WORKSPACE') {
         setNeedsWorkspace(true);
       } else {
@@ -63,7 +61,6 @@ export const WorkspaceProvider = ({ children }) => {
     }
   }, [isAuthenticated]);
 
-  // Load workspaces on auth change
   useEffect(() => {
     if (isAuthenticated) {
       fetchWorkspaces();
@@ -78,21 +75,18 @@ export const WorkspaceProvider = ({ children }) => {
     }
   }, [isAuthenticated, fetchWorkspaces]);
 
-  // Create workspace
   const createWorkspace = async (data) => {
     const result = await workspaceApi.createWorkspace(data);
     await fetchWorkspaces();
     return result;
   };
 
-  // Join workspace
   const joinWorkspace = async (inviteCode) => {
     const result = await workspaceApi.joinWorkspace(inviteCode);
     await fetchWorkspaces();
     return result;
   };
 
-  // Switch workspace
   const switchWorkspace = async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
     setCurrentWorkspaceId(workspaceId);
@@ -100,35 +94,30 @@ export const WorkspaceProvider = ({ children }) => {
     return result;
   };
 
-  // Update workspace
   const updateWorkspace = async (data) => {
     const result = await workspaceApi.updateWorkspace(data);
     setCurrentWorkspace(prev => ({ ...prev, ...result }));
     return result;
   };
 
-  // Regenerate invite code
   const regenerateInviteCode = async () => {
     const result = await workspaceApi.regenerateInviteCode();
     setCurrentWorkspace(prev => ({ ...prev, inviteCode: result.inviteCode }));
     return result;
   };
 
-  // Leave workspace
   const leaveWorkspace = async () => {
     const result = await workspaceApi.leaveWorkspace();
     await fetchWorkspaces();
     return result;
   };
 
-  // Refresh current workspace
   const refreshCurrentWorkspace = async () => {
     try {
       const current = await workspaceApi.getCurrentWorkspace();
       setCurrentWorkspace(current);
       return current;
     } catch (err) {
-      console.error('Error refreshing workspace:', err);
       throw err;
     }
   };

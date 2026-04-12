@@ -32,8 +32,8 @@ function BillingPage() {
       ]);
       setBillingStatus(statusRes.data);
       setPlans(plansRes.data.plans || []);
-    } catch (error) {
-      console.error('Failed to fetch billing data:', error);
+    } catch {
+      // Silently fail — billing UI shows loading/empty state
     } finally {
       setLoading(false);
     }

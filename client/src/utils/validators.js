@@ -1,29 +1,13 @@
-/**
- * Shared validation utilities
- * Used across client components to validate user inputs
- */
-
 // Email validation regex
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Phone validation regex - allows +, digits, spaces, and dashes
 export const PHONE_REGEX = /^[+]?[0-9\s-]+$/;
 
-/**
- * Validates an email address
- * @param {string} email - Email to validate
- * @returns {boolean} - True if valid
- */
 export const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
   return EMAIL_REGEX.test(email.trim());
 };
 
-/**
- * Validates a phone number
- * @param {string} phone - Phone number to validate
- * @returns {boolean} - True if valid
- */
 export const isValidPhone = (phone) => {
   if (!phone || typeof phone !== 'string') return false;
   const trimmed = phone.trim();
@@ -32,11 +16,6 @@ export const isValidPhone = (phone) => {
   return PHONE_REGEX.test(trimmed);
 };
 
-/**
- * Validates contact form data
- * @param {object} data - Contact data object
- * @returns {object} - { isValid: boolean, errors: object }
- */
 export const validateContactForm = (data) => {
   const errors = {};
 
@@ -61,11 +40,6 @@ export const validateContactForm = (data) => {
   };
 };
 
-/**
- * Validates password strength
- * @param {string} password - Password to validate
- * @returns {object} - { isValid: boolean, message: string }
- */
 export const validatePassword = (password) => {
   if (!password || password.length < 6) {
     return {
