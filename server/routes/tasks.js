@@ -2480,7 +2480,13 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     if (contactFile) {
       base64Data = contactFile.data;
     } else if (fileMeta.data) {
+      // Legacy: data still embedded — migrate on-the-fly
       base64Data = fileMeta.data;
+      ContactFile.updateOne(
+        { fileId },
+        { $setOnInsert: { fileId, data: base64Data } },
+        { upsert: true }
+      ).catch(() => {}); // Fire-and-forget — just ensure it's saved for next time
     } else {
       return res.status(404).json({ message: 'Dáta súboru nenájdené' });
     }
