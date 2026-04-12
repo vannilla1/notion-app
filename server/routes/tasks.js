@@ -120,22 +120,11 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       ]
     }).maxTimeMS(30000).lean();
 
-    // Batched loading of contacts with tasks to avoid timeout on large collections
-    const BATCH_SIZE = 5;
-    const contacts = [];
-    let skip = 0;
-    while (true) {
-      const batch = await Contact.aggregate([
-        { $match: { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } } },
-        { $sort: { name: 1 } },
-        { $skip: skip },
-        { $limit: BATCH_SIZE },
-        { $project: { name: 1, tasks: 1 } }
-      ]).option({ maxTimeMS: 30000 });
-      contacts.push(...batch);
-      if (batch.length < BATCH_SIZE) break;
-      skip += BATCH_SIZE;
-    }
+    // files.data is now in ContactFile collection, Contact docs are small
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
+      { name: 1, tasks: 1 }
+    ).lean();
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();

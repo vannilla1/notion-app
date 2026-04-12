@@ -423,28 +423,17 @@ const checkDueDates = async () => {
  */
 const checkContactDueDates = async () => {
   try {
-    // Batched loading to avoid timeout on collections with large documents
-    const contacts = [];
-    let skip = 0;
-    const BATCH_SIZE = 5;
-    while (true) {
-      const batch = await Contact.aggregate([
-        { $match: {
-          'tasks.0': { $exists: true },
-          'tasks': { $elemMatch: { completed: { $ne: true }, $or: [
-            { dueDate: { $exists: true, $ne: null } },
-            { reminder: { $exists: true, $ne: null } }
-          ]}}
-        }},
-        { $sort: { _id: 1 } },
-        { $skip: skip },
-        { $limit: BATCH_SIZE },
-        { $project: { name: 1, tasks: 1, workspaceId: 1, userId: 1 } }
-      ]).option({ maxTimeMS: 30000 });
-      contacts.push(...batch);
-      if (batch.length < BATCH_SIZE) break;
-      skip += BATCH_SIZE;
-    }
+    // files.data is now in ContactFile collection, Contact docs are small
+    const contacts = await Contact.find(
+      {
+        'tasks.0': { $exists: true },
+        'tasks': { $elemMatch: { completed: { $ne: true }, $or: [
+          { dueDate: { $exists: true, $ne: null } },
+          { reminder: { $exists: true, $ne: null } }
+        ]}}
+      },
+      { name: 1, tasks: 1, workspaceId: 1, userId: 1 }
+    ).lean();
 
     let notificationsSent = 0;
     let contactsUpdated = 0;

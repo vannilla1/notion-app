@@ -293,6 +293,47 @@ server.listen(PORT, () => {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }
 
+      // Migrate file data from Contact documents to ContactFile collection
+      // This dramatically reduces Contact document sizes (20MB → ~500KB)
+      // Uses cursor to process one document at a time (avoids timeout)
+      try {
+        const ContactModel = require('./models/Contact');
+        const ContactFile = require('./models/ContactFile');
+        const cursor = ContactModel.find(
+          { 'files.data': { $exists: true, $ne: null } }
+        ).cursor();
+
+        let migratedFiles = 0;
+        for await (const contact of cursor) {
+          const filesToMigrate = (contact.files || []).filter(f => f.data);
+          if (filesToMigrate.length === 0) continue;
+
+          for (const file of filesToMigrate) {
+            try {
+              await ContactFile.updateOne(
+                { contactId: contact._id, fileId: file.id },
+                { $setOnInsert: { data: file.data } },
+                { upsert: true }
+              );
+              migratedFiles++;
+            } catch (fileErr) {
+              logger.warn('File migration skip', { fileId: file.id, error: fileErr.message });
+            }
+          }
+          // Strip data from files, keep only metadata
+          const cleanFiles = contact.files.map(f => ({
+            id: f.id, originalName: f.originalName, mimetype: f.mimetype,
+            size: f.size, uploadedAt: f.uploadedAt
+          }));
+          await ContactModel.updateOne({ _id: contact._id }, { $set: { files: cleanFiles } });
+        }
+        if (migratedFiles > 0) {
+          logger.info(`Migrated ${migratedFiles} files from Contact to ContactFile collection`);
+        }
+      } catch (err) {
+        logger.error('File migration error', { error: err.message });
+      }
+
       // Initialize admin email service
       initializeEmail();
 

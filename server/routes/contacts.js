@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
+const ContactFile = require('../models/ContactFile');
 const User = require('../models/User');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -145,32 +146,15 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
 });
 
 // Get all contacts (for current workspace) - sorted alphabetically by name
-// Uses batched loading to avoid MongoDB timeout on large document collections
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const BATCH_SIZE = 5;
-    const allContacts = [];
-    let skip = 0;
+    // files.data is now stored in ContactFile collection, so Contact docs are small
+    const contacts = await Contact.find(
+      { workspaceId: req.workspaceId },
+      { 'files.data': 0 }
+    ).sort({ name: 1 }).lean();
 
-    while (true) {
-      const batch = await Contact.aggregate([
-        { $match: { workspaceId: req.workspaceId } },
-        { $sort: { name: 1 } },
-        { $skip: skip },
-        { $limit: BATCH_SIZE },
-        { $project: {
-          name: 1, email: 1, phone: 1, company: 1, website: 1,
-          notes: 1, status: 1, tasks: 1, userId: 1,
-          createdAt: 1, updatedAt: 1
-        }}
-      ]).option({ maxTimeMS: 30000 });
-
-      allContacts.push(...batch);
-      if (batch.length < BATCH_SIZE) break;
-      skip += BATCH_SIZE;
-    }
-
-    const contactsWithId = allContacts.map(contact => ({
+    const contactsWithId = contacts.map(contact => ({
       ...contact,
       id: contact._id.toString()
     }));
@@ -799,16 +783,24 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       // Convert file buffer to Base64
       const base64Data = req.file.buffer.toString('base64');
+      const fileId = uuidv4();
 
       const fileData = {
-        id: uuidv4(),
+        id: fileId,
         originalName: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
-        data: base64Data,
         uploadedAt: new Date()
       };
 
+      // Save file data to separate collection (keeps Contact documents small)
+      await ContactFile.create({
+        contactId: contact._id,
+        fileId: fileId,
+        data: base64Data
+      });
+
+      // Only store metadata in Contact (no data field)
       contact.files.push(fileData);
       await contact.save();
 
@@ -834,30 +826,42 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
   });
 });
 
-// Download file (from MongoDB Base64)
+// Download file (from ContactFile collection or legacy Contact.files.data)
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    const contact = await Contact.findOne(
+      { _id: req.params.id, workspaceId: req.workspaceId },
+      { 'files.$': 1 }
+    ).lean();
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    const file = contact.files.find(f => f.id === req.params.fileId);
-    if (!file) {
+    const fileMeta = (contact.files || []).find(f => f.id === req.params.fileId);
+    if (!fileMeta) {
       return res.status(404).json({ message: 'File not found' });
     }
 
-    if (!file.data) {
+    // Try ContactFile collection first, fall back to legacy embedded data
+    let base64Data;
+    const contactFile = await ContactFile.findOne(
+      { contactId: req.params.id, fileId: req.params.fileId },
+      { data: 1 }
+    ).lean();
+
+    if (contactFile) {
+      base64Data = contactFile.data;
+    } else if (fileMeta.data) {
+      base64Data = fileMeta.data;
+    } else {
       return res.status(404).json({ message: 'File data not found' });
     }
 
-    // Convert Base64 back to buffer
-    const fileBuffer = Buffer.from(file.data, 'base64');
+    const fileBuffer = Buffer.from(base64Data, 'base64');
 
-    // Set headers for file download
     res.set({
-      'Content-Type': file.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Type': fileMeta.mimetype,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
       'Content-Length': fileBuffer.length
     });
 
@@ -880,8 +884,12 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
       return res.status(404).json({ message: 'File not found' });
     }
 
+    const deletedFileId = contact.files[fileIndex].id;
     contact.files.splice(fileIndex, 1);
     await contact.save();
+
+    // Also delete from ContactFile collection
+    await ContactFile.deleteOne({ contactId: contact._id, fileId: deletedFileId }).catch(() => {});
 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
