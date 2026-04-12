@@ -547,19 +547,30 @@ function CRM() {
     setPreviewUrl(null);
     setPreviewError(null);
 
-    try {
-      // Use axios with timeout for consistent behavior
+    const fetchBlob = async () => {
       const response = await api.get(
         `/api/contacts/${contactId}/files/${file.id}/download`,
-        { responseType: 'blob', timeout: 30000 }
+        { responseType: 'blob', timeout: 45000 }
       );
-
       const blob = response.data;
+      if (!blob || blob.size === 0) throw new Error('empty');
+      return blob;
+    };
 
-      // Skontroluj či response obsahuje dáta
-      if (!blob || blob.size === 0) {
-        setPreviewError('Prázdna odpoveď zo servera');
-        return;
+    try {
+      let blob;
+      try {
+        blob = await fetchBlob();
+      } catch (firstError) {
+        // Retry once after 2s (handles cold starts)
+        const isTimeout = firstError.code === 'ECONNABORTED' || firstError.message?.includes('timeout');
+        const isNetwork = !firstError.response;
+        if (isTimeout || isNetwork) {
+          await new Promise(r => setTimeout(r, 2000));
+          blob = await fetchBlob();
+        } else {
+          throw firstError;
+        }
       }
 
       // Pre textové súbory načítaj obsah ako text
@@ -576,7 +587,9 @@ function CRM() {
     } catch (error) {
       let msg = 'Neznáma chyba';
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        msg = 'Časový limit vypršal — súbor je príliš veľký alebo server je pomalý';
+        msg = 'Časový limit vypršal — skúste to znova';
+      } else if (error.message === 'empty') {
+        msg = 'Prázdna odpoveď zo servera';
       } else if (error.response?.status) {
         msg = `Server vrátil chybu ${error.response.status}`;
         try {
