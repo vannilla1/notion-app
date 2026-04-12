@@ -1400,7 +1400,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // Task not found in global tasks, try to find in contacts
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1507,7 +1507,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     // If source is 'contact', delete from contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({});
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1582,7 +1582,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // If not found in global tasks, try contacts
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
@@ -1677,7 +1677,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     // If not found in global tasks, search in contacts
     if (!originalTask) {
-      const allContacts = await Contact.find({});
+      const allContacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
       for (const contact of allContacts) {
         if (contact.tasks && contact.tasks.length > 0) {
           const found = contact.tasks.find(t => t.id === req.params.id);
@@ -1830,7 +1830,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     // If source is specified as contact, look in contacts first
     if (source === 'contact') {
-      const contacts = await Contact.find({});
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -1910,7 +1910,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     }
 
     // If not found in global, search in contacts
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -1993,7 +1993,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({});
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2119,7 +2119,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     }
 
     // Search in contacts
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2230,7 +2230,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contacts = await Contact.find({});
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
       for (const contact of contacts) {
         if (contact.tasks) {
           const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
@@ -2293,7 +2293,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     }
 
     // Search in contacts
-    const contacts = await Contact.find({});
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, { 'files.data': 0 });
     for (const contact of contacts) {
       if (contact.tasks) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
