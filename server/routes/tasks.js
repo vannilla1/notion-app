@@ -107,7 +107,7 @@ const allSubtasksCompleted = (subtasks) => {
 // Helper function to populate assigned users info
 const populateAssignedUsers = async (assignedToIds) => {
   if (!assignedToIds || assignedToIds.length === 0) return [];
-  const users = await User.find({ _id: { $in: assignedToIds } }, 'username color avatar').lean();
+  const users = await User.find({ _id: { $in: assignedToIds } }, 'username color avatar');
   return users.map(u => ({
     id: u._id.toString(),
     username: u.username,
@@ -1172,7 +1172,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Otherwise use MongoDB query with index on tasks.id
       let contact;
       if (contactId) {
-        contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
+        contact = await Contact.findById(contactId);
       } else {
         contact = await Contact.findOne({ 'tasks.id': req.params.id });
       }
@@ -1434,94 +1434,96 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // Task not found in global tasks, try to find in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
-    if (contact && contact.tasks) {
-      const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
-      if (taskIndex !== -1) {
-        const ctask = contact.tasks[taskIndex];
-        // Save original values before update
-        const originalCtaskTitle = ctask.title;
-        const originalCtaskAssignedTo = ctask.assignedTo || [];
-        contact.tasks[taskIndex] = {
-          ...ctask,
-          id: ctask.id,
-          title: title !== undefined ? title : ctask.title,
-          description: description !== undefined ? description : ctask.description,
-          dueDate: dueDate !== undefined ? dueDate : ctask.dueDate,
-          priority: priority !== undefined ? priority : ctask.priority,
-          completed: completed !== undefined ? completed : ctask.completed,
-          assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
-          subtasks: req.body.subtasks !== undefined ? req.body.subtasks : ctask.subtasks,
-          createdAt: ctask.createdAt,
-          modifiedAt: new Date().toISOString()
-        };
-        contact.markModified('tasks');
-        await contact.save();
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
+        if (taskIndex !== -1) {
+          const ctask = contact.tasks[taskIndex];
+          // Save original values before update
+          const originalCtaskTitle = ctask.title;
+          const originalCtaskAssignedTo = ctask.assignedTo || [];
+          contact.tasks[taskIndex] = {
+            ...ctask,
+            id: ctask.id,
+            title: title !== undefined ? title : ctask.title,
+            description: description !== undefined ? description : ctask.description,
+            dueDate: dueDate !== undefined ? dueDate : ctask.dueDate,
+            priority: priority !== undefined ? priority : ctask.priority,
+            completed: completed !== undefined ? completed : ctask.completed,
+            assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
+            subtasks: req.body.subtasks !== undefined ? req.body.subtasks : ctask.subtasks,
+            createdAt: ctask.createdAt,
+            modifiedAt: new Date().toISOString()
+          };
+          contact.markModified('tasks');
+          await contact.save();
 
-        io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-        const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
-        const taskData = taskToPlainObject(contact.tasks[taskIndex], {
-          contactId: contact._id.toString(),
-          contactName: contact.name,
-          source: 'contact',
-          assignedUsers
-        });
-        io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
-
-        // Auto-sync to Google Calendar
-        autoSyncToGoogle(taskData, 'update');
-
-        // If title changed, also update all subtasks in calendar (they have parent title in their name)
-        if (title !== undefined && title !== originalCtaskTitle) {
-          const newTitle = title;
-          const subtasks = contact.tasks[taskIndex].subtasks;
-          logger.debug('Auto-sync: Parent task title changed (fallback)', { originalCtaskTitle, newTitle, subtaskCount: (subtasks || []).length });
-          syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
-            logger.warn('Auto-sync error updating subtasks (fallback)', { error: err.message })
-          );
-        }
-
-        // Determine newly assigned users first
-        let newlyAssigned = [];
-        if (assignedTo !== undefined) {
-          const newAssignedTo = assignedTo || [];
-          newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
-          logger.debug('[Task Update Fallback] Assignment check', {
-            originalCtaskAssignedTo,
-            newAssignedTo,
-            newlyAssigned,
-            assignedToFromBody: assignedTo
+          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+          const assignedUsers = await populateAssignedUsers(contact.tasks[taskIndex].assignedTo);
+          const taskData = taskToPlainObject(contact.tasks[taskIndex], {
+            contactId: contact._id.toString(),
+            contactName: contact.name,
+            source: 'contact',
+            assignedUsers
           });
+          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
+
+          // Auto-sync to Google Calendar
+          autoSyncToGoogle(taskData, 'update');
+
+          // If title changed, also update all subtasks in calendar (they have parent title in their name)
+          if (title !== undefined && title !== originalCtaskTitle) {
+            const newTitle = title;
+            const subtasks = contact.tasks[taskIndex].subtasks;
+            logger.debug('Auto-sync: Parent task title changed (fallback)', { originalCtaskTitle, newTitle, subtaskCount: (subtasks || []).length });
+            syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
+              logger.warn('Auto-sync error updating subtasks (fallback)', { error: err.message })
+            );
+          }
+
+          // Determine newly assigned users first
+          let newlyAssigned = [];
+          if (assignedTo !== undefined) {
+            const newAssignedTo = assignedTo || [];
+            newlyAssigned = newAssignedTo.filter(id => !originalCtaskAssignedTo.includes(id));
+            logger.debug('[Task Update Fallback] Assignment check', {
+              originalCtaskAssignedTo,
+              newAssignedTo,
+              newlyAssigned,
+              assignedToFromBody: assignedTo
+            });
+          }
+
+          // Send notification about task update (exclude newly assigned - they get assignment notification)
+          const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
+          await notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned, req.workspaceId);
+
+          // Notify newly assigned users with specific assignment notification
+          if (newlyAssigned.length > 0) {
+            logger.debug('[Task Update Fallback] Sending assignment notification', { newlyAssigned });
+            await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
+          }
+
+          res.json(taskData);
+
+          // Audit log (fire and forget)
+          auditService.logAction({
+            userId: req.user.id,
+            username: req.user.username,
+            email: req.user.email,
+            action: fallbackTaskType === 'task.completed' ? 'task.completed' : 'task.updated',
+            category: 'task',
+            targetType: 'task',
+            targetId: taskData.id,
+            targetName: taskData.title,
+            details: { title: taskData.title, source: 'contact', changedFields: Object.keys(req.body).filter(k => req.body[k] !== undefined) },
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            workspaceId: req.workspaceId || null
+          });
+          return;
         }
-
-        // Send notification about task update (exclude newly assigned - they get assignment notification)
-        const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
-        await notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned, req.workspaceId);
-
-        // Notify newly assigned users with specific assignment notification
-        if (newlyAssigned.length > 0) {
-          logger.debug('[Task Update Fallback] Sending assignment notification', { newlyAssigned });
-          await notificationService.notifyTaskAssignment(taskData, newlyAssigned, req.user);
-        }
-
-        res.json(taskData);
-
-        // Audit log (fire and forget)
-        auditService.logAction({
-          userId: req.user.id,
-          username: req.user.username,
-          email: req.user.email,
-          action: fallbackTaskType === 'task.completed' ? 'task.completed' : 'task.updated',
-          category: 'task',
-          targetType: 'task',
-          targetId: taskData.id,
-          targetName: taskData.title,
-          details: { title: taskData.title, source: 'contact', changedFields: Object.keys(req.body).filter(k => req.body[k] !== undefined) },
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          workspaceId: req.workspaceId || null
-        });
-        return;
       }
     }
 
@@ -1539,42 +1541,44 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     // If source is 'contact', delete from contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
-      if (contact && contact.tasks) {
-        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
-        if (taskIndex !== -1) {
-          const deletedTask = contact.tasks[taskIndex];
-          contact.tasks.splice(taskIndex, 1);
-          contact.markModified('tasks');
-          await contact.save();
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
+          if (taskIndex !== -1) {
+            const deletedTask = contact.tasks[taskIndex];
+            contact.tasks.splice(taskIndex, 1);
+            contact.markModified('tasks');
+            await contact.save();
 
-          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-          io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
-          // Auto-delete from Google Calendar
-          autoDeleteFromGoogle(req.params.id);
+            // Auto-delete from Google Calendar
+            autoDeleteFromGoogle(req.params.id);
 
-          // Send notification about deleted task
-          await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
+            // Send notification about deleted task
+            await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
-          res.json({ message: 'Task deleted' });
+            res.json({ message: 'Task deleted' });
 
-          // Audit log (fire and forget)
-          auditService.logAction({
-            userId: req.user.id,
-            username: req.user.username,
-            email: req.user.email,
-            action: 'task.deleted',
-            category: 'task',
-            targetType: 'task',
-            targetId: req.params.id,
-            targetName: deletedTask.title,
-            details: { title: deletedTask.title, source: 'contact' },
-            ipAddress: req.ip,
-            userAgent: req.get('user-agent'),
-            workspaceId: req.workspaceId || null
-          });
-          return;
+            // Audit log (fire and forget)
+            auditService.logAction({
+              userId: req.user.id,
+              username: req.user.username,
+              email: req.user.email,
+              action: 'task.deleted',
+              category: 'task',
+              targetType: 'task',
+              targetId: req.params.id,
+              targetName: deletedTask.title,
+              details: { title: deletedTask.title, source: 'contact' },
+              ipAddress: req.ip,
+              userAgent: req.get('user-agent'),
+              workspaceId: req.workspaceId || null
+            });
+            return;
+          }
         }
       }
       return res.status(404).json({ message: 'Task not found in contacts' });
@@ -1612,42 +1616,44 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // If not found in global tasks, try contacts
-    const contactFallback = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
-    if (contactFallback && contactFallback.tasks) {
-      const taskIndex = contactFallback.tasks.findIndex(t => t.id === req.params.id);
-      if (taskIndex !== -1) {
-        const deletedTask = contactFallback.tasks[taskIndex];
-        contactFallback.tasks.splice(taskIndex, 1);
-        contactFallback.markModified('tasks');
-        await contactFallback.save();
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
+        if (taskIndex !== -1) {
+          const deletedTask = contact.tasks[taskIndex];
+          contact.tasks.splice(taskIndex, 1);
+          contact.markModified('tasks');
+          await contact.save();
 
-        io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contactFallback));
-        io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
+          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+          io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
-        // Auto-delete from Google Calendar
-        autoDeleteFromGoogle(req.params.id);
+          // Auto-delete from Google Calendar
+          autoDeleteFromGoogle(req.params.id);
 
-        // Send notification about deleted task
-        await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
+          // Send notification about deleted task
+          await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
 
-        res.json({ message: 'Task deleted' });
+          res.json({ message: 'Task deleted' });
 
-        // Audit log (fire and forget)
-        auditService.logAction({
-          userId: req.user.id,
-          username: req.user.username,
-          email: req.user.email,
-          action: 'task.deleted',
-          category: 'task',
-          targetType: 'task',
-          targetId: req.params.id,
-          targetName: deletedTask.title,
-          details: { title: deletedTask.title, source: 'contact' },
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          workspaceId: req.workspaceId || null
-        });
-        return;
+          // Audit log (fire and forget)
+          auditService.logAction({
+            userId: req.user.id,
+            username: req.user.username,
+            email: req.user.email,
+            action: 'task.deleted',
+            category: 'task',
+            targetType: 'task',
+            targetId: req.params.id,
+            targetName: deletedTask.title,
+            details: { title: deletedTask.title, source: 'contact' },
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            workspaceId: req.workspaceId || null
+          });
+          return;
+        }
       }
     }
 
@@ -1703,13 +1709,16 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     // If not found in global tasks, search in contacts
     if (!originalTask) {
-      const foundContact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
-      if (foundContact && foundContact.tasks) {
-        const found = foundContact.tasks.find(t => t.id === req.params.id);
-        if (found) {
-          // Deep copy the task to ensure subtasks are properly copied
-          originalTask = JSON.parse(JSON.stringify(found));
-          originalTask.source = 'contact';
+      const allContacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+      for (const contact of allContacts) {
+        if (contact.tasks && contact.tasks.length > 0) {
+          const found = contact.tasks.find(t => t.id === req.params.id);
+          if (found) {
+            // Deep copy the task to ensure subtasks are properly copied
+            originalTask = JSON.parse(JSON.stringify(found));
+            originalTask.source = 'contact';
+            break;
+          }
         }
       }
     }
@@ -1852,43 +1861,45 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     // If source is specified as contact, look in contacts first
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-      if (contact && contact.tasks) {
-        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
-        if (taskIndex !== -1) {
-          if (addToParent(contact.tasks[taskIndex])) {
-            // Update parent task's modifiedAt when subtask is added
-            contact.tasks[taskIndex].modifiedAt = now;
-            contact.markModified('tasks');
-            await contact.save();
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+          if (taskIndex !== -1) {
+            if (addToParent(contact.tasks[taskIndex])) {
+              // Update parent task's modifiedAt when subtask is added
+              contact.tasks[taskIndex].modifiedAt = now;
+              contact.markModified('tasks');
+              await contact.save();
 
-            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
-              contactId: contact._id.toString(),
-              contactName: contact.name,
-              source: 'contact'
-            }));
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+                contactId: contact._id.toString(),
+                contactName: contact.name,
+                source: 'contact'
+              }));
 
-            // Auto-sync subtask to Google
-            autoSyncToGoogle({
-              id: subtask.id,
-              title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
-              description: subtask.notes || '',
-              dueDate: subtask.dueDate,
-              completed: subtask.completed,
-              priority: subtask.priority,
-              contactName: contact.name
-            }, 'create');
+              // Auto-sync subtask to Google
+              autoSyncToGoogle({
+                id: subtask.id,
+                title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
+                description: subtask.notes || '',
+                dueDate: subtask.dueDate,
+                completed: subtask.completed,
+                priority: subtask.priority,
+                contactName: contact.name
+              }, 'create');
 
-            // Send notification about new subtask
-            await notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user, [], req.workspaceId);
+              // Send notification about new subtask
+              await notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user, [], req.workspaceId);
 
-            // Send assignment notification if subtask is assigned to someone
-            if (assignedTo && assignedTo.length > 0) {
-              await notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+              // Send assignment notification if subtask is assigned to someone
+              if (assignedTo && assignedTo.length > 0) {
+                await notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+              }
+
+              return res.status(201).json(subtask);
             }
-
-            return res.status(201).json(subtask);
           }
         }
       }
@@ -1930,45 +1941,47 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     }
 
     // If not found in global, search in contacts
-    const contactFallback = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-    if (contactFallback && contactFallback.tasks) {
-      const taskIndex = contactFallback.tasks.findIndex(t => t.id === req.params.taskId);
-      if (taskIndex !== -1) {
-        if (addToParent(contactFallback.tasks[taskIndex])) {
-          // Update parent task's modifiedAt when subtask is added
-          contactFallback.tasks[taskIndex].modifiedAt = now;
-          contactFallback.markModified('tasks');
-          await contactFallback.save();
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+        if (taskIndex !== -1) {
+          if (addToParent(contact.tasks[taskIndex])) {
+            // Update parent task's modifiedAt when subtask is added
+            contact.tasks[taskIndex].modifiedAt = now;
+            contact.markModified('tasks');
+            await contact.save();
 
-          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contactFallback));
-          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contactFallback.tasks[taskIndex], {
-            contactId: contactFallback._id.toString(),
-            contactName: contactFallback.name,
-            source: 'contact'
-          }));
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              contactId: contact._id.toString(),
+              contactName: contact.name,
+              source: 'contact'
+            }));
 
-          // Auto-sync subtask to Google
-          autoSyncToGoogle({
-            id: subtask.id,
-            title: `${subtask.title} (${contactFallback.tasks[taskIndex].title})`,
-            description: subtask.notes || '',
-            dueDate: subtask.dueDate,
-            completed: subtask.completed,
-            priority: subtask.priority,
-            contactName: contactFallback.name
-          }, 'create');
+            // Auto-sync subtask to Google
+            autoSyncToGoogle({
+              id: subtask.id,
+              title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
+              description: subtask.notes || '',
+              dueDate: subtask.dueDate,
+              completed: subtask.completed,
+              priority: subtask.priority,
+              contactName: contact.name
+            }, 'create');
 
-          // Send notification about new subtask
-          await notificationService.notifySubtaskChange('subtask.created', subtask, contactFallback.tasks[taskIndex], req.user, [], req.workspaceId);
+            // Send notification about new subtask
+            await notificationService.notifySubtaskChange('subtask.created', subtask, contact.tasks[taskIndex], req.user, [], req.workspaceId);
 
-          // Send assignment notification if subtask is assigned to someone
-          if (assignedTo && assignedTo.length > 0) {
-            await notificationService.notifySubtaskAssignment(subtask, contactFallback.tasks[taskIndex], assignedTo, req.user);
+            // Send assignment notification if subtask is assigned to someone
+            if (assignedTo && assignedTo.length > 0) {
+              await notificationService.notifySubtaskAssignment(subtask, contact.tasks[taskIndex], assignedTo, req.user);
+            }
+
+            return res.status(201).json(subtask);
           }
-
-          return res.status(201).json(subtask);
+          return res.status(404).json({ message: 'Parent subtask not found' });
         }
-        return res.status(404).json({ message: 'Parent subtask not found' });
       }
     }
 
@@ -2009,67 +2022,69 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-      if (contact && contact.tasks) {
-        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
-        if (taskIndex !== -1) {
-          const result = updateSubtaskInTask(contact.tasks[taskIndex]);
-          if (result) {
-            const { updated, originalAssignedTo } = result;
-            contact.markModified('tasks');
-            await contact.save();
-
-            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
-              contactId: contact._id.toString(),
-              contactName: contact.name,
-              source: 'contact'
-            }));
-
-            // Auto-sync subtask to Google
-            autoSyncToGoogle({
-              id: updated.id,
-              title: `${updated.title} (${contact.tasks[taskIndex].title})`,
-              description: updated.notes || '',
-              dueDate: updated.dueDate,
-              completed: updated.completed,
-              priority: updated.priority,
-              contactName: contact.name
-            }, 'update');
-
-            // Determine newly assigned users
-            let newlyAssigned = [];
-            if (assignedTo !== undefined) {
-              const newAssignedTo = assignedTo || [];
-              newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-              logger.debug('[Subtask Update Contact] Assignment check', {
-                originalAssignedTo,
-                newAssignedTo,
-                newlyAssigned
-              });
-            }
-
-            // Send notification about subtask update (exclude newly assigned - they get assignment notification)
-            const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-            await notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
-
-            // Notify newly assigned users with specific assignment notification
-            if (newlyAssigned.length > 0) {
-              logger.debug('[Subtask Update Contact] Sending assignment notification', { newlyAssigned });
-              await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
-            }
-
-            // Auto-complete project when all subtasks are done
-            if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
-              contact.tasks[taskIndex].completed = true;
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+          if (taskIndex !== -1) {
+            const result = updateSubtaskInTask(contact.tasks[taskIndex]);
+            if (result) {
+              const { updated, originalAssignedTo } = result;
               contact.markModified('tasks');
               await contact.save();
-              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
-              logger.info('[Auto-complete] Project auto-completed (contact)', { taskId: req.params.taskId });
-            }
 
-            return res.json(updated);
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+                contactId: contact._id.toString(),
+                contactName: contact.name,
+                source: 'contact'
+              }));
+
+              // Auto-sync subtask to Google
+              autoSyncToGoogle({
+                id: updated.id,
+                title: `${updated.title} (${contact.tasks[taskIndex].title})`,
+                description: updated.notes || '',
+                dueDate: updated.dueDate,
+                completed: updated.completed,
+                priority: updated.priority,
+                contactName: contact.name
+              }, 'update');
+
+              // Determine newly assigned users
+              let newlyAssigned = [];
+              if (assignedTo !== undefined) {
+                const newAssignedTo = assignedTo || [];
+                newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+                logger.debug('[Subtask Update Contact] Assignment check', {
+                  originalAssignedTo,
+                  newAssignedTo,
+                  newlyAssigned
+                });
+              }
+
+              // Send notification about subtask update (exclude newly assigned - they get assignment notification)
+              const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
+              await notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
+
+              // Notify newly assigned users with specific assignment notification
+              if (newlyAssigned.length > 0) {
+                logger.debug('[Subtask Update Contact] Sending assignment notification', { newlyAssigned });
+                await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+              }
+
+              // Auto-complete project when all subtasks are done
+              if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
+                contact.tasks[taskIndex].completed = true;
+                contact.markModified('tasks');
+                await contact.save();
+                io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+                io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+                logger.info('[Auto-complete] Project auto-completed (contact)', { taskId: req.params.taskId });
+              }
+
+              return res.json(updated);
+            }
           }
         }
       }
@@ -2133,67 +2148,69 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     }
 
     // Search in contacts
-    const contactFallback = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-    if (contactFallback && contactFallback.tasks) {
-      const taskIndex = contactFallback.tasks.findIndex(t => t.id === req.params.taskId);
-      if (taskIndex !== -1) {
-        const result = updateSubtaskInTask(contactFallback.tasks[taskIndex]);
-        if (result) {
-          const { updated, originalAssignedTo } = result;
-          contactFallback.markModified('tasks');
-          await contactFallback.save();
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+        if (taskIndex !== -1) {
+          const result = updateSubtaskInTask(contact.tasks[taskIndex]);
+          if (result) {
+            const { updated, originalAssignedTo } = result;
+            contact.markModified('tasks');
+            await contact.save();
 
-          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contactFallback));
-          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contactFallback.tasks[taskIndex], {
-            contactId: contactFallback._id.toString(),
-            contactName: contactFallback.name,
-            source: 'contact'
-          }));
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              contactId: contact._id.toString(),
+              contactName: contact.name,
+              source: 'contact'
+            }));
 
-          // Auto-sync subtask to Google
-          autoSyncToGoogle({
-            id: updated.id,
-            title: `${updated.title} (${contactFallback.tasks[taskIndex].title})`,
-            description: updated.notes || '',
-            dueDate: updated.dueDate,
-            completed: updated.completed,
-            priority: updated.priority,
-            contactName: contactFallback.name
-          }, 'update');
+            // Auto-sync subtask to Google
+            autoSyncToGoogle({
+              id: updated.id,
+              title: `${updated.title} (${contact.tasks[taskIndex].title})`,
+              description: updated.notes || '',
+              dueDate: updated.dueDate,
+              completed: updated.completed,
+              priority: updated.priority,
+              contactName: contact.name
+            }, 'update');
 
-          // Determine newly assigned users
-          let newlyAssigned = [];
-          if (assignedTo !== undefined) {
-            const newAssignedTo = assignedTo || [];
-            newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
-            logger.debug('[Subtask Update Fallback] Assignment check', {
-              originalAssignedTo,
-              newAssignedTo,
-              newlyAssigned
-            });
+            // Determine newly assigned users
+            let newlyAssigned = [];
+            if (assignedTo !== undefined) {
+              const newAssignedTo = assignedTo || [];
+              newlyAssigned = newAssignedTo.filter(id => !originalAssignedTo.includes(id));
+              logger.debug('[Subtask Update Fallback] Assignment check', {
+                originalAssignedTo,
+                newAssignedTo,
+                newlyAssigned
+              });
+            }
+
+            // Send notification about subtask update (exclude newly assigned - they get assignment notification)
+            const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
+            await notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
+
+            // Notify newly assigned users with specific assignment notification
+            if (newlyAssigned.length > 0) {
+              logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
+              await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user);
+            }
+
+            // Auto-complete project when all subtasks are done
+            if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
+              contact.tasks[taskIndex].completed = true;
+              contact.markModified('tasks');
+              await contact.save();
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
+              logger.info('[Auto-complete] Project auto-completed (fallback contact)', { taskId: req.params.taskId });
+            }
+
+            return res.json(updated);
           }
-
-          // Send notification about subtask update (exclude newly assigned - they get assignment notification)
-          const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-          await notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contactFallback.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
-
-          // Notify newly assigned users with specific assignment notification
-          if (newlyAssigned.length > 0) {
-            logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
-            await notificationService.notifySubtaskAssignment(updated, contactFallback.tasks[taskIndex], newlyAssigned, req.user);
-          }
-
-          // Auto-complete project when all subtasks are done
-          if (completed === true && !contactFallback.tasks[taskIndex].completed && allSubtasksCompleted(contactFallback.tasks[taskIndex].subtasks)) {
-            contactFallback.tasks[taskIndex].completed = true;
-            contactFallback.markModified('tasks');
-            await contactFallback.save();
-            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contactFallback));
-            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contactFallback.tasks[taskIndex], { contactId: contactFallback._id.toString(), contactName: contactFallback.name, source: 'contact' }));
-            logger.info('[Auto-complete] Project auto-completed (fallback contact)', { taskId: req.params.taskId });
-          }
-
-          return res.json(updated);
         }
       }
     }
@@ -2242,41 +2259,43 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-      if (contact && contact.tasks) {
-        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
-        if (taskIndex !== -1) {
-          const deletedSubtask = findAndDeleteSubtask(contact.tasks[taskIndex]);
-          if (deletedSubtask) {
-            contact.markModified('tasks');
-            await contact.save();
+      const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+          if (taskIndex !== -1) {
+            const deletedSubtask = findAndDeleteSubtask(contact.tasks[taskIndex]);
+            if (deletedSubtask) {
+              contact.markModified('tasks');
+              await contact.save();
 
-            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
-              contactId: contact._id.toString(),
-              contactName: contact.name,
-              source: 'contact'
-            }));
+              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+                contactId: contact._id.toString(),
+                contactName: contact.name,
+                source: 'contact'
+              }));
 
-            // Build parent task object with contact info
-            // Use toObject() to properly convert Mongoose subdocument to plain object
-            const taskObj = contact.tasks[taskIndex].toObject ? contact.tasks[taskIndex].toObject() : contact.tasks[taskIndex];
-            const parentTask = {
-              ...taskObj,
-              id: taskObj.id || contact.tasks[taskIndex].id,
-              contactId: contact._id.toString(),
-              contactName: contact.name
-            };
+              // Build parent task object with contact info
+              // Use toObject() to properly convert Mongoose subdocument to plain object
+              const taskObj = contact.tasks[taskIndex].toObject ? contact.tasks[taskIndex].toObject() : contact.tasks[taskIndex];
+              const parentTask = {
+                ...taskObj,
+                id: taskObj.id || contact.tasks[taskIndex].id,
+                contactId: contact._id.toString(),
+                contactName: contact.name
+              };
 
-            logger.debug('[DeleteSubtask] IDs', { parentTaskId: parentTask.id, taskObjId: taskObj.id, deletedSubtaskId: deletedSubtask.id });
+              logger.debug('[DeleteSubtask] IDs', { parentTaskId: parentTask.id, taskObjId: taskObj.id, deletedSubtaskId: deletedSubtask.id });
 
-            // Send notifications for deleted subtask and all nested subtasks
-            await sendDeleteNotifications(deletedSubtask, parentTask);
+              // Send notifications for deleted subtask and all nested subtasks
+              await sendDeleteNotifications(deletedSubtask, parentTask);
 
-            // Auto-delete subtask from Google
-            autoDeleteFromGoogle(req.params.subtaskId);
+              // Auto-delete subtask from Google
+              autoDeleteFromGoogle(req.params.subtaskId);
 
-            return res.json({ message: 'Subtask deleted' });
+              return res.json({ message: 'Subtask deleted' });
+            }
           }
         }
       }
@@ -2303,36 +2322,38 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     }
 
     // Search in contacts
-    const contactFallback = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
-    if (contactFallback && contactFallback.tasks) {
-      const taskIndex = contactFallback.tasks.findIndex(t => t.id === req.params.taskId);
-      if (taskIndex !== -1) {
-        const deletedSubtask = findAndDeleteSubtask(contactFallback.tasks[taskIndex]);
-        if (deletedSubtask) {
-          contactFallback.markModified('tasks');
-          await contactFallback.save();
+    const contacts = await Contact.find({ workspaceId: req.workspaceId }, EXCLUDE_FILE_DATA);
+    for (const contact of contacts) {
+      if (contact.tasks) {
+        const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
+        if (taskIndex !== -1) {
+          const deletedSubtask = findAndDeleteSubtask(contact.tasks[taskIndex]);
+          if (deletedSubtask) {
+            contact.markModified('tasks');
+            await contact.save();
 
-          io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contactFallback));
-          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contactFallback.tasks[taskIndex], {
-            contactId: contactFallback._id.toString(),
-            contactName: contactFallback.name,
-            source: 'contact'
-          }));
+            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], {
+              contactId: contact._id.toString(),
+              contactName: contact.name,
+              source: 'contact'
+            }));
 
-          // Build parent task object with contact info
-          const parentTask = {
-            ...contactFallback.tasks[taskIndex],
-            contactId: contactFallback._id.toString(),
-            contactName: contactFallback.name
-          };
+            // Build parent task object with contact info
+            const parentTask = {
+              ...contact.tasks[taskIndex],
+              contactId: contact._id.toString(),
+              contactName: contact.name
+            };
 
-          // Send notifications for deleted subtask and all nested subtasks
-          await sendDeleteNotifications(deletedSubtask, parentTask);
+            // Send notifications for deleted subtask and all nested subtasks
+            await sendDeleteNotifications(deletedSubtask, parentTask);
 
-          // Auto-delete subtask from Google
-          autoDeleteFromGoogle(req.params.subtaskId);
+            // Auto-delete subtask from Google
+            autoDeleteFromGoogle(req.params.subtaskId);
 
-          return res.json({ message: 'Subtask deleted' });
+            return res.json({ message: 'Subtask deleted' });
+          }
         }
       }
     }
