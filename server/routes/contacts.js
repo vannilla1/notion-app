@@ -138,6 +138,22 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
     ]).option({ maxTimeMS: 45000 });
 
     const totalSize = stats.reduce((sum, s) => sum + s.docSize, 0);
+
+    // Check ContactFile collection
+    const contactFileCount = await ContactFile.countDocuments();
+    const contactFileStats = await ContactFile.aggregate([
+      { $project: { dataSize: { $strLenBytes: '$data' }, fileId: 1 } },
+      { $group: { _id: null, totalSize: { $sum: '$dataSize' }, count: { $sum: 1 } } }
+    ]).option({ maxTimeMS: 30000 });
+
+    // Check indexes on ContactFile
+    let cfIndexes = [];
+    try {
+      cfIndexes = await ContactFile.collection.indexes();
+    } catch (e) {
+      cfIndexes = [{ error: e.message }];
+    }
+
     res.json({
       contactCount: stats.length,
       totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
@@ -145,9 +161,15 @@ router.get('/diagnostics', authenticateToken, requireWorkspace, async (req, res)
       top5: stats.slice(0, 5).map(s => ({
         name: s.name,
         sizeMB: (s.docSize / 1024 / 1024).toFixed(2),
+        sizeKB: (s.docSize / 1024).toFixed(1),
         filesCount: s.filesCount,
         tasksCount: s.tasksCount
-      }))
+      })),
+      contactFiles: {
+        count: contactFileCount,
+        totalSizeMB: contactFileStats[0] ? (contactFileStats[0].totalSize / 1024 / 1024).toFixed(2) : '0',
+      },
+      cfIndexes: cfIndexes.map(i => i.name || i.error)
     });
   } catch (error) {
     logger.error('Diagnostics error', { error: error.message });
