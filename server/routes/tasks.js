@@ -119,10 +119,10 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
         { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
       ]
     }).maxTimeMS(15000).lean();
-    // Only fetch contacts with tasks from this workspace, exclude files.data (large Base64)
+    // Only fetch contacts with tasks - use inclusion projection to skip large files entirely
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
-      { 'files.data': 0 }
+      { name: 1, tasks: 1 }
     ).maxTimeMS(15000).lean();
 
     // Get all unique assigned user IDs for batch query

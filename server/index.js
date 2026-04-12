@@ -296,13 +296,13 @@ server.listen(PORT, () => {
       // Initialize admin email service
       initializeEmail();
 
-      // Defer schedulers - run after 30s to not compete with first requests
+      // Defer schedulers - run after 60s to not compete with first requests
       setTimeout(() => {
         scheduleDueDateChecks();
         scheduleSubscriptionCleanup();
         startGoogleTasksPolling(io);
         initializeCalendarWebhooks(io);
-      }, 30000);
+      }, 60000);
     }
   }).catch(err => {
     logger.error('MongoDB connection failed', { error: err.message });
