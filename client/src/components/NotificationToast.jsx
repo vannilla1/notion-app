@@ -51,7 +51,9 @@ function NotificationToast() {
   const handleClick = useCallback((toast) => {
     removeToast(toast.id);
 
-    if (toast.relatedType === 'contact' && toast.data?.contactId) {
+    if (toast.relatedType === 'message' && toast.data?.messageId) {
+      navigate(`/messages?highlight=${toast.data.messageId}&_t=${Date.now()}`);
+    } else if (toast.relatedType === 'contact' && toast.data?.contactId) {
       navigate('/crm', { state: { expandContactId: toast.data.contactId } });
     } else if (toast.relatedType === 'task' && toast.data?.taskId) {
       navigate('/tasks', { state: { highlightTaskId: toast.data.taskId } });
