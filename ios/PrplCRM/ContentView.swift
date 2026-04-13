@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import LocalAuthentication
+import Security
 
 struct ContentView: View {
     @EnvironmentObject var pushManager: PushNotificationManager
@@ -100,28 +101,33 @@ struct ContentView: View {
         }
     }
 
-    /// Skip biometrics and go straight to device passcode
+    /// Skip Face ID and show device passcode input directly.
+    /// Uses SecAccessControl with .devicePasscode flag which bypasses
+    /// biometry and shows only the passcode entry screen.
     private func authenticateWithPasscode() {
         biometricFailed = false
+
+        guard let accessControl = SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+            .devicePasscode,
+            nil
+        ) else {
+            authenticate()
+            return
+        }
+
         let context = LAContext()
-
-        // Disable biometrics so the system shows passcode input directly
-        context.localizedFallbackTitle = ""
-
-        var error: NSError?
-        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
-            // Invalidate biometrics to force passcode
-            context.interactionNotAllowed = false
-            context.evaluatePolicy(
-                .deviceOwnerAuthentication,
-                localizedReason: "Zadajte kód pre prístup do Prpl CRM"
-            ) { success, _ in
-                DispatchQueue.main.async {
-                    if success {
-                        isLocked = false
-                    } else {
-                        biometricFailed = true
-                    }
+        context.evaluateAccessControl(
+            accessControl,
+            operation: .useItem,
+            localizedReason: "Zadajte kód pre prístup do Prpl CRM"
+        ) { success, _ in
+            DispatchQueue.main.async {
+                if success {
+                    isLocked = false
+                } else {
+                    biometricFailed = true
                 }
             }
         }
