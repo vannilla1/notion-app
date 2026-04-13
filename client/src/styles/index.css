@@ -10652,6 +10652,104 @@ body.ios-app {
   cursor: pointer;
 }
 
+/* Leave workspace confirm modal */
+.workspace-leave-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: wsLeaveIn 0.15s ease;
+}
+
+@keyframes wsLeaveIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.workspace-leave-modal {
+  background: var(--bg-card, #fff);
+  border-radius: 16px;
+  padding: 28px 24px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: wsLeaveSlide 0.2s ease;
+}
+
+@keyframes wsLeaveSlide {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.workspace-leave-modal-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.workspace-leave-modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary, #1e293b);
+  margin: 0 0 10px;
+}
+
+.workspace-leave-modal-text {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.workspace-leave-modal-text strong {
+  color: var(--text-primary, #1e293b);
+}
+
+.workspace-leave-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.workspace-leave-modal-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.workspace-leave-modal-btn.cancel {
+  background: var(--bg-secondary, #f1f5f9);
+  color: var(--text-primary, #1e293b);
+}
+
+.workspace-leave-modal-btn.cancel:hover {
+  background: var(--bg-hover, #e2e8f0);
+}
+
+.workspace-leave-modal-btn.confirm {
+  background: #EF4444;
+  color: #fff;
+}
+
+.workspace-leave-modal-btn.confirm:hover {
+  background: #DC2626;
+}
+
+.workspace-leave-modal-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Promo code section */
 .billing-promo-section {
   margin-bottom: 20px;

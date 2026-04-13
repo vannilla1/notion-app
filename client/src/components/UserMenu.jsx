@@ -51,6 +51,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const { currentWorkspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [showMobileWorkspaces, setShowMobileWorkspaces] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [leavingWorkspace, setLeavingWorkspace] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [showProfile, setShowProfile] = useState(false);
@@ -809,15 +811,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     <div
                       className="mobile-workspace-item"
                       style={{ color: '#EF4444', borderTop: '1px solid var(--border-color, #e2e8f0)' }}
-                      onClick={async () => {
-                        if (!window.confirm(`Naozaj chcete opustiť prostredie "${currentWorkspace.name}"?`)) return;
-                        try {
-                          await leaveWorkspaceApi();
-                          window.location.href = '/app';
-                        } catch (err) {
-                          alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
-                        }
-                      }}
+                      onClick={() => setShowLeaveConfirm(true)}
                     >
                       <span style={{ fontSize: '14px' }}>🚪</span>
                       <span>Opustiť prostredie</span>
@@ -1315,6 +1309,46 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={handleCloseCalendarSettings}>
                 Zavrieť
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Leave workspace confirm modal */}
+      {showLeaveConfirm && currentWorkspace && (
+        <div className="workspace-leave-overlay" onClick={() => !leavingWorkspace && setShowLeaveConfirm(false)}>
+          <div className="workspace-leave-modal" onClick={e => e.stopPropagation()}>
+            <div className="workspace-leave-modal-icon">🚪</div>
+            <h3 className="workspace-leave-modal-title">Opustiť prostredie?</h3>
+            <p className="workspace-leave-modal-text">
+              Naozaj chcete opustiť prostredie <strong>{currentWorkspace.name}</strong>?
+              Stratíte prístup ku všetkým kontaktom, projektom a úlohám v tomto prostredí.
+              Pre opätovný prístup vás bude musieť niekto znova pozvať.
+            </p>
+            <div className="workspace-leave-modal-actions">
+              <button
+                className="workspace-leave-modal-btn cancel"
+                onClick={() => setShowLeaveConfirm(false)}
+                disabled={leavingWorkspace}
+              >
+                Zrušiť
+              </button>
+              <button
+                className="workspace-leave-modal-btn confirm"
+                onClick={async () => {
+                  try {
+                    setLeavingWorkspace(true);
+                    await leaveWorkspaceApi();
+                    window.location.href = '/app';
+                  } catch (err) {
+                    alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
+                    setLeavingWorkspace(false);
+                    setShowLeaveConfirm(false);
+                  }
+                }}
+                disabled={leavingWorkspace}
+              >
+                {leavingWorkspace ? 'Opúšťam...' : 'Áno, opustiť'}
               </button>
             </div>
           </div>

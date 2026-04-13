@@ -9,6 +9,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
+const notificationService = require('../services/notificationService');
 
 // Get all workspaces user is member of
 router.get('/', authenticateToken, async (req, res) => {
@@ -498,6 +499,10 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       });
     }
 
+    // Get leaving user info before deleting membership
+    const leavingUser = await User.findById(req.user.id, 'username');
+    const workspaceName = req.workspace.name;
+
     await WorkspaceMember.deleteOne({ _id: req.workspaceMember._id });
 
     // Find another workspace to switch to
@@ -510,7 +515,27 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       currentWorkspaceId: otherMembership?.workspaceId || null
     });
 
-    logger.info('User left workspace', { workspaceId: req.workspace._id, userId: req.user.id });
+    // Notify owners and managers that a member left
+    const admins = await WorkspaceMember.find({
+      workspaceId: req.workspace._id,
+      role: { $in: ['owner', 'manager'] }
+    });
+
+    for (const admin of admins) {
+      await notificationService.createNotification({
+        userId: admin.userId.toString(),
+        type: 'workspace',
+        title: `${leavingUser.username} opustil/a prostredie`,
+        message: `Používateľ ${leavingUser.username} opustil/a pracovné prostredie "${workspaceName}".`,
+        actorId: req.user.id,
+        actorName: leavingUser.username,
+        relatedType: 'workspace',
+        relatedId: req.workspace._id.toString(),
+        relatedName: workspaceName
+      });
+    }
+
+    logger.info('User left workspace', { workspaceId: req.workspace._id, userId: req.user.id, notified: admins.length });
 
     res.json({
       message: 'Opustili ste pracovné prostredie',
