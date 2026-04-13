@@ -11,44 +11,49 @@ import HeaderLogo from '../components/HeaderLogo';
 // Help tips for Dashboard
 const dashboardHelpTips = [
   {
+    icon: '👋',
+    title: 'Vitajte v aplikácii',
+    description: 'Toto je váš hlavný prehľad — Dashboard. Zobrazuje súhrn všetkých vašich kontaktov, projektov a správ na jednom mieste. Nižšie nájdete vysvetlenie jednotlivých sekcií. Tento návod si môžete kedykoľvek znova otvoriť kliknutím na fialové tlačidlo "?" v pravom dolnom rohu.'
+  },
+  {
     icon: '📊',
-    title: 'Prehľad štatistík',
-    description: 'Na dashboarde vidíte prehľad vašich kontaktov a projektov. Kliknutím na štatistiku zobrazíte detailný zoznam.'
+    title: 'Čo znamenajú čísla hore',
+    description: 'Na vrchu stránky vidíte štatistiky — počet kontaktov, projektov a úloh. Kliknutím na akékoľvek číslo sa presmerujete na podrobný zoznam. Napríklad kliknutím na "Aktívne kontakty" sa otvorí zoznam kontaktov filtrovaný na aktívne.'
   },
   {
     icon: '👥',
-    title: 'Kontakty podľa stavu',
-    description: 'Kontakty sú radené podľa stavu: Nové a Aktívne prvé, Dokončené za nimi, Zrušené na konci — v rámci skupín abecedne. Kliknutím na kategóriu zobrazíte zoznam.'
+    title: 'Ako fungujú kontakty',
+    description: 'Kontakty sú vaši zákazníci, klienti alebo ľudia, s ktorými pracujete. V sekcii "Kontakty" kliknite na "+ Nový kontakt" pre pridanie. Kontakty majú stavy: Nový (práve pridaný), Aktívny (pracujete s ním), Dokončený (hotový) a Zrušený. Kliknutím na kontakt v zozname rozbalíte jeho detail.'
   },
   {
     icon: '✅',
-    title: 'Projekty podľa priority',
-    description: 'Projekty sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené projekty sa zobrazujú na konci zoznamu.'
+    title: 'Ako fungujú projekty a úlohy',
+    description: 'Projekty obsahujú úlohy, ktoré treba splniť. Každý projekt má prioritu (Nízka, Stredná, Vysoká) a voliteľný termín. V sekcii "Projekty" kliknite na "+ Nový projekt" pre vytvorenie. Úlohy pridáte vnútri projektu. Keď je všetko hotové, označte projekt ako dokončený.'
   },
   {
     icon: '🔔',
-    title: 'Notifikácie',
-    description: 'V pravom hornom rohu nájdete zvonček s notifikáciami. Dostávate upozornenia na všetky zmeny vo workspace — nové kontakty, projekty, priradenia, termíny a správy. Push notifikácie fungujú aj na iOS. Notifikácie chodia len členom daného workspace.'
-  },
-  {
-    icon: '🏢',
-    title: 'Pracovné prostredia',
-    description: 'Cez ikonu profilu v pravom hornom rohu môžete prepínať medzi pracovnými prostrediami alebo vytvoriť nové. Na mobilnej verzii sa názov aktuálneho prostredia zobrazuje v hlavičke pod logom.'
-  },
-  {
-    icon: '📆',
-    title: 'Google synchronizácia',
-    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú synchronizáciu vašich termínov a projektov.'
+    title: 'Ako fungujú upozornenia',
+    description: 'Vpravo hore nájdete ikonu zvončeka — to sú vaše upozornenia. Červené číslo znamená počet neprečítaných. Upozornenia dostávate keď: niekto vytvorí nový kontakt alebo projekt, pridelí vám úlohu, blíži sa termín, alebo vám príde správa. Fungujú aj na telefóne cez push notifikácie (aj na iPhone).'
   },
   {
     icon: '✉️',
-    title: 'Správy a ankety',
-    description: 'V bočnom paneli vidíte prehľad správ podľa stavu (Čaká, Schválené, Zamietnuté, Komentované) a podľa typu (Ankety). Kliknutím na kategóriu zobrazíte zoznam správ. Počet ankiet zahŕňa prijaté aj odoslané.'
+    title: 'Ako fungujú správy',
+    description: 'Správy sú interná komunikácia vášho tímu. V bočnom paneli (vľavo na počítači, dole na mobile) vidíte prehľad správ podľa stavu. Čísla ukazujú koľko správ čaká na odpoveď, koľko bolo schválených atď. Kliknutím na číslo sa otvorí príslušný zoznam správ. Nové správy vytvoríte v sekcii "Správy".'
+  },
+  {
+    icon: '🏢',
+    title: 'Čo sú pracovné prostredia',
+    description: 'Pracovné prostredie je priestor pre váš tím — napríklad "Firemné CRM" alebo "Osobné". Každé prostredie má vlastné kontakty, projekty a správy. Na počítači prepínate prostredia cez dropdown v hlavičke. Na mobile kliknite na ikonu profilu vpravo hore a tam nájdete zoznam vašich prostredí.'
+  },
+  {
+    icon: '👤',
+    title: 'Kde nájdem nastavenia profilu',
+    description: 'Kliknite na ikonu profilu (koliesko s vašou fotkou alebo iniciálou) vpravo hore. Otvorí sa menu s možnosťami: Môj profil (zmena mena, emailu, fotky), Zmeniť heslo, Synchronizácia kalendára (prepojenie s Google), Správa tímu (pozvanie kolegov) a Predplatné (fakturácia).'
   },
   {
     icon: '⚡',
-    title: 'Rýchla navigácia',
-    description: 'Pomocou tlačidiel "Kontakty", "Projekty" a "Správy" v hlavičke alebo cez spodnú navigáciu sa rýchlo prepnete na detailné zobrazenie.'
+    title: 'Ako sa pohybovať v aplikácii',
+    description: 'Na počítači použite tlačidlá v hlavičke: "Kontakty", "Projekty", "Správy". Na mobile (telefóne) nájdete navigáciu na spodku obrazovky — ikony pre Dashboard, Kontakty, Projekty a Správy. Číslo na ikone znamená počet neprečítaných položiek.'
   }
 ];
 

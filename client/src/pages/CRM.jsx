@@ -14,48 +14,58 @@ import { linkifyText } from '../utils/linkify';
 const crmHelpTips = [
   {
     icon: '👤',
-    title: 'Vytvorenie kontaktu',
-    description: 'Kliknite na tlačidlo "+ Nový kontakt" pre pridanie nového kontaktu. Vyplňte meno, email, telefón, firmu a ďalšie údaje. Všetci členovia tímu dostanú notifikáciu.'
+    title: 'Ako pridať nový kontakt',
+    description: 'V pravom hornom rohu kliknite na fialové tlačidlo "+ Nový kontakt". Otvorí sa formulár, kde vyplníte meno kontaktu (povinné), email, telefónne číslo, názov firmy a poznámku. Po uložení sa kontakt zobrazí v zozname a všetci členovia vášho tímu o ňom dostanú upozornenie.'
   },
   {
     icon: '📋',
-    title: 'Detail kontaktu',
-    description: 'Kliknutím na kontakt v zozname rozbalíte jeho detail s projektami, poznámkami, súbormi a prepojenými správami.'
+    title: 'Ako zobraziť detail kontaktu',
+    description: 'Kliknite na meno kontaktu v zozname — rozbalí sa jeho detail. Tu uvidíte všetky informácie: projekty, úlohy, poznámky, nahrané súbory a prepojené správy. Na zatvorenie detailu kliknite na kontakt znova alebo na iný kontakt.'
   },
   {
     icon: '✏️',
-    title: 'Úprava kontaktu',
-    description: 'V rozbalenom detaile kliknite na ikonu ceruzky pre úpravu údajov kontaktu. Dvojklik na úlohu otvorí jej editáciu.'
-  },
-  {
-    icon: '📎',
-    title: 'Súbory a prílohy',
-    description: 'Ku každému kontaktu môžete nahrať súbory (dokumenty, obrázky). Kliknite na "Súbory" v detaile kontaktu.'
-  },
-  {
-    icon: '🔍',
-    title: 'Vyhľadávanie',
-    description: 'Použite vyhľadávacie pole na rýchle nájdenie kontaktu podľa mena, emailu alebo firmy.'
-  },
-  {
-    icon: '🏷️',
-    title: 'Radenie a filtrovanie',
-    description: 'Kontakty sa radia podľa stavu: Nové a Aktívne sú prvé, Dokončené za nimi a Zrušené na konci — v rámci skupín abecedne. Filtrujte v ľavom paneli.'
+    title: 'Ako upraviť kontakt',
+    description: 'V rozbalenom detaile kontaktu kliknite na ikonu ceruzky (✏️) vedľa mena. Otvorí sa formulár, kde môžete zmeniť akékoľvek údaje — meno, email, telefón, firmu alebo stav kontaktu (Nový, Aktívny, Dokončený, Zrušený). Zmeny uložte tlačidlom "Uložiť".'
   },
   {
     icon: '📝',
-    title: 'Projekty kontaktu',
-    description: 'Každý kontakt má vlastné projekty s úlohami. Pri dokončení hlavného projektu sa automaticky dokončia všetky úlohy.'
+    title: 'Ako pridať projekt ku kontaktu',
+    description: 'V detaile kontaktu nájdite sekciu "Projekty" a kliknite na "+ Nový projekt". Zadajte názov projektu, nastavte termín dokončenia a prioritu (Nízka, Stredná, Vysoká). Projekt sa priradí ku kontaktu a môžete do neho pridávať úlohy.'
+  },
+  {
+    icon: '✅',
+    title: 'Ako pracovať s úlohami',
+    description: 'V projekte kliknite na pole "Nová úloha" a napíšte jej názov. Úlohu dokončíte kliknutím na krúžok vedľa nej (zaškrtne sa). Každá úloha môže mať podúlohy — kliknite na úlohu a potom na "+ Nová podúloha". Keď dokončíte hlavný projekt (kliknutím na jeho checkbox), automaticky sa dokončia všetky jeho úlohy.'
+  },
+  {
+    icon: '📎',
+    title: 'Ako nahrať súbory',
+    description: 'V detaile kontaktu kliknite na záložku "Súbory". Potom kliknite na "Nahrať súbor" a vyberte súbor z vášho zariadenia. Podporované sú obrázky (JPG, PNG), dokumenty (PDF, Word, Excel), textové súbory a archívy. Maximálna veľkosť jedného súboru je 10 MB.'
+  },
+  {
+    icon: '🔍',
+    title: 'Ako vyhľadávať kontakty',
+    description: 'Na vrchu stránky je vyhľadávacie pole. Stačí začať písať meno, email alebo názov firmy — zoznam sa okamžite filtruje a zobrazí len kontakty, ktoré zodpovedajú vášmu hľadaniu. Pre zrušenie hľadania vymažte text z poľa.'
+  },
+  {
+    icon: '🏷️',
+    title: 'Ako filtrovať podľa stavu',
+    description: 'V ľavom paneli (na mobile hore) nájdete filtre podľa stavu: Všetky, Nové, Aktívne, Dokončené a Zrušené. Kliknite na požadovaný filter — zobrazia sa len kontakty v danom stave. Kontakty sú automaticky zoradené: Nové a Aktívne sú prvé, Dokončené za nimi, Zrušené na konci.'
   },
   {
     icon: '📥',
-    title: 'Export kontaktov do CSV',
-    description: 'Kliknite na "📥 CSV" v hlavičke zoznamu pre stiahnutie všetkých kontaktov do tabuľkového súboru. Obsahuje meno, email, telefón, firmu, stav a počet projektov. Súbor sa otvorí v Exceli alebo Google Sheets.'
+    title: 'Ako exportovať kontakty do Excelu',
+    description: 'Kliknite na tlačidlo "📥 CSV" v hlavičke zoznamu kontaktov. Stiahne sa tabuľkový súbor, ktorý otvoríte v Exceli alebo Google Sheets. Obsahuje všetky údaje: meno, email, telefón, firmu, stav a počet projektov. Súbor má správnu diakritiku (háčky, čiarky).'
   },
   {
     icon: '🔔',
-    title: 'Pripomienky termínov',
-    description: 'Pri nastavení termínu projektu alebo úlohy si vyberte vlastnú pripomienku (v deň termínu, 1, 3, 7 alebo 14 dní pred). Systém vás upozorní push notifikáciou.'
+    title: 'Ako nastaviť pripomienku termínu',
+    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia. Pod dátumom sa zobrazí možnosť "Pripomenúť" — vyberte si, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón.'
+  },
+  {
+    icon: '📨',
+    title: 'Prepojené správy',
+    description: 'V detaile kontaktu vidíte sekciu "Správy" — zobrazujú sa tu všetky interné správy, ktoré boli prepojené s týmto kontaktom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú.'
   }
 ];
 

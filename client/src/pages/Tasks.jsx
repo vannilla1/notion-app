@@ -19,68 +19,68 @@ import { linkifyText } from '../utils/linkify';
 const tasksHelpTips = [
   {
     icon: '➕',
-    title: 'Vytvorenie projektu',
-    description: 'Kliknite na "+ Nový projekt" pre vytvorenie nového projektu. Môžete ho priradiť ku kontaktu alebo vytvoriť globálny projekt.'
-  },
-  {
-    icon: '📅',
-    title: 'Termíny a priorita',
-    description: 'Každému projektu môžete nastaviť termín dokončenia a prioritu (nízka, stredná, vysoká). Farebné označenie ukazuje blížiace sa termíny — zelená (do 14 dní), oranžová (do 7 dní), červená (po termíne).'
-  },
-  {
-    icon: '🔔',
-    title: 'Upozornenia na termíny',
-    description: 'Systém automaticky sleduje termíny projektov a úloh. Dostanete notifikáciu 7 dní pred termínom, 3 dni pred termínom a keď termín vyprší. Pri nastavení termínu si môžete zvoliť vlastnú pripomienku (v deň termínu, 1, 3, 7 alebo 14 dní pred). Funguje aj cez push notifikácie na iOS.'
+    title: 'Ako vytvoriť nový projekt',
+    description: 'Kliknite na fialové tlačidlo "+ Nový projekt" v pravom hornom rohu. Zadajte názov projektu (povinné). Voliteľne vyberte kontakt, ku ktorému projekt patrí, alebo ho nechajte ako globálny projekt bez kontaktu. Nastavte termín a prioritu. Po uložení sa projekt zobrazí v zozname.'
   },
   {
     icon: '📝',
-    title: 'Úlohy a podúlohy',
-    description: 'Rozbaľte projekt a pridajte úlohy cez pole "Nová úloha". Úlohy môžu mať vlastné podúlohy (pole "Nová podúloha"), termíny, poznámky a priradených používateľov. Kliknutím na názov úlohy rozbalíte jej podúlohy.'
+    title: 'Ako pridať úlohy do projektu',
+    description: 'Kliknite na projekt — rozbalí sa. Dole uvidíte pole "Nová úloha". Napíšte názov úlohy a stlačte Enter. Úloha sa pridá do projektu. Každá úloha môže mať aj podúlohy — kliknite na úlohu, zobrazí sa pole "Nová podúloha". K úlohám môžete pridať termín, poznámku a priradiť zodpovedného člena tímu.'
   },
   {
     icon: '✅',
-    title: 'Dokončenie projektu',
-    description: 'Kliknutím na checkbox označíte projekt ako dokončený. Pri dokončení hlavného projektu sa automaticky dokončia aj všetky jeho úlohy.'
+    title: 'Ako dokončiť projekt alebo úlohu',
+    description: 'Vedľa každého projektu a úlohy je krúžok (checkbox). Kliknite naň — označí sa ako dokončené. Dôležité: keď označíte hlavný projekt ako dokončený, automaticky sa dokončia aj všetky jeho úlohy a podúlohy. Dokončené projekty sa presunú na koniec zoznamu.'
+  },
+  {
+    icon: '📅',
+    title: 'Ako nastaviť termín a prioritu',
+    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Vďaka tomu na prvý pohľad vidíte, čo je urgentné.'
+  },
+  {
+    icon: '🔔',
+    title: 'Ako fungujú pripomienky',
+    description: 'Pri nastavení termínu si vyberte, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón (funguje aj na iPhone). Systém automaticky posiela upozornenia aj 7 a 3 dni pred termínom.'
   },
   {
     icon: '👤',
-    title: 'Priradenie projektov',
-    description: 'Projekty a úlohy môžete priradiť konkrétnym členom tímu. Priradený používateľ dostane notifikáciu v aplikácii aj push notifikáciu na mobile.'
+    title: 'Ako priradiť projekt alebo úlohu kolegovi',
+    description: 'V detaile projektu alebo úlohy kliknite na ikonu osoby alebo na výber "Priradiť". Zobrazí sa zoznam členov vášho tímu — vyberte jedného. Priradený kolega okamžite dostane upozornenie v aplikácii aj na telefón, že mu bol priradený nový projekt alebo úloha.'
   },
   {
     icon: '↕️',
-    title: 'Radenie projektov',
-    description: 'Projekty sa radia podľa priority (Vysoká → Stredná → Nízka). Dokončené projekty sa zobrazia na konci. Poradie môžete zmeniť aj pretiahnutím cez ikonu ⠿.'
+    title: 'Ako meniť poradie projektov',
+    description: 'Projekty sú automaticky zoradené podľa priority (Vysoká prvá, potom Stredná, potom Nízka). Dokončené projekty sa zobrazia na konci. Ak chcete zmeniť poradie ručne, uchopte projekt za ikonu ⠿ (šesť bodiek vľavo) a pretiahnite ho na požadované miesto.'
   },
   {
     icon: '📎',
-    title: 'Prílohy',
-    description: 'K projektom a úlohám môžete priložiť súbory (max. 10 MB): obrázky (JPG, PNG, GIF, WebP), dokumenty (PDF, Word, Excel, PowerPoint), texty (TXT, CSV, JSON, XML), archívy (ZIP, RAR, 7z) a médiá (MP3, MP4, WAV, AVI, MOV).'
+    title: 'Ako priložiť súbory k projektu',
+    description: 'V detaile projektu alebo úlohy kliknite na ikonu kancelárskej sponky (📎). Vyberte súbor z vášho zariadenia. Podporované formáty: obrázky (JPG, PNG), dokumenty (PDF, Word, Excel), textové súbory, archívy (ZIP) a médiá (MP3, MP4). Maximálna veľkosť jedného súboru je 10 MB.'
   },
   {
     icon: '🔍',
-    title: 'Filtrovanie',
-    description: 'Použite filtre v ľavom paneli: Všetky, Na dnes, Priradené mne, Nové (posledných 24h), alebo podľa priority. Filtre fungujú aj na úlohy.'
+    title: 'Ako filtrovať projekty',
+    description: 'V ľavom paneli (na mobile hore) nájdete filtre: "Všetky" zobrazí všetko, "Na dnes" zobrazí projekty s dnešným termínom, "Priradené mne" zobrazí len vaše projekty, "Nové" zobrazí projekty za posledných 24 hodín. Filtre podľa priority zobrazia len projekty s danou prioritou.'
   },
   {
     icon: '🗓️',
-    title: 'Kalendárový pohľad',
-    description: 'Prepnite na pohľad kalendára tlačidlom 📅 vpravo hore. Vyberte si mesačný, týždenný alebo denný prehľad. Kliknutím na deň v mesačnom pohľade zobrazíte detailný denný pohľad. Na mobile sa kalendár dá horizontálne posúvať.'
+    title: 'Ako používať kalendárový pohľad',
+    description: 'Vpravo hore kliknite na ikonu kalendára (📅). Prepnete sa z pohľadu zoznamu na kalendár. Vyberte si mesačný, týždenný alebo denný prehľad pomocou tlačidiel hore. V mesačnom pohľade kliknite na konkrétny deň — zobrazí sa denný detail. Na mobile môžete kalendár posúvať dotykom doľava a doprava.'
   },
   {
     icon: '📥',
-    title: 'Export do CSV',
-    description: 'Kliknite na "📥 CSV" vedľa prepínača pohľadu pre stiahnutie všetkých projektov a úloh do tabuľkového súboru. Súbor sa otvorí v Exceli alebo Google Sheets so správnymi diakritikami.'
+    title: 'Ako exportovať projekty do Excelu',
+    description: 'Kliknite na tlačidlo "📥 CSV" vedľa prepínača pohľadu. Stiahne sa tabuľkový súbor so všetkými projektmi a ich úlohami. Súbor sa dá otvoriť v Exceli alebo Google Sheets. Obsahuje názov, stav, termín, prioritu, priradeného používateľa a ďalšie údaje. Diakritika (háčky, čiarky) funguje správne.'
   },
   {
     icon: '📆',
-    title: 'Google synchronizácia',
-    description: 'V nastaveniach profilu prepojte Google Calendar a Google Tasks pre automatickú obojstrannú synchronizáciu termínov a projektov.'
+    title: 'Ako prepojiť s Google kalendárom',
+    description: 'Kliknite na ikonu profilu vpravo hore, potom na "Synchronizácia kalendára". Prepojte svoj Google účet — vaše projekty s termínmi sa automaticky zobrazia v Google Calendar a úlohy v Google Tasks. Synchronizácia funguje obojsmerne: zmeny v Google sa prejavia aj v aplikácii.'
   },
   {
     icon: '📨',
-    title: 'Prepojené správy',
-    description: 'V detaile projektu vidíte všetky správy, ktoré boli s ním prepojené. Kliknutím na správu sa presmerujete do sekcie Správy.'
+    title: 'Ako vidieť prepojené správy',
+    description: 'V detaile projektu nájdete sekciu "Správy". Tu sa zobrazujú všetky interné správy vášho tímu, ktoré boli prepojené s týmto projektom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú alebo na ňu odpoviete.'
   }
 ];
 
