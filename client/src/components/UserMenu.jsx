@@ -4,7 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
+import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
 
 const translateErrorMessage = (message) => {
   if (!message) return 'Neznáma chyba';
@@ -805,6 +805,24 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </span>
                     </div>
                   ))}
+                  {currentWorkspace?.role !== 'owner' && (
+                    <div
+                      className="mobile-workspace-item"
+                      style={{ color: '#EF4444', borderTop: '1px solid var(--border-color, #e2e8f0)' }}
+                      onClick={async () => {
+                        if (!window.confirm(`Naozaj chcete opustiť prostredie "${currentWorkspace.name}"?`)) return;
+                        try {
+                          await leaveWorkspaceApi();
+                          window.location.href = '/app';
+                        } catch (err) {
+                          alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
+                        }
+                      }}
+                    >
+                      <span style={{ fontSize: '14px' }}>🚪</span>
+                      <span>Opustiť prostredie</span>
+                    </div>
+                  )}
                   {creatingWorkspace ? (
                     <div className="mobile-workspace-create-form">
                       <input

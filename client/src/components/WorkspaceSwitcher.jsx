@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
+import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -13,6 +13,7 @@ const WorkspaceSwitcher = () => {
   const [saving, setSaving] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [colorPickerFor, setColorPickerFor] = useState(null);
+  const [leaving, setLeaving] = useState(false);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
@@ -67,6 +68,20 @@ const WorkspaceSwitcher = () => {
   };
 
   const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
+  const canLeave = currentWorkspace?.role !== 'owner';
+
+  const handleLeaveWorkspace = async () => {
+    if (!window.confirm(`Naozaj chcete opustiť prostredie "${currentWorkspace.name}"?`)) return;
+    try {
+      setLeaving(true);
+      await leaveWorkspaceApi();
+      window.location.href = '/app';
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
+    } finally {
+      setLeaving(false);
+    }
+  };
 
   const colorOptions = [
     '#6366f1', '#3B82F6', '#10B981', '#F59E0B',
@@ -277,6 +292,19 @@ const WorkspaceSwitcher = () => {
               </span>
             </button>
           ))}
+
+          {canLeave && (
+            <button
+              className="workspace-dropdown-item workspace-leave-btn"
+              onClick={handleLeaveWorkspace}
+              disabled={leaving}
+            >
+              <span className="workspace-leave-icon">🚪</span>
+              <span className="workspace-info">
+                <span className="workspace-item-name">{leaving ? 'Opúšťam...' : 'Opustiť prostredie'}</span>
+              </span>
+            </button>
+          )}
 
           <div className="workspace-create-section">
             {isCreating ? (
