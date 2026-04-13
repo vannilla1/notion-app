@@ -13,6 +13,7 @@ const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
+const PromoCode = require('../models/PromoCode');
 const auditService = require('../services/auditService');
 
 const router = express.Router();
@@ -1159,6 +1160,256 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
     res.json(result);
   } catch (error) {
     logger.error('Workspace comparison error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ─── PROMO CODES MANAGEMENT ──────────────────────────────────
+
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// List all promo codes
+router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const codes = await PromoCode.find()
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(codes);
+  } catch (error) {
+    logger.error('List promo codes error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri načítaní promo kódov' });
+  }
+});
+
+// Create promo code
+router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { code, name, type, value, validForPlans, validForPeriods, maxUses, maxUsesPerUser, expiresAt } = req.body;
+
+    // Validate required fields
+    if (!code || !name || !type || value === undefined) {
+      return res.status(400).json({ message: 'Vyplňte všetky povinné polia (kód, názov, typ, hodnota)' });
+    }
+
+    // Validate code format (alphanumeric, hyphens, underscores)
+    if (!/^[A-Z0-9_-]+$/i.test(code)) {
+      return res.status(400).json({ message: 'Kód môže obsahovať len písmená, čísla, pomlčky a podčiarkovníky' });
+    }
+
+    // Check if code already exists
+    const existing = await PromoCode.findOne({ code: code.toUpperCase() });
+    if (existing) {
+      return res.status(409).json({ message: 'Promo kód s týmto kódom už existuje' });
+    }
+
+    // Validate value based on type
+    if (type === 'percentage' && (value < 1 || value > 100)) {
+      return res.status(400).json({ message: 'Percentuálna zľava musí byť medzi 1-100%' });
+    }
+    if (type === 'fixed' && (value < 0.01 || value > 500)) {
+      return res.status(400).json({ message: 'Fixná zľava musí byť medzi 0.01-500€' });
+    }
+    if (type === 'freeMonths' && (value < 1 || value > 24)) {
+      return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
+    }
+
+    // Create Stripe Coupon + Promotion Code
+    let stripeCouponId = null;
+    let stripePromotionCodeId = null;
+
+    if (process.env.STRIPE_SECRET_KEY) {
+      try {
+        // Create Stripe Coupon
+        const couponParams = {
+          name: name,
+          metadata: { promoCode: code.toUpperCase() }
+        };
+
+        if (type === 'percentage') {
+          couponParams.percent_off = value;
+        } else if (type === 'fixed') {
+          couponParams.amount_off = Math.round(value * 100); // Stripe uses cents
+          couponParams.currency = 'eur';
+        } else if (type === 'freeMonths') {
+          // For free months, use 100% off for X months
+          couponParams.percent_off = 100;
+          couponParams.duration = 'repeating';
+          couponParams.duration_in_months = value;
+        }
+
+        // Set duration for percentage/fixed
+        if (type !== 'freeMonths') {
+          couponParams.duration = 'once'; // One-time discount on first payment
+        }
+
+        if (maxUses > 0) {
+          couponParams.max_redemptions = maxUses;
+        }
+        if (expiresAt) {
+          couponParams.redeem_by = Math.floor(new Date(expiresAt).getTime() / 1000);
+        }
+
+        const stripeCoupon = await stripe.coupons.create(couponParams);
+        stripeCouponId = stripeCoupon.id;
+
+        // Create Stripe Promotion Code (the customer-facing code)
+        const promoCodeParams = {
+          coupon: stripeCoupon.id,
+          code: code.toUpperCase(),
+          active: true
+        };
+
+        if (maxUses > 0) {
+          promoCodeParams.max_redemptions = maxUses;
+        }
+        if (expiresAt) {
+          promoCodeParams.expires_at = Math.floor(new Date(expiresAt).getTime() / 1000);
+        }
+
+        const stripePromoCode = await stripe.promotionCodes.create(promoCodeParams);
+        stripePromotionCodeId = stripePromoCode.id;
+
+        logger.info('[PromoCode] Stripe coupon + promotion code created', {
+          couponId: stripeCouponId,
+          promotionCodeId: stripePromotionCodeId,
+          code: code.toUpperCase()
+        });
+      } catch (stripeErr) {
+        logger.error('[PromoCode] Stripe creation failed', { error: stripeErr.message });
+        // Continue without Stripe — code will work for in-app discount display
+      }
+    }
+
+    const promoCode = new PromoCode({
+      code: code.toUpperCase(),
+      name,
+      type,
+      value,
+      validForPlans: validForPlans || [],
+      validForPeriods: validForPeriods || [],
+      maxUses: maxUses || 0,
+      maxUsesPerUser: maxUsesPerUser !== undefined ? maxUsesPerUser : 1,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      stripeCouponId,
+      stripePromotionCodeId,
+      createdBy: req.adminUser.username
+    });
+
+    await promoCode.save();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: 'promo_code.created', category: 'billing',
+      targetType: 'promoCode', targetId: promoCode._id.toString(), targetName: code.toUpperCase(),
+      details: { type, value, maxUses, expiresAt, validForPlans, validForPeriods, stripeCouponId },
+      ipAddress: req.ip
+    });
+
+    res.status(201).json(promoCode);
+  } catch (error) {
+    logger.error('Create promo code error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri vytváraní promo kódu' });
+  }
+});
+
+// Update promo code (toggle active, update limits)
+router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const promoCode = await PromoCode.findById(req.params.id);
+    if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
+
+    const { name, isActive, maxUses, maxUsesPerUser, expiresAt } = req.body;
+
+    const changes = {};
+    if (name !== undefined) { changes.name = name; promoCode.name = name; }
+    if (isActive !== undefined) { changes.isActive = isActive; promoCode.isActive = isActive; }
+    if (maxUses !== undefined) { changes.maxUses = maxUses; promoCode.maxUses = maxUses; }
+    if (maxUsesPerUser !== undefined) { changes.maxUsesPerUser = maxUsesPerUser; promoCode.maxUsesPerUser = maxUsesPerUser; }
+    if (expiresAt !== undefined) {
+      changes.expiresAt = expiresAt;
+      promoCode.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    }
+
+    // Update Stripe promotion code active status
+    if (isActive !== undefined && promoCode.stripePromotionCodeId && process.env.STRIPE_SECRET_KEY) {
+      try {
+        await stripe.promotionCodes.update(promoCode.stripePromotionCodeId, { active: isActive });
+      } catch (stripeErr) {
+        logger.warn('[PromoCode] Stripe update failed', { error: stripeErr.message });
+      }
+    }
+
+    await promoCode.save();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: 'promo_code.updated', category: 'billing',
+      targetType: 'promoCode', targetId: promoCode._id.toString(), targetName: promoCode.code,
+      details: changes,
+      ipAddress: req.ip
+    });
+
+    res.json(promoCode);
+  } catch (error) {
+    logger.error('Update promo code error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri aktualizácii promo kódu' });
+  }
+});
+
+// Delete promo code
+router.delete('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const promoCode = await PromoCode.findById(req.params.id);
+    if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
+
+    // Deactivate in Stripe (don't delete — keep for historical records)
+    if (promoCode.stripePromotionCodeId && process.env.STRIPE_SECRET_KEY) {
+      try {
+        await stripe.promotionCodes.update(promoCode.stripePromotionCodeId, { active: false });
+      } catch (stripeErr) {
+        logger.warn('[PromoCode] Stripe deactivation failed', { error: stripeErr.message });
+      }
+    }
+
+    const codeName = promoCode.code;
+    await promoCode.deleteOne();
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: 'promo_code.deleted', category: 'billing',
+      targetType: 'promoCode', targetId: req.params.id, targetName: codeName,
+      details: {},
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Delete promo code error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní promo kódu' });
+  }
+});
+
+// Get promo code stats
+router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const promoCode = await PromoCode.findById(req.params.id).populate('redemptions.userId', 'username email');
+    if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
+
+    res.json({
+      code: promoCode.code,
+      name: promoCode.name,
+      usedCount: promoCode.usedCount,
+      maxUses: promoCode.maxUses,
+      isValid: promoCode.isValid(),
+      redemptions: promoCode.redemptions.map(r => ({
+        user: r.userId ? { username: r.userId.username, email: r.userId.email } : null,
+        redeemedAt: r.redeemedAt,
+        plan: r.plan,
+        period: r.period
+      }))
+    });
+  } catch (error) {
+    logger.error('Promo code stats error', { error: error.message });
     res.status(500).json({ message: 'Chyba' });
   }
 });

@@ -2,8 +2,15 @@ const express = require('express');
 const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const User = require('../models/User');
+const PromoCode = require('../models/PromoCode');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
+
+// ===== Plan prices (for discount calculations) =====
+const PLAN_DISPLAY_PRICES = {
+  team: { monthly: 4.99, yearly: 49.00 },
+  pro: { monthly: 9.99, yearly: 99.00 }
+};
 
 // ===== Plan ↔ Price mapping =====
 
@@ -141,7 +148,7 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       return res.status(503).json({ message: 'Billing not configured' });
     }
 
-    const { plan, period } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
+    const { plan, period, promoCode: promoCodeStr } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
 
     if (!['team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
@@ -176,7 +183,8 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       }
     }
 
-    const session = await stripe.checkout.sessions.create({
+    // Build checkout session options
+    const checkoutOptions = {
       customer: customerId,
       mode: 'subscription',
       payment_method_types: ['card'],
@@ -197,9 +205,50 @@ router.post('/checkout', authenticateToken, async (req, res) => {
           plan
         }
       },
-      allow_promotion_codes: true,
       billing_address_collection: 'auto'
-    });
+    };
+
+    // If user provided a promo code, attach Stripe promotion code
+    let appliedPromoCode = null;
+    if (promoCodeStr) {
+      const promoDoc = await PromoCode.findOne({ code: promoCodeStr.toUpperCase() });
+      if (promoDoc && promoDoc.isValid() && promoDoc.canBeUsedBy(req.user.id) && promoDoc.isValidForPlan(plan, period)) {
+        if (promoDoc.stripePromotionCodeId) {
+          // Use specific promotion code — disables manual entry
+          checkoutOptions.discounts = [{ promotion_code: promoDoc.stripePromotionCodeId }];
+        } else {
+          // No Stripe promo code — let user enter codes manually
+          checkoutOptions.allow_promotion_codes = true;
+        }
+        appliedPromoCode = promoDoc;
+        checkoutOptions.metadata.promoCodeId = promoDoc._id.toString();
+        checkoutOptions.metadata.promoCode = promoDoc.code;
+      } else {
+        // Invalid promo code — proceed without it but allow manual codes
+        checkoutOptions.allow_promotion_codes = true;
+      }
+    } else {
+      // No promo code provided — allow manual entry at Stripe checkout
+      checkoutOptions.allow_promotion_codes = true;
+    }
+
+    const session = await stripe.checkout.sessions.create(checkoutOptions);
+
+    // Record promo code usage after successful session creation
+    if (appliedPromoCode) {
+      appliedPromoCode.usedCount += 1;
+      appliedPromoCode.redemptions.push({
+        userId: user._id,
+        plan,
+        period
+      });
+      await appliedPromoCode.save();
+      logger.info('[Billing] Promo code applied to checkout', {
+        code: appliedPromoCode.code,
+        userId: user._id.toString(),
+        sessionId: session.id
+      });
+    }
 
     logger.info('[Billing] Checkout session created', {
       userId: user._id.toString(),
@@ -301,6 +350,65 @@ router.get('/debug', authenticateToken, async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Validate promo code (user-facing)
+router.post('/validate-promo', authenticateToken, async (req, res) => {
+  try {
+    const { code, plan, period } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ message: 'Zadajte promo kód' });
+    }
+
+    const promoCode = await PromoCode.findOne({ code: code.toUpperCase() });
+    if (!promoCode) {
+      return res.status(404).json({ message: 'Neplatný promo kód' });
+    }
+
+    if (!promoCode.isValid()) {
+      if (promoCode.expiresAt && new Date() > promoCode.expiresAt) {
+        return res.status(400).json({ message: 'Promo kód expiroval' });
+      }
+      if (promoCode.maxUses > 0 && promoCode.usedCount >= promoCode.maxUses) {
+        return res.status(400).json({ message: 'Promo kód bol už vyčerpaný' });
+      }
+      return res.status(400).json({ message: 'Promo kód nie je aktívny' });
+    }
+
+    if (!promoCode.canBeUsedBy(req.user.id)) {
+      return res.status(400).json({ message: 'Tento promo kód ste už použili' });
+    }
+
+    if (plan && period && !promoCode.isValidForPlan(plan, period)) {
+      return res.status(400).json({ message: 'Promo kód nie je platný pre tento plán alebo obdobie' });
+    }
+
+    // Calculate discount for each plan/period combination
+    const discountPreview = {};
+    for (const [planKey, prices] of Object.entries(PLAN_DISPLAY_PRICES)) {
+      if (promoCode.validForPlans.length > 0 && !promoCode.validForPlans.includes(planKey)) continue;
+      discountPreview[planKey] = {};
+      for (const [periodKey, price] of Object.entries(prices)) {
+        if (promoCode.validForPeriods.length > 0 && !promoCode.validForPeriods.includes(periodKey)) continue;
+        discountPreview[planKey][periodKey] = promoCode.calculateDiscount(price);
+      }
+    }
+
+    res.json({
+      valid: true,
+      code: promoCode.code,
+      name: promoCode.name,
+      type: promoCode.type,
+      value: promoCode.value,
+      validForPlans: promoCode.validForPlans,
+      validForPeriods: promoCode.validForPeriods,
+      discountPreview
+    });
+  } catch (error) {
+    logger.error('[Billing] Validate promo error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

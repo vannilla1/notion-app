@@ -15,6 +15,7 @@ const TABS = [
   { id: 'api', label: 'API', icon: '🔌' },
   { id: 'storage', label: 'Storage', icon: '💾' },
   { id: 'comparison', label: 'Porovnanie', icon: '⚖️' },
+  { id: 'promo', label: 'Promo kódy', icon: '🎟️' },
   { id: 'audit', label: 'Audit log', icon: '📋' },
   { id: 'sync', label: 'Sync', icon: '🔄' }
 ];
@@ -77,6 +78,7 @@ function AdminPanel() {
         {activeTab === 'api' && <ApiMetricsTab />}
         {activeTab === 'storage' && <StorageTab />}
         {activeTab === 'comparison' && <WorkspaceComparisonTab />}
+        {activeTab === 'promo' && <PromoCodesTab />}
         {activeTab === 'audit' && <AuditLogTab />}
         {activeTab === 'sync' && <SyncTab />}
       </div>
@@ -1916,6 +1918,315 @@ function WorkspaceComparisonTab() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── PROMO CODES TAB ──────────────────────────────────────────
+const PROMO_TYPES = {
+  percentage: { label: 'Percentuálna zľava', unit: '%', icon: '🏷️' },
+  fixed: { label: 'Fixná zľava', unit: '€', icon: '💶' },
+  freeMonths: { label: 'Voľné mesiace', unit: 'mes.', icon: '🎁' }
+};
+
+function PromoCodesTab() {
+  const [codes, setCodes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedCode, setSelectedCode] = useState(null);
+  const [stats, setStats] = useState(null);
+
+  // Form state
+  const [form, setForm] = useState({
+    code: '', name: '', type: 'percentage', value: '',
+    validForPlans: [], validForPeriods: [],
+    maxUses: '', maxUsesPerUser: '1', expiresAt: ''
+  });
+
+  const fetchCodes = useCallback(async () => {
+    try {
+      const res = await adminApi.get('/api/admin/promo-codes');
+      setCodes(res.data);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchCodes(); }, [fetchCodes]);
+
+  const resetForm = () => {
+    setForm({ code: '', name: '', type: 'percentage', value: '', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '' });
+    setShowForm(false);
+  };
+
+  const generateCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'PRPL-';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    setForm(f => ({ ...f, code }));
+  };
+
+  const handleCreate = async () => {
+    if (!form.code || !form.name || !form.value) {
+      alert('Vyplňte kód, názov a hodnotu');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminApi.post('/api/admin/promo-codes', {
+        ...form,
+        value: parseFloat(form.value),
+        maxUses: form.maxUses ? parseInt(form.maxUses) : 0,
+        maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : 1,
+        expiresAt: form.expiresAt || null
+      });
+      resetForm();
+      fetchCodes();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri vytváraní kódu');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle = async (id, isActive) => {
+    try {
+      await adminApi.put(`/api/admin/promo-codes/${id}`, { isActive: !isActive });
+      fetchCodes();
+    } catch {
+      alert('Chyba pri aktualizácii');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Naozaj vymazať tento promo kód?')) return;
+    try {
+      await adminApi.delete(`/api/admin/promo-codes/${id}`);
+      fetchCodes();
+      if (selectedCode?._id === id) { setSelectedCode(null); setStats(null); }
+    } catch {
+      alert('Chyba pri mazaní');
+    }
+  };
+
+  const viewStats = async (code) => {
+    setSelectedCode(code);
+    try {
+      const res = await adminApi.get(`/api/admin/promo-codes/${code._id}/stats`);
+      setStats(res.data);
+    } catch {
+      setStats(null);
+    }
+  };
+
+  const togglePlan = (plan) => {
+    setForm(f => ({
+      ...f,
+      validForPlans: f.validForPlans.includes(plan)
+        ? f.validForPlans.filter(p => p !== plan)
+        : [...f.validForPlans, plan]
+    }));
+  };
+
+  const togglePeriod = (period) => {
+    setForm(f => ({
+      ...f,
+      validForPeriods: f.validForPeriods.includes(period)
+        ? f.validForPeriods.filter(p => p !== period)
+        : [...f.validForPeriods, period]
+    }));
+  };
+
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
+  const isExpired = (d) => d && new Date(d) < new Date();
+
+  const cardStyle = { padding: '16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', marginBottom: '12px' };
+  const labelStyle = { fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' };
+  const inputStyle = { padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', width: '100%', boxSizing: 'border-box' };
+  const chipStyle = (active) => ({ padding: '4px 10px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer', border: `1px solid ${active ? 'var(--primary, #8B5CF6)' : 'var(--border-color)'}`, background: active ? 'var(--primary, #8B5CF6)' : 'transparent', color: active ? '#fff' : 'var(--text-secondary)', fontWeight: 500 });
+
+  if (loading) return <div className="sa-loading">Načítavam promo kódy...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Promo kódy ({codes.length})</h3>
+        {!showForm && (
+          <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 16px' }} onClick={() => setShowForm(true)}>
+            + Nový kód
+          </button>
+        )}
+      </div>
+
+      {/* Create form */}
+      {showForm && (
+        <div style={{ ...cardStyle, border: '1px solid var(--primary, #8B5CF6)' }}>
+          <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Nový promo kód</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={labelStyle}>Kód *</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input style={{ ...inputStyle, flex: 1, textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 600 }}
+                  value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} placeholder="PRPL-AKCIA50" />
+                <button onClick={generateCode} style={{ padding: '4px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', cursor: 'pointer', background: 'var(--bg-primary)', whiteSpace: 'nowrap' }}>
+                  Generovať
+                </button>
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Názov (interný) *</label>
+              <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Jarná akcia 2026" />
+            </div>
+            <div>
+              <label style={labelStyle}>Typ zľavy *</label>
+              <select style={inputStyle} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {Object.entries(PROMO_TYPES).map(([key, t]) => (
+                  <option key={key} value={key}>{t.icon} {t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Hodnota * ({PROMO_TYPES[form.type]?.unit})</label>
+              <input style={inputStyle} type="number" min="1" value={form.value}
+                onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
+                placeholder={form.type === 'percentage' ? '20' : form.type === 'fixed' ? '5.00' : '3'} />
+            </div>
+            <div>
+              <label style={labelStyle}>Platné pre plány (prázdne = všetky)</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <span style={chipStyle(form.validForPlans.includes('team'))} onClick={() => togglePlan('team')}>Tím</span>
+                <span style={chipStyle(form.validForPlans.includes('pro'))} onClick={() => togglePlan('pro')}>Pro</span>
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Platné pre obdobie (prázdne = obe)</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <span style={chipStyle(form.validForPeriods.includes('monthly'))} onClick={() => togglePeriod('monthly')}>Mesačne</span>
+                <span style={chipStyle(form.validForPeriods.includes('yearly'))} onClick={() => togglePeriod('yearly')}>Ročne</span>
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Max. použití (0 = neobmedzené)</label>
+              <input style={inputStyle} type="number" min="0" value={form.maxUses}
+                onChange={e => setForm(f => ({ ...f, maxUses: e.target.value }))} placeholder="0" />
+            </div>
+            <div>
+              <label style={labelStyle}>Max. na používateľa</label>
+              <input style={inputStyle} type="number" min="0" value={form.maxUsesPerUser}
+                onChange={e => setForm(f => ({ ...f, maxUsesPerUser: e.target.value }))} placeholder="1" />
+            </div>
+            <div>
+              <label style={labelStyle}>Platnosť do</label>
+              <input style={inputStyle} type="datetime-local" value={form.expiresAt}
+                onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' }}>
+            <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={resetForm}>Zrušiť</button>
+            <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={saving} onClick={handleCreate}>
+              {saving ? 'Vytváram...' : 'Vytvoriť kód'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Code list */}
+      {codes.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎟️</div>
+          <p>Žiadne promo kódy</p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {codes.map(c => {
+            const expired = isExpired(c.expiresAt);
+            const exhausted = c.maxUses > 0 && c.usedCount >= c.maxUses;
+            const inactive = !c.isActive || expired || exhausted;
+            return (
+              <div key={c._id} style={{ ...cardStyle, opacity: inactive ? 0.6 : 1, marginBottom: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <code style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary, #8B5CF6)', background: 'var(--bg-primary)', padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
+                        {c.code}
+                      </code>
+                      {!c.isActive && <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: '#FEE2E2', color: '#DC2626', fontWeight: 600 }}>NEAKTÍVNY</span>}
+                      {expired && <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: '#FEF3C7', color: '#D97706', fontWeight: 600 }}>EXPIROVANÝ</span>}
+                      {exhausted && <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: '#FEE2E2', color: '#DC2626', fontWeight: 600 }}>VYČERPANÝ</span>}
+                      {c.stripeCouponId && <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: '#DBEAFE', color: '#2563EB', fontWeight: 600 }}>STRIPE</span>}
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{c.name}</div>
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      <span>{PROMO_TYPES[c.type]?.icon} {c.value}{PROMO_TYPES[c.type]?.unit}</span>
+                      <span>Použití: {c.usedCount}{c.maxUses > 0 ? `/${c.maxUses}` : '/∞'}</span>
+                      {c.expiresAt && <span>Do: {formatDate(c.expiresAt)}</span>}
+                      {c.validForPlans?.length > 0 && <span>Plány: {c.validForPlans.join(', ')}</span>}
+                      {c.validForPeriods?.length > 0 && <span>Obdobie: {c.validForPeriods.map(p => p === 'monthly' ? 'mes.' : 'ročne').join(', ')}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <button onClick={() => viewStats(c)} title="Štatistiky"
+                      style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>📊</button>
+                    <button onClick={() => handleToggle(c._id, c.isActive)} title={c.isActive ? 'Deaktivovať' : 'Aktivovať'}
+                      style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>
+                      {c.isActive ? '⏸️' : '▶️'}
+                    </button>
+                    <button onClick={() => handleDelete(c._id)} title="Vymazať"
+                      style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Stats modal */}
+      {selectedCode && stats && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={() => { setSelectedCode(null); setStats(null); }}>
+          <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-lg)', padding: '24px', maxWidth: '500px', width: '90%', maxHeight: '80vh', overflow: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>
+                📊 {stats.code} — {stats.name}
+              </h3>
+              <button onClick={() => { setSelectedCode(null); setStats(null); }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ ...cardStyle, flex: 1, textAlign: 'center', marginBottom: 0 }}>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary, #8B5CF6)' }}>{stats.usedCount}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Použití</div>
+              </div>
+              <div style={{ ...cardStyle, flex: 1, textAlign: 'center', marginBottom: 0 }}>
+                <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.maxUses || '∞'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Max. limit</div>
+              </div>
+              <div style={{ ...cardStyle, flex: 1, textAlign: 'center', marginBottom: 0 }}>
+                <div style={{ fontSize: '24px' }}>{stats.isValid ? '✅' : '❌'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Stav</div>
+              </div>
+            </div>
+            {stats.redemptions?.length > 0 ? (
+              <div>
+                <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>Použitia</h4>
+                {stats.redemptions.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-color)', fontSize: '12px' }}>
+                    <span>{r.user?.username || 'Neznámy'} ({r.user?.email})</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{r.plan} / {r.period} — {formatDate(r.redeemedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>Zatiaľ žiadne použitia</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

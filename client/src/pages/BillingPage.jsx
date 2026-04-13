@@ -21,6 +21,10 @@ function BillingPage() {
   const [billingPeriod, setBillingPeriod] = useState('monthly');
   const [successMessage, setSuccessMessage] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoValidating, setPromoValidating] = useState(false);
+  const [promoResult, setPromoResult] = useState(null); // validated promo data
+  const [promoError, setPromoError] = useState('');
 
   const currentPlan = billingStatus?.plan || user?.subscription?.plan || 'free';
 
@@ -81,11 +85,36 @@ function BillingPage() {
     }
   };
 
+  const handleValidatePromo = async () => {
+    if (!promoCode.trim()) return;
+    setPromoValidating(true);
+    setPromoError('');
+    setPromoResult(null);
+    try {
+      const res = await api.post('/api/billing/validate-promo', { code: promoCode.trim() });
+      setPromoResult(res.data);
+    } catch (error) {
+      setPromoError(error.response?.data?.message || 'Neplatný kód');
+    } finally {
+      setPromoValidating(false);
+    }
+  };
+
+  const clearPromo = () => {
+    setPromoCode('');
+    setPromoResult(null);
+    setPromoError('');
+  };
+
   const handleCheckout = async (planId, period) => {
     const key = `${planId}-${period}`;
     setCheckoutLoading(key);
     try {
-      const res = await api.post('/api/billing/checkout', { plan: planId, period });
+      const body = { plan: planId, period };
+      if (promoResult?.valid) {
+        body.promoCode = promoResult.code;
+      }
+      const res = await api.post('/api/billing/checkout', body);
       if (res.data.url) {
         openExternal(res.data.url);
       }
@@ -250,6 +279,43 @@ function BillingPage() {
               </button>
             </div>
 
+            {/* Promo code input */}
+            <div className="billing-promo-section">
+              {promoResult?.valid ? (
+                <div className="promo-applied">
+                  <span className="promo-applied-icon">🎟️</span>
+                  <span className="promo-applied-text">
+                    <strong>{promoResult.code}</strong> — {promoResult.name}
+                    {promoResult.type === 'percentage' && ` (${promoResult.value}% zľava)`}
+                    {promoResult.type === 'fixed' && ` (${promoResult.value}€ zľava)`}
+                    {promoResult.type === 'freeMonths' && ` (${promoResult.value} mesiacov zadarmo)`}
+                  </span>
+                  <button className="promo-clear-btn" onClick={clearPromo} title="Odstrániť kód">✕</button>
+                </div>
+              ) : (
+                <div className="promo-input-row">
+                  <input
+                    type="text"
+                    className="promo-input"
+                    placeholder="Zadajte promo kód"
+                    value={promoCode}
+                    onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleValidatePromo()}
+                    disabled={promoValidating}
+                    style={{ textTransform: 'uppercase', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    className="btn btn-secondary promo-apply-btn"
+                    onClick={handleValidatePromo}
+                    disabled={promoValidating || !promoCode.trim()}
+                  >
+                    {promoValidating ? 'Overujem...' : 'Použiť'}
+                  </button>
+                </div>
+              )}
+              {promoError && <div className="promo-error">{promoError}</div>}
+            </div>
+
             {/* Plan cards */}
             <div className="billing-plans-grid">
               {plans.map(plan => {
@@ -258,6 +324,10 @@ function BillingPage() {
                                     (currentPlan === 'team' && plan.id === 'free');
                 const price = billingPeriod === 'yearly' ? plan.price.yearly : plan.price.monthly;
                 const checkoutKey = `${plan.id}-${billingPeriod}`;
+
+                // Calculate discounted price if promo code is applied
+                const promoDiscount = promoResult?.valid && promoResult.discountPreview?.[plan.id]?.[billingPeriod];
+                const finalPrice = promoDiscount ? promoDiscount.finalPrice : price;
 
                 return (
                   <div key={plan.id} className={`billing-plan-card ${isCurrent ? 'current' : ''} ${plan.id === 'pro' ? 'featured' : ''}`}>
@@ -270,14 +340,35 @@ function BillingPage() {
                         <span className="plan-price-amount">Zadarmo</span>
                       ) : billingPeriod === 'yearly' ? (
                         <>
-                          <span className="plan-price-amount">{price.toFixed(0)} €</span>
+                          {promoDiscount && promoDiscount.finalPrice !== price ? (
+                            <>
+                              <span className="plan-price-original">{price.toFixed(0)} €</span>
+                              <span className="plan-price-amount plan-price-discounted">{finalPrice.toFixed(0)} €</span>
+                            </>
+                          ) : (
+                            <span className="plan-price-amount">{price.toFixed(0)} €</span>
+                          )}
                           <span className="plan-price-period"> / rok</span>
-                          <span className="plan-price-yearly-detail">tj. {(price / 12).toFixed(2).replace('.', ',')} € / mesiac</span>
+                          {promoDiscount && promoDiscount.freeMonths ? (
+                            <span className="plan-price-yearly-detail promo-free-months">+ {promoDiscount.freeMonths} mesiacov zadarmo</span>
+                          ) : (
+                            <span className="plan-price-yearly-detail">tj. {(finalPrice / 12).toFixed(2).replace('.', ',')} € / mesiac</span>
+                          )}
                         </>
                       ) : (
                         <>
-                          <span className="plan-price-amount">{price.toFixed(2).replace('.', ',')} €</span>
+                          {promoDiscount && promoDiscount.finalPrice !== price ? (
+                            <>
+                              <span className="plan-price-original">{price.toFixed(2).replace('.', ',')} €</span>
+                              <span className="plan-price-amount plan-price-discounted">{finalPrice.toFixed(2).replace('.', ',')} €</span>
+                            </>
+                          ) : (
+                            <span className="plan-price-amount">{price.toFixed(2).replace('.', ',')} €</span>
+                          )}
                           <span className="plan-price-period"> / mesiac</span>
+                          {promoDiscount?.freeMonths && (
+                            <span className="plan-price-yearly-detail promo-free-months">+ {promoDiscount.freeMonths} mesiacov zadarmo</span>
+                          )}
                         </>
                       )}
                     </div>
