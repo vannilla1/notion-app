@@ -73,23 +73,36 @@ function NotificationBell() {
     if (!notif.read) {
       try { await api.put(`/api/notifications/${notif.id || notif._id}/read`); } catch {}
       setUnreadCount(c => Math.max(0, c - 1));
+      setNotifications(prev => prev.map(n =>
+        (n.id || n._id) === (notif.id || notif._id) ? { ...n, read: true } : n
+      ));
     }
     setOpen(false);
 
-    // Navigate to the relevant content
     const ts = Date.now();
     const data = notif.data || {};
+    const related = notif.relatedType || '';
     const type = notif.type || '';
 
-    if (type.startsWith('message') && data.messageId) {
+    // Use relatedType first (reliable), then fall back to type prefix
+    if ((related === 'message' || type.startsWith('message')) && data.messageId) {
       navigate(`/messages?highlight=${data.messageId}&_t=${ts}`);
-    } else if (type.startsWith('contact') && data.contactId) {
-      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}`);
-    } else if ((type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
+    } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
+      // Contact-embedded tasks: if we also have taskId, include it
+      let url = `/crm?expandContact=${data.contactId}&_t=${ts}`;
+      if (data.taskId) url += `&highlightTask=${data.taskId}`;
+      if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
+      navigate(url);
+    } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
       let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       if (data.contactId) url += `&contactId=${data.contactId}`;
       navigate(url);
+    } else if (notif.relatedId) {
+      // Fallback: use relatedType + relatedId
+      if (related === 'message') navigate(`/messages?highlight=${notif.relatedId}&_t=${ts}`);
+      else if (related === 'contact') navigate(`/crm?expandContact=${notif.relatedId}&_t=${ts}`);
+      else if (related === 'task' || related === 'subtask') navigate(`/tasks?highlightTask=${notif.relatedId}&_t=${ts}`);
     }
   }, [navigate]);
 
