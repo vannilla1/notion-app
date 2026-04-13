@@ -246,26 +246,6 @@
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 3px var(--text-primary);
 }
 
-/* Leave workspace */
-.workspace-leave-btn {
-  color: var(--danger, #EF4444) !important;
-  border-top: 1px solid var(--border-color);
-}
-
-.workspace-leave-btn:hover {
-  background: #FEE2E2 !important;
-}
-
-.workspace-leave-icon {
-  width: 12px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
 /* Create new workspace */
 .workspace-create-section {
   border-top: 1px solid var(--border-color);

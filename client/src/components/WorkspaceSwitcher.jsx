@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
+import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -13,8 +13,6 @@ const WorkspaceSwitcher = () => {
   const [saving, setSaving] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [colorPickerFor, setColorPickerFor] = useState(null);
-  const [leaving, setLeaving] = useState(false);
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
@@ -69,20 +67,6 @@ const WorkspaceSwitcher = () => {
   };
 
   const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
-  const canLeave = currentWorkspace?.role !== 'owner';
-
-  const handleLeaveWorkspace = async () => {
-    try {
-      setLeaving(true);
-      await leaveWorkspaceApi();
-      window.location.href = '/app';
-    } catch (err) {
-      alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
-      setLeaving(false);
-      setShowLeaveConfirm(false);
-    }
-  };
-
   const colorOptions = [
     '#6366f1', '#3B82F6', '#10B981', '#F59E0B',
     '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'
@@ -293,18 +277,6 @@ const WorkspaceSwitcher = () => {
             </button>
           ))}
 
-          {canLeave && (
-            <button
-              className="workspace-dropdown-item workspace-leave-btn"
-              onClick={() => setShowLeaveConfirm(true)}
-            >
-              <span className="workspace-leave-icon">🚪</span>
-              <span className="workspace-info">
-                <span className="workspace-item-name">Opustiť prostredie</span>
-              </span>
-            </button>
-          )}
-
           <div className="workspace-create-section">
             {isCreating ? (
               <div className="workspace-create-row">
@@ -347,35 +319,6 @@ const WorkspaceSwitcher = () => {
                 </span>
               </button>
             )}
-          </div>
-        </div>
-      )}
-      {showLeaveConfirm && (
-        <div className="workspace-leave-overlay" onClick={() => !leaving && setShowLeaveConfirm(false)}>
-          <div className="workspace-leave-modal" onClick={e => e.stopPropagation()}>
-            <div className="workspace-leave-modal-icon">🚪</div>
-            <h3 className="workspace-leave-modal-title">Opustiť prostredie?</h3>
-            <p className="workspace-leave-modal-text">
-              Naozaj chcete opustiť prostredie <strong>{currentWorkspace.name}</strong>?
-              Stratíte prístup ku všetkým kontaktom, projektom a úlohám v tomto prostredí.
-              Pre opätovný prístup vás bude musieť niekto znova pozvať.
-            </p>
-            <div className="workspace-leave-modal-actions">
-              <button
-                className="workspace-leave-modal-btn cancel"
-                onClick={() => setShowLeaveConfirm(false)}
-                disabled={leaving}
-              >
-                Zrušiť
-              </button>
-              <button
-                className="workspace-leave-modal-btn confirm"
-                onClick={handleLeaveWorkspace}
-                disabled={leaving}
-              >
-                {leaving ? 'Opúšťam...' : 'Áno, opustiť'}
-              </button>
-            </div>
           </div>
         </div>
       )}
