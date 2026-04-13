@@ -2517,7 +2517,7 @@ function Tasks() {
                         if (editingTask === task.id) return;
                         setExpandedTask(expandedTask === task.id ? null : task.id);
                       }}>
-                        <span className="drag-handle" {...dragListeners}>⠿</span>
+                        {editingTask !== task.id && <span className="drag-handle" {...dragListeners}>⠿</span>}
                         <div
                           className="task-checkbox-styled"
                           onClick={() => (!task.completed || user?.role === 'admin') && toggleTask(task)}

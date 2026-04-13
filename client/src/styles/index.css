@@ -8506,22 +8506,11 @@ body.ios-app {
     height: 24px !important;
   }
 
-  /* Hide drag handle when editing to prevent overlap */
-  .tasks-page .task-main .drag-handle {
-    position: absolute !important;
-    top: 14px !important;
-    right: 14px !important;
-    left: auto !important;
-    opacity: 0.4 !important;
-    font-size: 18px !important;
-    padding: 4px !important;
-  }
-
   /* Task edit form — premium mobile spacing */
   .tasks-page .task-edit-form {
     margin-left: 36px !important;
-    margin-top: 4px !important;
-    gap: 14px !important;
+    margin-top: 2px !important;
+    gap: 12px !important;
     width: calc(100% - 36px) !important;
   }
 
