@@ -13,26 +13,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             WebView(
-                url: {
-                    // If app launched from notification tap, load deep link URL directly
-                    // instead of /app — avoids double navigation on cold start
-                    if let deepLink = pushManager.pendingDeepLink {
-                        print("[Push] Cold start: pendingDeepLink = \(deepLink)")
-                        let base = "https://prplcrm.eu"
-                        let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
-                        let sep = link.contains("?") ? "&" : "?"
-                        let fullUrl = base + link + sep + "_t=\(Int(Date().timeIntervalSince1970 * 1000))"
-                        pushManager.pendingDeepLink = nil
-                        if let url = URL(string: fullUrl) {
-                            print("[Push] Cold start: loading deep link URL = \(fullUrl)")
-                            return url
-                        }
-                        print("[Push] Cold start: invalid URL from deep link: \(fullUrl)")
-                    } else {
-                        print("[Push] Cold start: no pendingDeepLink, loading /app")
-                    }
-                    return URL(string: "https://prplcrm.eu/app")!
-                }(),
+                url: URL(string: "https://prplcrm.eu/app")!,
                 isLoading: $isLoading,
                 loadError: $loadError,
                 pushManager: pushManager
@@ -418,16 +399,35 @@ struct WebView: UIViewRepresentable {
             webView.load(URLRequest(url: url))
         }
 
-        // Handle deep link from push notification tap (hot start / app in background)
-        if let deepLink = pushManager.pendingDeepLink {
-            print("[Push] Hot start: pendingDeepLink = \(deepLink), hasFinishedInitialLoad = \(context.coordinator.hasFinishedInitialLoad)")
-            pushManager.pendingDeepLink = nil
+        // Handle deep link from push notification tap.
+        // This is the ONLY place that processes pendingDeepLink.
+        // The body closure no longer touches it — that was the root cause
+        // of the bug: body consumed pendingDeepLink (set it to nil) but
+        // updateUIView never used the resulting URL, so deep links were lost.
+        guard let deepLink = pushManager.pendingDeepLink else { return }
+
+        print("[Push] updateUIView: deepLink = \(deepLink), pageLoaded = \(context.coordinator.hasFinishedInitialLoad)")
+
+        // Clear pendingDeepLink asynchronously to avoid "mutating state
+        // during view update" warnings from SwiftUI
+        let pm = pushManager
+        DispatchQueue.main.async {
+            pm.pendingDeepLink = nil
+        }
+
+        let base = "https://prplcrm.eu"
+        let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
+        let sep = link.contains("?") ? "&" : "?"
+        let ts = Int(Date().timeIntervalSince1970 * 1000)
+
+        if context.coordinator.hasFinishedInitialLoad {
+            // HOT START: Page is loaded — inject JS to navigate via React Router
+            // (avoids full page reload, preserves React state)
             let escapedLink = deepLink
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "'", with: "\\'")
             let js = """
             (function() {
-                // Parse URL — handle both full URLs and relative paths
                 var raw = '\(escapedLink)';
                 var path;
                 try {
@@ -436,26 +436,22 @@ struct WebView: UIViewRepresentable {
                 } catch(e) {
                     path = raw;
                 }
-                // Add timestamp to force re-navigation
                 var sep = path.includes('?') ? '&' : '?';
                 var fullPath = path + sep + '_t=' + Date.now();
-                // Store in sessionStorage as backup — App.jsx reads this after
-                // auth hydration completes and navigates via React Router
                 try { sessionStorage.setItem('pendingDeepLink', fullPath); } catch(e) {}
-                // Dispatch custom event — App.jsx listener navigates via React
-                // Router without a full page reload (preserves React state).
-                // SessionStorage backup ensures it works even if event fires
-                // before React is ready (cold-start edge case).
                 window.dispatchEvent(new CustomEvent('iosDeepLink', { detail: fullPath }));
             })();
             """
-
-            // If page hasn't loaded yet (cold start), defer until didFinish
-            if context.coordinator.hasFinishedInitialLoad {
-                webView.evaluateJavaScript(js, completionHandler: nil)
-            } else {
-                print("[Push] Page not loaded yet, deferring deep link")
-                context.coordinator.pendingDeepLinkJS = js
+            print("[Push] Hot start: injecting JS navigation")
+            webView.evaluateJavaScript(js, completionHandler: nil)
+        } else {
+            // COLD START: Page hasn't loaded yet — load the deep link URL
+            // directly into the WebView (replaces the default /app load).
+            // The splash screen is still showing so the user won't see a flash.
+            let fullUrl = base + link + sep + "_t=\(ts)"
+            if let deepLinkUrl = URL(string: fullUrl) {
+                print("[Push] Cold start: loading deep link URL directly = \(fullUrl)")
+                webView.load(URLRequest(url: deepLinkUrl))
             }
         }
     }
