@@ -33,8 +33,8 @@ const dashboardHelpTips = [
   },
   {
     icon: '🔔',
-    title: 'Ako fungujú upozornenia',
-    description: 'Vpravo hore nájdete ikonu zvončeka — to sú vaše upozornenia. Červené číslo znamená počet neprečítaných. Upozornenia dostávate keď: niekto vytvorí nový kontakt alebo projekt, pridelí vám úlohu, blíži sa termín, alebo vám príde správa. Fungujú aj na telefóne cez push notifikácie (aj na iPhone).'
+    title: 'Ako funguje zvonček notifikácií',
+    description: 'Vpravo hore nájdete fialový zvonček — centrum notifikácií. Červené číslo na ňom znamená počet neprečítaných upozornení. Kliknutím na zvonček sa otvorí panel s poslednými 30 notifikáciami. Neprečítané majú fialový okraj, tučný text a fialovú bodku — prečítané sú vyblednuté. Kliknutím na konkrétnu notifikáciu sa presmerujete priamo na danú zmenu (napr. komentár v správe, upravený kontakt alebo priradenú úlohu). Tlačidlo "Označiť všetky" hore v paneli označí všetky notifikácie ako prečítané naraz.'
   },
   {
     icon: '✉️',

@@ -82,6 +82,11 @@ const tasksHelpTips = [
     icon: '📨',
     title: 'Ako vidieť prepojené správy',
     description: 'V detaile projektu nájdete sekciu "Správy". Tu sa zobrazujú všetky interné správy vášho tímu, ktoré boli prepojené s týmto projektom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú alebo na ňu odpoviete.'
+  },
+  {
+    icon: '🔔',
+    title: 'Zvonček notifikácií',
+    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o projekte alebo úlohe sa priamo otvorí a zvýrazní daný projekt, vrátane konkrétnej podúlohy ak sa zmena týkala jej.'
   }
 ];
 

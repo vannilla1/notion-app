@@ -67,6 +67,11 @@ const crmHelpTips = [
     icon: '📨',
     title: 'Prepojené správy',
     description: 'V detaile kontaktu vidíte sekciu "Správy" — zobrazujú sa tu všetky interné správy, ktoré boli prepojené s týmto kontaktom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú.'
+  },
+  {
+    icon: '🔔',
+    title: 'Zvonček notifikácií',
+    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o kontakte sa priamo otvorí detail daného kontaktu. Tlačidlo "Označiť všetky" označí všetko ako prečítané naraz.'
   }
 ];
 

@@ -63,6 +63,11 @@ const messagesHelpTips = [
     icon: '🗑️',
     title: 'Ako upraviť alebo vymazať správu',
     description: 'Vlastné odoslané správy môžete upraviť alebo vymazať — v detaile správy kliknite na ikonu ceruzky (upraviť) alebo koša (vymazať). Vlastník a manažér prostredia môžu vymazať akúkoľvek správu v rámci svojho prostredia, aj keď ju nepísali oni.'
+  },
+  {
+    icon: '🔔',
+    title: 'Zvonček notifikácií',
+    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o správe sa priamo otvorí a zvýrazní daná správa — či už ide o novú správu, komentár, schválenie alebo zamietnutie.'
   }
 ];
 
