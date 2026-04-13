@@ -8544,7 +8544,7 @@ body.ios-app {
     padding: 8px 12px !important;
     font-size: 14px !important;
     border-radius: 8px !important;
-    gap: 8px !important;
+    gap: 10px !important;
   }
 
   .tasks-page .task-edit-form .multi-select-users.compact {
@@ -8558,7 +8558,7 @@ body.ios-app {
     padding: 10px 12px !important;
     font-size: 14px !important;
     border-radius: 8px !important;
-    gap: 10px !important;
+    gap: 12px !important;
   }
 
   .tasks-page .task-edit-form .task-edit-actions {
