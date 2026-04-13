@@ -237,10 +237,11 @@ function CRM() {
         lastNavTimestampRef.current = tsKey;
         // Clear query params from URL immediately
         navigate(location.pathname, { replace: true, state: {} });
-        // Refresh contacts then highlight
-        fetchContacts().then(() => {
-          setTimeout(() => processContactHighlight(urlContactId), 100);
-        });
+        // Always store as pending — the contacts useEffect will process it
+        // when contacts are loaded (avoids stale closure issues)
+        pendingHighlightRef.current = { contactId: urlContactId };
+        // Refresh contacts to trigger the pending highlight processing
+        fetchContacts();
       }
     }
   }, [location.search]);
@@ -280,16 +281,19 @@ function CRM() {
       const { contactId } = pendingHighlightRef.current;
       pendingHighlightRef.current = null; // Clear pending highlight
 
+      // Reset filter to 'all' so the contact is visible
+      setFilter('all');
+      setSearchQuery('');
       setExpandedContact(contactId);
       setHighlightedContactId(contactId);
 
-      // Scroll to contact after a short delay
+      // Scroll to contact after DOM renders with expanded contact
       setTimeout(() => {
         const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
         if (contactElement) {
           contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-      }, 100);
+      }, 300);
 
       // Remove highlight after 3 seconds
       setTimeout(() => {
