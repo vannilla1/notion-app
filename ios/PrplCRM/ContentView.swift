@@ -16,14 +16,19 @@ struct ContentView: View {
                     // If app launched from notification tap, load deep link URL directly
                     // instead of /app — avoids double navigation on cold start
                     if let deepLink = pushManager.pendingDeepLink {
+                        print("[Push] Cold start: pendingDeepLink = \(deepLink)")
                         let base = "https://prplcrm.eu"
                         let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
                         let sep = link.contains("?") ? "&" : "?"
                         let fullUrl = base + link + sep + "_t=\(Int(Date().timeIntervalSince1970 * 1000))"
                         pushManager.pendingDeepLink = nil
                         if let url = URL(string: fullUrl) {
+                            print("[Push] Cold start: loading deep link URL = \(fullUrl)")
                             return url
                         }
+                        print("[Push] Cold start: invalid URL from deep link: \(fullUrl)")
+                    } else {
+                        print("[Push] Cold start: no pendingDeepLink, loading /app")
                     }
                     return URL(string: "https://prplcrm.eu/app")!
                 }(),
@@ -369,8 +374,9 @@ struct WebView: UIViewRepresentable {
             webView.load(URLRequest(url: url))
         }
 
-        // Handle deep link from push notification tap
+        // Handle deep link from push notification tap (hot start / app in background)
         if let deepLink = pushManager.pendingDeepLink {
+            print("[Push] Hot start: pendingDeepLink = \(deepLink), hasFinishedInitialLoad = \(context.coordinator.hasFinishedInitialLoad)")
             pushManager.pendingDeepLink = nil
             let escapedLink = deepLink
                 .replacingOccurrences(of: "\\", with: "\\\\")

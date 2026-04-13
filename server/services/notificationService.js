@@ -441,7 +441,6 @@ const generateNotificationUrl = (type, data = {}) => {
   // Task notifications -> /tasks with task highlight
   if (type?.startsWith('task') && data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}`;
-    // Add contactId for contact-based tasks to help with navigation
     if (data.contactId) {
       url += `&contactId=${data.contactId}`;
     }
@@ -452,7 +451,6 @@ const generateNotificationUrl = (type, data = {}) => {
   // Subtask notifications -> /tasks with parent task highlight
   if (type?.startsWith('subtask') && data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
-    // Add contactId for contact-based tasks to help with navigation
     if (data.contactId) {
       url += `&contactId=${data.contactId}`;
     }
@@ -460,15 +458,39 @@ const generateNotificationUrl = (type, data = {}) => {
     return url;
   }
 
-  // Message notifications -> /messages
+  // Message notifications -> /messages with message highlight
   if (type?.startsWith('message') && data.messageId) {
     const url = `/messages?highlight=${data.messageId}`;
     logger.debug('[NotificationService] Generated message URL', { url });
     return url;
   }
 
-  logger.warn('[NotificationService] No URL match, returning /', { type, data });
-  return '/';
+  // Workspace notifications -> /app (dashboard)
+  if (type?.startsWith('workspace')) {
+    logger.debug('[NotificationService] Workspace notification, returning /app');
+    return '/app';
+  }
+
+  // Fallback: try to determine URL from data fields alone
+  if (data.messageId) {
+    const url = `/messages?highlight=${data.messageId}`;
+    logger.debug('[NotificationService] Fallback: generated message URL from data', { url });
+    return url;
+  }
+  if (data.contactId && !data.taskId) {
+    const url = `/crm?expandContact=${data.contactId}`;
+    logger.debug('[NotificationService] Fallback: generated contact URL from data', { url });
+    return url;
+  }
+  if (data.taskId) {
+    let url = `/tasks?highlightTask=${data.taskId}`;
+    if (data.contactId) url += `&contactId=${data.contactId}`;
+    logger.debug('[NotificationService] Fallback: generated task URL from data', { url });
+    return url;
+  }
+
+  logger.warn('[NotificationService] No URL match, returning /app', { type, data });
+  return '/app';
 };
 
 /**

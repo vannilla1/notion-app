@@ -50,15 +50,17 @@ function NotificationToast() {
 
   const handleClick = useCallback((toast) => {
     removeToast(toast.id);
+    const ts = Date.now();
 
     if (toast.relatedType === 'message' && toast.data?.messageId) {
-      navigate(`/messages?highlight=${toast.data.messageId}&_t=${Date.now()}`);
+      navigate(`/messages?highlight=${toast.data.messageId}&_t=${ts}`);
     } else if (toast.relatedType === 'contact' && toast.data?.contactId) {
-      navigate('/crm', { state: { expandContactId: toast.data.contactId } });
-    } else if (toast.relatedType === 'task' && toast.data?.taskId) {
-      navigate('/tasks', { state: { highlightTaskId: toast.data.taskId } });
-    } else if (toast.relatedType === 'subtask' && toast.data?.taskId) {
-      navigate('/tasks', { state: { highlightTaskId: toast.data.taskId } });
+      navigate(`/crm?expandContact=${toast.data.contactId}&_t=${ts}`);
+    } else if ((toast.relatedType === 'task' || toast.relatedType === 'subtask') && toast.data?.taskId) {
+      let url = `/tasks?highlightTask=${toast.data.taskId}&_t=${ts}`;
+      if (toast.data.subtaskId) url += `&subtask=${toast.data.subtaskId}`;
+      if (toast.data.contactId) url += `&contactId=${toast.data.contactId}`;
+      navigate(url);
     }
   }, [navigate, removeToast]);
 
@@ -80,6 +82,8 @@ function NotificationToast() {
     if (type?.startsWith('contact')) return '👤';
     if (type?.startsWith('task')) return '✅';
     if (type?.startsWith('subtask')) return '📝';
+    if (type?.startsWith('message')) return '📨';
+    if (type?.startsWith('workspace')) return '🏢';
     return '🔔';
   };
 

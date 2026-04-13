@@ -126,12 +126,34 @@ function AppContent() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    const pendingLink = sessionStorage.getItem('pendingDeepLink');
-    if (pendingLink) {
-      sessionStorage.removeItem('pendingDeepLink');
-      const sep = pendingLink.includes('?') ? '&' : '?';
-      navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
-    }
+
+    // Check immediately
+    const checkAndNavigate = () => {
+      const pendingLink = sessionStorage.getItem('pendingDeepLink');
+      if (pendingLink) {
+        sessionStorage.removeItem('pendingDeepLink');
+        const sep = pendingLink.includes('?') ? '&' : '?';
+        navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
+        return true;
+      }
+      return false;
+    };
+
+    if (checkAndNavigate()) return;
+
+    // Retry a few times — on iOS cold start, the Swift JS that sets
+    // sessionStorage may fire AFTER this effect runs (race condition).
+    // Polling for 3 seconds covers the deferred deep link path.
+    let attempts = 0;
+    const maxAttempts = 6;
+    const interval = setInterval(() => {
+      attempts++;
+      if (checkAndNavigate() || attempts >= maxAttempts) {
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
   }, [isAuthenticated, navigate]);
 
   // iOS hot-start deep link: Swift injects JS that dispatches this event
