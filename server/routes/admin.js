@@ -233,6 +233,54 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
   }
 });
 
+// ─── UPDATE WORKSPACE MEMBER ROLE ───────────────────────────────
+router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { workspaceId, role } = req.body;
+    if (!['owner', 'manager', 'member'].includes(role)) {
+      return res.status(400).json({ message: 'Neplatná workspace rola' });
+    }
+    if (!workspaceId) {
+      return res.status(400).json({ message: 'Chýba workspaceId' });
+    }
+
+    const membership = await WorkspaceMember.findOne({
+      userId: req.params.userId,
+      workspaceId: workspaceId
+    }).populate('workspaceId', 'name slug');
+
+    if (!membership) {
+      return res.status(404).json({ message: 'Členstvo vo workspace nenájdené' });
+    }
+
+    const oldRole = membership.role;
+    membership.role = role;
+    await membership.save();
+
+    const targetUser = await User.findById(req.params.userId);
+    logger.info('Admin workspace role change', {
+      targetUserId: req.params.userId,
+      workspaceId,
+      oldRole,
+      newRole: role,
+      changedBy: req.user.id
+    });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'user.workspace_role_changed', category: 'user',
+      targetType: 'user', targetId: req.params.userId, targetName: targetUser?.username,
+      details: { workspaceId, workspaceName: membership.workspaceId?.name, oldRole, newRole: role },
+      ipAddress: req.ip, userAgent: req.get('user-agent')
+    });
+
+    res.json({ message: 'Workspace rola bola aktualizovaná', role });
+  } catch (error) {
+    logger.error('Admin workspace role change error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri zmene workspace role' });
+  }
+});
+
 // ─── UPDATE USER PLAN ───────────────────────────────────────────
 router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, res) => {
   try {

@@ -242,13 +242,21 @@ function UsersTab() {
       .finally(() => setLoading(false));
   };
 
-  const handleRoleChange = async (userId, newRole) => {
+  const handleWorkspaceRoleChange = async (userId, workspaceId, newRole) => {
     setUpdating(userId);
     try {
-      await adminApi.put(`/api/admin/users/${userId}/role`, { role: newRole });
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+      await adminApi.put(`/api/admin/users/${userId}/workspace-role`, { workspaceId, role: newRole });
+      setUsers(prev => prev.map(u => {
+        if (u.id !== userId) return u;
+        return {
+          ...u,
+          workspaces: u.workspaces.map(w =>
+            w.workspaceId === workspaceId ? { ...w, role: newRole } : w
+          )
+        };
+      }));
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri zmene role');
+      alert(error.response?.data?.message || 'Chyba pri zmene workspace role');
     } finally {
       setUpdating(null);
     }
@@ -389,10 +397,9 @@ function UsersTab() {
               </th>
               <th>Používateľ</th>
               <th>Email</th>
-              <th>Rola</th>
               <th>Plán</th>
               <th>Sync</th>
-              <th>Workspace-y</th>
+              <th>Workspace-y a role</th>
               <th>Registrácia</th>
               <th>Akcie</th>
             </tr>
@@ -427,18 +434,6 @@ function UsersTab() {
                 <td className="sa-email-cell">{u.email}</td>
                 <td>
                   <select
-                    value={u.role}
-                    onChange={e => handleRoleChange(u.id, e.target.value)}
-                    disabled={updating === u.id || u.email === 'support@prplcrm.eu'}
-                    className="sa-select"
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="manager">Manažér</option>
-                    <option value="user">Používateľ</option>
-                  </select>
-                </td>
-                <td>
-                  <select
                     value={u.plan}
                     onChange={e => handlePlanChange(u.id, e.target.value)}
                     disabled={updating === u.id}
@@ -462,13 +457,23 @@ function UsersTab() {
                     {!u.googleCalendar && !u.googleTasks && <span className="sa-sync-none">—</span>}
                   </div>
                 </td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   <div className="sa-workspace-list">
                     {u.workspaces.length === 0 && <span className="sa-sync-none">—</span>}
                     {u.workspaces.map((w, i) => (
-                      <span key={i} className="sa-ws-chip" title={`Rola: ${w.role}`}>
-                        {w.name}
-                      </span>
+                      <div key={i} className="sa-ws-role-row">
+                        <span className="sa-ws-chip">{w.name}</span>
+                        <select
+                          className="sa-select sa-select-sm"
+                          value={w.role}
+                          onChange={e => handleWorkspaceRoleChange(u.id, w.workspaceId, e.target.value)}
+                          disabled={updating === u.id}
+                        >
+                          <option value="owner">Owner</option>
+                          <option value="manager">Manager</option>
+                          <option value="member">Member</option>
+                        </select>
+                      </div>
                     ))}
                   </div>
                 </td>
