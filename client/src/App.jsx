@@ -110,8 +110,11 @@ function AppContent() {
     return () => observer.disconnect();
   }, []);
 
+  // Save deep link to sessionStorage before auth redirect loses it.
+  // Must NOT require !loading — during cold start loading=true and the URL
+  // params would be lost by the time loading finishes.
   useEffect(() => {
-    if (!isAuthenticated && !loading) {
+    if (!isAuthenticated) {
       const params = new URLSearchParams(location.search);
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
           (location.pathname === '/tasks' && params.get('highlightTask')) ||
@@ -119,7 +122,7 @@ function AppContent() {
         sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
       }
     }
-  }, [location.pathname, location.search, isAuthenticated, loading]);
+  }, [location.pathname, location.search, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -130,6 +133,23 @@ function AppContent() {
       navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
     }
   }, [isAuthenticated, navigate]);
+
+  // iOS hot-start deep link: Swift injects JS that dispatches this event
+  // instead of window.location.href (which would cause a full page reload).
+  // If authenticated, navigate immediately via React Router.
+  // If not yet authenticated, sessionStorage backup is already set by the
+  // Swift JS — Effect B above will pick it up after auth resolves.
+  useEffect(() => {
+    const handler = (e) => {
+      const path = e.detail;
+      if (path && isAuthenticated) {
+        sessionStorage.removeItem('pendingDeepLink');
+        navigate(path, { replace: true });
+      }
+    };
+    window.addEventListener('iosDeepLink', handler);
+    return () => window.removeEventListener('iosDeepLink', handler);
+  }, [navigate, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

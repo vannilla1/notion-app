@@ -392,9 +392,11 @@ struct WebView: UIViewRepresentable {
                 // Store in sessionStorage as backup — App.jsx reads this after
                 // auth hydration completes and navigates via React Router
                 try { sessionStorage.setItem('pendingDeepLink', fullPath); } catch(e) {}
-                // Full navigation — 100% reliable with React Router.
-                // React will hydrate, read the URL params, and navigate correctly.
-                window.location.href = fullPath;
+                // Dispatch custom event — App.jsx listener navigates via React
+                // Router without a full page reload (preserves React state).
+                // SessionStorage backup ensures it works even if event fires
+                // before React is ready (cold-start edge case).
+                window.dispatchEvent(new CustomEvent('iosDeepLink', { detail: fullPath }));
             })();
             """
 
