@@ -8496,7 +8496,7 @@ body.ios-app {
   cursor: pointer;
   padding: 6px;
   border-radius: var(--radius);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   transition: background var(--transition-fast), color var(--transition-fast);
   display: flex;
   align-items: center;
