@@ -8547,6 +8547,13 @@ body.ios-app {
     gap: 10px !important;
   }
 
+  .tasks-page .task-edit-form .contact-checkbox input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin-right: 4px !important;
+    flex-shrink: 0 !important;
+  }
+
   .tasks-page .task-edit-form .multi-select-users.compact {
     padding: 8px !important;
     max-height: 160px !important;
@@ -8559,6 +8566,13 @@ body.ios-app {
     font-size: 14px !important;
     border-radius: 8px !important;
     gap: 12px !important;
+  }
+
+  .tasks-page .task-edit-form .user-checkbox input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin-right: 4px !important;
+    flex-shrink: 0 !important;
   }
 
   .tasks-page .task-edit-form .task-edit-actions {
