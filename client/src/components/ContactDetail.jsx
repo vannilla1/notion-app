@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import TaskList from './TaskList';
 import api from '../api/api';
 import { downloadBlob } from '../utils/fileDownload';
+import { linkifyText } from '../utils/linkify';
 
 function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
@@ -280,7 +281,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
               </div>
               <div className="info-item full-width">
                 <span className="info-label">Poznámky</span>
-                <span className="info-value notes">{contact.notes || '-'}</span>
+                <span className="info-value notes" style={{ whiteSpace: 'pre-wrap' }}>{contact.notes ? linkifyText(contact.notes) : '-'}</span>
               </div>
             </div>
           )}

@@ -13,6 +13,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 import FilePreviewModal from '../components/FilePreviewModal';
+import { linkifyText } from '../utils/linkify';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -1567,7 +1568,7 @@ function Tasks() {
           {/* Notes display */}
           {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
             <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
-              {subtask.notes}
+              {linkifyText(subtask.notes)}
             </div>
           )}
 
@@ -2699,7 +2700,7 @@ function Tasks() {
                       {expandedTask === task.id && editingTask !== task.id && (
                         <div className="task-expanded">
                           {task.description && (
-                            <div className="task-description">{task.description}</div>
+                            <div className="task-description">{linkifyText(task.description)}</div>
                           )}
 
                           {/* Task file attachments */}

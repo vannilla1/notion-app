@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import { linkifyText } from '../utils/linkify';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -1601,7 +1602,7 @@ function CRM() {
                             {contact.notes && (
                               <div className="detail-item">
                                 <span className="detail-label">📝 Poznámky:</span>
-                                <span className="detail-value">{contact.notes}</span>
+                                <span className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{linkifyText(contact.notes)}</span>
                               </div>
                             )}
                           </div>

@@ -10,6 +10,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import { useWorkspace } from '../context/WorkspaceContext';
 import FilePreviewModal from '../components/FilePreviewModal';
+import { linkifyText } from '../utils/linkify';
 
 const messagesHelpTips = [
   { icon: '📨', title: 'Správy', description: 'Posielajte interné správy členom tímu — žiadosti o schválenie, návrhy, informácie, žiadosti alebo ankety. Správy sa zobrazujú v troch taboch: Všetky (prijaté aj odoslané pokope), Prijaté a Odoslané.' },
@@ -1188,7 +1189,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
         {/* Description */}
         {msg.description && (
           <div style={{ marginBottom: '16px', fontSize: '14px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-            {msg.description}
+            {linkifyText(msg.description)}
           </div>
         )}
 
@@ -1398,7 +1399,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                         </div>
                       </div>
                     ) : (
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{linkifyText(c.text)}</div>
                     )}
                     {c.attachment?.originalName && (
                       <div style={{ marginTop: '6px' }}>
