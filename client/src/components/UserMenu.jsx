@@ -92,7 +92,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
   const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
   const [deleteSearchTerm, setDeleteSearchTerm] = useState('');
-  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+  const [avatarTimestamp, setAvatarTimestamp] = useState(() => user?.avatarTimestamp || 1);
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
 

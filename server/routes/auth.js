@@ -286,6 +286,9 @@ router.post('/avatar', authenticateToken, (req, res) => {
 
       await user.save();
 
+      // Invalidate avatar cache so next request gets fresh image
+      if (global._avatarCache) global._avatarCache.delete(userId);
+
       logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
 
       res.json({
@@ -306,16 +309,32 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.status(400).json({ message: 'Neplatné ID' });
     }
 
-    const user = await User.findById(req.params.userId);
+    // In-memory avatar cache (5 min TTL) to avoid hitting DB for every avatar request
+    if (!global._avatarCache) global._avatarCache = new Map();
+    const cacheKey = req.params.userId;
+    const cached = global._avatarCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 300000) {
+      if (!cached.data) {
+        res.set('Cache-Control', 'no-store');
+        return res.status(404).json({ message: 'Avatar nenájdený' });
+      }
+      res.set('Content-Type', cached.mimetype);
+      res.set('Cache-Control', 'public, max-age=3600');
+      return res.send(cached.data);
+    }
+
+    const user = await User.findById(req.params.userId).select('avatarData avatarMimetype').lean();
 
     if (!user || !user.avatarData) {
+      global._avatarCache.set(cacheKey, { data: null, ts: Date.now() });
       res.set('Cache-Control', 'no-store');
       return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
+    global._avatarCache.set(cacheKey, { data: buffer, mimetype: user.avatarMimetype || 'image/jpeg', ts: Date.now() });
     res.set('Content-Type', user.avatarMimetype || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=3600');  // Cache for 1 hour
+    res.set('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
   } catch (error) {
     logger.error('Avatar get error', { error: error.message, userId: req.params.userId });
@@ -333,6 +352,8 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
       avatarData: null,
       avatarMimetype: null
     });
+    // Invalidate avatar cache
+    if (global._avatarCache) global._avatarCache.delete(userId);
     logger.info('Avatar deleted', { userId });
 
     res.json({ message: 'Avatar bol odstránený' });

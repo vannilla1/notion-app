@@ -11,7 +11,7 @@ const logger = require('../utils/logger');
  */
 
 const dataCache = new Map();
-const CACHE_TTL = 30000; // 30 seconds
+const CACHE_TTL = 120000; // 2 minutes — safe for CRM, huge perf win on Atlas M0
 
 const getCachedData = (workspaceId, dataType) => {
   const key = `${workspaceId}:${dataType}`;
