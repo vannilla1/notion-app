@@ -778,7 +778,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 />
                 <span className="workspace-name-mobile">{currentWorkspace.name}</span>
                 <span className="workspace-role-mobile">
-                  {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+                  {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'manager' ? 'Manažér' : 'Člen'}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#94a3b8' }}>
                   {showMobileWorkspaces ? '▲' : '▼'}
@@ -801,7 +801,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       />
                       <span className="workspace-name-mobile">{ws.name}</span>
                       <span className="workspace-role-mobile">
-                        {ws.role === 'owner' ? 'Vlastník' : ws.role === 'admin' ? 'Admin' : 'Člen'}
+                        {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
                       </span>
                     </div>
                   ))}

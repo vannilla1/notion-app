@@ -66,7 +66,7 @@ const WorkspaceSwitcher = () => {
     }
   };
 
-  const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'admin';
+  const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
 
   const colorOptions = [
     '#6366f1', '#3B82F6', '#10B981', '#F59E0B',
@@ -229,7 +229,7 @@ const WorkspaceSwitcher = () => {
                   <span className="workspace-info">
                     <span className="workspace-item-name">{currentWorkspace.name}</span>
                     <span className="workspace-item-role">
-                      {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'admin' ? 'Admin' : 'Člen'}
+                      {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'manager' ? 'Manažér' : 'Člen'}
                     </span>
                   </span>
                   {canEdit && (
@@ -272,7 +272,7 @@ const WorkspaceSwitcher = () => {
               <span className="workspace-info">
                 <span className="workspace-item-name">{ws.name}</span>
                 <span className="workspace-item-role">
-                  {ws.role === 'owner' ? 'Vlastník' : ws.role === 'admin' ? 'Admin' : 'Člen'}
+                  {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
                 </span>
               </span>
             </button>
