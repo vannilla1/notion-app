@@ -42,6 +42,7 @@
   /* Border radius */
   --radius-sm: 6px;
   --radius: 8px;
+  --radius-md: 10px;
   --radius-lg: 12px;
   --radius-xl: 16px;
 
