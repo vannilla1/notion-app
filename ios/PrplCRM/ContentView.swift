@@ -53,7 +53,8 @@ struct ContentView: View {
             if isLocked {
                 LockScreenView(
                     biometricFailed: biometricFailed,
-                    onAuthenticate: { authenticate() }
+                    onAuthenticate: { authenticate() },
+                    onPasscode: { authenticateWithPasscode() }
                 )
                 .transition(.opacity)
             }
@@ -75,12 +76,15 @@ struct ContentView: View {
         let context = LAContext()
         var error: NSError?
 
-        // Try biometrics first (Face ID / Touch ID)
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+        // Use .deviceOwnerAuthentication which tries Face ID / Touch ID first
+        // and automatically falls back to device passcode if biometrics fail.
+        // Unlike .deviceOwnerAuthenticationWithBiometrics, this gives the user
+        // the system "Enter Passcode" option after Face ID fails.
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
             context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
+                .deviceOwnerAuthentication,
                 localizedReason: "Overenie identity pre prístup do Prpl CRM"
-            ) { success, _ in
+            ) { success, authError in
                 DispatchQueue.main.async {
                     if success {
                         isLocked = false
@@ -90,10 +94,27 @@ struct ContentView: View {
                 }
             }
         } else {
-            // Fallback to device passcode
+            // No authentication method available (no passcode set on device)
+            // Allow access since the device itself has no lock
+            isLocked = false
+        }
+    }
+
+    /// Skip biometrics and go straight to device passcode
+    private func authenticateWithPasscode() {
+        biometricFailed = false
+        let context = LAContext()
+
+        // Disable biometrics so the system shows passcode input directly
+        context.localizedFallbackTitle = ""
+
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            // Invalidate biometrics to force passcode
+            context.interactionNotAllowed = false
             context.evaluatePolicy(
                 .deviceOwnerAuthentication,
-                localizedReason: "Overenie identity pre prístup do Prpl CRM"
+                localizedReason: "Zadajte kód pre prístup do Prpl CRM"
             ) { success, _ in
                 DispatchQueue.main.async {
                     if success {
@@ -110,6 +131,7 @@ struct ContentView: View {
 struct LockScreenView: View {
     var biometricFailed: Bool
     var onAuthenticate: () -> Void
+    var onPasscode: () -> Void
 
     var body: some View {
         ZStack {
@@ -133,6 +155,7 @@ struct LockScreenView: View {
                         .foregroundColor(.white.opacity(0.8))
                         .padding(.top, 8)
 
+                    // Retry with Face ID / Touch ID + passcode fallback
                     Button(action: onAuthenticate) {
                         HStack(spacing: 8) {
                             Image(systemName: biometricIconName())
@@ -144,6 +167,21 @@ struct LockScreenView: View {
                         .padding(.horizontal, 32)
                         .padding(.vertical, 12)
                         .background(.white)
+                        .cornerRadius(12)
+                    }
+
+                    // Direct passcode entry option
+                    Button(action: onPasscode) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rectangle.and.pencil.and.ellipsis")
+                                .font(.title3)
+                            Text("Zadať kód")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 12)
+                        .background(.white.opacity(0.2))
                         .cornerRadius(12)
                     }
                 } else {
