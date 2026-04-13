@@ -8528,7 +8528,8 @@ body.ios-app {
     font-size: 13px !important;
     font-weight: 600 !important;
     color: var(--text-secondary) !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 10px !important;
+    padding-bottom: 4px !important;
     display: block !important;
   }
 
