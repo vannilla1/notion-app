@@ -171,7 +171,10 @@ function NotificationBell() {
                     <div className="notif-item-msg">{notif.message}</div>
                   )}
                 </div>
-                <span className="notif-item-time">{timeAgo(notif.createdAt)}</span>
+                <div className="notif-item-meta">
+                  <span className="notif-item-time">{timeAgo(notif.createdAt)}</span>
+                  {!notif.read && <span className="notif-unread-dot" />}
+                </div>
               </div>
             ))}
           </div>
