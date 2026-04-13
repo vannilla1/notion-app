@@ -7,6 +7,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
@@ -578,6 +579,7 @@ function Dashboard() {
           >
             Správy
           </button>
+          <NotificationBell />
           <UserMenu
             user={user}
             onLogout={logout}

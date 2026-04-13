@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -2079,6 +2080,7 @@ function Tasks() {
           >
             Správy
           </button>
+          <NotificationBell />
           <UserMenu
             user={user}
             onLogout={logout}

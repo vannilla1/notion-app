@@ -11,6 +11,7 @@ import {
 import UserMenu from '../components/UserMenu';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 
 function WorkspaceMembers() {
   const { user, logout, updateUser } = useAuth();
@@ -168,6 +169,7 @@ function WorkspaceMembers() {
           <button className="btn btn-secondary" onClick={() => navigate('/messages')}>
             Správy
           </button>
+          <NotificationBell />
           <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
         </div>
       </header>

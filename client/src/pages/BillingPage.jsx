@@ -6,6 +6,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import UserMenu from '../components/UserMenu';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 
 function BillingPage() {
   const { user, logout, updateUser } = useAuth();
@@ -160,6 +161,7 @@ function BillingPage() {
           </div>
           <div className="crm-header-right">
             <WorkspaceSwitcher />
+            <NotificationBell />
             <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
           </div>
         </header>
@@ -189,6 +191,7 @@ function BillingPage() {
           <button className="btn btn-secondary" onClick={() => navigate('/messages')}>
             Správy
           </button>
+          <NotificationBell />
           <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>

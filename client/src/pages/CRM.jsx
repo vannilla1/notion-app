@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 import { linkifyText } from '../utils/linkify';
 
 // Help tips for CRM/Contacts page
@@ -1262,6 +1263,7 @@ function CRM() {
           >
             Správy
           </button>
+          <NotificationBell />
           <UserMenu
             user={user}
             onLogout={logout}

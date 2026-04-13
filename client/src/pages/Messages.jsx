@@ -8,6 +8,7 @@ import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
+import NotificationBell from '../components/NotificationBell';
 import { useWorkspace } from '../context/WorkspaceContext';
 import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
@@ -579,6 +580,7 @@ function Messages() {
           <WorkspaceSwitcher />
           <button className="btn btn-secondary" onClick={() => navigate('/crm')}>Kontakty</button>
           <button className="btn btn-secondary" onClick={() => navigate('/tasks')}>Projekty</button>
+          <NotificationBell />
           <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>
