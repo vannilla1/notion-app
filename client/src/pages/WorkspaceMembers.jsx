@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import {
   getWorkspaceMembers, updateMemberRole, removeMember,
-  sendInvitation, getInvitations, cancelInvitation
+  sendInvitation, getInvitations, cancelInvitation,
+  leaveWorkspace as leaveWorkspaceApi
 } from '../api/workspaces';
 import UserMenu from '../components/UserMenu';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
@@ -25,6 +26,8 @@ function WorkspaceMembers() {
   const [inviteResult, setInviteResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(null);
   const [transferring, setTransferring] = useState(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [leavingWorkspace, setLeavingWorkspace] = useState(false);
 
   const isOwner = currentWorkspace?.role === 'owner';
   const canManage = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
@@ -377,9 +380,61 @@ function WorkspaceMembers() {
             </div>
           )}
         </div>
+          {/* Leave workspace - non-owners only */}
+          {currentWorkspace?.role !== 'owner' && (
+            <div className="wm-leave-section">
+              <button
+                className="wm-leave-btn"
+                onClick={() => setShowLeaveConfirm(true)}
+              >
+                🚪 Opustiť prostredie
+              </button>
+            </div>
+          )}
           </div>
         </main>
       </div>
+
+      {/* Leave confirm modal */}
+      {showLeaveConfirm && currentWorkspace && (
+        <div className="workspace-leave-overlay" onClick={() => !leavingWorkspace && setShowLeaveConfirm(false)}>
+          <div className="workspace-leave-modal" onClick={e => e.stopPropagation()}>
+            <div className="workspace-leave-modal-icon">🚪</div>
+            <h3 className="workspace-leave-modal-title">Opustiť prostredie?</h3>
+            <p className="workspace-leave-modal-text">
+              Naozaj chcete opustiť prostredie <strong>{currentWorkspace.name}</strong>?
+              Stratíte prístup ku všetkým kontaktom, projektom a úlohám v tomto prostredí.
+              Pre opätovný prístup vás bude musieť niekto znova pozvať.
+            </p>
+            <div className="workspace-leave-modal-actions">
+              <button
+                className="workspace-leave-modal-btn cancel"
+                onClick={() => setShowLeaveConfirm(false)}
+                disabled={leavingWorkspace}
+              >
+                Zrušiť
+              </button>
+              <button
+                className="workspace-leave-modal-btn confirm"
+                onClick={async () => {
+                  try {
+                    setLeavingWorkspace(true);
+                    await leaveWorkspaceApi();
+                    window.location.href = '/app';
+                  } catch (err) {
+                    alert(err.response?.data?.message || 'Chyba pri opúšťaní prostredia');
+                    setLeavingWorkspace(false);
+                    setShowLeaveConfirm(false);
+                  }
+                }}
+                disabled={leavingWorkspace}
+              >
+                {leavingWorkspace ? 'Opúšťam...' : 'Áno, opustiť'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9452,6 +9452,30 @@ body.ios-app {
   font-weight: 700;
 }
 
+.wm-leave-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+}
+
+.wm-leave-btn {
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wm-leave-btn:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+}
+
 /* ==================== Accept Invite Page ==================== */
 .invite-page {
   min-height: 100vh;
