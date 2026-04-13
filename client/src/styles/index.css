@@ -8491,12 +8491,12 @@ body.ios-app {
 
 .notif-bell-btn {
   position: relative;
-  background: none;
+  background: var(--accent-light);
   border: none;
   cursor: pointer;
-  padding: 6px;
+  padding: 8px;
   border-radius: var(--radius);
-  color: var(--text-primary);
+  color: var(--accent-color);
   transition: background var(--transition-fast), color var(--transition-fast);
   display: flex;
   align-items: center;
@@ -8504,8 +8504,8 @@ body.ios-app {
 }
 
 .notif-bell-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: var(--accent-color);
+  color: #fff;
 }
 
 .notif-bell-badge {
