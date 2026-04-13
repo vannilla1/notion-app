@@ -661,7 +661,7 @@ function Messages() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
             >
-              Prijaté
+              Prijaté {pendingCount > 0 && <span style={{ background: tab === 'received' ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white', borderRadius: '10px', padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>{pendingCount}</span>}
             </button>
             <button
               onClick={() => { setTab('sent'); setSelectedMessage(null); }}
@@ -703,7 +703,7 @@ function Messages() {
               isRecipient={isRecipient(selectedMessage)}
               isSender={selectedMessage.fromUserId === user.id || selectedMessage.fromUserId?._id === user.id}
               canDelete={(selectedMessage.fromUserId === user.id || selectedMessage.fromUserId?._id === user.id) || currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager'}
-              onBack={() => setSelectedMessage(null)}
+              onBack={() => { setSelectedMessage(null); fetchPendingCount(); }}
               onApprove={handleApprove}
               onReject={() => setShowRejectDialog(true)}
               onComment={handleComment}

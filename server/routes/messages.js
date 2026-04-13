@@ -182,12 +182,14 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
     }
 
-    // Mark as read by this user (fire and forget)
-    if (!message.readBy?.includes(req.user.id)) {
-      Message.updateOne(
+    // Mark as read by this user — AWAIT so subsequent pending-count
+    // requests reflect the updated readBy (fixes badge not clearing)
+    const userId = req.user.id.toString();
+    if (!message.readBy?.some(id => id.toString() === userId)) {
+      await Message.updateOne(
         { _id: message._id },
         { $addToSet: { readBy: req.user.id } }
-      ).catch(() => {});
+      );
     }
 
     res.json(stripAttachmentData(message));
