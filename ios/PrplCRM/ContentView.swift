@@ -447,57 +447,19 @@ struct WebView: UIViewRepresentable {
         let sep = link.contains("?") ? "&" : "?"
         let ts = Int(Date().timeIntervalSince1970 * 1000)
 
-        if context.coordinator.hasFinishedInitialLoad {
-            // HOT START: Page is loaded — inject JS to navigate via React Router
-            // (avoids full page reload, preserves React state)
-            let escapedLink = deepLink
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-            let js = """
-            (function() {
-                var raw = '\(escapedLink)';
-                var path;
-                try {
-                    var u = new URL(raw, window.location.origin);
-                    path = u.pathname + u.search;
-                } catch(e) {
-                    path = raw;
-                }
-                var sep = path.includes('?') ? '&' : '?';
-                var fullPath = path + sep + '_t=' + Date.now();
-                try { sessionStorage.setItem('pendingDeepLink', fullPath); } catch(e) {}
-                window.dispatchEvent(new CustomEvent('iosDeepLink', { detail: fullPath }));
-            })();
-            """
-            print("[Push] Hot start: injecting JS navigation")
-            webView.evaluateJavaScript(js, completionHandler: nil)
-
-            // Safety net: if React Router didn't navigate within 2s
-            // (e.g. event listener not registered yet), fall back to a
-            // direct webView.load so the user still lands on the target.
-            let targetPath = link
-            let fullUrl = base + link + sep + "_t=\(ts)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak webView] in
-                guard let wv = webView else { return }
-                let currentPath = wv.url?.path ?? ""
-                let currentQuery = wv.url?.query ?? ""
-                let targetBase = targetPath.split(separator: "?").first.map(String.init) ?? targetPath
-                if !currentPath.hasPrefix(targetBase) {
-                    print("[Push] Hot start fallback: JS nav didn't apply (at \(currentPath)?\(currentQuery)), reloading \(fullUrl)")
-                    if let u = URL(string: fullUrl) {
-                        wv.load(URLRequest(url: u))
-                    }
-                }
-            }
-        } else {
-            // COLD START: Page hasn't loaded yet — load the deep link URL
-            // directly into the WebView (replaces the default /app load).
-            // The splash screen is still showing so the user won't see a flash.
-            let fullUrl = base + link + sep + "_t=\(ts)"
-            if let deepLinkUrl = URL(string: fullUrl) {
-                print("[Push] Cold start: loading deep link URL directly = \(fullUrl)")
-                webView.load(URLRequest(url: deepLinkUrl))
-            }
+        // Always use direct webView.load for deep links — reliable across
+        // cold-start AND hot-start. Previously hot-start relied on JS injection
+        // + custom event dispatch, which silently failed when:
+        //   (a) SwiftUI skipped updateUIView due to class-reference equality,
+        //   (b) the React `iosDeepLink` listener hadn't attached yet,
+        //   (c) the app had been memory-killed and JS context reset.
+        // A full page load costs ~300ms of cache-warm render but is 100%
+        // deterministic. React (App.jsx) reads ws= + highlight params on mount
+        // and routes the user correctly.
+        let fullUrl = base + link + sep + "_t=\(ts)"
+        if let deepLinkUrl = URL(string: fullUrl) {
+            print("[Push] Loading deep link URL directly = \(fullUrl) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
+            webView.load(URLRequest(url: deepLinkUrl))
         }
     }
 
