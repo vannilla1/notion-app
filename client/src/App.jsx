@@ -110,7 +110,11 @@ function AppContent() {
     // Always show overlay with load count — so user sees if page reloads
     showOverlay(
       `LOAD #${loadCount} @ ${window.location.pathname}`,
-      `last unload: ${lastUnload || '(none)'}\nlast path: ${lastPath}\nua: ${navigator.userAgent.slice(0, 80)}`
+      `last unload: ${lastUnload || '(none)'}\nlast path: ${lastPath}\n` +
+      `iosNative: ${!!window.__iosNative}  SW-ctrl: ${!!window.__iosSwController}\n` +
+      `SW-regs: ${window.__iosSwRegCount ?? '?'}  cleaned: ${!!window.__iosSwCleaned}\n` +
+      `controller-now: ${!!(navigator.serviceWorker && navigator.serviceWorker.controller)}\n` +
+      `ua: ${navigator.userAgent.slice(0, 60)}`
     );
 
     // Detect component/route remount on scroll

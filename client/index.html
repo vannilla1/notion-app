@@ -13,15 +13,36 @@
         try {
           var isIos = /PrplCRM-iOS/.test(navigator.userAgent) ||
                       !!(window.webkit && window.webkit.messageHandlers);
+          window.__iosNative = isIos;
           if (!isIos) return;
           if ('serviceWorker' in navigator) {
             // Neutralize register() BEFORE registerSW.js runs
             navigator.serviceWorker.register = function () {
               return Promise.reject(new Error('SW disabled in iOS native app'));
             };
-            // Unregister any previously-registered SWs that survived an update
-            navigator.serviceWorker.getRegistrations().then(function (regs) {
-              regs.forEach(function (r) { r.unregister(); });
+
+            // If a previous SW is controlling this page, it's intercepting
+            // navigations and causing reload loops. Unregister ALL SWs, clear
+            // caches, then hard-reload ONCE (guarded by a flag so we don't loop).
+            var alreadyCleaned = sessionStorage.getItem('ios_sw_cleaned') === '1';
+            var hasController = !!navigator.serviceWorker.controller;
+            window.__iosSwController = hasController;
+            window.__iosSwCleaned = alreadyCleaned;
+
+            Promise.all([
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                window.__iosSwRegCount = regs.length;
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              }).catch(function () {}),
+              (typeof caches !== 'undefined' ? caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+              }) : Promise.resolve())
+            ]).then(function () {
+              if (hasController && !alreadyCleaned) {
+                sessionStorage.setItem('ios_sw_cleaned', '1');
+                // Force a fresh load WITHOUT the SW controller
+                window.location.reload();
+              }
             }).catch(function () {});
           }
         } catch (e) {}
