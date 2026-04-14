@@ -223,13 +223,23 @@ function Messages() {
       }).catch(() => {});
       if (commentId) {
         setHighlightedCommentId(commentId);
-        // Scroll after detail view renders
-        setTimeout(() => {
+        // Retry finding the comment element — on cold start the MessageDetail
+        // may take a moment to mount + render comments[], so a single 300ms
+        // timeout can miss it. Poll up to ~4s.
+        let attempts = 0;
+        const tryScroll = () => {
+          attempts++;
           const el = document.getElementById(`comment-${commentId}`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 300);
-        // Clear highlight after a few seconds
-        setTimeout(() => setHighlightedCommentId(null), 4000);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+          }
+          if (attempts < 40) setTimeout(tryScroll, 100);
+        };
+        setTimeout(tryScroll, 100);
+        // Clear highlight after giving the user time to see it (measure from
+        // when it's shown, not mount; extend to 6s for cold-start cases)
+        setTimeout(() => setHighlightedCommentId(null), 6000);
       }
     } catch {
       // Silently fail — message may have been deleted
