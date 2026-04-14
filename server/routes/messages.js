@@ -184,6 +184,10 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // $addToSet is idempotent so it's safe to always run; one DB round-trip
     // instead of two, and .lean() skips Mongoose document hydration (big win
     // for messages with many comments / attachments).
+    // PERF: exclude Base64 attachment/file/comment-attachment blobs from the
+    // payload. These can be MBs each and are only needed on explicit download
+    // via the /attachment endpoints. This was making message detail open take
+    // tens of seconds when large attachments were present.
     const message = await Message.findOneAndUpdate(
       {
         _id: req.params.id,
@@ -194,7 +198,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         ]
       },
       { $addToSet: { readBy: req.user.id } },
-      { new: true }
+      { new: true, projection: NO_BASE64_PROJECTION }
     ).lean();
 
     if (!message) {
