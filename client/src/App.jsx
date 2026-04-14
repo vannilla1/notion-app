@@ -86,6 +86,49 @@ function AppContent() {
       }
     };
 
+    // Patch location.reload and location.replace/assign to catch full-page reloads
+    try {
+      const origReload = window.location.reload.bind(window.location);
+      window.location.reload = function (...args) {
+        const st = new Error().stack || '';
+        sessionStorage.setItem('nav_diag_last_reload', new Date().toISOString() + '\n' + st.slice(0, 500));
+        showOverlay('location.reload()', st.split('\n').slice(1, 10).join('\n'));
+        return origReload(...args);
+      };
+      const origAssign = window.location.assign.bind(window.location);
+      window.location.assign = function (url) {
+        const st = new Error().stack || '';
+        sessionStorage.setItem('nav_diag_last_reload', 'assign ' + url + '\n' + st.slice(0, 500));
+        showOverlay('location.assign ' + url, st.split('\n').slice(1, 10).join('\n'));
+        return origAssign(url);
+      };
+      const origReplace = window.location.replace.bind(window.location);
+      window.location.replace = function (url) {
+        const st = new Error().stack || '';
+        sessionStorage.setItem('nav_diag_last_reload', 'replace ' + url + '\n' + st.slice(0, 500));
+        showOverlay('location.replace ' + url, st.split('\n').slice(1, 10).join('\n'));
+        return origReplace(url);
+      };
+    } catch (e) {}
+
+    // Try to intercept location.href assignment by redefining it
+    try {
+      const origDesc = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href') ||
+                       Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window.location), 'href');
+      if (origDesc && origDesc.set) {
+        Object.defineProperty(window.location, 'href', {
+          get: origDesc.get.bind(window.location),
+          set: function (url) {
+            const st = new Error().stack || '';
+            sessionStorage.setItem('nav_diag_last_reload', 'href= ' + url + '\n' + st.slice(0, 500));
+            showOverlay('location.href= ' + url, st.split('\n').slice(1, 10).join('\n'));
+            return origDesc.set.call(window.location, url);
+          },
+          configurable: true
+        });
+      }
+    } catch (e) {}
+
     const origPush = window.history.pushState;
     const origReplace = window.history.replaceState;
     window.history.pushState = function (...args) {
@@ -108,13 +151,12 @@ function AppContent() {
     window.addEventListener('pagehide', onBeforeUnload);
 
     // Always show overlay with load count — so user sees if page reloads
+    const lastReload = sessionStorage.getItem('nav_diag_last_reload');
     showOverlay(
       `LOAD #${loadCount} @ ${window.location.pathname}`,
       `last unload: ${lastUnload || '(none)'}\nlast path: ${lastPath}\n` +
-      `iosNative: ${!!window.__iosNative}  SW-ctrl: ${!!window.__iosSwController}\n` +
-      `SW-regs: ${window.__iosSwRegCount ?? '?'}  cleaned: ${!!window.__iosSwCleaned}\n` +
-      `controller-now: ${!!(navigator.serviceWorker && navigator.serviceWorker.controller)}\n` +
-      `ua: ${navigator.userAgent.slice(0, 60)}`
+      `SW-ctrl: ${!!(navigator.serviceWorker && navigator.serviceWorker.controller)}\n` +
+      (lastReload ? `\n⚠ LAST RELOAD SRC:\n${lastReload.slice(0, 600)}\n` : '\n(no reload source captured)\n')
     );
 
     // Detect component/route remount on scroll
