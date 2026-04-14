@@ -3409,6 +3409,16 @@ body.modal-open {
   box-shadow: 0 0 0 3px var(--accent-light);
 }
 
+/* Unified "new/modified" highlight for message list items.
+   Matches .task-card.highlighted and .contact-card.highlighted so
+   new-item indication is consistent across Tasks, CRM and Messages. */
+.message-item.highlighted {
+  animation: highlight-pulse 3s ease-out;
+  border-color: var(--accent-color) !important;
+  box-shadow: 0 0 0 3px var(--accent-light);
+  background: var(--accent-light) !important;
+}
+
 .contact-main {
   display: flex;
   align-items: center;

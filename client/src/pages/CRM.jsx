@@ -151,6 +151,18 @@ function CRM() {
   const [highlightedContactIds, setHighlightedContactIds] = useState(new Set());
   const pendingHighlightRef = useRef(null);
 
+  // Auto-highlight kontaktov vytvorených/zmenených v poslednych 24h.
+  // Konzistentne s Tasks.isNewOrModified — jednotný indikátor naprieč
+  // sekciami (Tasks/Projects/Messages/CRM) cez .highlighted CSS triedu.
+  const isContactNewOrModified = useCallback((contact) => {
+    const ts = contact.updatedAt || contact.createdAt;
+    if (!ts) return false;
+    const date = new Date(ts);
+    if (isNaN(date.getTime())) return false;
+    const diff = Date.now() - date.getTime();
+    return diff >= 0 && diff <= 24 * 60 * 60 * 1000;
+  }, []);
+
   // Define fetch functions early so they can be used in useEffects
   const fetchContacts = useCallback(async () => {
     try {
@@ -1488,7 +1500,7 @@ function CRM() {
               ) : (
                 <div className="contacts-list">
                   {filteredContacts.map(contact => (
-                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''} ${highlightedContactId === contact.id || highlightedContactIds.has(contact.id) ? 'highlighted' : ''}`}>
+                    <div key={contact.id} data-contact-id={contact.id} className={`contact-card ${expandedContact === contact.id ? 'expanded' : ''} ${highlightedContactId === contact.id || highlightedContactIds.has(contact.id) || isContactNewOrModified(contact) ? 'highlighted' : ''}`}>
                       <div className="contact-main">
                         <div
                           className="contact-avatar"

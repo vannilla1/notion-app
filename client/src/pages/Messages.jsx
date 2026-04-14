@@ -999,10 +999,10 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
         return (
           <div key={msg.id || msg._id}
             onClick={() => onSelect(msg)}
-            className={highlightedMessageIds.has(msg.id || msg._id) ? 'highlighted' : ''}
+            className={`message-item${highlightedMessageIds.has(msg.id || msg._id) ? ' highlighted' : ''}`}
             style={{
               padding: '12px 16px', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)',
-              background: highlightedMessageIds.has(msg.id || msg._id) ? 'var(--primary-light, #ede9fe)' : 'var(--bg-card)',
+              background: 'var(--bg-card)',
               cursor: 'pointer', transition: 'var(--transition)',
               borderLeft: `3px solid ${type.color}`,
               opacity: msg.status === 'approved' || msg.status === 'rejected' ? 0.75 : 1
