@@ -147,18 +147,29 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Stránka nenájdená' });
     }
 
-    // Recursively delete descendants — children are also filtered by the same
-    // workspace so we never accidentally touch another workspace's data.
-    const deleteChildren = async (parentId) => {
-      const children = await Page.find({ parentId, workspaceId: req.workspaceId });
-      for (const child of children) {
-        await deleteChildren(child._id);
-        await Page.findByIdAndDelete(child._id);
-      }
-    };
+    // Iterative BFS to collect every descendant ID, then a single deleteMany.
+    // Replaces the previous recursive per-node delete that could:
+    //   - blow the call stack on deep trees
+    //   - issue N sequential DB round-trips (one per node) → request timeout
+    //   - leave the tree partially deleted on mid-flight crash
+    // Safety cap (maxDepth) prevents pathological loops if data ever has a
+    // cycle (shouldn't be possible, but defense-in-depth).
+    const idsToDelete = [page._id];
+    let frontier = [page._id];
+    const maxDepth = 50;
+    for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
+      const children = await Page.find(
+        { parentId: { $in: frontier }, workspaceId: req.workspaceId },
+        { _id: 1 }
+      ).lean();
+      if (children.length === 0) break;
+      frontier = children.map(c => c._id);
+      idsToDelete.push(...frontier);
+    }
 
-    await deleteChildren(req.params.id);
-    await Page.findByIdAndDelete(req.params.id);
+    // Single atomic deleteMany — workspace filter included so we never reach
+    // outside the scoped data even if idsToDelete were somehow contaminated.
+    await Page.deleteMany({ _id: { $in: idsToDelete }, workspaceId: req.workspaceId });
 
     const io = req.app.get('io');
     if (io) io.to(`workspace-${req.workspaceId}`).emit('page-deleted', { pageId: req.params.id });
