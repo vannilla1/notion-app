@@ -130,7 +130,53 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         requestPushPermission(application)
+
+        // Cold-start deep link: if the app was launched by tapping a push
+        // notification, iOS hands us the payload here — BEFORE SwiftUI
+        // renders ContentView. We set pendingDeepLink synchronously so
+        // that WebView.makeUIView can load the deep-link URL instead of
+        // the default /app. Without this the hardcoded /app loads first
+        // and there's a race with updateUIView to redirect.
+        if let remoteNotif = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
+            print("[Push] Cold launch via notification, extracting deep link")
+            self.extractDeepLink(from: remoteNotif)
+        }
+
         return true
+    }
+
+    /// Extracts deep-link URL from an APNs payload and stores it on
+    /// pushManager.pendingDeepLink. Shared by cold-start (launchOptions)
+    /// and hot/background taps (didReceive response).
+    fileprivate func extractDeepLink(from userInfo: [AnyHashable: Any]) {
+        if let urlString = userInfo["url"] as? String, !urlString.isEmpty, urlString != "/" {
+            print("[Push] Deep link URL: \(urlString)")
+            self.pushManager.pendingDeepLink = urlString
+            return
+        }
+
+        let type = userInfo["type"] as? String ?? ""
+        print("[Push] No valid URL in payload (url=\(userInfo["url"] ?? "nil")), type=\(type)")
+
+        if type.hasPrefix("message"), let messageId = userInfo["messageId"] as? String {
+            let url = "/messages?highlight=\(messageId)"
+            print("[Push] Constructed message deep link: \(url)")
+            self.pushManager.pendingDeepLink = url
+        } else if type.hasPrefix("contact"), let contactId = userInfo["contactId"] as? String {
+            let url = "/crm?expandContact=\(contactId)"
+            print("[Push] Constructed contact deep link: \(url)")
+            self.pushManager.pendingDeepLink = url
+        } else if type.hasPrefix("task") || type.hasPrefix("subtask"),
+                  let taskId = userInfo["taskId"] as? String {
+            var url = "/tasks?highlightTask=\(taskId)"
+            if let contactId = userInfo["contactId"] as? String {
+                url += "&contactId=\(contactId)"
+            }
+            print("[Push] Constructed task deep link: \(url)")
+            self.pushManager.pendingDeepLink = url
+        } else {
+            print("[Push] Could not construct deep link, no matching data")
+        }
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
@@ -190,36 +236,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UIApplication.shared.applicationIconBadgeNumber = 0
 
         print("[Push] Notification tapped, userInfo keys: \(Array(userInfo.keys))")
-
-        if let urlString = userInfo["url"] as? String, !urlString.isEmpty, urlString != "/" {
-            print("[Push] Deep link URL: \(urlString)")
-            self.pushManager.pendingDeepLink = urlString
-        } else {
-            // Fallback: try to construct URL from type + data fields
-            let type = userInfo["type"] as? String ?? ""
-            print("[Push] No valid URL in payload (url=\(userInfo["url"] ?? "nil")), type=\(type)")
-
-            if type.hasPrefix("message"), let messageId = userInfo["messageId"] as? String {
-                let url = "/messages?highlight=\(messageId)"
-                print("[Push] Constructed message deep link: \(url)")
-                self.pushManager.pendingDeepLink = url
-            } else if type.hasPrefix("contact"), let contactId = userInfo["contactId"] as? String {
-                let url = "/crm?expandContact=\(contactId)"
-                print("[Push] Constructed contact deep link: \(url)")
-                self.pushManager.pendingDeepLink = url
-            } else if type.hasPrefix("task") || type.hasPrefix("subtask"),
-                      let taskId = userInfo["taskId"] as? String {
-                var url = "/tasks?highlightTask=\(taskId)"
-                if let contactId = userInfo["contactId"] as? String {
-                    url += "&contactId=\(contactId)"
-                }
-                print("[Push] Constructed task deep link: \(url)")
-                self.pushManager.pendingDeepLink = url
-            } else {
-                print("[Push] Could not construct deep link, no matching data")
-            }
-        }
-
+        self.extractDeepLink(from: userInfo)
         print("[Push] pendingDeepLink after processing: \(self.pushManager.pendingDeepLink ?? "nil")")
         completionHandler()
     }

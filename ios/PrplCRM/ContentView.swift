@@ -400,7 +400,24 @@ struct WebView: UIViewRepresentable {
         context.coordinator.webView = webView
         context.coordinator.startForegroundObserver()
 
-        webView.load(URLRequest(url: url))
+        // If a push notification arrived before the app launched, load the
+        // deep link URL directly instead of the default /app. Avoids race
+        // where /app finishes loading first and the deep link never applies.
+        var initialURL = url
+        if let deepLink = pushManager.pendingDeepLink {
+            let base = "https://prplcrm.eu"
+            let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
+            let sep = link.contains("?") ? "&" : "?"
+            let ts = Int(Date().timeIntervalSince1970 * 1000)
+            if let u = URL(string: base + link + sep + "_t=\(ts)") {
+                print("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
+                initialURL = u
+                // Clear now so updateUIView doesn't try to reload it again
+                let pm = pushManager
+                DispatchQueue.main.async { pm.pendingDeepLink = nil }
+            }
+        }
+        webView.load(URLRequest(url: initialURL))
         return webView
     }
 
@@ -454,6 +471,24 @@ struct WebView: UIViewRepresentable {
             """
             print("[Push] Hot start: injecting JS navigation")
             webView.evaluateJavaScript(js, completionHandler: nil)
+
+            // Safety net: if React Router didn't navigate within 2s
+            // (e.g. event listener not registered yet), fall back to a
+            // direct webView.load so the user still lands on the target.
+            let targetPath = link
+            let fullUrl = base + link + sep + "_t=\(ts)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak webView] in
+                guard let wv = webView else { return }
+                let currentPath = wv.url?.path ?? ""
+                let currentQuery = wv.url?.query ?? ""
+                let targetBase = targetPath.split(separator: "?").first.map(String.init) ?? targetPath
+                if !currentPath.hasPrefix(targetBase) {
+                    print("[Push] Hot start fallback: JS nav didn't apply (at \(currentPath)?\(currentQuery)), reloading \(fullUrl)")
+                    if let u = URL(string: fullUrl) {
+                        wv.load(URLRequest(url: u))
+                    }
+                }
+            }
         } else {
             // COLD START: Page hasn't loaded yet — load the deep link URL
             // directly into the WebView (replaces the default /app load).
