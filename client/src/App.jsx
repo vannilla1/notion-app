@@ -182,6 +182,24 @@ function AppContent() {
     };
   }, []);
 
+  // Cold-start via direct URL load (iOS APNs tap): if the current URL has
+  // `ws=` that differs from active workspace, switch workspace first so the
+  // page can fetch workspace-scoped data (message detail, etc.). Runs ONCE
+  // after auth + workspace context are ready.
+  const initialWsSwitchDoneRef = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated || workspaceLoading || initialWsSwitchDoneRef.current) return;
+    const params = new URLSearchParams(location.search);
+    const targetWs = params.get('ws');
+    if (targetWs) {
+      initialWsSwitchDoneRef.current = true;
+      // Re-use navigateWithWorkspace which handles switch + strip ws= + navigate
+      navigateWithWorkspace(location.pathname + location.search);
+    } else {
+      initialWsSwitchDoneRef.current = true;
+    }
+  }, [isAuthenticated, workspaceLoading, location.pathname, location.search, navigateWithWorkspace]);
+
   // Save deep link to sessionStorage before auth redirect loses it.
   // Must NOT require !loading — during cold start loading=true and the URL
   // params would be lost by the time loading finishes.
