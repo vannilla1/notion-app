@@ -55,6 +55,12 @@ function AppContent() {
     if (window.__navDiagInstalled) return;
     window.__navDiagInstalled = true;
 
+    // Track page loads via sessionStorage counter — survives full reloads
+    const loadCount = parseInt(sessionStorage.getItem('nav_diag_loads') || '0', 10) + 1;
+    sessionStorage.setItem('nav_diag_loads', String(loadCount));
+    const lastUnload = sessionStorage.getItem('nav_diag_last_unload');
+    const lastPath = sessionStorage.getItem('nav_diag_last_path') || '(none)';
+
     const showOverlay = (title, detail) => {
       try {
         let el = document.getElementById('nav-diag-overlay');
@@ -93,6 +99,37 @@ function AppContent() {
     const onPop = (e) => log('popstate', window.location.pathname);
     window.addEventListener('popstate', onPop);
 
+    // Catch full-page reloads
+    const onBeforeUnload = () => {
+      sessionStorage.setItem('nav_diag_last_unload', new Date().toISOString());
+      sessionStorage.setItem('nav_diag_last_path', window.location.pathname + window.location.search);
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onBeforeUnload);
+
+    // Always show overlay with load count — so user sees if page reloads
+    showOverlay(
+      `LOAD #${loadCount} @ ${window.location.pathname}`,
+      `last unload: ${lastUnload || '(none)'}\nlast path: ${lastPath}\nua: ${navigator.userAgent.slice(0, 80)}`
+    );
+
+    // Detect component/route remount on scroll
+    let scrollCount = 0;
+    const onAnyScroll = () => {
+      scrollCount++;
+      if (scrollCount === 1 || scrollCount % 20 === 0) {
+        // eslint-disable-next-line no-console
+        console.warn('[NAV-DIAG] scroll #', scrollCount, 'path=', window.location.pathname);
+      }
+    };
+    window.addEventListener('scroll', onAnyScroll, true);
+
+    // Log pageshow (fires on bfcache restore / reload)
+    const onPageShow = (e) => {
+      showOverlay(`pageshow persisted=${e.persisted} load=#${loadCount}`, `path=${window.location.pathname}`);
+    };
+    window.addEventListener('pageshow', onPageShow);
+
     // Also log scroll resets on main scroll container
     const onScroll = (e) => {
       const t = e.target;
@@ -108,6 +145,10 @@ function AppContent() {
       window.history.pushState = origPush;
       window.history.replaceState = origReplace;
       window.removeEventListener('popstate', onPop);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onBeforeUnload);
+      window.removeEventListener('scroll', onAnyScroll, true);
+      window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('scroll', onScroll, true);
       window.__navDiagInstalled = false;
     };
