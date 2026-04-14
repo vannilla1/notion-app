@@ -886,12 +886,16 @@ function Tasks() {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        console.log('[DeepLink] Tasks: processing highlightTask=', urlTaskId, 'subtask=', urlSubtaskId);
-        fetchTasks().then(() => {
-          setTimeout(() => processHighlight(urlTaskId, urlSubtaskId), 100);
-          // Strip params AFTER fetch starts so we don't re-trigger; keep state clean
-          navigate(location.pathname, { replace: true, state: {} });
-        });
+        console.log('[DeepLink] Tasks: queueing highlightTask=', urlTaskId, 'subtask=', urlSubtaskId);
+        // CRITICAL: set pending BEFORE fetchTasks so the [tasks] effect
+        // can consume it the moment setTasks() fires. Previously pending
+        // was set in a 100ms setTimeout AFTER fetch, which meant the
+        // [tasks] effect ran first (pending=null, no-op) and never ran
+        // again — the second bell click was needed to re-trigger it.
+        pendingHighlightRef.current = { taskId: urlTaskId, subtaskId: urlSubtaskId || null };
+        fetchTasks();
+        // Strip params so we don't re-trigger on subsequent renders.
+        navigate(location.pathname, { replace: true, state: {} });
       }
     }
   }, [location.search]);

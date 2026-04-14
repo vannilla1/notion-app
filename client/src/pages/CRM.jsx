@@ -254,13 +254,13 @@ function CRM() {
       // Only process if this is a new navigation (different _t)
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        console.log('[DeepLink] CRM: processing expandContact=', urlContactId);
-        // Always store as pending — the contacts useEffect will process it
-        // when contacts are loaded (avoids stale closure issues)
+        console.log('[DeepLink] CRM: queueing expandContact=', urlContactId);
+        // Set pending BEFORE fetchContacts so the [contacts] effect sees it
+        // on the first render after setContacts. Otherwise the effect fires
+        // with pending=null, does nothing, and a second click is needed.
         pendingHighlightRef.current = { contactId: urlContactId };
-        // Refresh contacts to trigger the pending highlight processing
         fetchContacts();
-        // Clear query params from URL after fetch starts
+        // Clear query params from URL
         navigate(location.pathname, { replace: true, state: {} });
       }
     }
