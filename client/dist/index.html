@@ -2,6 +2,31 @@
 <html lang="sk">
   <head>
     <meta charset="UTF-8" />
+    <!-- iOS native app: disable service worker registration.
+         Reason: VitePWA's auto-injected SW (registerSW.js → /sw.js) uses
+         NavigationRoute + precache + clientsClaim. In WKWebView this caused
+         a full page reload loop on scroll — precached index.html pointed to
+         stale bundle hash, SW activation pre-empted pages, etc. iOS uses APNs
+         for push so SW is unnecessary here. Must run BEFORE registerSW.js. -->
+    <script>
+      (function () {
+        try {
+          var isIos = /PrplCRM-iOS/.test(navigator.userAgent) ||
+                      !!(window.webkit && window.webkit.messageHandlers);
+          if (!isIos) return;
+          if ('serviceWorker' in navigator) {
+            // Neutralize register() BEFORE registerSW.js runs
+            navigator.serviceWorker.register = function () {
+              return Promise.reject(new Error('SW disabled in iOS native app'));
+            };
+            // Unregister any previously-registered SWs that survived an update
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              regs.forEach(function (r) { r.unregister(); });
+            }).catch(function () {});
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!-- Google Search Console Verification -->
@@ -238,7 +263,7 @@
       "description": "Moderny slovensky CRM system pre spravu kontaktov, projektov a timovej spoluprace."
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-B_uveJ0-.js"></script>
+    <script type="module" crossorigin src="/assets/index-DAJcmImn.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CnlHh3eR.css">
   <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
