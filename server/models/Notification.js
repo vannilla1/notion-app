@@ -8,6 +8,13 @@ const notificationSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  // Which workspace this notification belongs to — critical for multi-workspace users
+  workspaceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Workspace',
+    required: false, // Not required during migration of old records
+    index: true
+  },
   // Type of notification
   type: {
     type: String,
@@ -85,6 +92,8 @@ const notificationSchema = new mongoose.Schema({
 
 // Compound index for efficient queries
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, workspaceId: 1, read: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, workspaceId: 1, createdAt: -1 });
 
 // TTL index to auto-delete expired notifications
 notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

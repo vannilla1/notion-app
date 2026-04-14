@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket';
+import { useWorkspace } from '../context/WorkspaceContext';
 import api from '../api/api';
 
 function NotificationBell() {
@@ -12,6 +13,22 @@ function NotificationBell() {
   const bellRef = useRef(null);
   const navigate = useNavigate();
   const { socket, isConnected } = useSocket();
+  const { currentWorkspaceId, switchWorkspace, workspaces } = useWorkspace();
+
+  // Switch workspace if notif belongs to a different one, then navigate.
+  // Critical for multi-workspace users: a bell click on a notification
+  // from another workspace must first switch the workspace context.
+  const navigateForNotif = useCallback(async (url, notifWorkspaceId) => {
+    const targetWs = notifWorkspaceId?.toString?.() || notifWorkspaceId;
+    const currentWs = currentWorkspaceId?.toString?.() || currentWorkspaceId;
+    if (targetWs && targetWs !== currentWs) {
+      const isMember = (workspaces || []).some(w => (w.id || w._id)?.toString() === targetWs);
+      if (isMember) {
+        try { await switchWorkspace(targetWs); } catch {}
+      }
+    }
+    navigate(url);
+  }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
 
   // Fetch unread count
   const fetchUnreadCount = useCallback(async () => {
@@ -83,28 +100,29 @@ function NotificationBell() {
     const data = notif.data || {};
     const related = notif.relatedType || '';
     const type = notif.type || '';
+    const notifWs = notif.workspaceId || data.workspaceId || null;
 
     // Use relatedType first (reliable), then fall back to type prefix
     if ((related === 'message' || type.startsWith('message')) && data.messageId) {
-      navigate(`/messages?highlight=${data.messageId}&_t=${ts}`);
+      navigateForNotif(`/messages?highlight=${data.messageId}&_t=${ts}`, notifWs);
     } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
       // Contact-embedded tasks: if we also have taskId, include it
       let url = `/crm?expandContact=${data.contactId}&_t=${ts}`;
       if (data.taskId) url += `&highlightTask=${data.taskId}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
-      navigate(url);
+      navigateForNotif(url, notifWs);
     } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
       let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       if (data.contactId) url += `&contactId=${data.contactId}`;
-      navigate(url);
+      navigateForNotif(url, notifWs);
     } else if (notif.relatedId) {
       // Fallback: use relatedType + relatedId
-      if (related === 'message') navigate(`/messages?highlight=${notif.relatedId}&_t=${ts}`);
-      else if (related === 'contact') navigate(`/crm?expandContact=${notif.relatedId}&_t=${ts}`);
-      else if (related === 'task' || related === 'subtask') navigate(`/tasks?highlightTask=${notif.relatedId}&_t=${ts}`);
+      if (related === 'message') navigateForNotif(`/messages?highlight=${notif.relatedId}&_t=${ts}`, notifWs);
+      else if (related === 'contact') navigateForNotif(`/crm?expandContact=${notif.relatedId}&_t=${ts}`, notifWs);
+      else if (related === 'task' || related === 'subtask') navigateForNotif(`/tasks?highlightTask=${notif.relatedId}&_t=${ts}`, notifWs);
     }
-  }, [navigate]);
+  }, [navigateForNotif]);
 
   const markAllRead = async () => {
     try {

@@ -56,10 +56,39 @@ const pathToSection = (path) => {
 
 function AppContent() {
   const { isAuthenticated, loading } = useAuth();
-  const { needsWorkspace, loading: workspaceLoading } = useWorkspace();
+  const { needsWorkspace, loading: workspaceLoading, currentWorkspaceId, switchWorkspace, workspaces } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const { socket, isConnected } = useSocket();
+
+  // Navigate to a deep-link path, switching workspace first if the link
+  // carries a `ws=` query param that differs from the active workspace.
+  // Used by: iOS cold/hot start deep links, bell clicks, web push clicks.
+  const navigateWithWorkspace = useCallback(async (rawPath) => {
+    if (!rawPath) return;
+    try {
+      const full = new URL(rawPath, window.location.origin);
+      const targetWs = full.searchParams.get('ws');
+      // Strip `ws=` from the URL we navigate to — it was only a transport hint
+      full.searchParams.delete('ws');
+      const cleanPath = full.pathname + (full.searchParams.toString() ? '?' + full.searchParams.toString() : '');
+
+      if (targetWs && targetWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId)) {
+        // Only switch if the target workspace is one the user belongs to
+        const isMember = (workspaces || []).some(w => (w.id || w._id)?.toString() === targetWs);
+        if (isMember) {
+          try {
+            await switchWorkspace(targetWs);
+          } catch (e) {
+            // If switch fails, still navigate — user lands on wrong ws but visible
+          }
+        }
+      }
+      navigate(cleanPath, { replace: true });
+    } catch {
+      navigate(rawPath, { replace: true });
+    }
+  }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
 
   const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
   const prevPathRef = useRef(location.pathname);
@@ -176,7 +205,8 @@ function AppContent() {
       if (pendingLink) {
         sessionStorage.removeItem('pendingDeepLink');
         const sep = pendingLink.includes('?') ? '&' : '?';
-        navigate(pendingLink + sep + '_t=' + Date.now(), { replace: true });
+        // navigateWithWorkspace handles workspace switch if link has ws=
+        navigateWithWorkspace(pendingLink + sep + '_t=' + Date.now());
         return true;
       }
       return false;
@@ -197,7 +227,7 @@ function AppContent() {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigateWithWorkspace]);
 
   // iOS hot-start deep link: Swift injects JS that dispatches this event
   // instead of window.location.href (which would cause a full page reload).
@@ -209,12 +239,12 @@ function AppContent() {
       const path = e.detail;
       if (path && isAuthenticated) {
         sessionStorage.removeItem('pendingDeepLink');
-        navigate(path, { replace: true });
+        navigateWithWorkspace(path);
       }
     };
     window.addEventListener('iosDeepLink', handler);
     return () => window.removeEventListener('iosDeepLink', handler);
-  }, [navigate, isAuthenticated]);
+  }, [navigateWithWorkspace, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -250,24 +280,26 @@ function AppContent() {
           const path = urlObj.pathname;
           const params = new URLSearchParams(urlObj.search);
           const navTs = (timestamp || Date.now()).toString();
+          const ws = params.get('ws') || data?.workspaceId;
+          const wsSuffix = ws ? `&ws=${ws}` : '';
 
           if (path === '/crm' && (params.get('expandContact') || data?.contactId)) {
             const contactId = params.get('expandContact') || data.contactId;
-            navigate(`/crm?expandContact=${contactId}&_t=${navTs}`);
+            navigateWithWorkspace(`/crm?expandContact=${contactId}&_t=${navTs}${wsSuffix}`);
           } else if (path === '/tasks' && (params.get('highlightTask') || data?.taskId)) {
             const taskId = params.get('highlightTask') || data.taskId;
             const subtaskId = params.get('subtask') || data.subtaskId || null;
             let taskUrl = `/tasks?highlightTask=${taskId}&_t=${navTs}`;
             if (subtaskId) taskUrl += `&subtask=${subtaskId}`;
-            navigate(taskUrl);
+            navigateWithWorkspace(taskUrl + wsSuffix);
           } else if (path === '/messages' && (params.get('highlight') || data?.messageId)) {
             const messageId = params.get('highlight') || data.messageId;
-            navigate(`/messages?highlight=${messageId}&_t=${navTs}`);
+            navigateWithWorkspace(`/messages?highlight=${messageId}&_t=${navTs}${wsSuffix}`);
           } else {
-            navigate(path + (urlObj.search || ''));
+            navigateWithWorkspace(path + (urlObj.search || ''));
           }
         } catch {
-          if (url.startsWith('/')) navigate(url);
+          if (url.startsWith('/')) navigateWithWorkspace(url);
         }
       }
     };
@@ -277,7 +309,7 @@ function AppContent() {
     return () => {
       navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
     };
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigateWithWorkspace]);
 
   const publicPages = ['/', '/login', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));

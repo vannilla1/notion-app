@@ -301,6 +301,7 @@ const checkDueDates = async () => {
               const notificationType = change.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
               await notificationService.createNotification({
                 userId,
+                workspaceId: task.workspaceId,
                 type: notificationType,
                 title: message.title,
                 message: message.body,
@@ -367,6 +368,7 @@ const checkDueDates = async () => {
             const notificationType = rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
             await notificationService.createNotification({
               userId,
+              workspaceId: task.workspaceId,
               type: notificationType,
               title: message.title,
               message: message.body,
@@ -479,6 +481,7 @@ const checkContactDueDates = async () => {
               try {
                 await notificationService.createNotification({
                   userId,
+                  workspaceId: contact.workspaceId,
                   type: change.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
                   title: message.title,
                   message: message.body,
@@ -525,6 +528,7 @@ const checkContactDueDates = async () => {
               try {
                 await notificationService.createNotification({
                   userId,
+                  workspaceId: contact.workspaceId,
                   type: rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
                   title: msg.title,
                   message: msg.body,

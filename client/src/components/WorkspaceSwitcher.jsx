@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
+import api from '../api/api';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -13,9 +14,25 @@ const WorkspaceSwitcher = () => {
   const [saving, setSaving] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [colorPickerFor, setColorPickerFor] = useState(null);
+  const [unreadByWs, setUnreadByWs] = useState({});
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
+
+  // Fetch unread counts per workspace so we can badge other workspaces
+  // when they have unread notifications (multi-workspace awareness)
+  const fetchUnreadByWs = useCallback(async () => {
+    try {
+      const res = await api.get('/api/notifications/unread-by-workspace');
+      setUnreadByWs(res.data || {});
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchUnreadByWs();
+    const interval = setInterval(fetchUnreadByWs, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadByWs]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -160,6 +177,12 @@ const WorkspaceSwitcher = () => {
     return null;
   }
 
+  // Sum unread for workspaces OTHER than the current one — shown as a
+  // red dot on the switcher button so user knows another ws has activity
+  const otherUnreadTotal = Object.entries(unreadByWs).reduce((sum, [wsId, c]) => {
+    return wsId !== currentWorkspace.id ? sum + c : sum;
+  }, 0);
+
   return (
     <div className="workspace-switcher" ref={dropdownRef}>
       <button
@@ -172,6 +195,9 @@ const WorkspaceSwitcher = () => {
           style={{ backgroundColor: currentWorkspace.color || '#6366f1' }}
         />
         <span className="workspace-name">{currentWorkspace.name}</span>
+        {otherUnreadTotal > 0 && (
+          <span className="workspace-unread-dot" title={`${otherUnreadTotal} neprečítaných v iných prostrediach`} />
+        )}
         <span className="workspace-arrow">{isOpen ? '▲' : '▼'}</span>
       </button>
 
@@ -258,24 +284,32 @@ const WorkspaceSwitcher = () => {
             )}
           </div>
 
-          {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws) => (
-            <button
-              key={ws.id}
-              className="workspace-dropdown-item"
-              onClick={() => handleSwitch(ws.id)}
-            >
-              <span
-                className="workspace-color"
-                style={{ backgroundColor: ws.color || '#6366f1' }}
-              />
-              <span className="workspace-info">
-                <span className="workspace-item-name">{ws.name}</span>
-                <span className="workspace-item-role">
-                  {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
+          {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws) => {
+            const unread = unreadByWs[ws.id] || 0;
+            return (
+              <button
+                key={ws.id}
+                className="workspace-dropdown-item"
+                onClick={() => handleSwitch(ws.id)}
+              >
+                <span
+                  className="workspace-color"
+                  style={{ backgroundColor: ws.color || '#6366f1' }}
+                />
+                <span className="workspace-info">
+                  <span className="workspace-item-name">{ws.name}</span>
+                  <span className="workspace-item-role">
+                    {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
+                  </span>
                 </span>
-              </span>
-            </button>
-          ))}
+                {unread > 0 && (
+                  <span className="workspace-unread-badge">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
+              </button>
+            );
+          })}
 
           <div className="workspace-create-section">
             {isCreating ? (

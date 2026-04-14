@@ -303,6 +303,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       try {
         await notificationService.createNotification({
           userId: recipient._id.toString(),
+          workspaceId: req.workspaceId,
           type: 'message.created',
           title: `📨 Nový odkaz: ${typeLabel}`,
           message: `${req.user.username} vám poslal odkaz "${subject}"`,
@@ -310,7 +311,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
           relatedType: 'message',
           relatedId: message._id.toString(),
           relatedName: subject,
-          data: { messageId: message._id.toString() }
+          data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
         });
       } catch (notifErr) {
         logger.warn('Message notification failed', { error: notifErr.message });
@@ -444,6 +445,7 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
     try {
       await notificationService.createNotification({
         userId: message.fromUserId.toString(),
+        workspaceId: req.workspaceId,
         type: 'message.approved',
         title: '✅ Odkaz schválený',
         message: `${req.user.username} schválil váš odkaz "${message.subject}"`,
@@ -451,7 +453,7 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
         relatedType: 'message',
         relatedId: message._id.toString(),
         relatedName: message.subject,
-        data: { messageId: message._id.toString() }
+        data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
       });
     } catch (notifErr) {
       logger.warn('Approve notification failed', { error: notifErr.message });
@@ -518,6 +520,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
     try {
       await notificationService.createNotification({
         userId: message.fromUserId.toString(),
+        workspaceId: req.workspaceId,
         type: 'message.rejected',
         title: '❌ Odkaz zamietnutý',
         message: `${req.user.username} zamietol váš odkaz "${message.subject}"${reason ? ` — ${reason}` : ''}`,
@@ -525,7 +528,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
         relatedType: 'message',
         relatedId: message._id.toString(),
         relatedName: message.subject,
-        data: { messageId: message._id.toString() }
+        data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
       });
     } catch (notifErr) {
       logger.warn('Reject notification failed', { error: notifErr.message });
@@ -599,6 +602,7 @@ router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) 
     try {
       await notificationService.createNotification({
         userId: otherUserId,
+        workspaceId: req.workspaceId,
         type: 'message.created',
         title: '🔄 Rozhodnutie zrušené',
         message: `${req.user.username} zrušil ${previousStatus === 'approved' ? 'schválenie' : 'zamietnutie'} odkazu "${message.subject}"`,
@@ -606,7 +610,7 @@ router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) 
         relatedType: 'message',
         relatedId: message._id.toString(),
         relatedName: message.subject,
-        data: { messageId: message._id.toString() }
+        data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
       });
     } catch (notifErr) {
       logger.warn('Reopen notification failed', { error: notifErr.message });
@@ -786,6 +790,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
       // Fire-and-forget notification (see notificationService setImmediate)
       notificationService.createNotification({
         userId: notifyUserId,
+        workspaceId: req.workspaceId,
         type: 'message.commented',
         title: '💬 Nový komentár',
         message: `${req.user.username} komentoval odkaz "${meta.subject}"`,
@@ -793,7 +798,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         relatedType: 'message',
         relatedId: meta._id.toString(),
         relatedName: meta.subject,
-        data: { messageId: meta._id.toString() }
+        data: { messageId: meta._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
       }).catch(notifErr => {
         logger.warn('Comment notification failed', { error: notifErr.message });
       });

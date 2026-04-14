@@ -524,6 +524,7 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
     for (const admin of admins) {
       await notificationService.createNotification({
         userId: admin.userId.toString(),
+        workspaceId: req.workspace._id,
         type: 'workspace',
         title: `${leavingUser.username} opustil/a prostredie`,
         message: `Používateľ ${leavingUser.username} opustil/a pracovné prostredie "${workspaceName}".`,

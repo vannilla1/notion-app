@@ -261,10 +261,14 @@ const sendAPNsNotification = async (userId, payload) => {
         'mutable-content': 1,
         'interruption-level': 'active',
         'relevance-score': 1.0,
-        'thread-id': payload.type || 'default'
+        // Group notifications by workspace so iOS stacks per workspace
+        'thread-id': payload.data?.workspaceId
+          ? `ws-${payload.data.workspaceId}`
+          : (payload.type || 'default')
       },
       url: url,
       type: payload.type,
+      workspaceId: payload.data?.workspaceId ? String(payload.data.workspaceId) : undefined,
       ...(payload.data || {})
     };
 
@@ -431,66 +435,54 @@ const initialize = (socketIo) => {
 const generateNotificationUrl = (type, data = {}) => {
   logger.debug('[NotificationService] generateNotificationUrl', { type, data });
 
+  // Helper: append ws=<workspaceId> so the client can switch workspace
+  // before navigating to the target entity. Required for multi-workspace users.
+  const withWs = (url) => {
+    if (!data.workspaceId) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}ws=${data.workspaceId}`;
+  };
+
   // Contact notifications -> /crm with contact expansion
   if (type?.startsWith('contact') && data.contactId) {
-    const url = `/crm?expandContact=${data.contactId}`;
-    logger.debug('[NotificationService] Generated contact URL', { url });
-    return url;
+    return withWs(`/crm?expandContact=${data.contactId}`);
   }
 
   // Task notifications -> /tasks with task highlight
   if (type?.startsWith('task') && data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}`;
-    if (data.contactId) {
-      url += `&contactId=${data.contactId}`;
-    }
-    logger.debug('[NotificationService] Generated task URL', { url });
-    return url;
+    if (data.contactId) url += `&contactId=${data.contactId}`;
+    return withWs(url);
   }
 
   // Subtask notifications -> /tasks with parent task highlight
   if (type?.startsWith('subtask') && data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
-    if (data.contactId) {
-      url += `&contactId=${data.contactId}`;
-    }
-    logger.debug('[NotificationService] Generated subtask URL', { url });
-    return url;
+    if (data.contactId) url += `&contactId=${data.contactId}`;
+    return withWs(url);
   }
 
   // Message notifications -> /messages with message highlight
   if (type?.startsWith('message') && data.messageId) {
-    const url = `/messages?highlight=${data.messageId}`;
-    logger.debug('[NotificationService] Generated message URL', { url });
-    return url;
+    return withWs(`/messages?highlight=${data.messageId}`);
   }
 
   // Workspace notifications -> /app (dashboard)
   if (type?.startsWith('workspace')) {
-    logger.debug('[NotificationService] Workspace notification, returning /app');
-    return '/app';
+    return withWs('/app');
   }
 
   // Fallback: try to determine URL from data fields alone
-  if (data.messageId) {
-    const url = `/messages?highlight=${data.messageId}`;
-    logger.debug('[NotificationService] Fallback: generated message URL from data', { url });
-    return url;
-  }
-  if (data.contactId && !data.taskId) {
-    const url = `/crm?expandContact=${data.contactId}`;
-    logger.debug('[NotificationService] Fallback: generated contact URL from data', { url });
-    return url;
-  }
+  if (data.messageId) return withWs(`/messages?highlight=${data.messageId}`);
+  if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${data.contactId}`);
   if (data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}`;
     if (data.contactId) url += `&contactId=${data.contactId}`;
-    logger.debug('[NotificationService] Fallback: generated task URL from data', { url });
-    return url;
+    return withWs(url);
   }
 
   logger.warn('[NotificationService] No URL match, returning /app', { type, data });
-  return '/app';
+  return withWs('/app');
 };
 
 /**
@@ -657,6 +649,7 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
  */
 const createNotification = async ({
   userId,
+  workspaceId = null,
   type,
   title,
   message = '',
@@ -668,8 +661,15 @@ const createNotification = async ({
   data = {}
 }) => {
   try {
+    // Ensure workspaceId is also available inside data so push payloads
+    // (which use data as the payload envelope) carry workspace context
+    const dataWithWs = workspaceId
+      ? { ...data, workspaceId: workspaceId.toString() }
+      : data;
+
     const notification = new Notification({
       userId,
+      workspaceId: workspaceId || undefined,
       type,
       title,
       message,
@@ -678,7 +678,7 @@ const createNotification = async ({
       relatedType,
       relatedId,
       relatedName,
-      data
+      data: dataWithWs
     });
 
     await notification.save();
@@ -688,6 +688,7 @@ const createNotification = async ({
     if (io) {
       io.to(`user-${userId}`).emit('notification', {
         id: notification._id.toString(),
+        workspaceId: notification.workspaceId ? notification.workspaceId.toString() : null,
         type: notification.type,
         title: notification.title,
         message: notification.message,
@@ -912,12 +913,16 @@ const notifyContactChange = async (type, contact, actor, workspaceId, excludeAct
     type,
     title,
     message,
+    workspaceId,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'contact',
     relatedId: contact._id?.toString() || contact.id,
     relatedName: contact.name,
-    data: { contactId: contact._id?.toString() || contact.id }
+    data: {
+      contactId: contact._id?.toString() || contact.id,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined
+    }
   };
 
   if (!workspaceId) {
@@ -951,6 +956,7 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
     type,
     title,
     message,
+    workspaceId,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'task',
@@ -959,7 +965,8 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
     data: {
       taskId: task._id?.toString() || task.id,
       contactId: task.contactId,
-      contactName: task.contactName
+      contactName: task.contactName,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined
     }
   };
 
@@ -1007,7 +1014,7 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
 /**
  * Notify about task assignment
  */
-const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
+const notifyTaskAssignment = async (task, assignedUserIds, actor, workspaceId = null) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle('task.assigned', actorName, task.title);
   const message = getNotificationMessage('task.assigned', actorName, { contactName: task.contactName });
@@ -1026,6 +1033,7 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
     type: 'task.assigned',
     title,
     message,
+    workspaceId,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'task',
@@ -1034,7 +1042,8 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
     data: {
       taskId: task._id?.toString() || task.id,
       contactId: task.contactId,
-      contactName: task.contactName
+      contactName: task.contactName,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined
     }
   };
 
@@ -1049,7 +1058,7 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor) => {
 /**
  * Notify about subtask assignment
  */
-const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, actor) => {
+const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, actor, workspaceId = null) => {
   const actorName = actor?.username || 'Systém';
   const title = getNotificationTitle('subtask.assigned', actorName, subtask.title);
   const message = getNotificationMessage('subtask.assigned', actorName, { taskTitle: parentTask.title });
@@ -1060,6 +1069,7 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
     type: 'subtask.assigned',
     title,
     message,
+    workspaceId,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'subtask',
@@ -1069,7 +1079,8 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
       subtaskId: subtask.id,
       taskId: parentTask._id?.toString() || parentTask.id,
       taskTitle: parentTask.title,
-      contactId: parentTask.contactId
+      contactId: parentTask.contactId,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined
     }
   };
 
@@ -1100,6 +1111,7 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
     type,
     title,
     message,
+    workspaceId,
     actorId: actor?._id || actor?.id,
     actorName,
     relatedType: 'subtask',
@@ -1109,7 +1121,8 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
       subtaskId: subtask.id,
       taskId: parentTask._id?.toString() || parentTask.id,
       taskTitle: parentTask.title,
-      contactId: parentTask.contactId
+      contactId: parentTask.contactId,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined
     }
   };
 
