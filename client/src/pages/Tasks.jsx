@@ -803,32 +803,30 @@ function Tasks() {
   // Track navTimestamp to detect new navigation even when on same page
   const lastNavTimestampRef = useRef(null);
 
-  // Helper function to process highlight
-  const processHighlight = useCallback((taskId, subtaskId) => {
-    if (tasks.length > 0) {
-      setHighlightedTaskId(taskId);
-      setExpandedTask(taskId);
-
-      if (subtaskId) {
-        setHighlightedSubtaskId(subtaskId);
-        setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
-      }
-
-      setTimeout(() => {
-        if (taskRefs.current[taskId]) {
-          taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
-
-      setTimeout(() => {
-        setHighlightedTaskId(null);
-        setHighlightedSubtaskId(null);
-      }, 3000);
-    } else {
-      // Tasks not loaded yet, store for later
-      pendingHighlightRef.current = { taskId, subtaskId };
+  // Retry scrollIntoView until the target DOM element exists.
+  // On cold-start / workspace-switch, the task card may not be in the DOM
+  // yet when we try to scroll — retry for up to ~2s before giving up.
+  const scrollToTaskWithRetry = useCallback((taskId, attempts = 0) => {
+    const el = taskRefs.current[taskId];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      console.log('[DeepLink] Tasks: scrolled to', taskId, 'after', attempts, 'attempts');
+      return;
     }
-  }, [tasks.length]);
+    if (attempts < 20) { // 20 × 100ms = 2s
+      setTimeout(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
+    } else {
+      console.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
+    }
+  }, []);
+
+  // Helper function to process highlight. ALWAYS routes through
+  // pendingHighlightRef + [tasks] effect — never reads stale `tasks` closure.
+  // This is what makes deep-links reliable across workspace switches.
+  const processHighlight = useCallback((taskId, subtaskId) => {
+    console.log('[DeepLink] Tasks: queueing pending highlight', { taskId, subtaskId });
+    pendingHighlightRef.current = { taskId, subtaskId };
+  }, []);
 
   // Handle notification deep links — unified via URL query params
   useEffect(() => {
@@ -890,36 +888,41 @@ function Tasks() {
     }
   }, [location.search]);
 
-  // Process pending highlight when tasks are loaded
+  // Process pending highlight when tasks are loaded. Only fires when the
+  // target task is actually in the list — otherwise keeps pending so a later
+  // fetch (e.g. after workspace switch) can satisfy it.
   useEffect(() => {
-    if (pendingHighlightRef.current && tasks.length > 0) {
-      const { taskId, subtaskId } = pendingHighlightRef.current;
-      pendingHighlightRef.current = null; // Clear pending highlight
+    if (!pendingHighlightRef.current || tasks.length === 0) return;
+    const { taskId, subtaskId } = pendingHighlightRef.current;
 
-      setHighlightedTaskId(taskId);
-      setExpandedTask(taskId);
-
-      // If subtask is specified, highlight it and expand parent subtasks
-      if (subtaskId) {
-        setHighlightedSubtaskId(subtaskId);
-        // Auto-expand subtasks to show the highlighted one
-        setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
-      }
-
-      // Scroll to the task after a short delay
-      setTimeout(() => {
-        if (taskRefs.current[taskId]) {
-          taskRefs.current[taskId].scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
-
-      // Remove highlight after 3 seconds
-      setTimeout(() => {
-        setHighlightedTaskId(null);
-        setHighlightedSubtaskId(null);
-      }, 3000);
+    // Check if the target task is actually in the loaded tasks (or is a
+    // subtask of one). If not — the fetch may have been for wrong workspace;
+    // keep pending and wait for the next tasks update.
+    const taskExists = tasks.some(t => t.id === taskId || t._id === taskId);
+    if (!taskExists) {
+      console.log('[DeepLink] Tasks: target not in list yet, keep pending', taskId);
+      return;
     }
-  }, [tasks]);
+
+    pendingHighlightRef.current = null;
+    console.log('[DeepLink] Tasks: processing pending', { taskId, subtaskId });
+
+    setHighlightedTaskId(taskId);
+    setExpandedTask(taskId);
+
+    if (subtaskId) {
+      setHighlightedSubtaskId(subtaskId);
+      setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
+    }
+
+    // Retry-scroll until the DOM element exists (lazy render / expand animation).
+    scrollToTaskWithRetry(taskId);
+
+    setTimeout(() => {
+      setHighlightedTaskId(null);
+      setHighlightedSubtaskId(null);
+    }, 3000);
+  }, [tasks, scrollToTaskWithRetry]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
