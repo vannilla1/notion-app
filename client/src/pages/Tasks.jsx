@@ -810,7 +810,7 @@ function Tasks() {
     const el = taskRefs.current[taskId];
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      console.log('[DeepLink] Tasks: scrolled to', taskId, 'after', attempts, 'attempts');
+      console.log('[DeepLink] Tasks: scrolled to task', taskId, 'after', attempts, 'attempts');
       return;
     }
     if (attempts < 20) { // 20 × 100ms = 2s
@@ -819,6 +819,45 @@ function Tasks() {
       console.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
     }
   }, []);
+
+  // Scroll to a subtask DOM element (data-subtask-id). Retries because the
+  // subtask only appears after its ancestor chain is expanded (animation +
+  // re-render). 30 × 100ms = 3s window.
+  const scrollToSubtaskWithRetry = useCallback((subtaskId, attempts = 0) => {
+    const el = document.querySelector(`[data-subtask-id="${subtaskId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      console.log('[DeepLink] Tasks: scrolled to subtask', subtaskId, 'after', attempts, 'attempts');
+      return;
+    }
+    if (attempts < 30) {
+      setTimeout(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
+    } else {
+      console.warn('[DeepLink] Tasks: gave up scrolling to subtask', subtaskId);
+    }
+  }, []);
+
+  // Find the ancestor subtask IDs leading to a given subtask. Returns array
+  // of IDs (NOT including the target itself) from outermost to innermost.
+  // If subtask is a direct child of a top-level task, returns []. Returns
+  // null if subtask is not found anywhere.
+  const findSubtaskAncestors = useCallback((subtaskId) => {
+    const walk = (subtasks, path) => {
+      if (!subtasks) return null;
+      for (const sub of subtasks) {
+        const sid = sub.id || sub._id;
+        if (sid === subtaskId) return path;
+        const found = walk(sub.subtasks, [...path, sid]);
+        if (found) return found;
+      }
+      return null;
+    };
+    for (const t of tasks) {
+      const path = walk(t.subtasks, []);
+      if (path) return { taskId: t.id || t._id, ancestors: path };
+    }
+    return null;
+  }, [tasks]);
 
   // Helper function to process highlight. ALWAYS routes through
   // pendingHighlightRef + [tasks] effect — never reads stale `tasks` closure.
@@ -912,17 +951,35 @@ function Tasks() {
 
     if (subtaskId) {
       setHighlightedSubtaskId(subtaskId);
-      setExpandedSubtasks(prev => ({ ...prev, [subtaskId]: true }));
+      // Expand EVERY ancestor subtask on the path from the top-level task
+      // down to the target subtask. Without this, a deeply-nested subtask
+      // stays hidden because only its own children (not its parents) were
+      // expanded. Also expand the target itself so its children are visible.
+      const loc = findSubtaskAncestors(subtaskId);
+      if (loc) {
+        console.log('[DeepLink] Tasks: subtask ancestors =', loc.ancestors);
+        setExpandedSubtasks(prev => {
+          const next = { ...prev, [subtaskId]: true };
+          for (const ancestorId of loc.ancestors) next[ancestorId] = true;
+          return next;
+        });
+        // Scroll to the subtask itself (not the parent task) once its DOM
+        // node renders. Small delay lets expand state propagate first.
+        setTimeout(() => scrollToSubtaskWithRetry(subtaskId), 150);
+      } else {
+        console.warn('[DeepLink] Tasks: subtask not found in tree, scrolling to task', subtaskId);
+        scrollToTaskWithRetry(taskId);
+      }
+    } else {
+      // No subtask — just scroll to the task card.
+      scrollToTaskWithRetry(taskId);
     }
-
-    // Retry-scroll until the DOM element exists (lazy render / expand animation).
-    scrollToTaskWithRetry(taskId);
 
     setTimeout(() => {
       setHighlightedTaskId(null);
       setHighlightedSubtaskId(null);
     }, 3000);
-  }, [tasks, scrollToTaskWithRetry]);
+  }, [tasks, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
@@ -1428,7 +1485,7 @@ function Tasks() {
       return (
         <SortableSubtaskItem key={subtask.id} id={subtask.id}>
           {({ dragListeners, isDragging }) => (
-        <div className={`subtask-tree-item ${isDragging ? 'dragging' : ''}`} style={{ marginLeft: depth * 16 }}>
+        <div className={`subtask-tree-item ${isDragging ? 'dragging' : ''}`} style={{ marginLeft: depth * 16 }} data-subtask-id={subtask.id}>
           <div
             className={`subtask-item ${subtask.completed ? 'completed' : ''} ${matchesFilter ? 'filter-match' : ''} ${highlightedSubtaskId === subtask.id ? 'highlighted' : ''}`}
             onClick={(e) => {
