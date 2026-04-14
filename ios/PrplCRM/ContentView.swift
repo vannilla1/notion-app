@@ -472,6 +472,12 @@ struct WebView: UIViewRepresentable {
         var hasFinishedInitialLoad = false
         private var didOpenExternalAuth = false
         var pendingDeepLinkJS: String?
+        // Track last successfully loaded URL so we can restore it if the
+        // WebContent process terminates (iOS jetsam kills it under memory
+        // pressure — common when scrolling long lists). Without this the
+        // view would reload to the initial /app URL, which is exactly the
+        // "scroll jumps to dashboard" bug the user reported.
+        var lastURL: URL?
 
         init(_ parent: WebView) {
             self.parent = parent
@@ -485,6 +491,16 @@ struct WebView: UIViewRepresentable {
                 name: UIApplication.willEnterForegroundNotification,
                 object: nil
             )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appDidReceiveMemoryWarning),
+                name: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil
+            )
+        }
+
+        @objc private func appDidReceiveMemoryWarning() {
+            print("[WebView] ⚠ Memory warning received — at URL \(lastURL?.absoluteString ?? "nil")")
         }
 
         @objc private func appWillEnterForeground() {
@@ -617,6 +633,26 @@ struct WebView: UIViewRepresentable {
                 parent.loadError = true
                 parent.isLoading = false
             }
+        }
+
+        // Track every committed navigation so we know where the user really is.
+        // When WebContent process dies, we restore THIS URL, not the hardcoded
+        // initial /app URL.
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            if let url = webView.url {
+                lastURL = url
+                print("[WebView] didCommit \(url.absoluteString)")
+            }
+        }
+
+        // Fires when iOS kills the WebContent process (memory pressure, etc.)
+        // Without this handler, WKWebView stays blank or gets reloaded from
+        // initial URL by our updateUIView fallback — either way the user
+        // loses their current location. We reload the last known URL.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            let restoreURL = lastURL ?? parent.url
+            print("[WebView] ⚠ WebContent process terminated — reloading \(restoreURL.absoluteString)")
+            webView.load(URLRequest(url: restoreURL))
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
