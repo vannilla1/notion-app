@@ -8,6 +8,7 @@ import api from './api/api';
 import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
+import { isIosNativeApp } from './utils/platform';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -302,7 +303,10 @@ function AppContent() {
 
   return (
     <>
-      {isAuthenticated && <NotificationToast />}
+      {/* In iOS native app, APNs system banners already show notifications —
+          mounting NotificationToast would duplicate every notification.
+          Web/Android (no APNs) still get the in-app toast. */}
+      {isAuthenticated && !isIosNativeApp() && <NotificationToast />}
       {isAuthenticated && <BottomNav unreadCounts={unreadCounts} />}
       <Suspense fallback={<RouteFallback />}>
       <Routes>
