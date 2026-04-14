@@ -1,26 +1,42 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import CRM from './pages/CRM';
-import Tasks from './pages/Tasks';
-import WorkspaceMembers from './pages/WorkspaceMembers';
-import AcceptInvite from './pages/AcceptInvite';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import TermsOfService from './pages/TermsOfService';
-import Messages from './pages/Messages';
-import BillingPage from './pages/BillingPage';
-import LandingPage from './pages/LandingPage';
-import AdminPanel from './pages/AdminPanel';
-import AdminLogin from './pages/AdminLogin';
 import NotificationToast from './components/NotificationToast';
 import BottomNav from './components/BottomNav';
 import api from './api/api';
 import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
+
+// Lazy-load all routes. On iOS WKWebView, loading all pages + their
+// dependencies (heavy editors, recharts, etc.) at once pushes WebContent
+// process over the memory limit → jetsam → full reload to /app (the
+// "scroll jumps to dashboard" bug). Code splitting keeps each section's
+// code in its own chunk, loaded only when navigated to.
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CRM = lazy(() => import('./pages/CRM'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const WorkspaceMembers = lazy(() => import('./pages/WorkspaceMembers'));
+const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const Messages = lazy(() => import('./pages/Messages'));
+const BillingPage = lazy(() => import('./pages/BillingPage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const AdminLogin = lazy(() => import('./pages/AdminLogin'));
+
+const RouteFallback = () => (
+  <div style={{
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+    color: 'var(--text-secondary, #64748b)'
+  }}>
+    Načítavam…
+  </div>
+);
 
 const typeToSection = (type) => {
   if (!type) return null;
@@ -441,6 +457,7 @@ function AppContent() {
     <>
       {isAuthenticated && <NotificationToast />}
       {isAuthenticated && <BottomNav unreadCounts={unreadCounts} />}
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route
@@ -477,6 +494,7 @@ function AppContent() {
         <Route path="/ochrana-udajov" element={<PrivacyPolicy />} />
         <Route path="/vop" element={<TermsOfService />} />
       </Routes>
+      </Suspense>
     </>
   );
 }

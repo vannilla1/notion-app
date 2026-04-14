@@ -10,11 +10,22 @@ import './styles/index.css';
 // Initialize Sentry before rendering
 initSentry();
 
-const SentryErrorBoundary = import.meta.env.VITE_SENTRY_DSN
+const isNativeIOSApp = (() => {
+  try {
+    return /PrplCRM-iOS/.test(navigator.userAgent) ||
+           !!(window.webkit && window.webkit.messageHandlers);
+  } catch {
+    return false;
+  }
+})();
+
+const sentryEnabled = !!import.meta.env.VITE_SENTRY_DSN && !isNativeIOSApp;
+
+const SentryErrorBoundary = sentryEnabled
   ? Sentry.ErrorBoundary
   : React.Fragment;
 
-const errorBoundaryProps = import.meta.env.VITE_SENTRY_DSN
+const errorBoundaryProps = sentryEnabled
   ? {
       fallback: ({ error, resetError }) => (
         <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'sans-serif' }}>

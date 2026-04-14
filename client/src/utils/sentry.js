@@ -1,10 +1,29 @@
 import * as Sentry from '@sentry/react';
 
+const isNativeIOSApp = () => {
+  try {
+    return /PrplCRM-iOS/.test(navigator.userAgent) ||
+           !!(window.webkit && window.webkit.messageHandlers);
+  } catch {
+    return false;
+  }
+};
+
 const initSentry = () => {
   const dsn = import.meta.env.VITE_SENTRY_DSN;
 
   if (!dsn) {
     console.info('[Sentry] DSN not configured, frontend error tracking disabled');
+    return;
+  }
+
+  // Skip Sentry in native iOS app — the Replay integration alone uses
+  // 10-20MB of RAM, which combined with our JS bundle pushes WKWebView
+  // over the memory limit → WebContent process jetsam → full reload
+  // (the "scroll jumps to dashboard" bug). Native iOS errors are tracked
+  // separately via APNs/TestFlight crash reports.
+  if (isNativeIOSApp()) {
+    console.info('[Sentry] Skipped in iOS native app (memory optimization)');
     return;
   }
 

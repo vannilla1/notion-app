@@ -53,6 +53,22 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  build: {
+    // Larger warning limit — per-route chunks are still reasonable.
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Split heavy vendor libs into their own chunks so they can be
+        // cached and loaded independently from app code. Reduces
+        // per-page JS delivered to WKWebView on iOS (memory win).
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'sentry': ['@sentry/react'],
+          'socket': ['socket.io-client'],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {
