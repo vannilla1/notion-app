@@ -837,13 +837,23 @@ function Tasks() {
     const urlSubtaskId = params.get('subtask');
     const urlTimestamp = params.get('_t');
 
+    // Wait for App.jsx to resolve `ws=` (cross-workspace deep link) before
+    // stripping URL / fetching tasks — otherwise we'd fetch in the wrong
+    // workspace and never find the highlighted task.
+    if (params.get('ws')) {
+      console.log('[DeepLink] Tasks: ws= still present, deferring to App');
+      return;
+    }
+
     if (urlTaskId) {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        navigate(location.pathname, { replace: true, state: {} });
+        console.log('[DeepLink] Tasks: processing highlightTask=', urlTaskId, 'subtask=', urlSubtaskId);
         fetchTasks().then(() => {
           setTimeout(() => processHighlight(urlTaskId, urlSubtaskId), 100);
+          // Strip params AFTER fetch starts so we don't re-trigger; keep state clean
+          navigate(location.pathname, { replace: true, state: {} });
         });
       }
     }

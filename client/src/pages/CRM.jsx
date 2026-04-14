@@ -242,18 +242,26 @@ function CRM() {
     const urlContactId = params.get('expandContact');
     const urlTimestamp = params.get('_t');
 
+    // Defer if App.jsx hasn't resolved `ws=` yet — otherwise we'd fetch in
+    // the wrong workspace and never find the highlighted contact.
+    if (params.get('ws')) {
+      console.log('[DeepLink] CRM: ws= still present, deferring to App');
+      return;
+    }
+
     if (urlContactId) {
       const tsKey = urlTimestamp || 'no-ts';
       // Only process if this is a new navigation (different _t)
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        // Clear query params from URL immediately
-        navigate(location.pathname, { replace: true, state: {} });
+        console.log('[DeepLink] CRM: processing expandContact=', urlContactId);
         // Always store as pending — the contacts useEffect will process it
         // when contacts are loaded (avoids stale closure issues)
         pendingHighlightRef.current = { contactId: urlContactId };
         // Refresh contacts to trigger the pending highlight processing
         fetchContacts();
+        // Clear query params from URL after fetch starts
+        navigate(location.pathname, { replace: true, state: {} });
       }
     }
   }, [location.search]);

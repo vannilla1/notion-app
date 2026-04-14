@@ -253,10 +253,17 @@ function Messages() {
     const commentId = params.get('comment');
     const urlTimestamp = params.get('_t');
 
+    // Wait for App.jsx to resolve `ws=` first (cross-workspace deep link).
+    if (params.get('ws')) {
+      console.log('[DeepLink] Messages: ws= still present, deferring to App');
+      return;
+    }
+
     if (highlightId) {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastMsgHighlightRef.current) {
         lastMsgHighlightRef.current = tsKey;
+        console.log('[DeepLink] Messages: processing highlight=', highlightId, 'comment=', commentId);
         highlightMessage(highlightId, commentId);
         // Clear params from URL
         navigate(location.pathname, { replace: true });

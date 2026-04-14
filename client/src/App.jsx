@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
@@ -195,12 +195,16 @@ function AppContent() {
   // page can fetch workspace-scoped data (message detail, etc.). Runs ONCE
   // after auth + workspace context are ready.
   const initialWsSwitchDoneRef = useRef(false);
-  useEffect(() => {
+  // useLayoutEffect so this runs BEFORE child page effects (Tasks/CRM/Messages)
+  // strip their URL params — otherwise they'd navigate() and drop `ws=` before
+  // we can read it, and cross-workspace deep links would land on the wrong ws.
+  useLayoutEffect(() => {
     if (!isAuthenticated || workspaceLoading || initialWsSwitchDoneRef.current) return;
     const params = new URLSearchParams(location.search);
     const targetWs = params.get('ws');
     if (targetWs) {
       initialWsSwitchDoneRef.current = true;
+      console.log('[DeepLink] App: ws= detected, switching workspace →', targetWs);
       // Re-use navigateWithWorkspace which handles switch + strip ws= + navigate
       navigateWithWorkspace(location.pathname + location.search);
     } else {
