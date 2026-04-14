@@ -289,8 +289,18 @@ struct WebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.scrollView.bounces = true
+        // Disable iOS edge-swipe back gesture: on iOS the CSS pins body to
+        // `position: fixed` and scroll happens inside `.crm-main`. When the
+        // user started a vertical scroll with their finger near the left edge
+        // of the screen, WKWebView mis-interpreted it as a back-swipe and
+        // navigated the WebView history back to /app (the dashboard) — the
+        // "scroll-down jumps to dashboard" bug. The app has its own BottomNav
+        // for navigation, so the native back gesture is unnecessary.
+        webView.allowsBackForwardNavigationGestures = false
+        // Disable outer scrollView bouncing. Scroll happens inside the inner
+        // `.crm-main` container on iOS; letting the outer WKWebView bounce on
+        // top of that caused scroll-position desync and visual jumps.
+        webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 99/255, green: 102/255, blue: 241/255, alpha: 1)
