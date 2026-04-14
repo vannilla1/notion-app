@@ -47,6 +47,72 @@ function AppContent() {
   const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
   const prevPathRef = useRef(location.pathname);
 
+  // DIAGNOSTIC: iOS scroll→dashboard bug. Patch history methods to capture
+  // stack trace of EVERY navigation, and show it on-screen so the user can
+  // report exactly what triggers the jump. Remove once root cause found.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.__navDiagInstalled) return;
+    window.__navDiagInstalled = true;
+
+    const showOverlay = (title, detail) => {
+      try {
+        let el = document.getElementById('nav-diag-overlay');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'nav-diag-overlay';
+          el.style.cssText = 'position:fixed;top:8px;left:8px;right:8px;z-index:99999;background:rgba(220,38,38,0.95);color:#fff;font:11px/1.3 monospace;padding:8px;border-radius:6px;max-height:50vh;overflow:auto;white-space:pre-wrap;word-break:break-all;';
+          el.addEventListener('click', () => el.remove());
+          document.body.appendChild(el);
+        }
+        el.textContent = `[${new Date().toISOString().slice(11,19)}] ${title}\n${detail}\n\n(tap to dismiss)`;
+      } catch {}
+    };
+
+    const log = (kind, arg) => {
+      const stack = new Error().stack || '';
+      const from = window.location.pathname + window.location.search;
+      const to = typeof arg === 'string' ? arg : (arg?.pathname || JSON.stringify(arg));
+      // eslint-disable-next-line no-console
+      console.warn('[NAV-DIAG]', kind, 'from=', from, 'to=', to, '\n', stack);
+      if (String(to).includes('/app') && !from.startsWith('/app')) {
+        showOverlay(`${kind} → ${to}`, `from: ${from}\n\n${stack.split('\n').slice(1, 8).join('\n')}`);
+      }
+    };
+
+    const origPush = window.history.pushState;
+    const origReplace = window.history.replaceState;
+    window.history.pushState = function (...args) {
+      log('pushState', args[2]);
+      return origPush.apply(this, args);
+    };
+    window.history.replaceState = function (...args) {
+      log('replaceState', args[2]);
+      return origReplace.apply(this, args);
+    };
+    const onPop = (e) => log('popstate', window.location.pathname);
+    window.addEventListener('popstate', onPop);
+
+    // Also log scroll resets on main scroll container
+    const onScroll = (e) => {
+      const t = e.target;
+      if (t && t.scrollTop === 0 && t.__prevScrollTop > 50) {
+        // eslint-disable-next-line no-console
+        console.warn('[NAV-DIAG] scrollTop reset from', t.__prevScrollTop, 'on', t.className);
+      }
+      if (t) t.__prevScrollTop = t.scrollTop;
+    };
+    document.addEventListener('scroll', onScroll, true);
+
+    return () => {
+      window.history.pushState = origPush;
+      window.history.replaceState = origReplace;
+      window.removeEventListener('popstate', onPop);
+      document.removeEventListener('scroll', onScroll, true);
+      window.__navDiagInstalled = false;
+    };
+  }, []);
+
   const fetchUnreadCounts = useCallback(async () => {
     try {
       const res = await api.get('/api/notifications/unread-by-section');
