@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
@@ -8,6 +9,16 @@ const User = require('../models/User');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const logger = require('../utils/logger');
+
+// Projection that excludes ALL Base64 blobs so comment CRUD never pulls
+// megabytes of existing attachments into Node memory. Root cause of
+// 10+ sec comment operations was `message.save()` rewriting the full
+// document (including every Base64 attachment of every other comment).
+const NO_BASE64_PROJECTION = {
+  'attachment.data': 0,
+  'files.data': 0,
+  'comments.attachment.data': 0
+};
 
 const router = express.Router();
 
@@ -718,20 +729,27 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         return res.status(400).json({ message: 'Text komentára je povinný' });
       }
 
-      const message = await Message.findOne({
-        _id: req.params.id,
-        workspaceId: req.workspaceId,
-        $or: [
-          { fromUserId: req.user.id },
-          { toUserId: req.user.id }
-        ]
-      });
+      // PERF: load only metadata fields (NO Base64) for authorization +
+      // status-transition decision. Full message was previously pulled,
+      // mutated, and re-saved → rewrote every Base64 blob.
+      const meta = await Message.findOne(
+        {
+          _id: req.params.id,
+          workspaceId: req.workspaceId,
+          $or: [
+            { fromUserId: req.user.id },
+            { toUserId: req.user.id }
+          ]
+        },
+        { fromUserId: 1, toUserId: 1, status: 1, subject: 1 }
+      ).lean();
 
-      if (!message) {
+      if (!meta) {
         return res.status(404).json({ message: 'Odkaz nenájdený' });
       }
 
       const comment = {
+        _id: new mongoose.Types.ObjectId(),
         userId: req.user.id,
         username: req.user.username,
         text: text.trim().substring(0, 2000),
@@ -749,45 +767,48 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         };
       }
 
-      message.comments.push(comment);
-
-      // If comment is from recipient and status is pending, change to commented
-      if (message.toUserId.toString() === req.user.id.toString() && message.status === 'pending') {
-        message.status = 'commented';
+      // Atomic $push — only the new comment is sent over the wire.
+      const update = { $push: { comments: comment } };
+      const shouldTransition =
+        meta.toUserId.toString() === req.user.id.toString() &&
+        meta.status === 'pending';
+      if (shouldTransition) {
+        update.$set = { status: 'commented' };
       }
 
-      await message.save();
+      await Message.updateOne({ _id: meta._id }, update);
 
       // Notify the other party
-      const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
-        ? message.toUserId.toString()
-        : message.fromUserId.toString();
+      const notifyUserId = meta.fromUserId.toString() === req.user.id.toString()
+        ? meta.toUserId.toString()
+        : meta.fromUserId.toString();
 
-      try {
-        await notificationService.createNotification({
-          userId: notifyUserId,
-          type: 'message.commented',
-          title: '💬 Nový komentár',
-          message: `${req.user.username} komentoval odkaz "${message.subject}"`,
-          actorName: req.user.username,
-          relatedType: 'message',
-          relatedId: message._id.toString(),
-          relatedName: message.subject,
-          data: { messageId: message._id.toString() }
-        });
-      } catch (notifErr) {
+      // Fire-and-forget notification (see notificationService setImmediate)
+      notificationService.createNotification({
+        userId: notifyUserId,
+        type: 'message.commented',
+        title: '💬 Nový komentár',
+        message: `${req.user.username} komentoval odkaz "${meta.subject}"`,
+        actorName: req.user.username,
+        relatedType: 'message',
+        relatedId: meta._id.toString(),
+        relatedName: meta.subject,
+        data: { messageId: meta._id.toString() }
+      }).catch(notifErr => {
         logger.warn('Comment notification failed', { error: notifErr.message });
-      }
+      });
 
       const io = req.app.get('io');
       if (io) {
         io.to(`user-${notifyUserId}`).emit('message-updated', {
-          id: message._id.toString(),
-          status: message.status
+          id: meta._id.toString(),
+          status: shouldTransition ? 'commented' : meta.status
         });
       }
 
-      res.json(stripAttachmentData(message));
+      // Return updated message WITHOUT re-fetching Base64 blobs.
+      const updated = await Message.findById(meta._id, NO_BASE64_PROJECTION).lean();
+      res.json(stripAttachmentData(updated));
     } catch (error) {
       res.status(500).json({ message: 'Chyba servera' });
     }
@@ -802,46 +823,46 @@ router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async
       return res.status(400).json({ message: 'Text komentára je povinný' });
     }
 
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
+    // PERF: atomic $set on the matched comment — no full doc save.
+    // Authorship + workspace + membership enforced via filter.
+    const newText = text.trim().substring(0, 2000);
+    const result = await Message.updateOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ],
+        comments: {
+          $elemMatch: { _id: req.params.commentId, userId: req.user.id }
+        }
+      },
+      { $set: { 'comments.$.text': newText } }
+    );
 
-    if (!message) {
-      return res.status(404).json({ message: 'Odkaz nenájdený' });
+    if (result.matchedCount === 0) {
+      // Either message not found, comment not found, or user not author.
+      return res.status(404).json({ message: 'Komentár nenájdený alebo nie ste autor' });
     }
 
-    const comment = message.comments.id(req.params.commentId);
-    if (!comment) {
-      return res.status(404).json({ message: 'Komentár nenájdený' });
-    }
-
-    // Only author can edit
-    if (comment.userId.toString() !== req.user.id.toString()) {
-      return res.status(403).json({ message: 'Môžete upraviť len vlastný komentár' });
-    }
-
-    comment.text = text.trim().substring(0, 2000);
-    await message.save();
+    // Fetch minimal metadata for socket + response (no Base64).
+    const updated = await Message.findById(req.params.id, NO_BASE64_PROJECTION).lean();
 
     // Notify the other party
-    const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
-      ? message.toUserId.toString()
-      : message.fromUserId.toString();
+    const notifyUserId = updated.fromUserId.toString() === req.user.id.toString()
+      ? updated.toUserId.toString()
+      : updated.fromUserId.toString();
 
     const io = req.app.get('io');
     if (io) {
       io.to(`user-${notifyUserId}`).emit('message-updated', {
-        id: message._id.toString(),
-        status: message.status
+        id: updated._id.toString(),
+        status: updated.status
       });
     }
 
-    res.json(stripAttachmentData(message));
+    res.json(stripAttachmentData(updated));
   } catch (error) {
     logger.error('Edit comment error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
@@ -851,52 +872,53 @@ router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async
 // DELETE /api/messages/:id/comment/:commentId — delete comment (only author)
 router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
+    // PERF: atomic $pull with authorship check in filter. No full doc save.
+    const pullResult = await Message.updateOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ],
+        comments: {
+          $elemMatch: { _id: req.params.commentId, userId: req.user.id }
+        }
+      },
+      { $pull: { comments: { _id: req.params.commentId } } }
+    );
 
-    if (!message) {
-      return res.status(404).json({ message: 'Odkaz nenájdený' });
+    if (pullResult.matchedCount === 0) {
+      return res.status(404).json({ message: 'Komentár nenájdený alebo nie ste autor' });
     }
 
-    const comment = message.comments.id(req.params.commentId);
-    if (!comment) {
-      return res.status(404).json({ message: 'Komentár nenájdený' });
-    }
+    // If status was 'commented' and no comments remain, revert to 'pending'.
+    // Use conditional update — only fires if condition is met, no re-save.
+    await Message.updateOne(
+      {
+        _id: req.params.id,
+        status: 'commented',
+        comments: { $size: 0 }
+      },
+      { $set: { status: 'pending' } }
+    );
 
-    // Only author can delete
-    if (comment.userId.toString() !== req.user.id.toString()) {
-      return res.status(403).json({ message: 'Môžete vymazať len vlastný komentár' });
-    }
+    // Fetch minimal metadata for response + socket (no Base64).
+    const updated = await Message.findById(req.params.id, NO_BASE64_PROJECTION).lean();
 
-    message.comments.pull(req.params.commentId);
-
-    // If status was 'commented' and no comments remain, revert to 'pending'
-    if (message.status === 'commented' && message.comments.length === 0) {
-      message.status = 'pending';
-    }
-
-    await message.save();
-
-    // Notify the other party
-    const notifyUserId = message.fromUserId.toString() === req.user.id.toString()
-      ? message.toUserId.toString()
-      : message.fromUserId.toString();
+    const notifyUserId = updated.fromUserId.toString() === req.user.id.toString()
+      ? updated.toUserId.toString()
+      : updated.fromUserId.toString();
 
     const io = req.app.get('io');
     if (io) {
       io.to(`user-${notifyUserId}`).emit('message-updated', {
-        id: message._id.toString(),
-        status: message.status
+        id: updated._id.toString(),
+        status: updated.status
       });
     }
 
-    res.json(stripAttachmentData(message));
+    res.json(stripAttachmentData(updated));
   } catch (error) {
     logger.error('Delete comment error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
