@@ -121,6 +121,7 @@ function Messages() {
   const [editing, setEditing] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editingCommentText, setEditingCommentText] = useState('');
+  const [highlightedCommentId, setHighlightedCommentId] = useState(null);
 
   // File attachments
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -193,7 +194,7 @@ function Messages() {
 
   // Deep link highlight — fetch message by ID, switch to correct tab, select it
   const lastMsgHighlightRef = useRef(null);
-  const highlightMessage = async (messageId) => {
+  const highlightMessage = async (messageId, commentId = null) => {
     try {
       const res = await api.get(`/api/messages/${messageId}`);
       const msg = res.data;
@@ -213,6 +214,16 @@ function Messages() {
         setStatusFilter('all');
       }
       setSelectedMessage(msg);
+      if (commentId) {
+        setHighlightedCommentId(commentId);
+        // Scroll after detail view renders
+        setTimeout(() => {
+          const el = document.getElementById(`comment-${commentId}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+        // Clear highlight after a few seconds
+        setTimeout(() => setHighlightedCommentId(null), 4000);
+      }
     } catch {
       // Silently fail — message may have been deleted
     }
@@ -222,13 +233,14 @@ function Messages() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const highlightId = params.get('highlight');
+    const commentId = params.get('comment');
     const urlTimestamp = params.get('_t');
 
     if (highlightId) {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastMsgHighlightRef.current) {
         lastMsgHighlightRef.current = tsKey;
-        highlightMessage(highlightId);
+        highlightMessage(highlightId, commentId);
         // Clear params from URL
         navigate(location.pathname, { replace: true });
       }
@@ -787,6 +799,7 @@ function Messages() {
               setEditingCommentId={setEditingCommentId}
               editingCommentText={editingCommentText}
               setEditingCommentText={setEditingCommentText}
+              highlightedCommentId={highlightedCommentId}
             />
           ) : (
             <MessageList
@@ -1039,7 +1052,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1398,7 +1411,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                 const isOwn = (c.userId?.toString() || c.userId) === userId;
                 const isEditing = editingCommentId === c._id;
                 return (
-                  <div key={c._id || i} style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px' }}>
+                  <div key={c._id || i} id={`comment-${c._id}`} style={{ padding: '8px 12px', background: highlightedCommentId && (c._id?.toString() === highlightedCommentId?.toString()) ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px', transition: 'background 0.3s', outline: highlightedCommentId && (c._id?.toString() === highlightedCommentId?.toString()) ? '2px solid #6366f1' : 'none' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <strong>{c.username}</strong>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

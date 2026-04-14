@@ -294,7 +294,10 @@ function AppContent() {
             navigateWithWorkspace(taskUrl + wsSuffix);
           } else if (path === '/messages' && (params.get('highlight') || data?.messageId)) {
             const messageId = params.get('highlight') || data.messageId;
-            navigateWithWorkspace(`/messages?highlight=${messageId}&_t=${navTs}${wsSuffix}`);
+            const commentId = params.get('comment') || data?.commentId;
+            let msgUrl = `/messages?highlight=${messageId}&_t=${navTs}`;
+            if (commentId) msgUrl += `&comment=${commentId}`;
+            navigateWithWorkspace(msgUrl + wsSuffix);
           } else {
             navigateWithWorkspace(path + (urlObj.search || ''));
           }

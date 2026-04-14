@@ -462,9 +462,11 @@ const generateNotificationUrl = (type, data = {}) => {
     return withWs(url);
   }
 
-  // Message notifications -> /messages with message highlight
+  // Message notifications -> /messages with message highlight (+ comment scroll)
   if (type?.startsWith('message') && data.messageId) {
-    return withWs(`/messages?highlight=${data.messageId}`);
+    let url = `/messages?highlight=${data.messageId}`;
+    if (data.commentId) url += `&comment=${data.commentId}`;
+    return withWs(url);
   }
 
   // Workspace notifications -> /app (dashboard)
@@ -473,7 +475,11 @@ const generateNotificationUrl = (type, data = {}) => {
   }
 
   // Fallback: try to determine URL from data fields alone
-  if (data.messageId) return withWs(`/messages?highlight=${data.messageId}`);
+  if (data.messageId) {
+    let url = `/messages?highlight=${data.messageId}`;
+    if (data.commentId) url += `&comment=${data.commentId}`;
+    return withWs(url);
+  }
   if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${data.contactId}`);
   if (data.taskId) {
     let url = `/tasks?highlightTask=${data.taskId}`;

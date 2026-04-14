@@ -104,7 +104,9 @@ function NotificationBell() {
 
     // Use relatedType first (reliable), then fall back to type prefix
     if ((related === 'message' || type.startsWith('message')) && data.messageId) {
-      navigateForNotif(`/messages?highlight=${data.messageId}&_t=${ts}`, notifWs);
+      let url = `/messages?highlight=${data.messageId}&_t=${ts}`;
+      if (data.commentId) url += `&comment=${data.commentId}`;
+      navigateForNotif(url, notifWs);
     } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
       // Contact-embedded tasks: if we also have taskId, include it
       let url = `/crm?expandContact=${data.contactId}&_t=${ts}`;

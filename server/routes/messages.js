@@ -798,7 +798,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         relatedType: 'message',
         relatedId: meta._id.toString(),
         relatedName: meta.subject,
-        data: { messageId: meta._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
+        data: { messageId: meta._id.toString(), commentId: comment._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
       }).catch(notifErr => {
         logger.warn('Comment notification failed', { error: notifErr.message });
       });
