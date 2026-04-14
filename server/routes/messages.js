@@ -928,6 +928,14 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
 // GET /api/messages/:id/attachment — download attachment
 router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // PERF: early 304 short-circuit — if browser already has this blob
+    // cached (immutable files, deterministic ETag), skip Mongo + Node
+    // buffer allocation + network transfer entirely. Repeat preview = instant.
+    const etag = `"msg-${req.params.id}-attach"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
     // PERF: project only the main attachment — do NOT pull comments[].attachment.data
     // or files[].data. A message with 5 other 10 MB attachments was previously
     // shipping 50+ MB from Mongo just to return one file.
@@ -950,8 +958,10 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
     const fileBuffer = Buffer.from(message.attachment.data, 'base64');
     res.set({
       'Content-Type': message.attachment.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(message.attachment.originalName)}"`,
-      'Content-Length': fileBuffer.length
+      'Content-Disposition': `inline; filename="${encodeURIComponent(message.attachment.originalName)}"`,
+      'Content-Length': fileBuffer.length,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'ETag': etag
     });
     res.send(fileBuffer);
   } catch (error) {
@@ -962,6 +972,11 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
 // GET /api/messages/:id/comment/:commentId/attachment — download comment attachment
 router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    const etag = `"cmt-${req.params.commentId}-attach"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
     // PERF: $elemMatch projection returns ONLY the matching comment, not
     // the whole comments array. Main attachment + files are excluded entirely.
     const message = await Message.findOne(
@@ -988,8 +1003,10 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
     const fileBuffer = Buffer.from(comment.attachment.data, 'base64');
     res.set({
       'Content-Type': comment.attachment.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(comment.attachment.originalName)}"`,
-      'Content-Length': fileBuffer.length
+      'Content-Disposition': `inline; filename="${encodeURIComponent(comment.attachment.originalName)}"`,
+      'Content-Length': fileBuffer.length,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'ETag': etag
     });
     res.send(fileBuffer);
   } catch (error) {
@@ -1034,6 +1051,11 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
 // GET /api/messages/:id/files/:fileId/download — download file
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    const etag = `"file-${req.params.fileId}"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
     // PERF: $elemMatch projection — return only the matching file, not
     // the whole files array nor any comment attachments.
     const message = await Message.findOne(
@@ -1052,8 +1074,10 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     const buffer = Buffer.from(file.data, 'base64');
     res.set({
       'Content-Type': file.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,
-      'Content-Length': buffer.length
+      'Content-Disposition': `inline; filename="${encodeURIComponent(file.originalName)}"`,
+      'Content-Length': buffer.length,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'ETag': etag
     });
     res.send(buffer);
   } catch (error) {
