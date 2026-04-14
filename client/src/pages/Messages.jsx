@@ -214,6 +214,13 @@ function Messages() {
         setStatusFilter('all');
       }
       setSelectedMessage(msg);
+      // Mark all notifications for this message as read (bell badge + counts)
+      api.put('/api/notifications/read-for-related', {
+        relatedType: 'message',
+        relatedId: messageId
+      }).then(() => {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }).catch(() => {});
       if (commentId) {
         setHighlightedCommentId(commentId);
         // Scroll after detail view renders

@@ -159,6 +159,37 @@ router.put('/read-by-section/:section', authenticateToken, requireWorkspace, asy
   }
 });
 
+// Mark all notifications for a specific related entity as read.
+// Used when a deep link opens the target item (push / bell / cold-start URL)
+// so the bell badge reflects that the user has actually seen it.
+// Body: { relatedType: 'message'|'contact'|'task'|'subtask', relatedId: '...', commentId?: '...' }
+router.put('/read-for-related', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { relatedType, relatedId } = req.body || {};
+    if (!relatedType || !relatedId) {
+      return res.status(400).json({ message: 'relatedType a relatedId sú povinné' });
+    }
+    if (!/^[0-9a-fA-F]{24}$/.test(relatedId)) {
+      return res.status(400).json({ message: 'Neplatné relatedId' });
+    }
+    // Match by relatedId directly OR by data.messageId/taskId/contactId
+    const dataKey = relatedType === 'message' ? 'data.messageId'
+                  : relatedType === 'contact' ? 'data.contactId'
+                  : (relatedType === 'task' || relatedType === 'subtask') ? 'data.taskId'
+                  : null;
+    const or = [{ relatedId: relatedId }];
+    if (dataKey) or.push({ [dataKey]: relatedId });
+    const result = await Notification.updateMany(
+      { userId: req.user.id, workspaceId: req.workspaceId, read: false, $or: or },
+      { read: true }
+    );
+    res.json({ success: true, modified: result.modifiedCount });
+  } catch (error) {
+    logger.error('[Notifications] Error marking related as read', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri označovaní' });
+  }
+});
+
 // Mark notification as read
 router.put('/:id/read', authenticateToken, async (req, res) => {
   try {

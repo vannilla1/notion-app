@@ -104,6 +104,14 @@ function AppContent() {
     if (isAuthenticated) fetchUnreadCounts();
   }, [isAuthenticated, fetchUnreadCounts]);
 
+  // Refresh section counts when any component marks notifications as read
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const handler = () => fetchUnreadCounts();
+    window.addEventListener('notifications-updated', handler);
+    return () => window.removeEventListener('notifications-updated', handler);
+  }, [isAuthenticated, fetchUnreadCounts]);
+
   useEffect(() => {
     if (!socket || !isConnected || !isAuthenticated) return;
     const handleNotification = (notification) => {

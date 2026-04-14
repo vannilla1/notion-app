@@ -56,6 +56,17 @@ function NotificationBell() {
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
+  // Refresh immediately when another component marks notifications as read
+  // (e.g. opening a message detail via deep link clears that message's notifs)
+  useEffect(() => {
+    const handler = () => {
+      fetchUnreadCount();
+      if (open) fetchNotifications();
+    };
+    window.addEventListener('notifications-updated', handler);
+    return () => window.removeEventListener('notifications-updated', handler);
+  }, [fetchUnreadCount, fetchNotifications, open]);
+
   // Socket: real-time notification updates
   useEffect(() => {
     if (!socket || !isConnected) return;
