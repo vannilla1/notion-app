@@ -92,22 +92,48 @@ function AppContent() {
     }
   }, [isAuthenticated]);
 
+  // Modal scroll-lock: prevent body scroll behind open modals (iOS-safe).
+  // Uses a local `isLocked` flag (not the body class) as source of truth, so
+  // class desync can never trigger a stray window.scrollTo. Throttles via rAF
+  // so scroll-driven mutations (sticky headers, list virtualization, socket
+  // updates) don't hammer the callback. The scroll-restore is guarded by
+  // savedScrollY > 0, so a transient .modal-overlay opening at scroll=0 can
+  // never snap a deeply-scrolled page back to top — which was the root cause
+  // of the iOS "scroll-down jumps to dashboard" bug.
   useEffect(() => {
-    let scrollY = 0;
-    const observer = new MutationObserver(() => {
-      const hasModal = document.querySelector('.modal-overlay');
-      if (hasModal && !document.body.classList.contains('modal-open')) {
-        scrollY = window.scrollY;
+    let isLocked = false;
+    let savedScrollY = 0;
+    let scheduledCheck = null;
+
+    const checkAndUpdate = () => {
+      const hasModal = !!document.querySelector('.modal-overlay');
+      if (hasModal && !isLocked) {
+        isLocked = true;
+        savedScrollY = window.scrollY;
         document.body.classList.add('modal-open');
-        document.body.style.top = `-${scrollY}px`;
-      } else if (!hasModal && document.body.classList.contains('modal-open')) {
+        document.body.style.top = `-${savedScrollY}px`;
+      } else if (!hasModal && isLocked) {
+        isLocked = false;
         document.body.classList.remove('modal-open');
         document.body.style.top = '';
-        window.scrollTo(0, scrollY);
+        if (savedScrollY > 0) {
+          window.scrollTo(0, savedScrollY);
+        }
       }
+    };
+
+    const observer = new MutationObserver(() => {
+      if (scheduledCheck !== null) return;
+      scheduledCheck = requestAnimationFrame(() => {
+        scheduledCheck = null;
+        checkAndUpdate();
+      });
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (scheduledCheck !== null) cancelAnimationFrame(scheduledCheck);
+    };
   }, []);
 
   // Save deep link to sessionStorage before auth redirect loses it.
