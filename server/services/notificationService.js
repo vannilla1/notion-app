@@ -702,7 +702,13 @@ const createNotification = async ({
       metrics.notifications.socketEmitted++;
     }
 
-    // Send push notifications — prefer APNs for iOS, web push for desktop
+    // Send push notifications — prefer APNs for iOS, web push for desktop.
+    // CRITICAL PERF FIX: push sends (APNs round-trip to Apple + web push VAPID
+    // signing/POST) take 5-15s per device. Previously these were awaited,
+    // blocking the HTTP response of every route that created a notification
+    // (comment submit taking "tens of seconds" = classic symptom).
+    // Socket.IO emit above stays synchronous so in-app real-time works
+    // instantly; push fan-out now runs fire-and-forget on the next tick.
     const pushPayload = {
       title: notification.title,
       body: notification.message,
@@ -710,16 +716,25 @@ const createNotification = async ({
       data: notification.data
     };
 
-    // Check if user has APNs devices — if so, use APNs only (avoid duplicate on iOS)
-    const apnsDevices = apnConfigured ? await APNsDevice.find({ userId }) : [];
-    if (apnsDevices.length > 0) {
-      await sendAPNsNotification(userId, pushPayload);
-      // Send web push only to non-iOS subscriptions (desktop browsers)
-      await sendPushNotificationExcludeIOS(userId, pushPayload);
-    } else {
-      // No APNs devices — send web push to all subscriptions
-      await sendPushNotification(userId, pushPayload);
-    }
+    setImmediate(async () => {
+      try {
+        const apnsDevices = apnConfigured ? await APNsDevice.find({ userId }) : [];
+        if (apnsDevices.length > 0) {
+          await sendAPNsNotification(userId, pushPayload);
+          // Send web push only to non-iOS subscriptions (desktop browsers)
+          await sendPushNotificationExcludeIOS(userId, pushPayload);
+        } else {
+          // No APNs devices — send web push to all subscriptions
+          await sendPushNotification(userId, pushPayload);
+        }
+      } catch (pushErr) {
+        logger.error('[NotificationService] Async push send failed', {
+          error: pushErr.message,
+          userId,
+          type
+        });
+      }
+    });
 
     return notification;
   } catch (error) {

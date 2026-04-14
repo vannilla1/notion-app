@@ -169,27 +169,25 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(400).json({ message: 'Neplatné ID' });
     }
 
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
+    // PERF: single findOneAndUpdate + .lean() instead of findOne + updateOne.
+    // $addToSet is idempotent so it's safe to always run; one DB round-trip
+    // instead of two, and .lean() skips Mongoose document hydration (big win
+    // for messages with many comments / attachments).
+    const message = await Message.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ]
+      },
+      { $addToSet: { readBy: req.user.id } },
+      { new: true }
+    ).lean();
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
-    }
-
-    // Mark as read by this user — AWAIT so subsequent pending-count
-    // requests reflect the updated readBy (fixes badge not clearing)
-    const userId = req.user.id.toString();
-    if (!message.readBy?.some(id => id.toString() === userId)) {
-      await Message.updateOne(
-        { _id: message._id },
-        { $addToSet: { readBy: req.user.id } }
-      );
     }
 
     res.json(stripAttachmentData(message));
