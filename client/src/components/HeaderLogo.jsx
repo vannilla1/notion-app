@@ -5,24 +5,29 @@ const HeaderLogo = ({ active, onClick }) => {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
 
-  // On iOS (BottomNav provides Dashboard navigation), the outer div's onClick
-  // was firing accidentally when users touched the header area while starting
-  // a scroll gesture — WKWebView synthesized a click from small-movement
-  // taps on the header-brand <div>, navigating the whole app back to /app.
-  // That was the "enter section → try to scroll → jumps to dashboard" bug.
-  // Fix: only bind onClick when explicitly provided OR when NOT inside the
-  // iOS WebView. The BottomNav already has a Dashboard tab, so desktop keeps
-  // the click-to-home behavior and iOS loses nothing.
-  const isIosApp = typeof document !== 'undefined' &&
-    document.body?.classList?.contains('ios-app');
-  const defaultNav = isIosApp ? null : () => navigate('/app');
-  const handleClick = onClick || defaultNav;
+  // Click header → go to dashboard. On iOS WKWebView there was a past bug
+  // where scroll-start taps synthesized a click; that was fixed by the modal
+  // scroll-lock guard in App.jsx, so it's safe to re-enable navigation here.
+  // Use pointer tracking to ignore taps that moved significantly (scroll gesture).
+  const handlePointerDown = (e) => {
+    e.currentTarget._pointerStart = { x: e.clientX, y: e.clientY };
+  };
+  const handleClick = onClick || ((e) => {
+    const start = e.currentTarget._pointerStart;
+    if (start) {
+      const dx = Math.abs(e.clientX - start.x);
+      const dy = Math.abs(e.clientY - start.y);
+      if (dx > 8 || dy > 8) return; // was a scroll, not a tap
+    }
+    navigate('/app');
+  });
 
   return (
     <div
       className="header-brand"
-      onClick={handleClick || undefined}
-      style={handleClick ? undefined : { cursor: 'default' }}
+      onPointerDown={handlePointerDown}
+      onClick={handleClick}
+      style={{ cursor: 'pointer' }}
     >
       <img src="/icons/icon-96x96.png" alt="" width="28" height="28" className="header-logo-icon" />
       <div className="header-brand-text">
