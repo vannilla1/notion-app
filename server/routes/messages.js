@@ -928,14 +928,20 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
 // GET /api/messages/:id/attachment — download attachment
 router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
+    // PERF: project only the main attachment — do NOT pull comments[].attachment.data
+    // or files[].data. A message with 5 other 10 MB attachments was previously
+    // shipping 50+ MB from Mongo just to return one file.
+    const message = await Message.findOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ]
+      },
+      { attachment: 1 }
+    ).lean();
 
     if (!message || !message.attachment || !message.attachment.data) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
@@ -956,20 +962,25 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
 // GET /api/messages/:id/comment/:commentId/attachment — download comment attachment
 router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [
-        { fromUserId: req.user.id },
-        { toUserId: req.user.id }
-      ]
-    });
+    // PERF: $elemMatch projection returns ONLY the matching comment, not
+    // the whole comments array. Main attachment + files are excluded entirely.
+    const message = await Message.findOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ]
+      },
+      { comments: { $elemMatch: { _id: req.params.commentId } } }
+    ).lean();
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
     }
 
-    const comment = message.comments.id(req.params.commentId);
+    const comment = message.comments && message.comments[0];
     if (!comment || !comment.attachment || !comment.attachment.data) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
     }
@@ -1023,14 +1034,19 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
 // GET /api/messages/:id/files/:fileId/download — download file
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId,
-      $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
-    });
+    // PERF: $elemMatch projection — return only the matching file, not
+    // the whole files array nor any comment attachments.
+    const message = await Message.findOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
+      },
+      { files: { $elemMatch: { id: req.params.fileId } } }
+    ).lean();
     if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
-    const file = message.files.find(f => f.id === req.params.fileId);
+    const file = message.files && message.files[0];
     if (!file || !file.data) return res.status(404).json({ message: 'Súbor nenájdený' });
 
     const buffer = Buffer.from(file.data, 'base64');
