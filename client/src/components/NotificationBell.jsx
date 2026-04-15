@@ -104,6 +104,8 @@ function NotificationBell() {
       setNotifications(prev => prev.map(n =>
         (n.id || n._id) === (notif.id || notif._id) ? { ...n, read: true } : n
       ));
+      // Let App.jsx refetch section counts so BottomNav badge drops immediately
+      window.dispatchEvent(new Event('notifications-updated'));
     }
     setOpen(false);
 
@@ -142,6 +144,8 @@ function NotificationBell() {
       await api.put('/api/notifications/read-all');
       setUnreadCount(0);
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      // Same as handleClick — tell App.jsx to refetch BottomNav section counts
+      window.dispatchEvent(new Event('notifications-updated'));
     } catch {}
   };
 
