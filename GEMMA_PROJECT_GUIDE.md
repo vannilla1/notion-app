@@ -1187,6 +1187,24 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 3. App rebuild po stálom scroll → WebContent crash → reload na poslednú URL (nie /app)
 4. Login → Keychain save → force quit → reopen → Face ID → localStorage má správny token
 
+### 13.6 Automatizované testy — quick index
+
+Existujúce Jest test suites v `server/__tests__/`:
+- `notificationService.test.js` — notifikačný service (createNotification, workspace scoping,
+  deduplikácia, deep-link generation)
+- `models/User.test.js` — User model, **calendarFeedToken sparse unique index** (6 testov,
+  vrátane regresného testu na pôvodný bug s non-sparse indexom a E11000)
+- `setup.js` — shared `mongodb-memory-server` setup (afterEach vyčistí collections)
+
+Spúšťanie: `cd server && npm test` (všetky) alebo `npx jest <path>` (jeden file).
+
+Pravidlá písania nových testov:
+- AAA pattern (Arrange / Act / Assert) s prázdnym riadkom medzi
+- Slovenské `describe`/`it` popisy (konzistentné s UI jazykom)
+- Pri modeloch s indexmi volaj `await Model.init()` v `beforeAll` — Mongoose vytvára
+  indexy lazily, inak test môže nevidieť unique/sparse constraint
+- Žiadne `.only()` / `.skip()` v committnutom kóde
+
 ---
 
 ## 14. Na čo sa Gemma nepýta (vedela by to sama zistiť)
