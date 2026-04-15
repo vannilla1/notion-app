@@ -1237,9 +1237,10 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 
 ### 13.6 Automatizované testy — quick index
 
-Existujúce Jest test suites v `server/__tests__/`:
-- `notificationService.test.js` — notifikačný service (createNotification, workspace scoping,
-  deduplikácia, deep-link generation)
+Existujúce Jest test suites v `server/__tests__/` (**32 testov, všetky prechádzajú**):
+- `notificationService.test.js` — notifikačný service (getNotificationTitle s actor-first
+  formátom, notifyContactChange, notifyTaskChange s workspace scopingom, notifyTaskAssignment,
+  notifySubtaskChange, Socket.IO integrácia, createNotification, tenancy guard)
 - `models/User.test.js` — User model, **calendarFeedToken sparse unique index** (6 testov,
   vrátane regresného testu na pôvodný bug s non-sparse indexom a E11000)
 - `setup.js` — shared `mongodb-memory-server` setup (afterEach vyčistí collections)

@@ -282,7 +282,10 @@ describe('NotificationService', () => {
   });
 
   describe('notifyTaskChange', () => {
-    it('should notify assigned users about task changes', async () => {
+    // Všetky testy prechádzajú workspaceId, lebo aktuálny kód honoruje
+    // workspace scoping (P2 guide-u). Bez workspaceId existuje len legacy
+    // fallback na task.assignedTo — ten sa v produkcii nepoužíva a netestujeme ho.
+    it('should notify workspace members about task changes', async () => {
       const task = {
         _id: new mongoose.Types.ObjectId(),
         title: 'Dôležitá úloha',
@@ -297,15 +300,17 @@ describe('NotificationService', () => {
       const notifications = await notificationService.notifyTaskChange(
         'task.updated',
         task,
-        actor
+        actor,
+        [],
+        testWorkspaceId
       );
 
-      // Should notify user2 and user3 (assigned users, excluding actor)
+      // Should notify user2 and user3 (workspace members, excluding actor)
       expect(notifications).toHaveLength(2);
       expect(notifications[0].relatedType).toBe('task');
     });
 
-    it('should not notify actor even if assigned', async () => {
+    it('should not notify actor who made the change', async () => {
       const task = {
         _id: new mongoose.Types.ObjectId(),
         title: 'Self-assigned task',
@@ -320,16 +325,19 @@ describe('NotificationService', () => {
       const notifications = await notificationService.notifyTaskChange(
         'task.completed',
         task,
-        actor
+        actor,
+        [],
+        testWorkspaceId
       );
 
-      // Should only notify user2, not user1 (actor)
+      // Should notify user2 and user3 (members except actor user1)
       const recipientIds = notifications.map(n => n.userId.toString());
       expect(recipientIds).not.toContain(testUser1._id.toString());
       expect(recipientIds).toContain(testUser2._id.toString());
+      expect(recipientIds).toContain(testUser3._id.toString());
     });
 
-    it('should notify all except actor when no assigned users', async () => {
+    it('should notify all workspace members except actor when no assigned users', async () => {
       const task = {
         _id: new mongoose.Types.ObjectId(),
         title: 'Unassigned task',
@@ -344,11 +352,37 @@ describe('NotificationService', () => {
       const notifications = await notificationService.notifyTaskChange(
         'task.created',
         task,
+        actor,
+        [],
+        testWorkspaceId
+      );
+
+      // Should notify user2 and user3 (workspace members except actor)
+      expect(notifications).toHaveLength(2);
+    });
+
+    it('should return empty without workspaceId and without assignedTo (tenancy guard)', async () => {
+      // Regresný test: bez workspaceId a bez assigned users nemáme ako zistiť
+      // recipients — service musí vrátiť [] (fail-safe). Pôvodne test očakával
+      // broadcast všetkým v DB, čo bolo nebezpečné pre multi-tenant prostredie.
+      const task = {
+        _id: new mongoose.Types.ObjectId(),
+        title: 'Orphan task',
+        assignedTo: []
+      };
+
+      const actor = {
+        _id: testUser1._id,
+        username: 'testuser1'
+      };
+
+      const notifications = await notificationService.notifyTaskChange(
+        'task.created',
+        task,
         actor
       );
 
-      // Should notify user2 and user3
-      expect(notifications).toHaveLength(2);
+      expect(notifications).toHaveLength(0);
     });
   });
 
