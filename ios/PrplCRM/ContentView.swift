@@ -308,17 +308,27 @@ struct WebView: UIViewRepresentable {
         // Set mobile user agent
         webView.customUserAgent = "PrplCRM-iOS/1.0 " + (webView.value(forKey: "userAgent") as? String ?? "")
 
-        // Restore token from Keychain BEFORE page JS runs
+        // Restore token from Keychain BEFORE page JS runs — ONLY if localStorage is
+        // empty. WKUserScript source is baked in at WebView-init time and runs on
+        // every page load (including window.location.href navigations). If we
+        // unconditionally overwrote localStorage here, a stale baked-in token (e.g.
+        // from before JWT_SECRET rotation, or from a Keychain that still holds the
+        // old value due to a race between axios's 401-interceptor logout and the
+        // async bridge "logout" message) would re-infect localStorage on every
+        // workspace switch — causing the user to get 401'd → kicked to /login on
+        // every reload, even after a fresh login. The `if (!localStorage.getItem)`
+        // guard preserves any fresh token already in localStorage from the current
+        // session.
         if let savedToken = KeychainHelper.getToken() {
             let escapedToken = savedToken.replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "'", with: "\\'")
             let restoreScript = WKUserScript(
-                source: "localStorage.setItem('token', '\(escapedToken)');",
+                source: "if (!localStorage.getItem('token')) { localStorage.setItem('token', '\(escapedToken)'); }",
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             )
             config.userContentController.addUserScript(restoreScript)
-            print("[Keychain] Injecting saved token into WebView localStorage")
+            print("[Keychain] Injecting saved token into WebView localStorage (only if empty)")
         }
 
         // Inject CSS safe area variables + auth token bridge
