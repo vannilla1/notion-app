@@ -944,10 +944,26 @@ Enum v `Notification.js`:
 | `message.commented` | messages.js | Druhá strana | **Áno** |
 | `message.comment.reacted` | messages.js | Autor komentára | — |
 
-**Deep-link rezolver** v `notificationService.js:465–491`:
+**Deep-link rezolver** v `notificationService.js:generateNotificationUrl`:
 - `type.startsWith('message')` + `data.messageId` → `/messages?highlight=X&comment=Y&ws=Z`
-- `type.startsWith('task')` → `/tasks?highlightTask=X&subtask=Y&contactId=Z&ws=W`
+- `type.startsWith('task')` → `/tasks?highlightTask=X&ws=W`
+- `type.startsWith('subtask')` → `/tasks?highlightTask=X&subtask=Y&ws=W`
 - `type.startsWith('contact')` → `/crm?expandContact=X&ws=Y`
+
+**⚠️ Invariant — task/subtask URL nesmie obsahovať `contactId`:**
+Tasks.jsx má useEffect, ktorý pri detekcii `?contactId=...` v URL zavolá
+`setContactFilter(...)` + `navigate('/tasks', { replace: true })`. Ten navigate
+**zmaže všetky query params vrátane `highlightTask` a `ws`**, takže notifikácia
+by skončila vo filtrovanom zozname bez zvýraznenia konkrétneho tasku.
+
+Pokrýva to regresný test `generateNotificationUrl — deep-link resolver >
+task.* deep-link nesmie obsahovať contactId v query (regression)` v
+`notificationService.test.js`. Defense-in-depth fix v Tasks.jsx kontroluje
+prítomnosť `highlightTask` pred aplikáciou contactFilter.
+
+**Filter podľa kontaktu je legitímna operácia** cez tlačidlo „Zobraziť projekty"
+v CRM (`navigate('/tasks?contactId=X')`). Rozdiel: tam chýba `highlightTask`,
+takže contactFilter sa aplikuje.
 
 ### 6.4 Integrácie
 
@@ -1180,6 +1196,8 @@ Pri kontrole PR/zmeny má Gemma prejsť tento checklist:
 - [ ] Nová akcia, o ktorej má byť user informovaný, vytvára `Notification`?
 - [ ] Nový notification type je pridaný aj do `Notification.js` enumu?
 - [ ] Deep-link resolver v `notificationService.js` vie typ spracovať?
+- [ ] Task/subtask notifikačná URL NEobsahuje `&contactId=` (Tasks.jsx by ho
+  interpretoval ako filter a zmazal highlightTask — viď §6.3 invariant)?
 
 ### 12.5 iOS špecifiká
 - [ ] Nová page je lazy-loaded (`React.lazy`)?

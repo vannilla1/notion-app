@@ -630,12 +630,16 @@ function Tasks() {
     }
   }, [location.search, navigate]);
 
-  // Handle contact filter from URL (when navigating from CRM)
+  // Handle contact filter from URL (when navigating from CRM's "Zobraziť
+  // projekty" button). Defensive: ak URL zároveň obsahuje highlightTask,
+  // pochádza z notifikácie — ignorujeme contactId, aby sa scroll/zvýraznenie
+  // konkrétneho tasku nestratilo kvôli navigate('/tasks', replace) volaniu.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const contactId = params.get('contactId');
+    const hasHighlight = params.get('highlightTask');
 
-    if (contactId) {
+    if (contactId && !hasHighlight) {
       setContactFilter(contactId);
       // Clear URL parameter but keep the filter active
       navigate('/tasks', { replace: true });

@@ -113,6 +113,65 @@ describe('NotificationService', () => {
     });
   });
 
+  describe('generateNotificationUrl — deep-link resolver', () => {
+    // Regresné testy: task notifikácie NESMÚ obsahovať &contactId= v URL,
+    // pretože Tasks.jsx má useEffect, ktorý pri detekcii contactId v URL
+    // volá navigate('/tasks', { replace: true }) a tým zmaže highlightTask.
+    // Výsledok by bol, že notifikácia otvorí filtrovaný zoznam tasks
+    // pre kontakt a hľadaná úloha sa nezvýrazni.
+    it('task.* deep-link nesmie obsahovať contactId v query (regression)', () => {
+      const url = notificationService.generateNotificationUrl('task.updated', {
+        taskId: 'task-123',
+        contactId: 'contact-456',
+        workspaceId: 'ws-789'
+      });
+      expect(url).toContain('highlightTask=task-123');
+      expect(url).toContain('ws=ws-789');
+      expect(url).not.toContain('contactId');
+    });
+
+    it('subtask.* deep-link nesmie obsahovať contactId v query (regression)', () => {
+      const url = notificationService.generateNotificationUrl('subtask.created', {
+        taskId: 'task-123',
+        subtaskId: 'sub-456',
+        contactId: 'contact-789',
+        workspaceId: 'ws-999'
+      });
+      expect(url).toContain('highlightTask=task-123');
+      expect(url).toContain('subtask=sub-456');
+      expect(url).not.toContain('contactId');
+    });
+
+    it('contact.* deep-link smeruje na /crm s expandContact', () => {
+      const url = notificationService.generateNotificationUrl('contact.updated', {
+        contactId: 'contact-abc',
+        workspaceId: 'ws-xyz'
+      });
+      expect(url).toContain('/crm');
+      expect(url).toContain('expandContact=contact-abc');
+      expect(url).toContain('ws=ws-xyz');
+    });
+
+    it('message.* deep-link smeruje na /messages s highlight a voliteľne comment', () => {
+      const url = notificationService.generateNotificationUrl('message.comment.reacted', {
+        messageId: 'msg-1',
+        commentId: 'com-2',
+        workspaceId: 'ws-3'
+      });
+      expect(url).toContain('/messages');
+      expect(url).toContain('highlight=msg-1');
+      expect(url).toContain('comment=com-2');
+      expect(url).toContain('ws=ws-3');
+    });
+
+    it('fallback bez taskId/messageId → /app dashboard', () => {
+      const url = notificationService.generateNotificationUrl('unknown.type', {
+        workspaceId: 'ws-1'
+      });
+      expect(url).toBe('/app?ws=ws-1');
+    });
+  });
+
   describe('createNotification', () => {
     it('should create notification and save to database', async () => {
       const notification = await notificationService.createNotification({

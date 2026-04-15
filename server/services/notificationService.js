@@ -449,17 +449,18 @@ const generateNotificationUrl = (type, data = {}) => {
   }
 
   // Task notifications -> /tasks with task highlight
+  // NOTE: úmyselne NEpridávame &contactId — Tasks.jsx by ho interpretoval ako
+  // contactFilter a volal navigate('/tasks', { replace: true }), čo zmaže
+  // highlightTask a user by skončil vo filtrovanom zozname bez zvýraznenia.
+  // highlightTask stačí na scroll + flash animáciu.
   if (type?.startsWith('task') && data.taskId) {
-    let url = `/tasks?highlightTask=${data.taskId}`;
-    if (data.contactId) url += `&contactId=${data.contactId}`;
-    return withWs(url);
+    return withWs(`/tasks?highlightTask=${data.taskId}`);
   }
 
-  // Subtask notifications -> /tasks with parent task highlight
+  // Subtask notifications -> /tasks with parent task highlight (rovnaký dôvod
+  // ako vyššie — žiadny contactId v notifikačnej URL).
   if (type?.startsWith('subtask') && data.taskId) {
-    let url = `/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`;
-    if (data.contactId) url += `&contactId=${data.contactId}`;
-    return withWs(url);
+    return withWs(`/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`);
   }
 
   // Message notifications -> /messages with message highlight (+ comment scroll)
@@ -482,9 +483,8 @@ const generateNotificationUrl = (type, data = {}) => {
   }
   if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${data.contactId}`);
   if (data.taskId) {
-    let url = `/tasks?highlightTask=${data.taskId}`;
-    if (data.contactId) url += `&contactId=${data.contactId}`;
-    return withWs(url);
+    // Viď poznámku vyššie — contactId do task URL nedávame.
+    return withWs(`/tasks?highlightTask=${data.taskId}`);
   }
 
   logger.warn('[NotificationService] No URL match, returning /app', { type, data });
@@ -1219,6 +1219,7 @@ module.exports = {
   notifySubtaskAssignment,
   getNotificationTitle,
   getNotificationMessage,
+  generateNotificationUrl,
   sendPushNotification,
   isVapidConfigured: () => vapidConfigured,
   isAPNsConfigured: () => apnConfigured,

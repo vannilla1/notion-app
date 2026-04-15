@@ -168,9 +168,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             self.pushManager.pendingDeepLink = url
         } else if type.hasPrefix("task") || type.hasPrefix("subtask"),
                   let taskId = userInfo["taskId"] as? String {
+            // NOTE: zámerne NEpridávame contactId do URL — Tasks.jsx by ho
+            // interpretoval ako filter a navigate('/tasks', replace) by
+            // zmazal highlightTask. Viď GEMMA_PROJECT_GUIDE.md §6.3 invariant.
             var url = "/tasks?highlightTask=\(taskId)"
-            if let contactId = userInfo["contactId"] as? String {
-                url += "&contactId=\(contactId)"
+            if let subtaskId = userInfo["subtaskId"] as? String {
+                url += "&subtask=\(subtaskId)"
             }
             print("[Push] Constructed task deep link: \(url)")
             self.pushManager.pendingDeepLink = url
