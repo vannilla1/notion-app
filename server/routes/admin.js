@@ -207,8 +207,11 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
       return res.status(404).json({ message: 'Používateľ nenájdený' });
     }
 
-    // Prevent removing own admin role
-    if (req.params.userId === req.user.id && role !== 'admin') {
+    // Prevent removing own admin role.
+    // POZOR: `req.user.id` je Mongoose ObjectId, `req.params.userId` je string.
+    // Strict `===` by vždy vrátil false → admin by mohol demotnúť sám seba.
+    // Bez .toString() ochrana nefungovala vôbec (odhalené testom, jar 2026).
+    if (req.params.userId === req.user.id.toString() && role !== 'admin') {
       return res.status(400).json({ message: 'Nemôžete odstrániť vlastnú admin rolu' });
     }
 
@@ -318,7 +321,11 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
 // ─── DELETE USER ────────────────────────────────────────────────
 router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    if (req.params.userId === req.user.id) {
+    // ObjectId vs string porovnanie — viď PUT /users/:userId/role komentár.
+    // Bez .toString() táto ochrana nefungovala; self-delete bol nepriamo
+    // blokovaný len ochranou "iný admin". Po odinštalovaní admin role by
+    // admin mohol zmazať sám seba.
+    if (req.params.userId === req.user.id.toString()) {
       return res.status(400).json({ message: 'Nemôžete vymazať vlastný účet' });
     }
 

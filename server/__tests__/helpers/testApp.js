@@ -25,6 +25,11 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 process.env.NODE_ENV = 'development';
 process.env.SKIP_RATE_LIMIT = 'true';
 
+// Dummy Stripe kľúč aby Stripe SDK nehodil "Neither apiKey..." error pri
+// module-level require v routes/admin.js, routes/billing.js. Žiadne reálne
+// API volania sa v testoch neudejú — Stripe client sa len inštanciuje.
+process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_dummy_key_for_jest_tests_only';
+
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../../models/User');

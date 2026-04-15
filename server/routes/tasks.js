@@ -896,10 +896,17 @@ router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req,
 // Get single task (from global tasks or contacts)
 router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // First check global tasks in this workspace
-    const task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId }).lean();
-    if (task) {
-      return res.json({ ...task, source: 'global', id: task._id.toString() });
+    // Global task IDs sú ObjectId (24 hex), contact task IDs sú UUID v4.
+    // Bez tejto guard by Task.findOne({_id: 'uuid-...'}) hodil CastError a
+    // request by skončil na 500 ešte pred fallbackom na Contact lookup.
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(req.params.id);
+
+    if (isObjectId) {
+      // First check global tasks in this workspace
+      const task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId }).lean();
+      if (task) {
+        return res.json({ ...task, source: 'global', id: task._id.toString() });
+      }
     }
 
     // Check tasks in contacts using MongoDB query (much faster than loading all contacts)
@@ -1290,8 +1297,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Task not found in contacts' });
     }
 
-    // Try to update global task
-    let task = await Task.findById(req.params.id);
+    // Try to update global task.
+    // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
+    // mohol updatnuť task z workspace B (task._id vie byť guessable v brute-
+    // force scenári). Odhalené route integračnými testami (2026-04-15).
+    let task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
 
     if (task) {
       // Save original assignedTo before update
@@ -1580,8 +1590,10 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Task not found in contacts' });
     }
 
-    // Try to delete from global tasks first
-    const task = await Task.findByIdAndDelete(req.params.id);
+    // Try to delete from global tasks first.
+    // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
+    // mohol DELETE taska z workspace B. Viď analogický fix v PUT /:id vyššie.
+    const task = await Task.findOneAndDelete({ _id: req.params.id, workspaceId: req.workspaceId });
     if (task) {
       io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'global' });
 
