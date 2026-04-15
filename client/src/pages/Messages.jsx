@@ -116,6 +116,10 @@ function Messages() {
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [commentText, setCommentText] = useState('');
   const [commentAttachment, setCommentAttachment] = useState(null);
+  // Loading stav počas odosielania komentára — vypne tlačidlo a mení label
+  // na "Odosielam..." aby user videl, že akcia prebieha (base64 upload
+  // veľkej prílohy môže trvať niekoľko sekúnd).
+  const [submittingComment, setSubmittingComment] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -429,6 +433,8 @@ function Messages() {
 
   const handleComment = async (id) => {
     if (!commentText.trim()) return;
+    if (submittingComment) return; // Guard proti double-submit (napr. opakovaný Enter)
+    setSubmittingComment(true);
     try {
       const formData = new FormData();
       formData.append('text', commentText.trim());
@@ -443,6 +449,8 @@ function Messages() {
       fetchPendingCount();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba');
+    } finally {
+      setSubmittingComment(false);
     }
   };
 
@@ -834,6 +842,7 @@ function Messages() {
               setCommentText={setCommentText}
               commentAttachment={commentAttachment}
               setCommentAttachment={setCommentAttachment}
+              submittingComment={submittingComment}
               formatDate={formatDate}
               formatDateTime={formatDateTime}
               navigate={navigate}
@@ -1112,7 +1121,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1640,8 +1649,9 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
               placeholder="Napíšte komentár..." rows={1} />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
-                disabled={!commentText.trim()} style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                Odoslať
+                disabled={!commentText.trim() || submittingComment}
+                style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '100px', opacity: submittingComment ? 0.75 : 1 }}>
+                {submittingComment ? 'Odosielam...' : 'Odoslať'}
               </button>
             </div>
           </div>
