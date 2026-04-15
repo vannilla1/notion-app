@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
@@ -189,26 +189,25 @@ function AppContent() {
     };
   }, []);
 
-  // Cold-start via direct URL load (iOS APNs tap): if the current URL has
-  // `ws=` that differs from active workspace, switch workspace first so the
-  // page can fetch workspace-scoped data (message detail, etc.). Runs ONCE
-  // after auth + workspace context are ready.
-  const initialWsSwitchDoneRef = useRef(false);
-  // useLayoutEffect so this runs BEFORE child page effects (Tasks/CRM/Messages)
-  // strip their URL params — otherwise they'd navigate() and drop `ws=` before
-  // we can read it, and cross-workspace deep links would land on the wrong ws.
+  // Deep link via direct URL load (iOS APNs tap — cold start AND hot start
+  // when the app was in background). If the URL carries `ws=` that differs
+  // from the active workspace, switch first so the target page fetches
+  // workspace-scoped data. useLayoutEffect so this runs BEFORE child page
+  // effects strip URL params.
+  //
+  // No "run-once" ref: navigateWithWorkspace is idempotent (only switches if
+  // targetWs !== currentWorkspaceId) and strips ws= from the URL after, so
+  // the effect re-fires exactly once per deep link. Earlier versions had a
+  // ref guard that fired on the FIRST ever mount regardless of whether ws=
+  // was present — which silently disabled every subsequent notification tap
+  // whose workspace differed from the current one (the exact bug users saw
+  // where push notifications opened the right SECTION in the wrong WORKSPACE).
   useLayoutEffect(() => {
-    if (!isAuthenticated || workspaceLoading || initialWsSwitchDoneRef.current) return;
+    if (!isAuthenticated || workspaceLoading) return;
     const params = new URLSearchParams(location.search);
-    const targetWs = params.get('ws');
-    if (targetWs) {
-      initialWsSwitchDoneRef.current = true;
-      console.log('[DeepLink] App: ws= detected, switching workspace →', targetWs);
-      // Re-use navigateWithWorkspace which handles switch + strip ws= + navigate
-      navigateWithWorkspace(location.pathname + location.search);
-    } else {
-      initialWsSwitchDoneRef.current = true;
-    }
+    if (!params.get('ws')) return;
+    console.log('[DeepLink] App: ws= detected, switching workspace →', params.get('ws'));
+    navigateWithWorkspace(location.pathname + location.search);
   }, [isAuthenticated, workspaceLoading, location.pathname, location.search, navigateWithWorkspace]);
 
   // Save deep link to sessionStorage before auth redirect loses it.
