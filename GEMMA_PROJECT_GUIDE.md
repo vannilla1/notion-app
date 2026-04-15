@@ -1255,7 +1255,7 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 
 ### 13.6 Automatizované testy — quick index
 
-Existujúce Jest test suites v `server/__tests__/` (**226 testov, všetky prechádzajú**):
+Existujúce Jest test suites v `server/__tests__/` (**307 testov, všetky prechádzajú**):
 - `notificationService.test.js` — notifikačný service (getNotificationTitle s actor-first
   formátom, generateNotificationUrl deep-link resolver s P2 invariantami, notifyContactChange,
   notifyTaskChange s workspace scopingom, notifyTaskAssignment, notifySubtaskChange,
@@ -1291,6 +1291,26 @@ Existujúce Jest test suites v `server/__tests__/` (**226 testov, všetky prech�
 - `models/Invitation.test.js` — Workspace invite flow (20 testov: auto-token crypto
   randomBytes(32), role manager|member bez owner, status enum, lowercase+trim email,
   unique token constraint, TTL 7 dní)
+- `models/Page.test.js` — Notion-style stránky (14 testov: required workspaceId+userId,
+  parent/child hierarchia cez parentId, P2 Workspace Isolation aj pri nested queries,
+  toJSON transform, sort by updatedAt desc)
+- `models/ContactFile.test.js` — Oddelené Base64 prílohy (13 testov: unique fileId UUID,
+  orphan súbory s contactId=null, cascade cleanup, 1MB payload bez truncation)
+- `models/PushSubscription.test.js` — Web Push subskripcie (14 testov: required userId+
+  endpoint+keys, unique endpoint, multi-browser per user, stale detection pre
+  subscriptionCleanup service)
+- `services/auditService.test.js` — Audit log service (6 testov: perzistencia logov,
+  system actions bez workspaceId, **fire-and-forget graceful degradation** — zlyhanie
+  auditu nesmie shodiť business logiku)
+- `services/apiMetrics.test.js` — In-memory API metrics (11 testov: trackRequest
+  middleware non-blocking, route+method grouping, statusCodes counter, errorRate %
+  rounding, topRoutes sort desc, 24h hourlyData, jest.resetModules medzi testmi)
+- `services/dueDateChecker.test.js` — Urgency level calculator (22 testov: pure function
+  getUrgencyLevel, hranice overdue≤0/danger 1-3/warning 4-7/success 8-14/null >14 dní,
+  ISO string input, time-of-day normalizácia na polnoc)
+- `services/subscriptionCleanup.test.js` — Cron na mazanie stale push subs (10 testov:
+  STALE_THRESHOLD_DAYS=30 constant, cleanup maže iba lastUsed <30d, edge case 29d
+  zostáva, getSubscriptionStats s total/unique/activeLastDay/Week/stale + avgPerUser)
 - `setup.js` — shared `mongodb-memory-server` setup (afterEach vyčistí collections)
 
 **Produkčné bugy odhalené a opravené počas testovania:**
