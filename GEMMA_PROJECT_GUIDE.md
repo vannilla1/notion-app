@@ -1255,12 +1255,18 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 
 ### 13.6 Automatizované testy — quick index
 
-Existujúce Jest test suites v `server/__tests__/` (**32 testov, všetky prechádzajú**):
+Existujúce Jest test suites v `server/__tests__/` (**51 testov, všetky prechádzajú**):
 - `notificationService.test.js` — notifikačný service (getNotificationTitle s actor-first
-  formátom, notifyContactChange, notifyTaskChange s workspace scopingom, notifyTaskAssignment,
-  notifySubtaskChange, Socket.IO integrácia, createNotification, tenancy guard)
+  formátom, generateNotificationUrl deep-link resolver s P2 invariantami, notifyContactChange,
+  notifyTaskChange s workspace scopingom, notifyTaskAssignment, notifySubtaskChange,
+  Socket.IO integrácia, createNotification, tenancy guard)
 - `models/User.test.js` — User model, **calendarFeedToken sparse unique index** (6 testov,
   vrátane regresného testu na pôvodný bug s non-sparse indexom a E11000)
+- `models/Task.test.js` — Task model, **P2 Workspace Isolation guard** (cross-workspace
+  findOne leak test, required workspaceId, nested subtasks storage)
+- `models/Contact.test.js` — Contact model, **P2 Workspace Isolation guard** (10 testov:
+  required workspaceId+userId, default name behavior, nested tasks, cross-workspace
+  findOne/findOneAndUpdate/deleteOne regression testy)
 - `setup.js` — shared `mongodb-memory-server` setup (afterEach vyčistí collections)
 
 Spúšťanie: `cd server && npm test` (všetky) alebo `npx jest <path>` (jeden file).
