@@ -371,6 +371,11 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Store contact data for notification before deletion
     const contactData = { _id: contact._id, name: contact.name };
 
+    // Cascade: zmaž aj prílohy v ContactFile kolekcii. Bez tohto zostanú
+    // orphaned Base64 payloady v DB (MB per file) aj po zmazaní kontaktu —
+    // hromadí sa to tichu v tle a bloatuje Mongo storage. ContactFile má
+    // contactId ref, ale Mongoose neposkytuje auto-cascade, musíme ručne.
+    await ContactFile.deleteMany({ contactId: req.params.id });
     await Contact.findByIdAndDelete(req.params.id);
 
     const io = req.app.get('io');

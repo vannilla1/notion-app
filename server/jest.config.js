@@ -10,5 +10,10 @@ module.exports = {
   coverageDirectory: 'coverage',
   setupFilesAfterEnv: ['<rootDir>/__tests__/setup.js'],
   testTimeout: 30000,
-  verbose: true
+  verbose: true,
+  // Niektoré moduly (napr. routes/push.js, services/dueDateChecker.js, services/
+  // subscriptionCleanup.js) si pri require registrujú setInterval pre
+  // periodický cleanup. V teste nie je spôsob ich vypnúť bez refaktoru, takže
+  // necháme Jest forcnuť exit — inak by proces visel po dokončení testov.
+  forceExit: true
 };
