@@ -185,6 +185,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Clear badge when app is opened
         application.applicationIconBadgeNumber = 0
+        // Clear delivered notifications from Notification Center too — user is
+        // now in the app and can see their unread state there, so stale APNs
+        // banners in the Center are noise. Matches Slack/Messenger behavior.
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
     private func requestPushPermission(_ application: UIApplication) {
@@ -237,6 +241,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Clear badge on notification tap
         UIApplication.shared.applicationIconBadgeNumber = 0
+        // Also clear all delivered notifications — user actively engaged with
+        // one, so the rest in the Center are stale context.
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
 
         print("[Push] Notification tapped, userInfo keys: \(Array(userInfo.keys))")
         self.extractDeepLink(from: userInfo)
