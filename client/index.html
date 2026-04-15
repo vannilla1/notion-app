@@ -106,10 +106,18 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
 
-    <!-- Fonts -->
+    <!-- Fonts — loaded non-blocking for faster FCP. `display=swap` already
+         lets the page render with system fonts until Inter is ready; the
+         media=print + onload swap keeps the stylesheet request off the
+         critical path so it doesn't delay first paint. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"></noscript>
+
+    <!-- Preload landing-page logo — LCP candidate on "/" (hero/navbar). -->
+    <link rel="preload" as="image" href="/icons/icon-96x96.png" fetchpriority="high">
 
     <!-- GEO/AEO: JSON-LD Structured Data -->
     <script type="application/ld+json">
