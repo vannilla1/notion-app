@@ -218,6 +218,20 @@ function CRM() {
     return () => window.removeEventListener('workspace-switched', handleSwitch);
   }, [fetchContacts, fetchGlobalTasks]);
 
+  // Mark contact notifications as read when the user actually opens the
+  // contact — replaces the old "mark everything read when section is clicked"
+  // behavior. Covers user clicks, deep-link expands, and highlight flows.
+  // Server endpoint is idempotent.
+  useEffect(() => {
+    if (!expandedContact) return;
+    api.put('/api/notifications/read-for-related', {
+      relatedType: 'contact',
+      relatedId: expandedContact
+    }).then(() => {
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    }).catch(() => {});
+  }, [expandedContact]);
+
   useEffect(() => {
     if (expandedContact) fetchLinkedMessages(expandedContact);
   }, [expandedContact, fetchLinkedMessages]);

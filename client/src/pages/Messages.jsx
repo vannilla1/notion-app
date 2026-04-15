@@ -169,6 +169,23 @@ function Messages() {
     return () => window.removeEventListener('workspace-switched', handleSwitch);
   }, [tab]);
 
+  // Mark notifications for this message as read whenever the user opens one
+  // (list click, deep-link, fetched detail). Replaces the old "mark the
+  // whole Messages section as read on nav tap" behavior. Server endpoint is
+  // idempotent so repeated firings (e.g. when detail re-fetches and sets
+  // selectedMessage again) are harmless.
+  useEffect(() => {
+    if (!selectedMessage) return;
+    const messageId = selectedMessage.id || selectedMessage._id;
+    if (!messageId) return;
+    api.put('/api/notifications/read-for-related', {
+      relatedType: 'message',
+      relatedId: messageId
+    }).then(() => {
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    }).catch(() => {});
+  }, [selectedMessage]);
+
   useEffect(() => {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);
@@ -223,13 +240,9 @@ function Messages() {
         setStatusFilter('all');
       }
       setSelectedMessage(msg);
-      // Mark all notifications for this message as read (bell badge + counts)
-      api.put('/api/notifications/read-for-related', {
-        relatedType: 'message',
-        relatedId: messageId
-      }).then(() => {
-        window.dispatchEvent(new CustomEvent('notifications-updated'));
-      }).catch(() => {});
+      // Notification read-marking is handled centrally by the
+      // `selectedMessage` effect below — deep-link, list-click, and any
+      // other code path that opens a message all go through that hook.
       if (commentId) {
         setHighlightedCommentId(commentId);
         // Retry finding the comment element — on cold start the MessageDetail

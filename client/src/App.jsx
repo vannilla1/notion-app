@@ -47,13 +47,6 @@ const typeToSection = (type) => {
   return null;
 };
 
-const pathToSection = (path) => {
-  if (path === '/crm') return 'crm';
-  if (path === '/tasks') return 'tasks';
-  if (path === '/messages') return 'messages';
-  return null;
-};
-
 function AppContent() {
   const { isAuthenticated, loading } = useAuth();
   const { needsWorkspace, loading: workspaceLoading, currentWorkspaceId, switchWorkspace, workspaces } = useWorkspace();
@@ -91,7 +84,6 @@ function AppContent() {
   }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
 
   const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
-  const prevPathRef = useRef(location.pathname);
 
   const fetchUnreadCounts = useCallback(async () => {
     try {
@@ -117,28 +109,24 @@ function AppContent() {
     const handleNotification = (notification) => {
       const section = typeToSection(notification.type);
       if (section) {
-        // Don't increment if user is already viewing that section
-        const currentSection = pathToSection(location.pathname);
-        if (currentSection !== section) {
-          setUnreadCounts(prev => ({ ...prev, [section]: prev[section] + 1 }));
-        }
+        // Always increment — even when the user is currently viewing the
+        // section. Being on a list page is not the same as reading a
+        // specific item. Individual notifications are marked read only when
+        // the user opens that item (task/contact/message expand) or clicks
+        // the notification in the bell — never implicitly by section entry.
+        setUnreadCounts(prev => ({ ...prev, [section]: prev[section] + 1 }));
       }
     };
     socket.on('notification', handleNotification);
     return () => socket.off('notification', handleNotification);
-  }, [socket, isConnected, isAuthenticated, location.pathname]);
+  }, [socket, isConnected, isAuthenticated]);
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const section = pathToSection(location.pathname);
-    const prevSection = pathToSection(prevPathRef.current);
-    prevPathRef.current = location.pathname;
-
-    if (section && section !== prevSection && unreadCounts[section] > 0) {
-      setUnreadCounts(prev => ({ ...prev, [section]: 0 }));
-      api.put(`/api/notifications/read-by-section/${section}`).catch(() => {});
-    }
-  }, [location.pathname, isAuthenticated]);
+  // NOTE: previously we auto-marked every notification in a section as read
+  // the moment the user tapped that section in the bottom nav — that's a lie
+  // about what the user has actually seen, so it's been removed. Mark-as-read
+  // now happens only when the user opens a specific item (see the useEffects
+  // on expandedTask / expandedContact / selectedMessage in the page
+  // components) or taps a notification in the bell dropdown.
 
   useEffect(() => {
     if (isAuthenticated) {

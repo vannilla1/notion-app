@@ -564,6 +564,20 @@ function Tasks() {
     if (expandedTask) fetchLinkedMessages(expandedTask);
   }, [expandedTask, fetchLinkedMessages]);
 
+  // Mark task notifications as read when the user actually opens the task —
+  // replaces the old "mark everything read when section is clicked" behavior.
+  // Covers user clicks, deep-link expands, and highlight flows. Server
+  // endpoint is idempotent, so re-firing on the same id is harmless.
+  useEffect(() => {
+    if (!expandedTask) return;
+    api.put('/api/notifications/read-for-related', {
+      relatedType: 'task',
+      relatedId: expandedTask
+    }).then(() => {
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    }).catch(() => {});
+  }, [expandedTask]);
+
   // Handle Google Calendar and Google Tasks OAuth callback parameters
   useEffect(() => {
     const params = new URLSearchParams(location.search);
