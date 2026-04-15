@@ -59,6 +59,17 @@ Vždy si najprv overí cez grep.
 **P8 — Minimalizmus zmien.** Gemma uprednostňuje najmenšiu možnú zmenu, ktorá rieši problém.
 Veľké prepisy sú povolené len ak to explicitne žiadame.
 
+**P9 — Terminológia projektu je zdroj pravdy, nie testy.** Keď Gemma rieši failujúci test
+a zistí, že text v teste **nezodpovedá terminológii projektu**, *nesmie* len tak zmeniť
+produkčný kód, aby test prešiel. Musí najprv:
+1. Overiť cez `read_file` aktuálny UI jazyk (viď §1.3 Terminológia)
+2. Porovnať s tým, čo test očakáva
+3. Ak sa líšia → test je zastaraný, upraví **test**, nie kód
+4. Explicitne to používateľovi oznámiť v výstupe ako „konflikt terminológie"
+
+Testy reflektujú **historický** stav. GEMMA_PROJECT_GUIDE.md reflektuje **aktuálny** stav.
+Pri konflikte víťazí guide.
+
 ### 0.3 Čo Gemma SMIE robiť bez dopytu
 
 - Opraviť zjavné typo v komentároch, logovacích správach a error messages.
@@ -93,7 +104,8 @@ Keď Gemma robí review, píše výstup takto (v slovenčine):
 team kolaboračný a CRM systém** pre malé tímy (2–20 ľudí). Kombinuje:
 
 - **Kontakty (CRM)** — správa zákazníkov/leadov so status flow
-- **Úlohy (Tasks/Projects)** — hierarchia projektov → tasks → subtasks s drag-and-drop
+- **Projekty a úlohy** — hierarchia Tasks (→ UI "projekty") s nested Subtasks (→ UI "úlohy"),
+  drag-and-drop radenie cez @dnd-kit
 - **Odkazy (Messages)** — interný tím messaging systém s approval flow, poľami, komentármi
   a like/dislike reakciami
 - **Notifikácie** — real-time socket + push (APNs pre iOS, Web Push pre web/Android)
@@ -132,6 +144,42 @@ notion-app/
 ├── README.md            # Slovak inštalačné docs
 └── GEMMA_PROJECT_GUIDE.md   # TENTO SÚBOR
 ```
+
+### 1.3 Terminológia projektu (TECHNICKÉ MENO ↔ UI SLOVENSKY)
+
+**Kritické:** Modely v kóde majú iné názvy než ich UI reprezentácia. Pri písaní
+user-facing textov (notifikácie, push, error messages, tooltipy) **VŽDY použi UI
+terminológiu**. Testy, ktoré tieto texty overujú, musia byť v zhode s touto mapou.
+
+| Model / kód | UI (slovensky) | Poznámka |
+|-------------|----------------|----------|
+| `User` | používateľ, člen tímu | — |
+| `Workspace` | prostredie, tím | UI používa oba podľa kontextu |
+| `WorkspaceMember` | člen | — |
+| `Contact` | kontakt | — |
+| `ContactFile` | príloha kontaktu | — |
+| `Task` | **projekt** | Top-level hierarchia, môže mať Subtasks |
+| `Subtask` (nested v Task) | **úloha** | Podradené pod Task |
+| `Message` | odkaz | Nie "správa" — tento výraz je rezervovaný |
+| `Comment` (nested v Message) | komentár | — |
+| `Reaction` (nested v Comment) | reakcia (like/dislike) | — |
+| `Notification` | notifikácia, upozornenie | — |
+| `Page` | stránka | Rich-text editor obsahu |
+| `AuditLog` | záznam aktivity | Len pre admin |
+
+**Formát titulkov notifikácií** (viď `server/services/notificationService.js:getNotificationTitle`):
+```
+"<Actor> <sloveso> <entita>: <názov>"
+```
+Príklady:
+- `Peter vytvoril nový kontakt: Firma ABC`
+- `Maria dokončil projekt: Q4 Launch` (Task = projekt!)
+- `Admin pridal úlohu: Napísať testy` (Subtask = úloha!)
+
+Ak `relatedName` je null, vynechá sa aj dvojbodka: `Jan upravil projekt`.
+
+Formát **message** (popisu) notifikácie je dlhší, kontextovejší, viď
+`getNotificationMessage` v tom istom súbore.
 
 ---
 

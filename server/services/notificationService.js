@@ -804,36 +804,47 @@ const notifyAllExcept = async (excludeUserId, notificationData, workspaceId) => 
  * Get notification title based on type
  */
 const getNotificationTitle = (type, actorName, relatedName) => {
+  // Titulok notifikácie má actor-first formát:
+  //   "<Kto> <čo urobil> <s čím>: <názov>"
+  // Ak relatedName chýba, vynecháme aj dvojbodku (prirodzenejšie znenie v push).
+  //
+  // Terminológia projektu (viď GEMMA_PROJECT_GUIDE.md §1):
+  //   Task (model)    → "projekt" v UI
+  //   Subtask (nested) → "úloha" v UI
+  //
+  // Format notifikácie sa premieta aj do iOS push a web-push titulkov, takže
+  // musí byť konzistentný s terminológiou vo zvyšku aplikácie.
   const actor = actorName || 'Niekto';
   const related = relatedName || '';
+  const suffix = related ? `: ${related}` : '';
 
   switch (type) {
     case 'contact.created':
-      return `Nový kontakt: ${related || 'bez názvu'}`;
+      return `${actor} vytvoril nový kontakt${suffix}`;
     case 'contact.updated':
-      return `Kontakt upravený: ${related || 'bez názvu'}`;
+      return `${actor} upravil kontakt${suffix}`;
     case 'contact.deleted':
-      return `Kontakt vymazaný: ${related || 'bez názvu'}`;
+      return `${actor} vymazal kontakt${suffix}`;
     case 'task.created':
-      return `Nový projekt: ${related || 'bez názvu'}`;
+      return `${actor} vytvoril nový projekt${suffix}`;
     case 'task.updated':
-      return `Projekt upravený: ${related || 'bez názvu'}`;
+      return `${actor} upravil projekt${suffix}`;
     case 'task.completed':
-      return `Projekt dokončený: ${related || 'bez názvu'}`;
+      return `${actor} dokončil projekt${suffix}`;
     case 'task.deleted':
-      return `Projekt vymazaný: ${related || 'bez názvu'}`;
+      return `${actor} vymazal projekt${suffix}`;
     case 'task.assigned':
-      return `Priradený projekt: ${related || 'bez názvu'}`;
+      return `${actor} vám priradil projekt${suffix}`;
     case 'subtask.created':
-      return `Nová úloha: ${related || 'bez názvu'}`;
+      return `${actor} pridal úlohu${suffix}`;
     case 'subtask.updated':
-      return `Úloha upravená: ${related || 'bez názvu'}`;
+      return `${actor} upravil úlohu${suffix}`;
     case 'subtask.completed':
-      return `Úloha dokončená: ${related || 'bez názvu'}`;
+      return `${actor} dokončil úlohu${suffix}`;
     case 'subtask.deleted':
-      return `Úloha vymazaná: ${related || 'bez názvu'}`;
+      return `${actor} vymazal úlohu${suffix}`;
     case 'subtask.assigned':
-      return `Priradená úloha: ${related || 'bez názvu'}`;
+      return `${actor} vám priradil úlohu${suffix}`;
     case 'task.dueDate':
     case 'subtask.dueDate':
       return related || 'Blíži sa termín';

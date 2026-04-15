@@ -64,7 +64,7 @@ describe('NotificationService', () => {
         'Peter',
         'Dokončiť projekt'
       );
-      expect(title).toBe('Peter vám priradil úlohu: Dokončiť projekt');
+      expect(title).toBe('Peter vám priradil projekt: Dokončiť projekt');
     });
 
     it('should generate correct title for task.completed', () => {
@@ -73,7 +73,7 @@ describe('NotificationService', () => {
         'Maria',
         'Review kódu'
       );
-      expect(title).toBe('Maria dokončil úlohu: Review kódu');
+      expect(title).toBe('Maria dokončil projekt: Review kódu');
     });
 
     it('should generate correct title for subtask.created', () => {
@@ -82,7 +82,7 @@ describe('NotificationService', () => {
         'Admin',
         'Napísať testy'
       );
-      expect(title).toBe('Admin pridal podúlohu: Napísať testy');
+      expect(title).toBe('Admin pridal úlohu: Napísať testy');
     });
 
     it('should use default actor name when not provided', () => {
@@ -100,7 +100,7 @@ describe('NotificationService', () => {
         'Jan',
         null
       );
-      expect(title).toBe('Jan upravil úlohu');
+      expect(title).toBe('Jan upravil projekt');
     });
 
     it('should return default for unknown type', () => {
@@ -372,7 +372,7 @@ describe('NotificationService', () => {
 
       expect(notifications).toHaveLength(2);
       expect(notifications[0].type).toBe('task.assigned');
-      expect(notifications[0].title).toContain('priradil úlohu');
+      expect(notifications[0].title).toContain('priradil projekt');
     });
 
     it('should not notify actor if in assigned list', async () => {
