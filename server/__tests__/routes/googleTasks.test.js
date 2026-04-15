@@ -1,0 +1,351 @@
+const { createTestApp, createUserWithWorkspace, authHeader } = require('../helpers/testApp');
+const request = require('supertest');
+const mongoose = require('mongoose');
+const User = require('../../models/User');
+const Task = require('../../models/Task');
+const Contact = require('../../models/Contact');
+const Workspace = require('../../models/Workspace');
+const WorkspaceMember = require('../../models/WorkspaceMember');
+
+/**
+ * /api/google-tasks route testy — OAuth Google Tasks sync.
+ *
+ * Paralelné testy k googleCalendar.test.js — rovnaký pattern, iný scope.
+ *
+ * Doplnkovo testujeme:
+ *   - OAuth not configured → 503 na auth-url
+ *   - invalid ObjectId v state → redirect na invalid_state (anti-injection)
+ *   - /status: daily quota tracking (50000 queries/day), pending task count
+ *   - /sync: 400 ak Google Tasks nie je pripojený
+ *   - /sync: 429 ak quota prekročená
+ */
+
+const mockGenerateAuthUrl = jest.fn().mockReturnValue('https://accounts.google.com/o/oauth2/mock-tasks-url');
+const mockRevokeToken = jest.fn().mockResolvedValue({});
+const mockGetToken = jest.fn().mockResolvedValue({
+  tokens: {
+    access_token: 'tasks-access-token',
+    refresh_token: 'tasks-refresh-token',
+    expiry_date: Date.now() + 3600000
+  }
+});
+const mockSetCredentials = jest.fn();
+const mockTasklistsList = jest.fn().mockResolvedValue({
+  data: { items: [{ id: 'existing-list', title: 'Prpl CRM' }] }
+});
+const mockTasklistsInsert = jest.fn().mockResolvedValue({
+  data: { id: 'new-list-id', title: 'Prpl CRM' }
+});
+
+jest.mock('googleapis', () => ({
+  google: {
+    auth: {
+      OAuth2: jest.fn().mockImplementation(() => ({
+        generateAuthUrl: mockGenerateAuthUrl,
+        setCredentials: mockSetCredentials,
+        revokeToken: mockRevokeToken,
+        getToken: mockGetToken,
+        refreshAccessToken: jest.fn().mockResolvedValue({
+          credentials: { access_token: 'refreshed', expiry_date: Date.now() + 3600000 }
+        })
+      }))
+    },
+    tasks: jest.fn().mockReturnValue({
+      tasklists: {
+        list: mockTasklistsList,
+        insert: mockTasklistsInsert
+      },
+      tasks: {
+        list: jest.fn().mockResolvedValue({ data: { items: [] } }),
+        insert: jest.fn().mockResolvedValue({ data: { id: 'new-task-id' } }),
+        update: jest.fn().mockResolvedValue({ data: {} }),
+        delete: jest.fn().mockResolvedValue({}),
+        patch: jest.fn().mockResolvedValue({ data: {} })
+      }
+    }),
+    calendar: jest.fn().mockReturnValue({
+      events: { watch: jest.fn() },
+      channels: { stop: jest.fn() }
+    })
+  }
+}));
+
+describe('/api/google-tasks route', () => {
+  let app;
+  let ctx;
+
+  beforeAll(() => {
+    process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+    process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret';
+    process.env.GOOGLE_TASKS_REDIRECT_URI = 'http://localhost:3001/api/google-tasks/callback';
+    process.env.CLIENT_URL = 'http://localhost:3000';
+
+    const gtasksRouter = require('../../routes/googleTasks');
+    ({ app } = createTestApp('/api/google-tasks', gtasksRouter));
+  });
+
+  beforeEach(async () => {
+    await Task.deleteMany({});
+    await Contact.deleteMany({});
+    await WorkspaceMember.deleteMany({});
+    await Workspace.deleteMany({});
+    await User.deleteMany({});
+
+    ctx = await createUserWithWorkspace({
+      username: 'gtasksuser',
+      email: 'gtasks@test.com',
+      role: 'owner',
+      workspaceName: 'GT WS'
+    });
+
+    mockGenerateAuthUrl.mockClear();
+    mockGetToken.mockClear();
+    mockRevokeToken.mockClear();
+    mockTasklistsList.mockClear();
+    mockTasklistsInsert.mockClear();
+  });
+
+  afterAll(async () => {
+    await mongoose.connection.close();
+  });
+
+  describe('GET /auth-url', () => {
+    it('401 bez tokenu', async () => {
+      const res = await request(app).get('/api/google-tasks/auth-url');
+      expect(res.status).toBe(401);
+    });
+
+    it('vráti authUrl', async () => {
+      const res = await request(app)
+        .get('/api/google-tasks/auth-url')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.authUrl).toContain('accounts.google.com');
+      expect(mockGenerateAuthUrl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: expect.arrayContaining(['https://www.googleapis.com/auth/tasks']),
+          state: ctx.user._id.toString()
+        })
+      );
+    });
+  });
+
+  describe('GET /callback', () => {
+    it('redirect na error ak chýba code', async () => {
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?state=${ctx.user._id}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('google_tasks=error');
+      expect(res.headers.location).toContain('missing_params');
+    });
+
+    it('redirect na error pri invalid ObjectId v state (anti-injection)', async () => {
+      const res = await request(app)
+        .get('/api/google-tasks/callback?code=abc&state=not-a-valid-objectid');
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('invalid_state');
+    });
+
+    it('redirect na error ak user neexistuje', async () => {
+      const fake = new mongoose.Types.ObjectId().toString();
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?code=abc&state=${fake}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('user_not_found');
+    });
+
+    it('úspešný callback nájde existujúci Prpl CRM zoznam', async () => {
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('google_tasks=connected');
+
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.enabled).toBe(true);
+      expect(updated.googleTasks.taskListId).toBe('existing-list');
+      // insert sa nevolal (list existuje)
+      expect(mockTasklistsInsert).not.toHaveBeenCalled();
+    });
+
+    it('callback vytvorí nový zoznam ak Prpl CRM neexistuje', async () => {
+      mockTasklistsList.mockResolvedValueOnce({ data: { items: [] } });
+
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+
+      expect(res.status).toBe(302);
+      expect(mockTasklistsInsert).toHaveBeenCalledWith({
+        resource: { title: 'Prpl CRM' }
+      });
+
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.taskListId).toBe('new-list-id');
+    });
+
+    it('rozpozná aj starý názov "Perun CRM" a použije ho', async () => {
+      mockTasklistsList.mockResolvedValueOnce({
+        data: { items: [{ id: 'legacy-list', title: 'Perun CRM' }] }
+      });
+
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+
+      expect(res.status).toBe(302);
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.taskListId).toBe('legacy-list');
+    });
+  });
+
+  describe('GET /status', () => {
+    it('401 bez tokenu', async () => {
+      const res = await request(app).get('/api/google-tasks/status');
+      expect(res.status).toBe(401);
+    });
+
+    it('connected=false + quota info pre disconnected usera', async () => {
+      const res = await request(app)
+        .get('/api/google-tasks/status')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(false);
+      expect(res.body.quota).toBeDefined();
+      expect(res.body.quota.limit).toBe(50000);
+      expect(res.body.quota.used).toBe(0);
+      expect(res.body.pendingTasks.total).toBe(0);
+    });
+
+    it('connected=true + spočíta pending tasks', async () => {
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'x',
+        refreshToken: 'y',
+        taskListId: 'my-list',
+        connectedAt: new Date(),
+        syncedTaskIds: new Map()
+      };
+      await ctx.user.save();
+
+      const due = new Date(Date.now() + 86400000);
+      await Task.create([
+        { workspaceId: ctx.workspace._id, userId: ctx.user._id, title: 'T1', dueDate: due, completed: false },
+        { workspaceId: ctx.workspace._id, userId: ctx.user._id, title: 'T2', dueDate: due, completed: false },
+        // No dueDate → nespočíta sa
+        { workspaceId: ctx.workspace._id, userId: ctx.user._id, title: 'T3', completed: false }
+      ]);
+
+      const res = await request(app)
+        .get('/api/google-tasks/status')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(true);
+      expect(res.body.pendingTasks.total).toBe(2);
+      expect(res.body.pendingTasks.synced).toBe(0);
+      expect(res.body.pendingTasks.pending).toBe(2);
+    });
+
+    it('quota countdown zobrazuje correct percentage', async () => {
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'x',
+        refreshToken: 'y',
+        quotaUsedToday: 25000,
+        quotaResetDate: new Date()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .get('/api/google-tasks/status')
+        .set(authHeader(ctx.token));
+
+      expect(res.body.quota.used).toBe(25000);
+      expect(res.body.quota.remaining).toBe(25000);
+      expect(res.body.quota.percentUsed).toBe(50);
+    });
+  });
+
+  describe('POST /disconnect', () => {
+    it('401 bez tokenu', async () => {
+      const res = await request(app).post('/api/google-tasks/disconnect');
+      expect(res.status).toBe(401);
+    });
+
+    it('vyčistí googleTasks credentials + revoke token', async () => {
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'active-token',
+        refreshToken: 'refresh',
+        taskListId: 'list-123',
+        connectedAt: new Date()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockRevokeToken).toHaveBeenCalledWith('active-token');
+
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.enabled).toBe(false);
+      expect(updated.googleTasks.accessToken).toBeNull();
+      expect(updated.googleTasks.taskListId).toBeNull();
+    });
+
+    it('toleruje revoke error (token už neplatný)', async () => {
+      mockRevokeToken.mockRejectedValueOnce(new Error('invalid_token'));
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'stale',
+        refreshToken: 'refresh'
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.enabled).toBe(false);
+    });
+  });
+
+  describe('POST /sync', () => {
+    it('400 ak Google Tasks nie je enabled', async () => {
+      const res = await request(app)
+        .post('/api/google-tasks/sync')
+        .set(authHeader(ctx.token))
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/nie je pripojený/i);
+    });
+
+    it('429 ak quota prekročená', async () => {
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'x',
+        refreshToken: 'y',
+        taskListId: 'list',
+        quotaUsedToday: 49995,
+        quotaResetDate: new Date()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/sync')
+        .set(authHeader(ctx.token))
+        .send({});
+
+      expect(res.status).toBe(429);
+      expect(res.body.quotaExceeded).toBe(true);
+    });
+  });
+});
