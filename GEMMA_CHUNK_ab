@@ -1,0 +1,500 @@
+- **BillingPage** — plan info, upgrade CTA, Stripe checkout redirect
+- **WorkspaceMembers** — list + invite + role change
+- **AcceptInvite** — invite token acceptance flow
+- **AdminLogin** / **AdminPanel** — admin only
+- **PrivacyPolicy** / **TermsOfService** — SK legal
+
+### 3.5 Contexts
+
+#### AuthContext
+Expose: `user`, `token`, `loading`, `isAuthenticated`, `login()`, `register()`, `logout()`, `updateUser()`.
+Perzistencia: `localStorage.token`. Axios interceptor `401|403 → clear token → navigate('/login')`.
+
+#### WorkspaceContext
+Expose: `workspaces[]`, `currentWorkspace`, `currentWorkspaceId`, `loading`, `needsWorkspace`,
+`createWorkspace()`, `joinWorkspace()`, `switchWorkspace()`, `updateWorkspace()`,
+`regenerateInviteCode()`, `leaveWorkspace()`, `refreshCurrentWorkspace()`.
+
+**Kľúčové:** `switchWorkspace()` dispatchuje `window.CustomEvent('workspace-switched')`. Každá
+page (CRM, Tasks, Messages) na to reaguje refetchom + zatvorením otvorených modálov. Rieši
+race condition pri deep-link notifikácii do iného workspace.
+
+### 3.6 Hooks
+
+- **`useSocket()`** — socket.io-client instance, pripojenie s tokenom, reconnect (max 5×, 1s delay).
+  Export: `{ socket, isConnected, joinPage, leavePage, registerListener }`.
+- **`useContactOperations()` / `useTaskOperations()`** — CRUD helpery pre kontakty a tasky
+  (globálne aj kontaktové). `isGlobal` flag prepína endpoint.
+
+### 3.7 Komponenty (vybrané)
+
+| Komponent | Súbor | Zodpovednosť |
+|-----------|-------|--------------|
+| BottomNav | `BottomNav.jsx` | Mobile bottom nav, badge counts z props |
+| NotificationBell | `NotificationBell.jsx` | Zvonček s dropdownom, fetch last 30, mark-as-read, navigate |
+| NotificationToast | `NotificationToast.jsx` | Ephemeral toast (5s auto-dismiss), listener na socket `notification` |
+| WorkspaceSwitcher | `WorkspaceSwitcher.jsx` | Dropdown prepínača, farba + unread count per workspace |
+| ContactCard / ContactDetail / ContactForm | — | CRM kontakt UI |
+| TaskList | `TaskList.jsx` | Tasky s drag-drop, subtasks, inline edit |
+| UserMenu | `UserMenu.jsx` | Profil, settings, sync calendar, logout (55 KB — veľa settings) |
+| HelpGuide | `HelpGuide.jsx` | In-app help panel s tipmi |
+| FilePreviewModal / FilePreviewImage | — | Image/PDF preview, full-screen |
+| WorkspaceSetup | `WorkspaceSetup.jsx` | Ak user nemá workspace — force setup |
+| ErrorBoundary | `ErrorBoundary.jsx` | React error boundary s fallback UI |
+| PushNotificationToggle | `PushNotificationToggle.jsx` | Enable/disable web push |
+
+### 3.8 API klient
+
+**`client/src/api/api.js`:**
+
+```javascript
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001',
+  timeout: 60000  // 60s pre Render cold start
+});
+
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// Response interceptor:
+// - timeout/network/503 → retry max 3× (3s, 6s, 9s)
+// - 401/403 → localStorage.removeItem('token') + redirect /login
+// - blob responses skip retry
+```
+
+### 3.9 Deep link & push notification handling
+
+Tri cesty ako prichádzajú deep linky:
+
+1. **Cold start** (užívateľ tapne push, app je killnutá) — Swift extrahuje `url` z APNs
+   payloadu, nastaví `pendingDeepLink`, ContentView direct-loaduje URL (namiesto default `/app`).
+   `App.jsx` `useLayoutEffect` detekuje `?ws=` param a switchne workspace PRED child page
+   effectmi — tie by inak stripli URL param.
+
+2. **Hot start** (app bola na pozadí) — Swift dispatchuje `window.dispatchEvent(new
+   CustomEvent('iosDeepLink', { detail: path }))`. `App.jsx` handler volá `navigateWithWorkspace(path)`.
+
+3. **Web push click** — service worker posle `{ type: 'NOTIFICATION_CLICK', url, data }` do hlavného
+   okna. `App.jsx` listener parsuje URL a volá `navigateWithWorkspace()`.
+
+**`navigateWithWorkspace(rawPath)`** (App.jsx:60–84):
+- Parsuje URL, extrahuje `ws=`.
+- Ak `ws` ≠ current a user je člen — `await switchWorkspace(ws)` predtým ako naviguje.
+- Strippne `ws=` z URL (je to transport hint, nie page param).
+- `navigate(cleanPath, { replace: true })`.
+
+**URL parametre a ich význam:**
+
+| Param | Page | Efekt |
+|-------|------|-------|
+| `expandContact={id}` | `/crm` | Auto-expand kontaktu |
+| `highlightTask={id}` | `/tasks` alebo `/crm` | Highlight tasku |
+| `subtask={id}` | `/tasks` | Expand subtasku |
+| `highlight={id}` | `/messages` | Highlight správy |
+| `comment={id}` | `/messages` | Scroll na komentár + highlight |
+| `ws={id}` | akákoľvek | Workspace hint (stripnuté pred nav) |
+| `_t={timestamp}` | akákoľvek | Cache-bust (force re-render aj pri rovnakom path-e) |
+
+### 3.10 Synchronizácia notifikačných counts
+
+1. **Initial load** (App.jsx:88–93): `GET /api/notifications/unread-by-section` → `{crm, tasks, messages}`.
+2. **Bottom nav** zobrazuje badge counts.
+3. **Socket `notification` event** — handler v App.jsx **vždy inkrementuje** badge (aj keď je
+   user na tej sekcii) — "byť na liste != mať prečítané". Mark-as-read sa deje len pri otvorení
+   konkrétnej položky alebo cez bell.
+4. **Mark as read** — Messages/CRM/Tasks volajú `PUT /api/notifications/read-for-related`
+   keď sa `expandedTask` / `expandedContact` / `selectedMessage` zmení na non-null.
+   Dispatch `window.dispatchEvent(new Event('notifications-updated'))` → App.jsx refetchne
+   unread counts.
+
+**Custom eventy:**
+
+| Event | Dispatcher | Listeners |
+|-------|-----------|-----------|
+| `notifications-updated` | Any page (mark-as-read) | App.jsx (refetch), NotificationBell |
+| `workspace-switched` | WorkspaceContext.switchWorkspace() | CRM, Tasks, Messages, Dashboard |
+| `app-resumed` | App.jsx visibilitychange (hidden > 3s) | Všetky pages (refetch) |
+| `iosDeepLink` | Swift (hot start) | App.jsx |
+| `notificationSettingChanged` | UserMenu | NotificationToast |
+
+### 3.11 Styling
+
+- CSS variables v `:root` (`--bg-primary`, `--accent-color: #6366f1` indigo brand, `--radius`, ...)
+- Utility classes (`.btn`, `.btn-primary`, `.card`, `.modal-overlay`)
+- Žiadny CSS-in-JS framework — classic CSS súbory + inline style props
+- **Dark mode zatiaľ nie je implementovaný** (CSS vars to umožňujú, len chýba JS toggle)
+
+### 3.12 Dôležité komentáre v kóde
+
+Hľadaj a zachovaj:
+- `// PERF:` — performance optimalizácie (napr. atomic $push namiesto save(), projection bez Base64)
+- `// NOTE:` — kontext rozhodnutia (napr. prečo sa notifikácie markujú read len pri otvorení položky)
+- `// iOS:` / `// WKWebView:` — iOS-specific workaroundy
+- `// WORKAROUND:` — dočasné hacky s popisom dôvodu
+
+Príklad z App.jsx:124-129 popisuje, prečo sme odstránili auto-mark-as-read pri tapnutí sekcie —
+kedysi sa všetky notifikácie sekcie označili za prečítané aj keď user reálne ani jednu neotvoril;
+teraz sa značkujú len pri otvorení konkrétnej položky alebo kliknutí vo zvončeku.
+
+---
+
+## 4. iOS native app — `ios/PrplCRM/`
+
+### 4.1 Štruktúra
+
+```
+ios/
+├── PrplCRM.xcodeproj/          # Xcode projekt (target: PrplCRM)
+└── PrplCRM/
+    ├── PrplCRMApp.swift        # @main, AppDelegate, PushNotificationManager
+    ├── ContentView.swift       # SwiftUI root, WebView UIViewRepresentable, Coordinator
+    ├── KeychainHelper.swift    # Secure token storage (Security framework)
+    ├── Info.plist              # Capabilities, usage descriptions
+    ├── PrplCRM.entitlements    # aps-environment=development
+    └── Assets.xcassets/         # App icons, colors
+```
+
+**Bundle identifier:** `sk.perunelectromobility.prplcrm`
+**Name:** Prpl CRM, **Version:** 1.0 (build 4)
+**Development Region:** sk
+**Base URL:** `https://prplcrm.eu/app`
+
+### 4.2 Launch flow
+
+1. `@main struct PrplCRMApp` boot cez SwiftUI `@UIApplicationDelegateAdaptor`
+2. `AppDelegate.didFinishLaunchingWithOptions`:
+   - `UIApplication.shared.registerForRemoteNotifications()`
+   - `UNUserNotificationCenter` permission request (alert, badge, sound)
+   - **Kľúčové:** extrahuje cold-start deep link z `launchOptions` a nastaví
+     `pushManager.pendingDeepLink` **synchrónne** (nie na `DispatchQueue.main.async`!) — aby
+     ContentView.makeUIView videl link pred prvým renderom
+3. `ContentView` renderuje WebView s URL = pendingDeepLink ?? `https://prplcrm.eu/app`
+4. `ContentView.onAppear` — ak Keychain má token, show Face ID lock
+
+### 4.3 WKWebView konfigurácia (ContentView.swift:267–431)
+
+```swift
+config.allowsInlineMediaPlayback = true
+config.mediaTypesRequiringUserActionForPlayback = []
+config.preferences.javaScriptCanOpenWindowsAutomatically = true
+webView.allowsBackForwardNavigationGestures = false   // iOS: disable edge swipe
+webView.scrollView.bounces = false                    // bounce deje dnu v `.crm-main`
+webView.scrollView.contentInsetAdjustmentBehavior = .never
+webView.backgroundColor = UIColor(red: 99/255, green: 102/255, blue: 241/255)  // brand indigo
+customUserAgent = "PrplCRM-iOS/1.0 <default UA>"
+```
+
+### 4.4 WKUserScripts
+
+**At document start** (ContentView.swift:311–332) — **token restoration**:
+```swift
+if let savedToken = KeychainHelper.getToken() {
+    let restoreScript = WKUserScript(
+        source: "if (!localStorage.getItem('token')) { localStorage.setItem('token', '\(escapedToken)'); }",
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true
+    )
+}
+```
+
+**⚠ Guard `if (!localStorage.getItem('token'))` je KĽÚČOVÝ.** Bez neho by sa stale Keychain
+token re-injektol pri každom reload a prepísal by fresh token po login. Commit `b4fde4a` fixol
+tento bug (user sa musel re-loginovať po každom workspace switchi).
+
+**At document end** — **safe area CSS + auth bridge**:
+- CSS vars `--sat`, `--sab`, `--sal`, `--sar` pre safe area insets
+- Pridá class `ios-app` na `<body>`
+- JS watcher na `localStorage.setItem('token', ...)` → postMessage `{ type: 'authToken', token }` do native
+- JS watcher na `localStorage.removeItem('token')` → postMessage `{ type: 'logout' }` do native
+- Fallback polling 3s / 30s
+
+### 4.5 Bridge — Swift ↔ JS
+
+**Message handlers** (registered v Coordinator.userContentController):
+
+| Handler | Z JS do Swift | Efekt |
+|---------|---------------|-------|
+| `iosNative` | `{ type: 'authToken', token }` | `KeychainHelper.saveToken()` + trigger APNs register |
+| `iosNative` | `{ type: 'logout' }` | `KeychainHelper.deleteToken()` + clear `pushManager.authToken` |
+| `fileDownload` | `{ data: base64, fileName, mimetype }` | Share sheet cez UIActivityViewController |
+| `openExternal` | URL string | Safari open (pre Stripe redirect) |
+
+### 4.6 Push notifications (APNs)
+
+**Flow:**
+1. AppDelegate: `registerForRemoteNotifications()` → iOS volá `didRegisterForRemoteNotificationsWithDeviceToken`
+2. Device token hex → uložené v UserDefaults (kľúč `deviceToken`)
+3. Keď je k dispozícii aj `authToken`, POST `https://perun-crm-api.onrender.com/api/push/apns/register`
+4. Retry s exponential backoff (2s, 4s, 8s, 16s, 32s) max 5×; 401 stopne registráciu
+
+**Notification tap handler** (`userNotificationCenter(_:didReceive:)`):
+- Extrahuje `url` (alebo skonštruuje z `type` + IDs) z `userInfo`
+- Nastaví `pushManager.pendingDeepLink` **synchrónne**
+- Reset badge na 0
+
+**Foreground (app open):** `willPresent` ukáže banner + list + badge + sound.
+
+### 4.7 Memory recovery (kritické pre iOS)
+
+**Problém:** WKWebView WebContent process môže byť killnutý kvôli jetsam (memory pressure).
+Výsledok: biela obrazovka alebo "scroll jumps to dashboard" bug (page reload na `/app`).
+
+**Fixy v kóde:**
+1. `webView(_:didCommit:)` — ukladá `lastURL` po každej úspešnej navigácii
+2. `webViewWebContentProcessDidTerminate(_:)` — loaduje `lastURL` namiesto hardcoded `/app`
+3. Memory warning observer (`UIApplication.didReceiveMemoryWarningNotification`) — len logging
+
+**Frontend mitigácie (aplikované cez web build):**
+- Sentry **DISABLED** v iOS (detekcia cez custom UA `PrplCRM-iOS/`)
+- Lazy-loaded React routes
+- Manuálne chunks v Vite (`react-vendor`, `sentry`, `socket`)
+
+### 4.8 Keychain (KeychainHelper.swift)
+
+- Service ID: `sk.perunelectromobility.prplcrm`
+- Account: `authToken`
+- Accessibility: `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
+- Metódy: `saveToken(token)`, `getToken() -> String?`, `deleteToken()`
+
+### 4.9 App Store stav
+
+- Aktuálne: `aps-environment=development` (dev APNs)
+- Pre App Store: zmeniť na `production`, regenerovať provisioning profile ako **App Store**
+- Posledný známy problém: contracts error pri upload (user session — netýka sa súčasného stavu)
+- Checklist na vydanie v memory: `/Users/martinkosco/.claude/projects/.../memory/appstore_release_plan.md`
+
+---
+
+## 5. Deployment & infraštruktúra
+
+### 5.1 Render.com (`render.yaml`)
+
+Dva web services, región **frankfurt**:
+
+**Backend `prpl-crm-api`** (web service):
+- Runtime: node
+- Root: `server/`
+- Build: `npm ci --omit=dev`
+- Start: `node index.js`
+- Health check: `GET /health`
+- Env vars: `NODE_ENV=production`, `JWT_SECRET` (auto-gen), `CORS_ORIGIN`, `MONGODB_URI`,
+  `VAPID_*`, `SENTRY_DSN`, Stripe keys (synced z Render dashboardu).
+
+**Frontend `prpl-crm`** (static site):
+- Runtime: static
+- Root: `client/`
+- Build: `npm install && npm run build`
+- Publish: `dist/`
+- SPA rewrite: všetky routes → `/index.html`
+- Cache: `Cache-Control: no-cache` pre `/*`
+
+**Auto-deploy:** Render spúšťa build na každý push do `main`.
+
+### 5.2 Scripts
+
+**Server (`server/package.json`):**
+- `npm start` → `node index.js`
+- `npm run dev` → `nodemon --ignore data/ index.js`
+- `npm test` / `test:watch` / `test:coverage` — Jest
+
+**Client (`client/package.json`):**
+- `npm run dev` → vite na porte 3000, proxy `/api/*`
+- `npm run build` → `vite build` → `dist/`
+- `npm run preview` → `vite preview`
+- `npm test` / `test:ui` / `test:coverage` — Vitest
+
+**Root (`package.json`):**
+- Len deps `googleapis`, `sharp` (dev) — bez scriptov.
+
+### 5.3 Testing
+
+**Server** — Jest + supertest + mongodb-memory-server (`__tests__/` priečinok, setup v `__tests__/setup.js`).
+
+**Client** — Vitest + @testing-library/react, jsdom env, setup v `src/test/setup.js`.
+
+**Coverage** — generované cez `--coverage` flagy, neexistuje CI gate.
+
+### 5.4 CI/CD
+
+- **Žiadne GitHub Actions.**
+- Deploy flow: `git push origin main` → Render auto-deploy oboch services.
+- Žiadne husky/lint-staged hooky.
+- Žiadne ESLint/Prettier configy (skontrolovať pri review — dôvod pre code style drift).
+
+### 5.5 Logging a monitoring
+
+**Winston (`server/utils/logger.js`):**
+- Levels: error, warn, info (default), http, verbose, debug
+- Dev: colorized console
+- Prod: JSON console + súbory (`logs/error.log`, `logs/combined.log`, rotácia 5MB × 5)
+- Helpers: `logger.http()`, `logger.auth()`, `logger.socket()`
+
+**Sentry:**
+- Server: `SENTRY_DSN`, sample rate 0.1 v prod, 1.0 v dev, `beforeSend` filtruje heslá
+- Client: `VITE_SENTRY_DSN`, replay v prod 0.1, **vypnuté v iOS native**
+
+**Plán na vlastný error tracker** (v AdminPanel) — čaká na potvrdenie iOS stability. Referencia
+v `/Users/martinkosco/.claude/projects/.../memory/inhouse_error_tracking_plan.md`.
+
+---
+
+## 6. Doménový model a business logika
+
+### 6.1 Workspace a tenancy
+
+**Multi-tenancy:** Každý user môže byť v 0..N workspace-och. Aktuálny workspace je v
+`user.currentWorkspaceId`. **Každý dotaz, ktorý číta/zapisuje workspace-scoped entitu, musí
+filtrovať `workspaceId`**. Toto je najčastejší zdroj security chýb.
+
+**Role:** owner (1 per workspace, vlastník) > manager > member.
+
+**Invite flow:** owner/manager generuje 8-char hex `inviteCode`, pošle link
+`/invite/{inviteCode}`. AcceptInvite page overí kód, user joinne s rolou `member`.
+
+**Workspace switching:**
+- UI: `WorkspaceSwitcher` dropdown
+- API: `POST /api/workspaces/switch/:id` → update `user.currentWorkspaceId`
+- Frontend: `WorkspaceContext.switchWorkspace()` → dispatch `workspace-switched` event
+- Všetky pages listen → refetch + close otvorené modály
+
+### 6.2 Plány a limity
+
+| Plán | Cena/mes | Cena/rok | Kontakty | Projekty/kontakt | Členovia | Workspaces |
+|------|----------|----------|----------|------------------|----------|------------|
+| Free | 0 € | 0 € | 5 | 10 | 2 | 1 |
+| Team | 4.99 € | 49 € | 25 | 25 | 10 | 2 |
+| Pro | 9.99 € | 99 € | ∞ | ∞ | ∞ | ∞ |
+
+- Free je **permanentný**, nie trial.
+- **Read-only enforcement:** pri downgrade, ak workspace presahuje limit členov → read-only
+  režim (view bez edit).
+- Promo kódy: `PromoCode` model, aplikované pri Stripe checkout.
+
+### 6.3 Typy notifikácií a ich deep-link
+
+Enum v `Notification.js`:
+
+| Type | Zdroj | Notifikovaný | Push? |
+|------|-------|--------------|-------|
+| `contact.created` | contacts.js | Ostatní členovia workspace-u | — |
+| `contact.updated` | contacts.js | Ostatní členovia | — |
+| `contact.deleted` | contacts.js | Ostatní členovia | — |
+| `task.created` | tasks.js | Assigned users | — |
+| `task.updated` | tasks.js | Assigned users | — |
+| `task.completed` | tasks.js | Autor + assigned | — |
+| `task.deleted` | tasks.js | Assigned | — |
+| `task.assigned` | tasks.js | Nový assignee | **Áno** |
+| `subtask.*` | tasks.js | Analogicky | niektoré |
+| `task.dueDate` | dueDateChecker | Assigned | **Áno** |
+| `subtask.dueDate` | dueDateChecker | Assigned | **Áno** |
+| `message.created` | messages.js | Recipient | **Áno** |
+| `message.approved` | messages.js | Sender | — |
+| `message.rejected` | messages.js | Sender | **Áno** |
+| `message.commented` | messages.js | Druhá strana | **Áno** |
+| `message.comment.reacted` | messages.js | Autor komentára | — |
+
+**Deep-link rezolver** v `notificationService.js:465–491`:
+- `type.startsWith('message')` + `data.messageId` → `/messages?highlight=X&comment=Y&ws=Z`
+- `type.startsWith('task')` → `/tasks?highlightTask=X&subtask=Y&contactId=Z&ws=W`
+- `type.startsWith('contact')` → `/crm?expandContact=X&ws=Y`
+
+### 6.4 Integrácie
+
+**Google Calendar** — OAuth2, bidirectional sync, webhook push, syncToken incremental.
+`user.googleCalendar` = `{ accessToken, refreshToken, syncToken, syncedTaskIds: Map }`.
+
+**Google Tasks** — OAuth2, polling (nie webhooks — Google Tasks ich nemá), 5 min interval.
+
+**iCal feed export** — per-user endpoint s `user.calendarFeedToken`, ReadOnly.
+
+**Žiadne iné externé integrácie** (žiadny Slack/Jira/GitHub).
+
+### 6.5 Zvláštnosti a neobvyklé rozhodnutia (ktoré má Gemma rešpektovať)
+
+1. **Súbory ako Base64 v MongoDB, limit 10 MB** — vedomé rozhodnutie pre jednoduchosť.
+   Migrácia na S3 je mimo scope bez explicitného schválenia.
+
+2. **Message linking** — správa môže byť linknutá na kontakt alebo task (nie oboje), cez
+   `linkedType` + `linkedId` + `linkedName`. Objaví sa v oboch miestach.
+
+3. **Cascading auto-complete** — označenie projektu/tasku ako `completed` cascaduje na všetky
+   nested subtasky. Implementované vo frontende, server ho neverifikuje. **Toto je dizajn, nie bug.**
+
+4. **Comment reactions (like/dislike)** — max 1 reakcia per user per komentár. Enforcované cez
+   `$pull` → `$push` na route.
+
+5. **Notification auto-expiry 30 dní** — MongoDB TTL index. História notifikácií je efemérna,
+   audit trail žije v `AuditLog`.
+
+6. **Socket broadcast bez workspace filtrovania** — známy security debt (§11.4).
+
+7. **Slovak-only UI** — žiadne i18n, stringy sú hardcoded v JSX (EN varnames / SK strings).
+
+---
+
+## 7. Bezpečnostný model
+
+### 7.1 Autentifikácia
+
+- JWT v `Authorization: Bearer`, secret z `JWT_SECRET` (min 32 chars, enforcované pri boot)
+- Heslá: bcrypt (cost 10)
+- JWT expirácia 30d → user dostane 401 a musí sa re-loginovať
+- iOS Keychain stores token, Face ID lock pri app restart
+
+### 7.2 Autorizácia
+
+- Middleware `authenticateToken` → `req.user`
+- Middleware `requireWorkspace` → `req.workspaceId` + `req.workspaceRole`
+- Per-route role check (`requireAdmin`, `requireOwner`, `requireManager`)
+
+### 7.3 Workspace isolation
+
+**KĽÚČOVÉ PRAVIDLO:** Každý dotaz nad workspace-scoped entitou MUSÍ obsahovať
+`workspaceId: req.workspaceId` vo filtri. Nikdy nesmie byť dotaz typu
+`Contact.findById(req.params.id)` bez workspace filtra.
+
+Správny vzor:
+```javascript
+await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+```
+
+### 7.4 Ďalšie bezpečnostné mechanizmy
+
+- Helmet (XSS protection, HSTS, CSP, etc.)
+- CORS whitelist (`CORS_ORIGIN`)
+- Rate limiter (100 req/15min neauth, 1000 req/15min auth)
+- Password complexity nie je explicitne vynútená (zvážiť)
+- CSV export sanitizácia proti CSV injection (riešené)
+- Sentry `beforeSend` filtruje `password`, `currentPassword`, `newPassword` z chybových dát
+- Stripe webhook signature verification (`STRIPE_WEBHOOK_SECRET`)
+
+---
+
+## 8. Realtime a push notifikácie
+
+### 8.1 Socket.IO
+
+Server:
+- Connection → JWT verify → `socket.join('user-'+userId)`
+- `req.app.get('io')` → emit z route handlerov
+
+Klient:
+- `useSocket()` → auto-connect s tokenom, reconnect max 5×/1s
+- Listeners: `notification`, `message-updated`, `contact-*`, `task-*`
+
+### 8.2 Web Push (VAPID)
+
+- Backend: `web-push` lib, VAPID keys v env, `PushSubscription` model per user+endpoint
+- Frontend: service worker `public/sw-push.js`, `navigator.serviceWorker.register()` +
+  `pushManager.subscribe()`
+- Push click handler v SW → postMessage `NOTIFICATION_CLICK` → App.jsx listener
+
+### 8.3 iOS APNs
+
+- Custom HTTP/2 klient v `server/services/pushService.js` (**nie** knižnica `apn` —
+  neudržiavaná, replaced)
+- `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_KEY_PATH` env vars
+- `APNsDevice` model per user+deviceToken

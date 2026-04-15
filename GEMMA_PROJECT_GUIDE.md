@@ -1255,7 +1255,7 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 
 ### 13.6 Automatizované testy — quick index
 
-Existujúce Jest test suites v `server/__tests__/` (**51 testov, všetky prechádzajú**):
+Existujúce Jest test suites v `server/__tests__/` (**110 testov, všetky prechádzajú**):
 - `notificationService.test.js` — notifikačný service (getNotificationTitle s actor-first
   formátom, generateNotificationUrl deep-link resolver s P2 invariantami, notifyContactChange,
   notifyTaskChange s workspace scopingom, notifyTaskAssignment, notifySubtaskChange,
@@ -1267,6 +1267,16 @@ Existujúce Jest test suites v `server/__tests__/` (**51 testov, všetky prechá
 - `models/Contact.test.js` — Contact model, **P2 Workspace Isolation guard** (10 testov:
   required workspaceId+userId, default name behavior, nested tasks, cross-workspace
   findOne/findOneAndUpdate/deleteOne regression testy)
+- `models/Workspace.test.js` — Workspace model (16 testov: required fields, slug unique +
+  lowercase, inviteCode sparse unique, generateSlug so stripom diakritiky a counter
+  suffixom, generateInviteCode formát, toJSON virtual id)
+- `models/WorkspaceMember.test.js` — WorkspaceMember (15 testov: role enum owner|manager|
+  member, compound unique index `{workspaceId, userId}`, canAdmin()/isOwner() instance
+  methods, cross-workspace izolácia, tracking fields)
+- `models/Message.test.js` — Message model (28 testov: required fields, type enum
+  approval|info|request|proposal|poll, linkedType contact|task|null, embedded comments
+  s reakciami like|dislike, poll options + votes, P2 Workspace Isolation na find/update/
+  delete, toJSON transform strippuje attachment.data z list views, readBy tracking)
 - `setup.js` — shared `mongodb-memory-server` setup (afterEach vyčistí collections)
 
 Spúšťanie: `cd server && npm test` (všetky) alebo `npx jest <path>` (jeden file).

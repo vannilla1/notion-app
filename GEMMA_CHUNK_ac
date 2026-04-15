@@ -1,0 +1,293 @@
+- iOS Swift registruje token po login cez `/api/push/apns/register`
+
+---
+
+## 9. Konvencie kódu
+
+### 9.1 JS/React štýl
+
+- ES modules, async/await (nie callbacks)
+- `const` > `let`, `var` nepoužívať
+- Funkcionálne komponenty + hooks (žiadne class componenty)
+- `useEffect` cleanup funkcie pre listeners
+- `useMemo` / `useCallback` pre drahé computed values a stable refs
+- Pages sú ploché (väčšina logiky v pages, minimum prop drillingu v stromoch)
+- Inline styles s CSS vars tam, kde komponent nemá zmysel vytŕkať von (napr. komponenty
+  správ v Messages.jsx)
+
+### 9.2 Mongoose štýl
+
+- **Atomic updates** preferované pred `.save()`:
+  - `$push` namiesto `arr.push() + save()`
+  - `$pull` namiesto `filter() + save()`
+  - `$set` na matched subdoc (`{ 'arr.$.field': value }`)
+- **Projekcia bez Base64** cez `NO_BASE64_PROJECTION` object — pozri messages.js:17
+- `.lean()` pre read-only dotazy (performance)
+- Workspace filter na **každom** dotaze
+
+### 9.3 Error handling
+
+- Routes vždy try/catch, logger.error s kontextom, return 500 JSON `{ message: 'Chyba servera' }`
+- User-facing správy v slovenčine
+- Frontend zachytáva cez `err.response?.data?.message || 'Chyba'`
+
+### 9.4 Logovanie
+
+- `logger.info/warn/error(...)` nie `console.log` v novom kóde
+- **Poznámka:** v existujúcom frontende je ~40 console.log — dlh, ale niektoré sú user-facing
+  mobile debug (rozhodnúť individuálne)
+
+### 9.5 Komentáre
+
+Použi prefix podľa typu:
+- `// PERF:` — optimalizácia
+- `// NOTE:` — dôvod rozhodnutia
+- `// WORKAROUND:` — dočasný hack
+- `// iOS:` / `// WKWebView:` — iOS-specific
+- `// TODO:` — plánované zlepšenie (krátke)
+- `// FIXME:` — známy bug
+
+---
+
+## 10. Commit a git workflow
+
+- Branch **`main`** je single source of truth (Render auto-deployuje).
+- Commit messages v slovenčine s prefixom `feat(<scope>):`, `fix(<scope>):`, `refactor(...)`,
+  `perf(...)`, `security(...)`, `cleanup(...)`
+- Viac-riadkový body s vysvetlením "prečo", nielen "čo"
+- Co-author signoff (`Co-Authored-By: Claude Opus 4.6 ...`)
+- Bez `--amend` po push-e (by default)
+- Bez force push na main
+
+**Príklad dobrej správy** (commit `3e2da23`):
+```
+feat(messages): pridať like/dislike reakcie ku komentárom s notifikáciami
+
+Komentáre v odkazoch teraz podporujú 👍/👎 reakcie:
+- Každý user môže mať max 1 aktívnu reakciu na komentár (toggle/swap/off)
+- Autor komentára dostane notifikáciu pri pridaní alebo zmene reakcie
+- Push + socket + deep-link fungujú automaticky
+```
+
+---
+
+## 11. Známy technický dlh (vedomé kompromisy)
+
+Gemma by mala tieto body poznať, ale **nenavrhovať opravu, pokým ju explicitne nepoviem**.
+
+### 11.1 Console.log v produkcii (~40 výskytov vo frontende)
+Niektoré sú užitočné pre mobile debug (iOS log nie je vždy dostupný). Rozhodnutie o tom, čo
+odstrániť, musí byť manuálne.
+
+### 11.2 DueDateChecker nespracúva `Contact.tasks[]`
+`dueDateChecker.js` scanuje len globálny `Task` model, nie vnorené tasky v `Contact.tasks[]`.
+Reminder pre task patriaci kontaktu sa nepošle. Architektúrna zmena.
+
+### 11.3 `apn` + `node-forge` CVE (riešené)
+Pôvodne sa použila knižnica `apn` — neudržiavaná, node-forge mal moderate/high CVE.
+Nahradené custom HTTP/2 klientom v `pushService.js`.
+
+### 11.4 Socket.IO bez workspace filtering
+`io.emit('contact-updated')` ide všetkým klientom, nie len tým z daného workspace-u. Fix:
+`io.to('workspace-'+workspaceId).emit(...)` + `socket.join('workspace-'+wsId)` pri switchi.
+**Bezpečnostný dlh.**
+
+### 11.5 Sentry odstrániť a nahradiť in-house
+Sentry je vypnutý v iOS (memory). Plán: vlastné error tracking UI v AdminPanel. Čaká na
+potvrdenie iOS stability.
+
+### 11.6 Chýba ESLint/Prettier
+Žiaden lint/format setup. Style drift je možný pri väčších zmenách.
+
+### 11.7 Žiadny CI gate
+Render auto-deploy nečaká na testy. Povolí deploy aj keď `npm test` failuje lokálne.
+
+---
+
+## 12. Review checklist pre Gemmu
+
+Pri kontrole PR/zmeny má Gemma prejsť tento checklist:
+
+### 12.1 Bezpečnosť
+- [ ] Každý Mongoose dotaz nad workspace-scoped entitou má `workspaceId: req.workspaceId` filter?
+- [ ] Route používa `authenticateToken` a (ak treba) `requireWorkspace`?
+- [ ] Sú user inputy validované (dĺžka, typ, whitelisty) pred zápisom?
+- [ ] Nevypisujeme sensitive údaje do logov (heslá, tokeny, API keys)?
+- [ ] Chýba niekde escape HTML pri rendering-u user contentu?
+
+### 12.2 Funkčnosť
+- [ ] Nezmenila sa pozorovateľná funkcionalita oproti pôvodnej? (Ak áno → bug report, nie refactor.)
+- [ ] UI stringy zostali slovenčine?
+- [ ] Error messages zostali slovenčine?
+
+### 12.3 Výkon
+- [ ] Používa sa atomic update (`$push`/`$pull`/`$set` na matched subdoc) namiesto `.save()`?
+- [ ] Dotaz na dokumenty so zoznamom Base64 príloh používa `NO_BASE64_PROJECTION`?
+- [ ] Veľké listy sú lean-uté (`.lean()`)?
+- [ ] Sú pre nové queries indexy v modeli?
+- [ ] Socket handler neemituje úplný dokument, len nevyhnutné polia?
+
+### 12.4 Realtime/notifikácie
+- [ ] Nová akcia, ktorá ovplyvňuje druhú stranu, emituje socket event?
+- [ ] Nová akcia, o ktorej má byť user informovaný, vytvára `Notification`?
+- [ ] Nový notification type je pridaný aj do `Notification.js` enumu?
+- [ ] Deep-link resolver v `notificationService.js` vie typ spracovať?
+
+### 12.5 iOS špecifiká
+- [ ] Nová page je lazy-loaded (`React.lazy`)?
+- [ ] Ak upravujeme `ContentView.swift` alebo bridge → upozorniť že treba Xcode rebuild + TestFlight?
+- [ ] Neinštalujeme ťažké knižnice (zvýšenie WKWebView bundle size)?
+- [ ] Používa sa `window.webkit.messageHandlers.iosNative` správne (guard `window.webkit?` check)?
+
+### 12.6 Frontend
+- [ ] Je cleanup v `useEffect` (listenery, intervaly)?
+- [ ] Nie sú stale closures nad state v `useEffect` dependencies?
+- [ ] Je 401 handler netknutý (redirect na /login)?
+- [ ] Nové URL params sa čítajú v page-i a správne manipulujú state?
+
+### 12.7 Konvencie
+- [ ] Commit message v slovenčine s prefixom?
+- [ ] Komentáre `PERF:/NOTE:/WORKAROUND:` zachované?
+- [ ] Prihlásenie pre `Co-Authored-By` pridané?
+
+---
+
+## 13. Testovací postup (manual checklist)
+
+Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
+
+### 13.1 Auth flow
+1. Register → prihlásenie → refresh → ostáva prihlásený
+2. Logout → token zmizne z localStorage a Keychain
+3. Expired token → auto-redirect na /login
+
+### 13.2 Workspace switch
+1. User v 2+ workspace-och
+2. Prepnutie → všetky pages refetchnú dáta
+3. Deep-link z notifikácie s `ws=` → prepne + zobrazí správne dáta (nie data z predchádzajúceho ws)
+
+### 13.3 Notifikácie
+1. User A vytvorí task a priradí ho userovi B
+2. User B vidí badge, zvonček má nový záznam
+3. Klik na zvonček → scroll na task, badge sa zníži
+4. Push (iOS): notifikácia sa zobrazí aj pri zamknutej obrazovke, tap otvorí konkrétny task
+
+### 13.4 Komentáre a reakcie (najnovšia feature)
+1. Odkaz s komentárom, userA reaguje 👍 → count = 1, zvýraznené
+2. UserA klikne 👎 → preprne sa na 1 dislike
+3. UserA znova 👎 → odstrání reakciu (count = 0)
+4. UserB reaguje 👍 → autor komentára (ak je iný) dostane notifikáciu
+
+### 13.5 iOS-specific
+1. Cold start z notifikácie — workspace switch + deep-link ide cez APNs launchOptions
+2. Hot start z notifikácie — iosDeepLink event
+3. App rebuild po stálom scroll → WebContent crash → reload na poslednú URL (nie /app)
+4. Login → Keychain save → force quit → reopen → Face ID → localStorage má správny token
+
+---
+
+## 14. Na čo sa Gemma nepýta (vedela by to sama zistiť)
+
+- **Existujúci endpoint pre X?** → grep `router.(get|post|put|delete)` v `server/routes/`
+- **Je pole X indexované?** → pozri model súbor, `schema.index(...)`
+- **Kde sa zisťuje current workspace?** → `req.workspaceId` po `requireWorkspace` middleware
+- **Ako sa posiela notifikácia?** → `notificationService.createNotification({...})`
+- **Ako sa pridáva socket event?** → `req.app.get('io')` + `io.to('user-'+userId).emit(...)`
+- **Ako sa loguje?** → `const logger = require('../utils/logger'); logger.info('...', {...})`
+- **Ako sa detekuje iOS?** → frontend: `utils/platform.js::isIosNativeApp()`; backend: User-Agent `PrplCRM-iOS/`
+
+---
+
+## 15. Na čo sa Gemma pýta pred návrhom
+
+Keď niečo nevie, spýta sa **najprv**, potom navrhne:
+
+1. "Má zmena dopad na iOS binary? (Swift súbor, bridge API, WKUserScript)" → ak áno, upozorniť
+   že treba Xcode rebuild.
+2. "Je tento endpoint volaný aj z niečoho iného ako z tejto page?" → grep pred zmenou signature.
+3. "Je tento socket event emitovaný aj z iného route?" → grep `io.emit`.
+4. "Je tento model používaný v ďalších agregáciách alebo exportoch?" → grep model name.
+
+---
+
+## 16. Zoznam najdôležitejších súborov (quick index)
+
+### Backend
+- `server/index.js` — entry, middleware stack, route register, background jobs
+- `server/models/Message.js` — Message + komentáre + reakcie schémy
+- `server/models/Notification.js` — Notification enum (tu sa pridávajú nové typy)
+- `server/models/User.js`, `Workspace.js`, `WorkspaceMember.js` — tenancy core
+- `server/routes/messages.js` — Messages CRUD + komentáre + reakcie
+- `server/routes/tasks.js` — Tasks CRUD + reorder
+- `server/routes/contacts.js` — Contacts CRUD + nested tasks
+- `server/routes/notifications.js` — read-for-related, unread-by-section
+- `server/services/notificationService.js` — createNotification + deep-link URL resolver
+- `server/middleware/auth.js` + `requireWorkspace.js` — tenancy guards
+- `server/utils/logger.js` — Winston
+
+### Frontend
+- `client/src/App.jsx` — routing + deep-link handling + workspace switch logic
+- `client/src/pages/Messages.jsx` — Odkazy UI (aktuálne aj s reakciami)
+- `client/src/pages/Tasks.jsx` — Projekty/tasky s drag-drop
+- `client/src/pages/CRM.jsx` — Kontakty
+- `client/src/context/AuthContext.jsx` — Auth state + login/logout
+- `client/src/context/WorkspaceContext.jsx` — Workspace state + switchWorkspace
+- `client/src/api/api.js` — Axios + 401 handler
+- `client/src/hooks/useSocket.js` — Socket.io manager
+- `client/src/components/NotificationBell.jsx` + `NotificationToast.jsx`
+- `client/src/utils/platform.js` — iOS detekcia
+- `client/vite.config.js` — build + chunks + test config
+
+### iOS
+- `ios/PrplCRM/PrplCRMApp.swift` — @main, AppDelegate, PushNotificationManager
+- `ios/PrplCRM/ContentView.swift` — WebView, Coordinator, bridge, memory recovery
+- `ios/PrplCRM/KeychainHelper.swift` — token persistence
+
+### Konfigurácia
+- `render.yaml` — deployment config
+- `server/.env.example`, `client/.env.example` — env var templates
+- `client/vite.config.js` — build config
+
+---
+
+## 17. Rýchla referenčná tabuľka (cheat sheet)
+
+### Pridanie nového notifikačného typu
+1. Pridať string do `server/models/Notification.js` `type` enumu
+2. Volať `notificationService.createNotification({ type: 'new.type', ... })` v route
+3. Ak má deep-link → pridať logiku v `notificationService.js:buildDeepLinkUrl`
+4. Ak má zvláštny icon v bell/toast → upraviť `getIcon()` v
+   `NotificationBell.jsx:148` a `NotificationToast.jsx:81`
+5. Pridať `data.messageId`/`data.taskId`/`data.contactId` podľa potreby
+
+### Pridanie nového socket eventu
+1. V route: `req.app.get('io').to('user-'+userId).emit('event-name', { id, ... })`
+2. V klient page: `useEffect(() => { socket.on('event-name', handler); return () => socket.off(...) }, [socket])`
+
+### Pridanie nového workspace-scoped Mongoose modelu
+1. Model: `workspaceId: { type: ObjectId, ref: 'Workspace', required: true, index: true }`
+2. Compound index `{ workspaceId: 1, createdAt: -1 }` (alebo podľa query vzoru)
+3. Route: `requireWorkspace` middleware, všetky queries majú `{ workspaceId: req.workspaceId }`
+4. Toggle filter v delete/update: `await Model.deleteOne({ _id, workspaceId: req.workspaceId })`
+
+### Pridanie novej stránky do frontendu
+1. Vytvoriť `client/src/pages/NewPage.jsx`
+2. V `App.jsx` pridať `const NewPage = lazy(() => import('./pages/NewPage'))` (**lazy je povinné**)
+3. Pridať `<Route path="/newpath" element={isAuthenticated ? <NewPage /> : <Navigate to="/login" />} />`
+4. Ak je v bottom nav → upraviť `BottomNav.jsx`
+
+---
+
+## 18. Kontakty a odkazy
+
+- **Vlastník projektu:** Martin Koščo
+- **Frontend doména:** https://prplcrm.eu
+- **Backend API:** https://perun-crm-api.onrender.com
+- **Repo:** https://github.com/vannilla1/notion-app
+- **Brand farba:** Indigo `#6366f1`
+- **Development region:** Slovakia (`sk`)
+
+---
+
+**Koniec súboru.** Pri každej zmene v štruktúre projektu tento dokument aktualizuj (commit
+message: `docs(gemma): update project guide — <čo sa zmenilo>`).
