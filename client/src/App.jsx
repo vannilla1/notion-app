@@ -96,6 +96,17 @@ function AppContent() {
     if (isAuthenticated) fetchUnreadCounts();
   }, [isAuthenticated, fetchUnreadCounts]);
 
+  // Periodic poll — mirrors NotificationBell's 30s interval so that BottomNav
+  // section badges stay in sync with the bell. Previously section counts
+  // only refreshed on the `notifications-updated` event; if an event was
+  // dropped (iOS backgrounded WKWebView, socket reconnect, race) the
+  // BottomNav badge drifted higher than the bell and never self-corrected.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(fetchUnreadCounts, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, fetchUnreadCounts]);
+
   // Refresh section counts when any component marks notifications as read
   useEffect(() => {
     if (!isAuthenticated) return;
