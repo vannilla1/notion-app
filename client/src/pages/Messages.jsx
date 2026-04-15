@@ -1546,56 +1546,80 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                       const likes = reactions.filter(r => r.type === 'like');
                       const dislikes = reactions.filter(r => r.type === 'dislike');
                       const myReaction = reactions.find(r => (r.userId?.toString?.() || r.userId) === userId)?.type || null;
-                      const likesTooltip = likes.length ? likes.map(r => r.username).join(', ') : 'Zatiaľ žiadne 👍';
-                      const dislikesTooltip = dislikes.length ? dislikes.map(r => r.username).join(', ') : 'Zatiaľ žiadne 👎';
+                      const likesTooltip = likes.length ? likes.map(r => r.username).join(', ') : 'Zatiaľ žiadne „páči sa mi"';
+                      const dislikesTooltip = dislikes.length ? dislikes.map(r => r.username).join(', ') : 'Zatiaľ žiadne „nepáči sa mi"';
+                      // Priehľadné pill tlačidlá s jemným fialovým nádychom
+                      // ladené na brand farbu (#6366f1 indigo). Glassmorphism
+                      // vzhľad — blurovaný fialový backdrop, zvýraznený border
+                      // pri aktívnej reakcii aktuálneho usera.
                       const baseBtn = {
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '4px',
-                        padding: '3px 8px',
-                        borderRadius: '12px',
-                        border: '1px solid var(--border-color)',
-                        background: 'var(--bg-card, #fff)',
+                        gap: '5px',
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(99, 102, 241, 0.18)',
+                        background: 'rgba(99, 102, 241, 0.06)',
+                        color: 'var(--text-muted, #64748b)',
                         cursor: 'pointer',
                         fontSize: '12px',
                         lineHeight: 1,
-                        transition: 'all 0.15s',
-                        userSelect: 'none'
+                        fontVariantNumeric: 'tabular-nums',
+                        transition: 'all 0.18s ease',
+                        userSelect: 'none',
+                        backdropFilter: 'blur(6px)',
+                        WebkitBackdropFilter: 'blur(6px)'
                       };
-                      const activeLike = {
-                        background: 'rgba(34, 197, 94, 0.15)',
-                        borderColor: 'rgba(34, 197, 94, 0.5)',
-                        color: 'rgb(21, 128, 61)',
-                        fontWeight: 600
+                      const activeReaction = {
+                        background: 'rgba(99, 102, 241, 0.14)',
+                        borderColor: 'rgba(99, 102, 241, 0.55)',
+                        color: '#6366f1',
+                        fontWeight: 600,
+                        boxShadow: '0 0 0 2px rgba(99, 102, 241, 0.08)'
                       };
-                      const activeDislike = {
-                        background: 'rgba(239, 68, 68, 0.15)',
-                        borderColor: 'rgba(239, 68, 68, 0.5)',
-                        color: 'rgb(153, 27, 27)',
-                        fontWeight: 600
-                      };
+                      // SVG ikony (Lucide thumbs-up / thumbs-down štýl). Výhoda
+                      // oproti emoji: konzistentný vzhľad naprieč platformami
+                      // (emoji na iOS vs web vs Android sa líšia), jednotný
+                      // currentColor pre hover/active stavy a ostré rendering
+                      // pri malej veľkosti.
+                      const thumbUpIcon = (filled) => (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M7 10v12" />
+                          <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H7a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L15 1a3 3 0 0 1 3 3v1.88Z" />
+                        </svg>
+                      );
+                      const thumbDownIcon = (filled) => (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M17 14V2" />
+                          <path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H17a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L9 23a3 3 0 0 1-3-3v-1.88Z" />
+                        </svg>
+                      );
                       return (
                         <div style={{ display: 'flex', gap: '6px', marginTop: '8px', alignItems: 'center' }}>
                           <button
                             type="button"
                             onClick={() => onReactComment && onReactComment(msg.id || msg._id, c._id, 'like')}
+                            onMouseEnter={e => { if (myReaction !== 'like') { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.10)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.35)'; } }}
+                            onMouseLeave={e => { if (myReaction !== 'like') { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.06)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.18)'; } }}
                             title={likesTooltip}
-                            style={{ ...baseBtn, ...(myReaction === 'like' ? activeLike : {}) }}
+                            style={{ ...baseBtn, ...(myReaction === 'like' ? activeReaction : {}) }}
                             aria-label={`Páči sa mi — ${likes.length} reakcií`}
                             aria-pressed={myReaction === 'like'}
                           >
-                            <span>👍</span>
+                            {thumbUpIcon(myReaction === 'like')}
                             {likes.length > 0 && <span>{likes.length}</span>}
                           </button>
                           <button
                             type="button"
                             onClick={() => onReactComment && onReactComment(msg.id || msg._id, c._id, 'dislike')}
+                            onMouseEnter={e => { if (myReaction !== 'dislike') { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.10)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.35)'; } }}
+                            onMouseLeave={e => { if (myReaction !== 'dislike') { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.06)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.18)'; } }}
                             title={dislikesTooltip}
-                            style={{ ...baseBtn, ...(myReaction === 'dislike' ? activeDislike : {}) }}
+                            style={{ ...baseBtn, ...(myReaction === 'dislike' ? activeReaction : {}) }}
                             aria-label={`Nepáči sa mi — ${dislikes.length} reakcií`}
                             aria-pressed={myReaction === 'dislike'}
                           >
-                            <span>👎</span>
+                            {thumbDownIcon(myReaction === 'dislike')}
                             {dislikes.length > 0 && <span>{dislikes.length}</span>}
                           </button>
                         </div>

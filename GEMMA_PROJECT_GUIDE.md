@@ -1177,6 +1177,9 @@ Keď Gemma navrhuje fix, mala by odporučiť konkrétne smoke testy:
 2. UserA klikne 👎 → preprne sa na 1 dislike
 3. UserA znova 👎 → odstrání reakciu (count = 0)
 4. UserB reaguje 👍 → autor komentára (ak je iný) dostane notifikáciu
+5. Vizuál: priehľadné pill tlačidlá s fialovým nádychom (brand `#6366f1`),
+   SVG thumbs-up/thumbs-down ikony (Lucide štýl), filled stav pri aktívnej
+   reakcii, glassmorphism hover (backdrop-filter blur)
 
 ### 13.5 iOS-specific
 1. Cold start z notifikácie — workspace switch + deep-link ide cez APNs launchOptions
