@@ -91,6 +91,12 @@ export const WorkspaceProvider = ({ children }) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
     setCurrentWorkspaceId(workspaceId);
     await fetchWorkspaces();
+    // Tell every mounted page (Dashboard/CRM/Tasks/Messages) to refetch +
+    // reset expanded/modal state. Without this, switching workspace via a
+    // deep-link (push notification tap) changes the header but leaves the
+    // page showing data from the previous workspace — because the page
+    // component doesn't remount when only location.search changes.
+    window.dispatchEvent(new CustomEvent('workspace-switched', { detail: { workspaceId } }));
     return result;
   };
 

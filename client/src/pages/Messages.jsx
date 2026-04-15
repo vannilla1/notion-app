@@ -160,6 +160,15 @@ function Messages() {
     return () => window.removeEventListener('app-resumed', handleResume);
   }, [tab]);
 
+  // Refetch when workspace switches (deep-link from push notification can
+  // change the active workspace; this page's state otherwise keeps messages
+  // from the previous workspace).
+  useEffect(() => {
+    const handleSwitch = () => { fetchMessages(); fetchPendingCount(); };
+    window.addEventListener('workspace-switched', handleSwitch);
+    return () => window.removeEventListener('workspace-switched', handleSwitch);
+  }, [tab]);
+
   useEffect(() => {
     if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);

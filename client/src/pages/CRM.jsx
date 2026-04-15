@@ -205,6 +205,19 @@ function CRM() {
     return () => window.removeEventListener('app-resumed', handleResume);
   }, [fetchContacts, fetchGlobalTasks]);
 
+  // Refetch when workspace switches (e.g. notification deep-link that targets
+  // a different workspace). Collapse any expanded contact — an ID from the
+  // previous workspace would otherwise render a stale modal with empty data.
+  useEffect(() => {
+    const handleSwitch = () => {
+      setExpandedContact(null);
+      fetchContacts();
+      fetchGlobalTasks();
+    };
+    window.addEventListener('workspace-switched', handleSwitch);
+    return () => window.removeEventListener('workspace-switched', handleSwitch);
+  }, [fetchContacts, fetchGlobalTasks]);
+
   useEffect(() => {
     if (expandedContact) fetchLinkedMessages(expandedContact);
   }, [expandedContact, fetchLinkedMessages]);

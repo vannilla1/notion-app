@@ -100,6 +100,14 @@ function Dashboard() {
     return () => window.removeEventListener('app-resumed', handleResume);
   }, []);
 
+  // Refetch when workspace switches (deep-link from push notification can
+  // change the active workspace without remounting the page).
+  useEffect(() => {
+    const handleSwitch = () => fetchData();
+    window.addEventListener('workspace-switched', handleSwitch);
+    return () => window.removeEventListener('workspace-switched', handleSwitch);
+  }, []);
+
   useEffect(() => {
     if (!socket || !isConnected) return;
 
