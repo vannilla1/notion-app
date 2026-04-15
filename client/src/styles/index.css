@@ -4084,6 +4084,18 @@ a.detail-value:hover {
   flex-shrink: 0;
 }
 
+/* Red dot shown next to workspace name on mobile/iOS when another workspace
+   has unread notifications (desktop has the same indicator in WorkspaceSwitcher). */
+.header-workspace-unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-left: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.25);
+}
+
 /* Dashboard Styles */
 .dashboard-page {
   max-width: 100%;

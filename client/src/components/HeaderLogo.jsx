@@ -1,9 +1,35 @@
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
+import api from '../api/api';
 
 const HeaderLogo = ({ active, onClick }) => {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
+  const [otherUnreadTotal, setOtherUnreadTotal] = useState(0);
+
+  // Fetch unread counts per workspace so we can show the red dot next to the
+  // workspace name on mobile/iOS too (WorkspaceSwitcher handles desktop but
+  // returns null on mobile, so the dot was invisible in the iOS WKWebView).
+  const fetchUnread = useCallback(async () => {
+    if (!currentWorkspace?.id) return;
+    try {
+      const res = await api.get('/api/notifications/unread-by-workspace');
+      const data = res.data || {};
+      const total = Object.entries(data).reduce((sum, [wsId, c]) => (
+        wsId !== currentWorkspace.id ? sum + (c || 0) : sum
+      ), 0);
+      setOtherUnreadTotal(total);
+    } catch {
+      // swallow — transient; next poll will retry
+    }
+  }, [currentWorkspace?.id]);
+
+  useEffect(() => {
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnread]);
 
   // Click header → go to dashboard. On iOS WKWebView there was a past bug
   // where scroll-start taps synthesized a click; that was fixed by the modal
@@ -38,6 +64,12 @@ const HeaderLogo = ({ active, onClick }) => {
           <span className="header-workspace-name">
             <span className="header-workspace-dot" style={{ backgroundColor: currentWorkspace.color || '#6366f1' }} />
             {currentWorkspace.name}
+            {otherUnreadTotal > 0 && (
+              <span
+                className="header-workspace-unread-dot"
+                title={`${otherUnreadTotal} neprečítaných v iných prostrediach`}
+              />
+            )}
           </span>
         )}
       </div>
