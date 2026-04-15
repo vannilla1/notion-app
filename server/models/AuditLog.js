@@ -13,14 +13,18 @@ const auditLogSchema = new mongoose.Schema({
   ipAddress: String,
   userAgent: String,
   workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', index: true },
-  createdAt: { type: Date, default: Date.now, index: true }
+  // NOTE: Zámerne BEZ `index: true` tu — duplikovalo by sa s TTL indexom nižšie.
+  // Mongoose by potom skúšal vytvoriť dva indexy s rovnakým názvom (createdAt_1)
+  // ale rôznymi opciami (s/bez expireAfterSeconds) → MongoServerError a TTL
+  // by v produkcii nemusel fungovať (logy by sa nikdy samy nemazali).
+  createdAt: { type: Date, default: Date.now }
 }, {
   timestamps: false // we manage createdAt ourselves
 });
 
-// Auto-delete after 90 days
+// Auto-delete after 90 days — tento index pokrýva aj bežné queries na createdAt.
 auditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
-// Compound index for common queries
+// Compound indexes for common queries
 auditLogSchema.index({ category: 1, createdAt: -1 });
 auditLogSchema.index({ userId: 1, createdAt: -1 });
 

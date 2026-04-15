@@ -42,8 +42,10 @@ const invitationSchema = new mongoose.Schema({
 });
 
 // Indexes
+// NOTE: `token` už je indexované cez `unique: true` v schéme vyššie — duplicitný
+// `invitationSchema.index({ token: 1 })` by spôsobil MongoServerError (dva indexy
+// s rovnakým názvom, rôznymi opciami).
 invitationSchema.index({ workspaceId: 1, email: 1 });
-invitationSchema.index({ token: 1 });
 invitationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // Auto-delete expired
 
 module.exports = mongoose.model('Invitation', invitationSchema);
