@@ -934,6 +934,134 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
   }
 });
 
+// POST /api/messages/:id/comment/:commentId/reaction
+// Toggle like/dislike reakcie na komentári.
+// Body: { type: 'like' | 'dislike' | null }
+//  - null alebo rovnaký typ ako existujúca reakcia → odstránenie (toggle off)
+//  - iný typ → prepnutie (remove + add)
+//  - nový → pridanie
+// Reakciu môže pridať iba user, ktorý je sender alebo recipient odkazu
+// (workspace guard). Autor komentára nedostane notifikáciu za vlastnú reakciu.
+router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { type } = req.body;
+    if (type !== null && type !== 'like' && type !== 'dislike') {
+      return res.status(400).json({ message: 'Neplatný typ reakcie' });
+    }
+
+    // Overenie prístupu + získanie autora komentára pre notifikáciu.
+    // Načítame len metadata (žiadny Base64) + konkrétny komentár cez
+    // $elemMatch projection.
+    const meta = await Message.findOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ],
+        'comments._id': req.params.commentId
+      },
+      {
+        fromUserId: 1,
+        toUserId: 1,
+        subject: 1,
+        'comments.$': 1
+      }
+    ).lean();
+
+    if (!meta || !meta.comments || meta.comments.length === 0) {
+      return res.status(404).json({ message: 'Komentár nenájdený' });
+    }
+
+    const comment = meta.comments[0];
+    const existingReaction = (comment.reactions || []).find(
+      r => r.userId.toString() === req.user.id.toString()
+    );
+    const existingType = existingReaction?.type || null;
+
+    // Vyriešime výslednú reakciu:
+    //  - ak klikol na rovnaký typ ako má, alebo poslal null → odstránime
+    //  - inak nastavíme nový typ (add alebo change)
+    const finalType = (type === null || type === existingType) ? null : type;
+
+    // Vždy najprv vypadnúť existujúcu reakciu tohto usera (atomic $pull),
+    // aby sme zachovali invariant "max 1 reakcia per user per komentár".
+    if (existingReaction) {
+      await Message.updateOne(
+        { _id: meta._id, 'comments._id': req.params.commentId },
+        { $pull: { 'comments.$.reactions': { userId: req.user.id } } }
+      );
+    }
+
+    // Ak výsledný stav je reakcia (nie odstránenie), pridáme novú.
+    if (finalType) {
+      await Message.updateOne(
+        { _id: meta._id, 'comments._id': req.params.commentId },
+        {
+          $push: {
+            'comments.$.reactions': {
+              userId: req.user.id,
+              username: req.user.username,
+              type: finalType,
+              createdAt: new Date()
+            }
+          }
+        }
+      );
+    }
+
+    // Notifikácia len ak je to nová alebo zmenená reakcia (nie remove),
+    // a len ak reagoval niekto iný ako autor komentára.
+    const commentAuthorId = comment.userId.toString();
+    const shouldNotify = finalType && commentAuthorId !== req.user.id.toString();
+
+    if (shouldNotify) {
+      const emoji = finalType === 'like' ? '👍' : '👎';
+      const label = finalType === 'like' ? 'páči' : 'nepáči';
+      const preview = (comment.text || '').trim().substring(0, 60);
+      notificationService.createNotification({
+        userId: commentAuthorId,
+        workspaceId: req.workspaceId,
+        type: 'message.comment.reacted',
+        title: `${emoji} Reakcia na komentár`,
+        message: `${req.user.username} reagoval "${label}" na váš komentár v odkaze "${meta.subject}"${preview ? `: "${preview}${comment.text.length > 60 ? '…' : ''}"` : ''}`,
+        actorName: req.user.username,
+        relatedType: 'message',
+        relatedId: meta._id.toString(),
+        relatedName: meta.subject,
+        data: {
+          messageId: meta._id.toString(),
+          commentId: req.params.commentId,
+          reactionType: finalType,
+          workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined
+        }
+      }).catch(notifErr => {
+        logger.warn('Reaction notification failed', { error: notifErr.message });
+      });
+    }
+
+    // Refetch dokumentu (bez Base64) a socket emit na oboch účastníkov,
+    // aby sa UI okamžite aktualizovalo na druhej strane.
+    const updated = await Message.findById(meta._id, NO_BASE64_PROJECTION).lean();
+    const io = req.app.get('io');
+    if (io) {
+      const otherUserId = meta.fromUserId.toString() === req.user.id.toString()
+        ? meta.toUserId.toString()
+        : meta.fromUserId.toString();
+      io.to(`user-${otherUserId}`).emit('message-updated', {
+        id: meta._id.toString(),
+        status: updated.status
+      });
+    }
+
+    res.json(stripAttachmentData(updated));
+  } catch (error) {
+    logger.error('Comment reaction error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // GET /api/messages/:id/attachment — download attachment
 router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {

@@ -19,6 +19,17 @@ const pollOptionSchema = new mongoose.Schema({
   }]
 }, { _id: true });
 
+// Reakcie na komentár (like/dislike). Jeden používateľ môže mať maximálne
+// jednu aktívnu reakciu na komentár — enforcenuté na route úrovni ($pull
+// pred $push). Uchovávame username pre rýchle zobrazenie v tooltipe bez
+// populate lookup.
+const commentReactionSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  username: { type: String, required: true },
+  type: { type: String, enum: ['like', 'dislike'], required: true },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const commentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   username: { type: String, required: true },
@@ -30,6 +41,7 @@ const commentSchema = new mongoose.Schema({
     data: String, // Base64
     uploadedAt: Date
   },
+  reactions: { type: [commentReactionSchema], default: [] },
   createdAt: { type: Date, default: Date.now }
 }, { _id: true });
 

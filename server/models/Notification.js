@@ -37,7 +37,8 @@ const notificationSchema = new mongoose.Schema({
       'message.created',
       'message.approved',
       'message.rejected',
-      'message.commented'
+      'message.commented',
+      'message.comment.reacted'
     ],
     required: true
   },

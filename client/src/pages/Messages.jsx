@@ -471,6 +471,19 @@ function Messages() {
     }
   };
 
+  // Toggle like/dislike na komentár. Server rieši toggle logiku sám —
+  // ak user už má rovnaký typ, odstráni sa; ak má iný, prepne sa; inak pridá.
+  const handleReactComment = async (messageId, commentId, type) => {
+    try {
+      const res = await api.post(`/api/messages/${messageId}/comment/${commentId}/reaction`, { type });
+      setSelectedMessage(res.data);
+      // Poznámka: fetchMessages() tu zámerne nevoláme — reakcia nemení stav
+      // odkazu (status/subject), takže list netreba refreshovať.
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri reakcii');
+    }
+  };
+
   const handleEdit = async (id, editData) => {
     try {
       const formData = new FormData();
@@ -841,6 +854,7 @@ function Messages() {
               isImage={isImage}
               onEditComment={handleEditComment}
               onDeleteComment={handleDeleteComment}
+              onReactComment={handleReactComment}
               editingCommentId={editingCommentId}
               setEditingCommentId={setEditingCommentId}
               editingCommentText={editingCommentText}
@@ -1098,7 +1112,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1523,6 +1537,70 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                         </div>
                       </div>
                     )}
+                    {/* Like/Dislike reakcie. Zvýraznený je ten typ, ktorý má
+                        práve prihlásený user — kliknutím sa zapne/zmení/vypne.
+                        Title (tooltip) zobrazí mená reagujúcich pre rýchly
+                        prehľad bez nutnosti otvárať samostatný zoznam. */}
+                    {!isEditing && (() => {
+                      const reactions = c.reactions || [];
+                      const likes = reactions.filter(r => r.type === 'like');
+                      const dislikes = reactions.filter(r => r.type === 'dislike');
+                      const myReaction = reactions.find(r => (r.userId?.toString?.() || r.userId) === userId)?.type || null;
+                      const likesTooltip = likes.length ? likes.map(r => r.username).join(', ') : 'Zatiaľ žiadne 👍';
+                      const dislikesTooltip = dislikes.length ? dislikes.map(r => r.username).join(', ') : 'Zatiaľ žiadne 👎';
+                      const baseBtn = {
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-card, #fff)',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        lineHeight: 1,
+                        transition: 'all 0.15s',
+                        userSelect: 'none'
+                      };
+                      const activeLike = {
+                        background: 'rgba(34, 197, 94, 0.15)',
+                        borderColor: 'rgba(34, 197, 94, 0.5)',
+                        color: 'rgb(21, 128, 61)',
+                        fontWeight: 600
+                      };
+                      const activeDislike = {
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        borderColor: 'rgba(239, 68, 68, 0.5)',
+                        color: 'rgb(153, 27, 27)',
+                        fontWeight: 600
+                      };
+                      return (
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '8px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => onReactComment && onReactComment(msg.id || msg._id, c._id, 'like')}
+                            title={likesTooltip}
+                            style={{ ...baseBtn, ...(myReaction === 'like' ? activeLike : {}) }}
+                            aria-label={`Páči sa mi — ${likes.length} reakcií`}
+                            aria-pressed={myReaction === 'like'}
+                          >
+                            <span>👍</span>
+                            {likes.length > 0 && <span>{likes.length}</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onReactComment && onReactComment(msg.id || msg._id, c._id, 'dislike')}
+                            title={dislikesTooltip}
+                            style={{ ...baseBtn, ...(myReaction === 'dislike' ? activeDislike : {}) }}
+                            aria-label={`Nepáči sa mi — ${dislikes.length} reakcií`}
+                            aria-pressed={myReaction === 'dislike'}
+                          >
+                            <span>👎</span>
+                            {dislikes.length > 0 && <span>{dislikes.length}</span>}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
