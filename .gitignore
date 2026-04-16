@@ -14,3 +14,18 @@ logs
 server/uploads/*
 !server/uploads/.gitkeep
 !server/uploads/avatars/.gitkeep
+
+# Android TWA build artifacts (Bubblewrap)
+# Keep config (twa-manifest.json, AndroidManifest.xml), exclude build outputs + keystore.
+# Keystore is SECURITY-CRITICAL — losing it means we can never update the app on Play Store.
+# Always back it up to 2 offline locations.
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/*.keystore
+android/keystore-*.jks
+android/*.aab
+android/*.apk
+android/*.idsig
+
