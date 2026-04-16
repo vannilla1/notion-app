@@ -586,6 +586,10 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
 });
 
 // Get all users in current workspace (for sharing/assignment)
+// CRITICAL: `role` MUSÍ byť workspace-scoped (WorkspaceMember.role), NIKDY globálne
+// User.role — inak sa pri picker-i používateľov v jednom workspace zobrazí rola
+// z iného workspacu (napr. "Admin" pri mene, keď je človek v tomto workspace len
+// member). Enum hodnoty: 'owner' | 'manager' | 'member' (pozri WorkspaceMember.js).
 router.get('/users', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -594,18 +598,19 @@ router.get('/users', authenticateToken, async (req, res) => {
     }
 
     const WorkspaceMember = require('../models/WorkspaceMember');
-    const members = await WorkspaceMember.find({ workspaceId: user.currentWorkspaceId });
-    const memberUserIds = members.map(m => m.userId);
+    const members = await WorkspaceMember.find({ workspaceId: user.currentWorkspaceId })
+      .populate('userId', 'username email color avatar');
 
-    const users = await User.find({ _id: { $in: memberUserIds } }, 'username email color avatar role');
-    res.json(users.map(u => ({
-      id: u._id,
-      username: u.username,
-      email: u.email,
-      color: u.color,
-      avatar: u.avatar,
-      role: u.role
-    })));
+    res.json(members
+      .filter(m => m.userId) // defensívne: ak je user deleted, populate vráti null
+      .map(m => ({
+        id: m.userId._id,
+        username: m.userId.username,
+        email: m.userId.email,
+        color: m.userId.color,
+        avatar: m.userId.avatar,
+        role: m.role // workspace-scoped: 'owner' | 'manager' | 'member'
+      })));
   } catch (error) {
     logger.error('Get users error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });

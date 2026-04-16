@@ -393,5 +393,53 @@ describe('/api/auth route', () => {
         expect(u.email).toBeDefined();
       });
     });
+
+    it('role je workspace-scoped (nie globálne User.role) — assignee picker nesmie leakovať admin status z iného workspace', async () => {
+      // User má globálne User.role = 'admin' (super-admin feature), ale
+      // v tomto konkrétnom workspace je len 'member'. Endpoint MUSÍ vrátiť
+      // workspace-rolu ('member'), nie globálnu ('admin').
+      const globalAdmin = await User.create({
+        username: 'globaladmin',
+        email: 'ga@test.com',
+        password: 'hashed',
+        color: '#f00',
+        role: 'admin' // globálna rola — super admin na platforme
+      });
+      const workspaceOwner = await User.create({
+        username: 'wsowner',
+        email: 'wso@test.com',
+        password: 'hashed',
+        color: '#0f0'
+      });
+      const workspace = await Workspace.create({
+        name: 'Scope Test',
+        slug: 'scope-test',
+        ownerId: workspaceOwner._id
+      });
+      await WorkspaceMember.create([
+        { workspaceId: workspace._id, userId: workspaceOwner._id, role: 'owner' },
+        { workspaceId: workspace._id, userId: globalAdmin._id, role: 'member' }
+      ]);
+      workspaceOwner.currentWorkspaceId = workspace._id;
+      await workspaceOwner.save();
+
+      const token = jwt.sign({ id: workspaceOwner._id.toString() }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+      const res = await request(app)
+        .get('/api/auth/users')
+        .set(authHeader(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(2);
+
+      const globalAdminInResponse = res.body.find(u => u.username === 'globaladmin');
+      expect(globalAdminInResponse).toBeDefined();
+      // KĽÚČOVÉ: rola v tomto workspace je 'member', NIE 'admin' (globálna)
+      expect(globalAdminInResponse.role).toBe('member');
+      expect(globalAdminInResponse.role).not.toBe('admin');
+
+      const ownerInResponse = res.body.find(u => u.username === 'wsowner');
+      expect(ownerInResponse.role).toBe('owner');
+    });
   });
 });

@@ -2480,7 +2480,7 @@ function Tasks() {
                             {u.username.charAt(0).toUpperCase()}
                           </span>
                           <span>{u.username}</span>
-                          <span className="user-role-badge">{u.role === 'admin' ? 'Admin' : u.role === 'manager' ? 'Manažér' : 'Používateľ'}</span>
+                          <span className="user-role-badge">{u.role === 'owner' ? 'Vlastník' : u.role === 'manager' ? 'Manažér' : 'Člen'}</span>
                         </label>
                       ))}
                     </div>

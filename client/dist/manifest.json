@@ -2,6 +2,7 @@
   "name": "Prpl CRM",
   "short_name": "PrplCRM",
   "description": "Moderný slovenský CRM systém pre správu kontaktov, projektov a tímovej spolupráce. Zadarmo na vyskúšanie.",
+  "id": "/?source=pwa",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
