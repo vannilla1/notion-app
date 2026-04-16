@@ -1,7 +1,15 @@
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 
 export default function PrivacyPolicy() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Ak používateľ prišiel z registrácie (?from=register), vrátime ho späť
+  // do registračného formulára namiesto na hlavnú stránku.
+  const fromRegister = searchParams.get('from') === 'register';
+  const backPath = fromRegister ? '/login?register=true' : '/';
+  const backLabel = fromRegister ? 'Späť na registráciu' : 'Späť na hlavnú stránku';
+  // Krížový link medzi Zásadami a VOP musí zachovať from=register
+  const vopLink = fromRegister ? '/vop?from=register' : '/vop';
 
   return (
     <div style={{
@@ -127,16 +135,16 @@ export default function PrivacyPolicy() {
 
       <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate(backPath)}
           style={{
             background: '#6366f1', color: 'white', border: 'none', padding: '10px 24px',
             borderRadius: '8px', fontSize: '14px', cursor: 'pointer'
           }}
         >
-          Späť na hlavnú stránku
+          {backLabel}
         </button>
         <Link
-          to="/vop"
+          to={vopLink}
           style={{
             background: '#f1f5f9', color: '#1e293b', border: 'none', padding: '10px 24px',
             borderRadius: '8px', fontSize: '14px', cursor: 'pointer', textDecoration: 'none',

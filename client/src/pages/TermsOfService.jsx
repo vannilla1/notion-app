@@ -1,7 +1,15 @@
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 
 export default function TermsOfService() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Ak používateľ prišiel z registrácie (?from=register), vrátime ho späť
+  // do registračného formulára namiesto na hlavnú stránku.
+  const fromRegister = searchParams.get('from') === 'register';
+  const backPath = fromRegister ? '/login?register=true' : '/';
+  const backLabel = fromRegister ? 'Späť na registráciu' : 'Späť na hlavnú stránku';
+  // Krížový link medzi VOP a Zásadami musí zachovať from=register
+  const privacyLink = fromRegister ? '/ochrana-udajov?from=register' : '/ochrana-udajov';
 
   const s = { section: { marginBottom: '24px' }, h2: { fontSize: '20px', marginBottom: '8px' }, ul: { paddingLeft: '20px' }, a: { color: '#6366f1' } };
 
@@ -236,16 +244,16 @@ export default function TermsOfService() {
 
       <div style={{ display: 'flex', gap: '12px', marginTop: '32px' }}>
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate(backPath)}
           style={{
             background: '#6366f1', color: 'white', border: 'none', padding: '10px 24px',
             borderRadius: '8px', fontSize: '14px', cursor: 'pointer'
           }}
         >
-          Späť na hlavnú stránku
+          {backLabel}
         </button>
         <Link
-          to="/ochrana-udajov"
+          to={privacyLink}
           style={{
             background: '#f1f5f9', color: '#1e293b', border: 'none', padding: '10px 24px',
             borderRadius: '8px', fontSize: '14px', cursor: 'pointer', textDecoration: 'none',

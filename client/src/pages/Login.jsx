@@ -142,9 +142,9 @@ function Login() {
           {isRegister && (
             <p style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginTop: '12px', textAlign: 'center', lineHeight: '1.5' }}>
               Registráciou súhlasíte s{' '}
-              <Link to="/vop" style={{ color: 'var(--accent-color, #6366f1)' }}>Obchodnými podmienkami</Link>
+              <Link to="/vop?from=register" style={{ color: 'var(--accent-color, #6366f1)' }}>Obchodnými podmienkami</Link>
               {' '}a{' '}
-              <Link to="/ochrana-udajov" style={{ color: 'var(--accent-color, #6366f1)' }}>Zásadami ochrany osobných údajov</Link>.
+              <Link to="/ochrana-udajov?from=register" style={{ color: 'var(--accent-color, #6366f1)' }}>Zásadami ochrany osobných údajov</Link>.
             </p>
           )}
         </form>
