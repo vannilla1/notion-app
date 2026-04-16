@@ -157,20 +157,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let hasWs = urlString.contains("ws=")
             print("[Push] Deep link URL: \(urlString) (hasWs=\(hasWs))")
             self.pushManager.pendingDeepLink = urlString
+            // Also broadcast via Cocoa NotificationCenter so the WebView
+            // Coordinator can load the URL directly — bypasses SwiftUI's
+            // @Published re-render chain which was silently dropping hot-start
+            // taps (user reported "notification tap did nothing when app was
+            // in background"). Coordinator observer handles deterministic load.
+            NotificationCenter.default.post(
+                name: Notification.Name("PrplCRMDeepLinkReceived"),
+                object: nil,
+                userInfo: ["url": urlString]
+            )
             return
         }
 
         let type = userInfo["type"] as? String ?? ""
         print("[Push] No valid URL in payload (url=\(userInfo["url"] ?? "nil")), type=\(type)")
 
+        var fallbackUrl: String?
         if type.hasPrefix("message"), let messageId = userInfo["messageId"] as? String {
-            let url = "/messages?highlight=\(messageId)"
-            print("[Push] Constructed message deep link: \(url)")
-            self.pushManager.pendingDeepLink = url
+            fallbackUrl = "/messages?highlight=\(messageId)"
+            print("[Push] Constructed message deep link: \(fallbackUrl!)")
         } else if type.hasPrefix("contact"), let contactId = userInfo["contactId"] as? String {
-            let url = "/crm?expandContact=\(contactId)"
-            print("[Push] Constructed contact deep link: \(url)")
-            self.pushManager.pendingDeepLink = url
+            fallbackUrl = "/crm?expandContact=\(contactId)"
+            print("[Push] Constructed contact deep link: \(fallbackUrl!)")
         } else if type.hasPrefix("task") || type.hasPrefix("subtask"),
                   let taskId = userInfo["taskId"] as? String {
             // NOTE: zámerne NEpridávame contactId do URL — Tasks.jsx by ho
@@ -180,10 +189,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if let subtaskId = userInfo["subtaskId"] as? String {
                 url += "&subtask=\(subtaskId)"
             }
+            // Workspace fallback too — if top-level userInfo["url"] was missing
+            // but workspaceId is present in the payload, honor it so we still
+            // route cross-workspace correctly.
+            if let wsId = userInfo["workspaceId"] as? String, !wsId.isEmpty {
+                url += "&ws=\(wsId)"
+            }
+            fallbackUrl = url
             print("[Push] Constructed task deep link: \(url)")
-            self.pushManager.pendingDeepLink = url
         } else {
             print("[Push] Could not construct deep link, no matching data")
+        }
+        if let url = fallbackUrl {
+            self.pushManager.pendingDeepLink = url
+            NotificationCenter.default.post(
+                name: Notification.Name("PrplCRMDeepLinkReceived"),
+                object: nil,
+                userInfo: ["url": url]
+            )
         }
     }
 

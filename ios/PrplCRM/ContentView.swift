@@ -504,6 +504,38 @@ struct WebView: UIViewRepresentable {
                 name: UIApplication.didReceiveMemoryWarningNotification,
                 object: nil
             )
+            // Direct deep-link receiver — bypasses SwiftUI @Published/updateUIView.
+            // AppDelegate posts this whenever a notification tap arrives
+            // (cold-start via launchOptions, hot-start via didReceive).
+            // Going through SwiftUI's observation chain turned out to be
+            // unreliable on hot-start: the user would see the app foreground
+            // with the SAME page they left, as if webView.load() never ran.
+            // This observer gives us a deterministic path: NSNotification →
+            // Coordinator → webView.load().
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleDeepLinkReceived(_:)),
+                name: Notification.Name("PrplCRMDeepLinkReceived"),
+                object: nil
+            )
+        }
+
+        @objc private func handleDeepLinkReceived(_ notification: Notification) {
+            guard let urlString = notification.userInfo?["url"] as? String,
+                  let webView = webView else {
+                print("[Push] Coordinator.handleDeepLinkReceived: no URL or no webView")
+                return
+            }
+            let base = "https://prplcrm.eu"
+            let link = urlString.hasPrefix("/") ? urlString : "/\(urlString)"
+            let sep = link.contains("?") ? "&" : "?"
+            let ts = Int(Date().timeIntervalSince1970 * 1000)
+            let fullUrl = base + link + sep + "_t=\(ts)"
+            guard let url = URL(string: fullUrl) else { return }
+            print("[Push] Coordinator: loading deep link via NotificationCenter bypass = \(fullUrl)")
+            DispatchQueue.main.async {
+                webView.load(URLRequest(url: url))
+            }
         }
 
         @objc private func appDidReceiveMemoryWarning() {
