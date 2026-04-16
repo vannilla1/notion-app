@@ -32,6 +32,7 @@ const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
+const Page = require('./models/Page');
 const logger = require('./utils/logger');
 const { initSentry } = require('./utils/sentry');
 const { errorMiddleware: serverErrorMirrorMiddleware } = require('./services/serverErrorService');
@@ -173,27 +174,108 @@ io.on('connection', async (socket) => {
   // Join user's personal room for private updates
   socket.join(`user-${socket.user.id}`);
 
-  // Join all workspace rooms the user belongs to
+  // Join all workspace rooms the user belongs to, and build an in-memory
+  // Set of their workspaceIds. The Set is the source of truth for all
+  // subsequent workspace-membership checks on this socket (used by
+  // canAccessPage below), so we don't hit Mongo on every page-related event.
+  // Trade-off: if a user is added/removed from a workspace mid-session, the
+  // change takes effect on next reconnect. Acceptable — REST API enforces
+  // membership on every request anyway; this only affects real-time deltas.
+  const userWorkspaceIds = new Set();
   try {
     const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
     for (const m of memberships) {
-      socket.join(`workspace-${m.workspaceId}`);
+      const wsId = m.workspaceId.toString();
+      socket.join(`workspace-${wsId}`);
+      userWorkspaceIds.add(wsId);
     }
     logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
   } catch (err) {
     logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
   }
+  socket.data.userWorkspaceIds = userWorkspaceIds;
+  // Cache pageId → workspaceId after a successful join-page check, so
+  // re-joining or re-checking the same page in this session is a Set lookup,
+  // not a Mongo query.
+  socket.data.pageAccess = new Map();
+  // Anti-enumeration: count denied joins per socket inside a 60s sliding
+  // window. Repeated attempts to join unauthorized pages (e.g. someone
+  // brute-forcing ObjectIds) → disconnect. Legit users never hit this.
+  socket.data.joinDenied = { count: 0, firstAt: 0 };
 
-  socket.on('join-page', (pageId) => {
+  // Helper: does this socket's user belong to the workspace that owns `pageId`?
+  // SECURITY CRITICAL: every collaborative page event flows through this check.
+  // Previously missing — any authenticated user could call
+  // `socket.emit('join-page', anyPageId)` and start receiving page content,
+  // block updates and cursor positions from other customers' workspaces (GDPR
+  // leak). Format-validates pageId first to avoid $-operator injection if a
+  // client sends a non-string payload, and to fail fast on garbage.
+  async function canAccessPage(pageId) {
+    if (typeof pageId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(pageId)) return false;
+    if (socket.data.pageAccess.has(pageId)) return true;
+    try {
+      const page = await Page.findById(pageId, 'workspaceId').lean();
+      if (!page) return false;
+      const wsId = page.workspaceId.toString();
+      if (!socket.data.userWorkspaceIds.has(wsId)) return false;
+      socket.data.pageAccess.set(pageId, wsId);
+      return true;
+    } catch (err) {
+      logger.error('canAccessPage failed', { error: err.message, userId: socket.user.id, pageId });
+      return false;
+    }
+  }
+
+  socket.on('join-page', async (pageId) => {
+    if (!(await canAccessPage(pageId))) {
+      // Silently drop — never ack failure, to avoid leaking whether the page
+      // exists vs. is simply not accessible (timing-oracle style enumeration).
+      const d = socket.data.joinDenied;
+      const now = Date.now();
+      if (now - d.firstAt > 60_000) { d.count = 0; d.firstAt = now; }
+      d.count++;
+      logger.warn('Socket: join-page DENIED', {
+        userId: socket.user.id,
+        username: socket.user.username,
+        pageId: typeof pageId === 'string' ? pageId : typeof pageId,
+        deniedInWindow: d.count
+      });
+      if (d.count >= 10) {
+        logger.warn('Socket: disconnecting for repeated join-page denials', {
+          userId: socket.user.id,
+          username: socket.user.username
+        });
+        socket.disconnect(true);
+      }
+      return;
+    }
     socket.join(`page-${pageId}`);
     logger.socket('join-page', socket.user.id, socket.user.username, { pageId });
   });
 
   socket.on('leave-page', (pageId) => {
+    if (typeof pageId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(pageId)) return;
     socket.leave(`page-${pageId}`);
+    socket.data.pageAccess.delete(pageId);
   });
 
-  socket.on('page-update', ({ pageId, content, title }) => {
+  // For page-update / block-update / cursor-move we only accept events from
+  // sockets that are ALREADY IN the page room. Room membership is proof of a
+  // prior successful join-page check — so we avoid a DB hit per event. This
+  // matters for cursor-move which fires ~20x/sec per user.
+  function isInPageRoom(pageId) {
+    return typeof pageId === 'string' && socket.rooms.has(`page-${pageId}`);
+  }
+
+  // All three handlers below accept the payload as a single param and guard
+  // against non-object inputs BEFORE destructuring — otherwise a malicious
+  // client emitting `socket.emit('page-update', null)` would throw inside the
+  // destructure, bubble to process.on('uncaughtException') which calls
+  // process.exit(1), and crash the whole server.
+  socket.on('page-update', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const { pageId, content, title } = payload;
+    if (!isInPageRoom(pageId)) return;
     // Broadcast to all users in the page room except sender
     socket.to(`page-${pageId}`).emit('page-updated', {
       pageId,
@@ -203,7 +285,10 @@ io.on('connection', async (socket) => {
     });
   });
 
-  socket.on('block-update', ({ pageId, blockId, content, type }) => {
+  socket.on('block-update', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const { pageId, blockId, content, type } = payload;
+    if (!isInPageRoom(pageId)) return;
     socket.to(`page-${pageId}`).emit('block-updated', {
       pageId,
       blockId,
@@ -213,7 +298,10 @@ io.on('connection', async (socket) => {
     });
   });
 
-  socket.on('cursor-move', ({ pageId, position }) => {
+  socket.on('cursor-move', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const { pageId, position } = payload;
+    if (!isInPageRoom(pageId)) return;
     socket.to(`page-${pageId}`).emit('cursor-moved', {
       userId: socket.user.id,
       username: socket.user.username,
