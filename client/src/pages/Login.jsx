@@ -7,9 +7,20 @@ import { acceptInvitation } from '../api/workspaces';
 function Login() {
   const { login, register } = useAuth();
   const { fetchWorkspaces, switchWorkspace } = useWorkspace();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [isRegister, setIsRegister] = useState(searchParams.get('register') === 'true');
+  // isRegister sa deriva priamo z URL, aby bol stav zachovaný aj pri návrate
+  // cez browser back button (napr. z /vop alebo /ochrana-udajov).
+  const isRegister = searchParams.get('register') === 'true';
+  const setIsRegister = (value) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (value) {
+      newParams.set('register', 'true');
+    } else {
+      newParams.delete('register');
+    }
+    setSearchParams(newParams, { replace: false });
+  };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
