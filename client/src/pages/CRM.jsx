@@ -4,6 +4,7 @@ import { downloadBlob } from '../utils/fileDownload';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
+import { useWorkspaceSwitched, useAppResume, isDeepLinkPending } from '../hooks';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
@@ -199,25 +200,14 @@ function CRM() {
     fetchGlobalTasks();
   }, [fetchContacts, fetchGlobalTasks]);
 
-  // Refresh when app returns from background
-  useEffect(() => {
-    const handleResume = () => { fetchContacts(); fetchGlobalTasks(); };
-    window.addEventListener('app-resumed', handleResume);
-    return () => window.removeEventListener('app-resumed', handleResume);
-  }, [fetchContacts, fetchGlobalTasks]);
-
-  // Refetch when workspace switches (e.g. notification deep-link that targets
-  // a different workspace). Collapse any expanded contact — an ID from the
-  // previous workspace would otherwise render a stale modal with empty data.
-  useEffect(() => {
-    const handleSwitch = () => {
-      setExpandedContact(null);
-      fetchContacts();
-      fetchGlobalTasks();
-    };
-    window.addEventListener('workspace-switched', handleSwitch);
-    return () => window.removeEventListener('workspace-switched', handleSwitch);
-  }, [fetchContacts, fetchGlobalTasks]);
+  // Pri návrate z pozadia + pri prepnutí workspacu — refetch + collapse modal.
+  // (stale contact ID z predošlého workspacu by inak renderol prázdny modal)
+  useAppResume(() => { fetchContacts(); fetchGlobalTasks(); });
+  useWorkspaceSwitched(() => {
+    setExpandedContact(null);
+    fetchContacts();
+    fetchGlobalTasks();
+  });
 
   // Mark contact notifications as read when the user actually opens the
   // contact — replaces the old "mark everything read when section is clicked"
@@ -270,22 +260,16 @@ function CRM() {
     const urlContactId = params.get('expandContact');
     const urlTimestamp = params.get('_t');
 
-    // Defer if App.jsx hasn't resolved `ws=` yet — otherwise we'd fetch in
-    // the wrong workspace and never find the highlighted contact.
-    if (params.get('ws')) {
-      console.log('[DeepLink] CRM: ws= still present, deferring to App');
-      return;
-    }
+    // Počkaj kým App.jsx vyrieši `ws=` (cross-workspace deep-link).
+    if (isDeepLinkPending(location)) return;
 
     if (urlContactId) {
       const tsKey = urlTimestamp || 'no-ts';
-      // Only process if this is a new navigation (different _t)
+      // Spracuj len novú navigáciu (iné _t)
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        console.log('[DeepLink] CRM: queueing expandContact=', urlContactId);
-        // Set pending BEFORE fetchContacts so the [contacts] effect sees it
-        // on the first render after setContacts. Otherwise the effect fires
-        // with pending=null, does nothing, and a second click is needed.
+        // pending nastavíme PRED fetchContacts — inak [contacts] effect beží
+        // skôr (pending=null, no-op) a highlight sa stratí.
         pendingHighlightRef.current = { contactId: urlContactId };
         fetchContacts();
         // Clear query params from URL

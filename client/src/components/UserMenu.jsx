@@ -6,6 +6,7 @@ import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
+import { getWorkspaceRoleLabel } from '../utils/constants';
 
 const translateErrorMessage = (message) => {
   if (!message) return 'Neznáma chyba';
@@ -781,7 +782,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 />
                 <span className="workspace-name-mobile">{currentWorkspace.name}</span>
                 <span className="workspace-role-mobile">
-                  {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'manager' ? 'Manažér' : 'Člen'}
+                  {getWorkspaceRoleLabel(currentWorkspace.role)}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#94a3b8' }}>
                   {showMobileWorkspaces ? '▲' : '▼'}
@@ -804,7 +805,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       />
                       <span className="workspace-name-mobile">{ws.name}</span>
                       <span className="workspace-role-mobile">
-                        {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
+                        {getWorkspaceRoleLabel(ws.role)}
                       </span>
                     </div>
                   ))}

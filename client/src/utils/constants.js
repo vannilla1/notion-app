@@ -78,18 +78,24 @@ export const USER_ROLE_LABELS = {
   user: 'Používateľ'
 };
 
-// Workspace roles
+// Workspace roles — MUSIA sedieť s enumom v server/models/WorkspaceMember.js
 export const WORKSPACE_ROLE = {
   OWNER: 'owner',
-  ADMIN: 'admin',
+  MANAGER: 'manager',
   MEMBER: 'member'
 };
 
 // Workspace role labels (Slovak)
 export const WORKSPACE_ROLE_LABELS = {
   owner: 'Vlastník',
-  admin: 'Admin',
+  manager: 'Manažér',
   member: 'Člen'
+};
+
+// Cross-page custom events (dispatched z WorkspaceContext / AuthContext)
+export const APP_EVENTS = {
+  WORKSPACE_SWITCHED: 'workspace-switched',
+  APP_RESUMED: 'app-resumed'
 };
 
 export const getStatusLabel = (status) => {

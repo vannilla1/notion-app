@@ -70,27 +70,21 @@ function AppContent() {
 
       if (targetWs && targetWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId)) {
         const isMember = (workspaces || []).some(w => (w.id || w._id)?.toString() === targetWs);
-        console.log('[DeepLink] navigateWithWorkspace: target=', targetWs, 'current=', currentWorkspaceId, 'isMember=', isMember);
         if (isMember) {
           try {
             await switchWorkspace(targetWs);
-            console.log('[DeepLink] switchWorkspace resolved OK →', targetWs);
           } catch (e) {
-            // Switch FAILED — do NOT strip ws= and navigate. If we navigated,
-            // the URL would lose ws=, the `pendingWsSwitch` gate in AppContent
-            // would unblock, and the user would land on the wrong workspace
-            // (exactly the "correct section, wrong workspace" bug). Instead,
-            // leave ws= in the URL and return. The gate keeps showing
-            // "Načítavam..." until the switch is retried (useLayoutEffect
-            // re-fires when deps change) or the user acts manually.
-            console.error('[DeepLink] switchWorkspace FAILED — keeping ws= in URL:', e?.response?.status, e?.message);
+            // Switch zlyhal → NEPRECHÁDZAME na cleanPath. Keby sme šli bez ws=,
+            // `pendingWsSwitch` gate v AppContent by odomkol a user by skončil
+            // v zlom workspace ("correct section, wrong workspace" bug).
+            // ws= necháme v URL, gate drží "Načítavam..." kým sa switch retryne.
+            console.error('[DeepLink] switchWorkspace zlyhal — ws= ponechávame:', e?.response?.status, e?.message);
             return;
           }
         } else {
-          // Not a member — log and fall through to plain navigate (strip ws=).
-          // User will land on their current workspace; the target workspace
-          // was probably left or they weren't invited.
-          console.warn('[DeepLink] targetWs not in membership list — skipping switch. workspaces=', workspaces);
+          // Nie som člen → fall-through na čistý navigate (user skončí v svojom
+          // aktuálnom workspace; target workspace bol asi opustený alebo pozvanka zrušená).
+          console.warn('[DeepLink] targetWs nie je v membership liste — skip switch');
         }
       }
       navigate(cleanPath, { replace: true });
@@ -206,24 +200,16 @@ function AppContent() {
     };
   }, []);
 
-  // Deep link via direct URL load (iOS APNs tap — cold start AND hot start
-  // when the app was in background). If the URL carries `ws=` that differs
-  // from the active workspace, switch first so the target page fetches
-  // workspace-scoped data. useLayoutEffect so this runs BEFORE child page
-  // effects strip URL params.
-  //
-  // No "run-once" ref: navigateWithWorkspace is idempotent (only switches if
-  // targetWs !== currentWorkspaceId) and strips ws= from the URL after, so
-  // the effect re-fires exactly once per deep link. Earlier versions had a
-  // ref guard that fired on the FIRST ever mount regardless of whether ws=
-  // was present — which silently disabled every subsequent notification tap
-  // whose workspace differed from the current one (the exact bug users saw
-  // where push notifications opened the right SECTION in the wrong WORKSPACE).
+  // Deep-link priamo z URL (iOS APNs tap — cold aj hot start). Ak URL má `ws=`
+  // odlišný od aktívneho, prepneme workspace ešte pred tým ako child stránky
+  // fetchnú dáta. useLayoutEffect aby bežal PRED child page effectmi (tie
+  // strippujú URL parametre).
+  // Idempotentné: navigateWithWorkspace prepne iba ak targetWs !== current,
+  // a následne strippne ws=, takže effect sa re-fired presne raz per deep-link.
   useLayoutEffect(() => {
     if (!isAuthenticated || workspaceLoading) return;
     const params = new URLSearchParams(location.search);
     if (!params.get('ws')) return;
-    console.log('[DeepLink] App: ws= detected, switching workspace →', params.get('ws'));
     navigateWithWorkspace(location.pathname + location.search);
   }, [isAuthenticated, workspaceLoading, location.pathname, location.search, navigateWithWorkspace]);
 
@@ -273,13 +259,6 @@ function AppContent() {
 
     return () => clearInterval(interval);
   }, [isAuthenticated, navigateWithWorkspace]);
-
-  // NOTE: starý `iosDeepLink` CustomEvent listener bol odstránený (bol orphan).
-  // Pôvodne Swift injecovol JS ktorý dispatchol tento event, aby sa predišlo
-  // full-page reloadu. Od commitu c18a9b2 Swift používa `webView.load(URLRequest(...))`
-  // pre hot-start deep linky (ContentView.swift:461-465) — event sa už nikdy
-  // nedispatchuje, takže listener bol dead code. Ak sa v budúcnosti vrátime
-  // k JS-injection prístupu, obnovíme listener + Swift injection spolu.
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -352,13 +331,9 @@ function AppContent() {
   const publicPages = ['/', '/login', '/forgot-password', '/reset-password', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
 
-  // Block child-route rendering while a deep-link workspace switch is still
-  // pending. Without this, Tasks/CRM/Messages mount with the OLD workspace,
-  // fire fetchTasks/fetchContacts/etc. against that workspace, and show the
-  // wrong data. The useLayoutEffect above is already handling the switch —
-  // we just need to pause rendering until `ws=` is either stripped (switch
-  // done) or resolved to the current workspace. Blocks only authenticated
-  // routes; public routes (landing page, login) don't care about workspace.
+  // Blok renderu child route kým sa deep-link workspace switch nedokončí.
+  // Inak Tasks/CRM/Messages mountnú so starým workspacom a fetchnú dáta
+  // proti nemu (wrong data). Blok je len pre authenticated routes.
   const urlParams = new URLSearchParams(location.search);
   const urlWs = urlParams.get('ws');
   const pendingWsSwitch = !!urlWs && !!currentWorkspaceId &&

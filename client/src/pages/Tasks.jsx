@@ -3,6 +3,9 @@ import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
+import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
+import { getWorkspaceRoleLabel } from '../utils/constants';
+import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
@@ -405,7 +408,7 @@ function Tasks() {
   const location = useLocation();
   const [tasks, setTasks] = useState([]);
   const [contacts, setContacts] = useState([]);
-  const [users, setUsers] = useState([]);
+  const { users } = useWorkspaceUsers();
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [contactFilter, setContactFilter] = useState(null); // Filter by specific contact
@@ -508,15 +511,6 @@ function Tasks() {
     }
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await api.get('/api/auth/users');
-      setUsers(res.data);
-    } catch {
-      // Silently fail
-    }
-  }, []);
-
   const fetchLinkedMessages = useCallback(async (taskId) => {
     try {
       const res = await api.get('/api/messages/by-linked', { params: { linkedType: 'task', linkedId: taskId } });
@@ -534,32 +528,21 @@ function Tasks() {
     }
   }, [fetchTasks]);
 
+  // Fetch all data in parallel (saves ~2-4s vs sequential on Atlas M0).
+  // Google Tasks sync beží na pozadí (5min interval) — nespúšťame ho na
+  // každom page loade, aby sme nepreťažili Atlas M0.
   useEffect(() => {
-    // Fetch all data in parallel (saves ~2-4s vs sequential on Atlas M0)
-    Promise.all([fetchTasks(), fetchContacts(), fetchUsers()]);
-    // Google Tasks sync is handled by background polling (5min interval)
-    // Don't sync on every page load — it overloads Atlas M0
-  }, [fetchTasks, fetchContacts, fetchUsers]);
-
-  // Refresh when app returns from background
-  useEffect(() => {
-    const handleResume = () => { fetchTasks(); fetchContacts(); };
-    window.addEventListener('app-resumed', handleResume);
-    return () => window.removeEventListener('app-resumed', handleResume);
+    Promise.all([fetchTasks(), fetchContacts()]);
   }, [fetchTasks, fetchContacts]);
 
-  // Refetch when workspace switches (e.g. notification deep-link that targets
-  // a different workspace). Also close any open task/modal — an expandedTask
-  // ID from the old workspace would otherwise render a stale empty modal.
-  useEffect(() => {
-    const handleSwitch = () => {
-      setExpandedTask(null);
-      fetchTasks();
-      fetchContacts();
-    };
-    window.addEventListener('workspace-switched', handleSwitch);
-    return () => window.removeEventListener('workspace-switched', handleSwitch);
-  }, [fetchTasks, fetchContacts]);
+  // Pri návrate z pozadia + pri prepnutí workspacu — refetch + zatvorenie modalu.
+  // (stale expandedTask ID z predošlého workspacu by inak renderol prázdny modal)
+  useAppResume(() => { fetchTasks(); fetchContacts(); });
+  useWorkspaceSwitched(() => {
+    setExpandedTask(null);
+    fetchTasks();
+    fetchContacts();
+  });
 
   useEffect(() => {
     if (expandedTask) fetchLinkedMessages(expandedTask);
@@ -842,7 +825,7 @@ function Tasks() {
     const el = taskRefs.current[taskId];
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      console.log('[DeepLink] Tasks: scrolled to task', taskId, 'after', attempts, 'attempts');
+      debug.log('[DeepLink] Tasks: scrolled to task', taskId, 'after', attempts, 'attempts');
       return;
     }
     if (attempts < 20) { // 20 × 100ms = 2s
@@ -859,7 +842,7 @@ function Tasks() {
     const el = document.querySelector(`[data-subtask-id="${subtaskId}"]`);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      console.log('[DeepLink] Tasks: scrolled to subtask', subtaskId, 'after', attempts, 'attempts');
+      debug.log('[DeepLink] Tasks: scrolled to subtask', subtaskId, 'after', attempts, 'attempts');
       return;
     }
     if (attempts < 30) {
@@ -895,7 +878,7 @@ function Tasks() {
   // pendingHighlightRef + [tasks] effect — never reads stale `tasks` closure.
   // This is what makes deep-links reliable across workspace switches.
   const processHighlight = useCallback((taskId, subtaskId) => {
-    console.log('[DeepLink] Tasks: queueing pending highlight', { taskId, subtaskId });
+    debug.log('[DeepLink] Tasks: queueing pending highlight', { taskId, subtaskId });
     pendingHighlightRef.current = { taskId, subtaskId };
   }, []);
 
@@ -906,24 +889,16 @@ function Tasks() {
     const urlSubtaskId = params.get('subtask');
     const urlTimestamp = params.get('_t');
 
-    // Wait for App.jsx to resolve `ws=` (cross-workspace deep link) before
-    // stripping URL / fetching tasks — otherwise we'd fetch in the wrong
-    // workspace and never find the highlighted task.
-    if (params.get('ws')) {
-      console.log('[DeepLink] Tasks: ws= still present, deferring to App');
-      return;
-    }
+    // Počkáme kým App.jsx vyrieši `ws=` (cross-workspace deep-link). Inak
+    // by sme fetchli dáta v nesprávnom workspace a nenašli highlighted task.
+    if (isDeepLinkPending(location)) return;
 
     if (urlTaskId) {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastNavTimestampRef.current) {
         lastNavTimestampRef.current = tsKey;
-        console.log('[DeepLink] Tasks: queueing highlightTask=', urlTaskId, 'subtask=', urlSubtaskId);
-        // CRITICAL: set pending BEFORE fetchTasks so the [tasks] effect
-        // can consume it the moment setTasks() fires. Previously pending
-        // was set in a 100ms setTimeout AFTER fetch, which meant the
-        // [tasks] effect ran first (pending=null, no-op) and never ran
-        // again — the second bell click was needed to re-trigger it.
+        // CRITICAL: pending nastavíme PRED fetchTasks — inak [tasks] effect
+        // beží skôr (pending=null, no-op) a highlight sa stratí.
         pendingHighlightRef.current = { taskId: urlTaskId, subtaskId: urlSubtaskId || null };
         fetchTasks();
         // Strip params so we don't re-trigger on subsequent renders.
@@ -975,12 +950,12 @@ function Tasks() {
     // keep pending and wait for the next tasks update.
     const taskExists = tasks.some(t => t.id === taskId || t._id === taskId);
     if (!taskExists) {
-      console.log('[DeepLink] Tasks: target not in list yet, keep pending', taskId);
+      debug.log('[DeepLink] Tasks: target not in list yet, keep pending', taskId);
       return;
     }
 
     pendingHighlightRef.current = null;
-    console.log('[DeepLink] Tasks: processing pending', { taskId, subtaskId });
+    debug.log('[DeepLink] Tasks: processing pending', { taskId, subtaskId });
 
     setHighlightedTaskId(taskId);
     setExpandedTask(taskId);
@@ -993,7 +968,7 @@ function Tasks() {
       // expanded. Also expand the target itself so its children are visible.
       const loc = findSubtaskAncestors(subtaskId);
       if (loc) {
-        console.log('[DeepLink] Tasks: subtask ancestors =', loc.ancestors);
+        debug.log('[DeepLink] Tasks: subtask ancestors =', loc.ancestors);
         setExpandedSubtasks(prev => {
           const next = { ...prev, [subtaskId]: true };
           for (const ancestorId of loc.ancestors) next[ancestorId] = true;
@@ -2480,7 +2455,7 @@ function Tasks() {
                             {u.username.charAt(0).toUpperCase()}
                           </span>
                           <span>{u.username}</span>
-                          <span className="user-role-badge">{u.role === 'owner' ? 'Vlastník' : u.role === 'manager' ? 'Manažér' : 'Člen'}</span>
+                          <span className="user-role-badge">{getWorkspaceRoleLabel(u.role)}</span>
                         </label>
                       ))}
                     </div>

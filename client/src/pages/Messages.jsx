@@ -3,6 +3,7 @@ import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
+import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
@@ -101,7 +102,7 @@ function Messages() {
 
   // New message form
   const [showForm, setShowForm] = useState(false);
-  const [users, setUsers] = useState([]);
+  const { users, refetch: refetchUsers } = useWorkspaceUsers({ excludeUserId: user?.id });
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState({
@@ -157,21 +158,11 @@ function Messages() {
 
   useEffect(() => { setLoading(true); fetchMessages(); fetchPendingCount(); }, [tab]);
 
-  // Refresh when app returns from background (iOS / tab switch)
-  useEffect(() => {
-    const handleResume = () => { fetchMessages(); fetchPendingCount(); };
-    window.addEventListener('app-resumed', handleResume);
-    return () => window.removeEventListener('app-resumed', handleResume);
-  }, [tab]);
-
-  // Refetch when workspace switches (deep-link from push notification can
-  // change the active workspace; this page's state otherwise keeps messages
-  // from the previous workspace).
-  useEffect(() => {
-    const handleSwitch = () => { fetchMessages(); fetchPendingCount(); };
-    window.addEventListener('workspace-switched', handleSwitch);
-    return () => window.removeEventListener('workspace-switched', handleSwitch);
-  }, [tab]);
+  // Pri návrate z pozadia a pri prepnutí workspacu — refetch správ + badge.
+  // Ref-based hooks vždy volajú aktuálnu verziu handlera, takže `tab` je
+  // čerstvý bez re-bindu listenera.
+  useAppResume(() => { fetchMessages(); fetchPendingCount(); });
+  useWorkspaceSwitched(() => { fetchMessages(); fetchPendingCount(); });
 
   // Mark notifications for this message as read whenever the user opens one
   // (list click, deep-link, fetched detail). Replaces the old "mark the
@@ -191,7 +182,7 @@ function Messages() {
   }, [selectedMessage]);
 
   useEffect(() => {
-    if (showForm) { fetchUsers(); fetchContactsAndTasks(); }
+    if (showForm) { refetchUsers(); fetchContactsAndTasks(); }
   }, [showForm]);
 
   // Socket events — debounced to coalesce rapid updates
@@ -279,17 +270,13 @@ function Messages() {
     const commentId = params.get('comment');
     const urlTimestamp = params.get('_t');
 
-    // Wait for App.jsx to resolve `ws=` first (cross-workspace deep link).
-    if (params.get('ws')) {
-      console.log('[DeepLink] Messages: ws= still present, deferring to App');
-      return;
-    }
+    // Počkaj kým App.jsx vyrieši `ws=` (cross-workspace deep-link).
+    if (isDeepLinkPending(location)) return;
 
     if (highlightId) {
       const tsKey = urlTimestamp || 'no-ts';
       if (tsKey !== lastMsgHighlightRef.current) {
         lastMsgHighlightRef.current = tsKey;
-        console.log('[DeepLink] Messages: processing highlight=', highlightId, 'comment=', commentId);
         highlightMessage(highlightId, commentId);
         // Clear params from URL
         navigate(location.pathname, { replace: true });
@@ -343,13 +330,6 @@ function Messages() {
     try {
       const res = await api.get('/api/messages/pending-count');
       setPendingCount(res.data.count);
-    } catch (err) { /* ignore */ }
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const res = await api.get('/api/auth/users');
-      setUsers(res.data.filter(u => u.id !== user.id));
     } catch (err) { /* ignore */ }
   };
 

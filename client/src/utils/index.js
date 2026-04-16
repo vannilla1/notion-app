@@ -30,6 +30,7 @@ export {
   USER_ROLE_LABELS,
   WORKSPACE_ROLE,
   WORKSPACE_ROLE_LABELS,
+  APP_EVENTS,
   getStatusLabel,
   getStatusColor,
   getTaskStatusLabel,

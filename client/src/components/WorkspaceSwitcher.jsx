@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import api from '../api/api';
+import { getWorkspaceRoleLabel } from '../utils/constants';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -254,7 +255,7 @@ const WorkspaceSwitcher = () => {
                   <span className="workspace-info">
                     <span className="workspace-item-name">{currentWorkspace.name}</span>
                     <span className="workspace-item-role">
-                      {currentWorkspace.role === 'owner' ? 'Vlastník' : currentWorkspace.role === 'manager' ? 'Manažér' : 'Člen'}
+                      {getWorkspaceRoleLabel(currentWorkspace.role)}
                     </span>
                   </span>
                   {canEdit && (
@@ -299,7 +300,7 @@ const WorkspaceSwitcher = () => {
                 <span className="workspace-info">
                   <span className="workspace-item-name">{ws.name}</span>
                   <span className="workspace-item-role">
-                    {ws.role === 'owner' ? 'Vlastník' : ws.role === 'manager' ? 'Manažér' : 'Člen'}
+                    {getWorkspaceRoleLabel(ws.role)}
                   </span>
                 </span>
                 {unread > 0 && (

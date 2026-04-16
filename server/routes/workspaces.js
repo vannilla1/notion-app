@@ -266,14 +266,10 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
     invalidateCache(req.user.id);
 
-    // Build FULL workspace shape (same as GET /current) so the client can
-    // atomically update both currentWorkspaceId + currentWorkspace (details)
-    // from a single response. Previously this endpoint returned only the
-    // 5 core fields, forcing the client to follow up with GET /current —
-    // during that roundtrip the header/sidebar still showed the OLD
-    // workspace's name/color/role while currentWorkspaceId already pointed
-    // at the new one. That's the "push notification opens right section
-    // but wrong workspace" symptom on cross-workspace deep links.
+    // Vraciame FULL workspace shape (rovnaký ako GET /current), aby klient
+    // v jednom React render tiku atomicky nastavil currentWorkspaceId +
+    // currentWorkspace. Second roundtrip GET /current by otvoril race window
+    // (cross-workspace deep-link bug, commit c18a9b2).
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
     const owner = await User.findById(workspace.ownerId);
     const paidSeats = workspace.paidSeats || 0;

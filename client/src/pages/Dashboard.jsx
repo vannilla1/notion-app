@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
+import { useWorkspaceSwitched, useAppResume } from '../hooks';
 import { useNavigate } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
@@ -93,20 +94,10 @@ function Dashboard() {
     return () => { if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current); };
   }, []);
 
-  // Refresh when app returns from background
-  useEffect(() => {
-    const handleResume = () => fetchData();
-    window.addEventListener('app-resumed', handleResume);
-    return () => window.removeEventListener('app-resumed', handleResume);
-  }, []);
-
-  // Refetch when workspace switches (deep-link from push notification can
-  // change the active workspace without remounting the page).
-  useEffect(() => {
-    const handleSwitch = () => fetchData();
-    window.addEventListener('workspace-switched', handleSwitch);
-    return () => window.removeEventListener('workspace-switched', handleSwitch);
-  }, []);
+  // Pri návrate z pozadia + pri prepnutí workspacu (deep-link z push môže
+  // zmeniť aktívny workspace bez remountu stránky) — refetch dát.
+  useAppResume(fetchData);
+  useWorkspaceSwitched(fetchData);
 
   useEffect(() => {
     if (!socket || !isConnected) return;

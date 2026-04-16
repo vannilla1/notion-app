@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import * as workspaceApi from '../api/workspaces';
+import { APP_EVENTS } from '../utils/constants';
 
 const WorkspaceContext = createContext(null);
 
@@ -22,17 +23,14 @@ export const WorkspaceProvider = ({ children }) => {
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
 
   const fetchWorkspaces = useCallback(async () => {
-    if (!isAuthenticated) {
-      // Don't set loading=false here — App.jsx only checks workspaceLoading
-      // when isAuthenticated is true, so keeping it true prevents flash
-      // between auth resolving and workspace fetch starting.
-      return;
-    }
+    // Loading=true držíme aj keď nie sme authenticated — App.jsx gate kontroluje
+    // workspaceLoading iba pri isAuthenticated=true, takže to nespôsobí blok,
+    // ale zabráni 1-frame flashu medzi auth-resolved a workspace-fetch-started.
+    if (!isAuthenticated) return;
 
     try {
       setLoading(true);
       setError(null);
-      // Fetch workspaces and current workspace in parallel
       const [data, current] = await Promise.all([
         workspaceApi.getWorkspaces(),
         workspaceApi.getCurrentWorkspace().catch(err => {
@@ -69,9 +67,7 @@ export const WorkspaceProvider = ({ children }) => {
       setCurrentWorkspace(null);
       setCurrentWorkspaceId(null);
       setNeedsWorkspace(false);
-      // Don't set loading=false — App.jsx condition: loading || (isAuthenticated && workspaceLoading)
-      // When isAuthenticated=false, workspaceLoading is irrelevant, so keeping it true is safe
-      // and prevents the 1-frame flash when auth resolves before workspace fetch starts.
+      // loading=true zachovávame zámerne — viď komentár v fetchWorkspaces.
     }
   }, [isAuthenticated, fetchWorkspaces]);
 
@@ -89,37 +85,19 @@ export const WorkspaceProvider = ({ children }) => {
 
   const switchWorkspace = async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
-    // CRITICAL: update currentWorkspaceId AND currentWorkspace (details)
-    // ATOMICALLY from the single POST /switch response. React batches both
-    // setState calls into one render — so every component that reads either
-    // value sees a consistent workspace state in the next paint.
-    //
-    // Previously this function did:
-    //   setCurrentWorkspaceId(B)            ← id flipped to B
-    //   await getCurrentWorkspace()         ← yields a render tick
-    //   ... React renders here with:
-    //     currentWorkspaceId = B
-    //     currentWorkspace   = A (still!)   ← race window
-    //   setCurrentWorkspace(current)        ← finally updates details
-    //
-    // During the race window, the `pendingWsSwitch` gate in App.jsx (which
-    // only checks currentWorkspaceId) opened and unblocked child routes.
-    // Tasks/CRM/Messages mounted, but the header/sidebar kept showing the
-    // OLD workspace's name and color. That is the "push notification opens
-    // right section in wrong workspace" symptom users reported.
-    //
-    // POST /switch now returns the full workspace shape (matches GET /current),
-    // so we never need a second roundtrip for the critical path.
+    // CRITICAL: id + details meníme ATOMICKY z jedného POST /switch response.
+    // React batchne oba setState volania do jedného renderu, takže header /
+    // sidebar / children vidia konzistentný workspace v ďalšom paint.
+    // (Druhý fetch GET /current by otvoril race window medzi id a details,
+    // čím by `pendingWsSwitch` gate v App.jsx odomkol stránku so stale headerom
+    // — to bola "cross-workspace push notification" regresia, commit c18a9b2.)
     setCurrentWorkspaceId(workspaceId);
     if (result?.workspace) {
       setCurrentWorkspace(result.workspace);
     }
-    // Tell every mounted page (Dashboard/CRM/Tasks/Messages) to refetch +
-    // reset expanded/modal state. Without this, switching workspace via a
-    // deep-link (push notification tap) changes the header but leaves the
-    // page showing data from the previous workspace — because the page
-    // component doesn't remount when only location.search changes.
-    window.dispatchEvent(new CustomEvent('workspace-switched', { detail: { workspaceId } }));
+    // Stránky (Dashboard/CRM/Tasks/Messages) nie sú odpojené od toho istého
+    // URL pri `ws=` zmene, preto im eventom povieme: refetch + reset modalov.
+    window.dispatchEvent(new CustomEvent(APP_EVENTS.WORKSPACE_SWITCHED, { detail: { workspaceId } }));
     return result;
   };
 

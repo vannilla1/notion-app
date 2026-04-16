@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { getInvitationByToken, acceptInvitation } from '../api/workspaces';
+import { getWorkspaceRoleLabel } from '../utils/constants';
 
 function AcceptInvite() {
   const { token } = useParams();
@@ -105,7 +106,7 @@ function AcceptInvite() {
             {invitation?.workspaceName}
           </div>
           <p>Pozval vás: <strong>{invitation?.invitedBy}</strong></p>
-          <p>Rola: <strong>{invitation?.role === 'owner' ? 'Vlastník' : invitation?.role === 'manager' ? 'Manažér' : 'Člen'}</strong></p>
+          <p>Rola: <strong>{getWorkspaceRoleLabel(invitation?.role)}</strong></p>
         </div>
 
         {success ? (
