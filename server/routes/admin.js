@@ -14,7 +14,11 @@ const AuditLog = require('../models/AuditLog');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
 const PromoCode = require('../models/PromoCode');
+const ServerError = require('../models/ServerError');
 const auditService = require('../services/auditService');
+const onlineUsers = require('../services/onlineUsers');
+const { getMetrics } = require('../services/apiMetrics');
+const healthMonitor = require('../jobs/healthMonitor');
 
 const router = express.Router();
 
@@ -1466,6 +1470,356 @@ router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req
   } catch (error) {
     logger.error('Promo code stats error', { error: error.message });
     res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ─── DIAGNOSTICS DASHBOARD ─────────────────────────────────────────
+// Endpointy pre SuperAdmin "Diagnostika" kartu:
+//   - Errors (zoznam, detail, resolve, stats)
+//   - Performance (pomalé endpointy, error rates)
+//   - Health (full check snapshot)
+//   - Active users (online + failed logins)
+//   - Feature usage (agregácia z AuditLog)
+//   - Revenue (MRR, plans breakdown, trials)
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── ERRORS ────────────────────────────────────────────────────────
+
+// GET /api/admin/errors — zoznam chýb
+router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.resolved === 'true') filter.resolved = true;
+    else if (req.query.resolved === 'false') filter.resolved = false;
+    if (req.query.search) {
+      filter.$or = [
+        { message: { $regex: req.query.search, $options: 'i' } },
+        { path: { $regex: req.query.search, $options: 'i' } }
+      ];
+    }
+    if (req.query.from) filter.lastSeen = { ...filter.lastSeen, $gte: new Date(req.query.from) };
+    if (req.query.to) filter.lastSeen = { ...filter.lastSeen, $lte: new Date(req.query.to) };
+
+    const [errors, total] = await Promise.all([
+      ServerError.find(filter)
+        .sort({ lastSeen: -1 })
+        .skip(skip).limit(limit)
+        .populate('userId', 'username email')
+        .populate('resolvedBy', 'username email')
+        .lean(),
+      ServerError.countDocuments(filter)
+    ]);
+
+    res.json({
+      errors,
+      page,
+      pages: Math.ceil(total / limit),
+      total
+    });
+  } catch (error) {
+    logger.error('Errors list error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET /api/admin/errors/stats — agregovane pre top kartičky
+router.get('/errors/stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const now = Date.now();
+    const h24 = new Date(now - 24 * 60 * 60 * 1000);
+    const d7 = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const d30 = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+    const [count24h, count7d, count30d, unresolved, topByCount] = await Promise.all([
+      ServerError.countDocuments({ lastSeen: { $gte: h24 } }),
+      ServerError.countDocuments({ lastSeen: { $gte: d7 } }),
+      ServerError.countDocuments({ lastSeen: { $gte: d30 } }),
+      ServerError.countDocuments({ resolved: false }),
+      ServerError.find({ resolved: false }).sort({ count: -1 }).limit(5).select('message path count lastSeen').lean()
+    ]);
+
+    res.json({ count24h, count7d, count30d, unresolved, topByCount });
+  } catch (error) {
+    logger.error('Errors stats error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET /api/admin/errors/:id — detail
+router.get('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const err = await ServerError.findById(req.params.id)
+      .populate('userId', 'username email')
+      .populate('resolvedBy', 'username email')
+      .lean();
+    if (!err) return res.status(404).json({ message: 'Chyba nenájdená' });
+    res.json(err);
+  } catch (error) {
+    logger.error('Error detail error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// PUT /api/admin/errors/:id/resolve — označiť opravené / znova otvoriť
+router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { resolved, notes } = req.body;
+    const update = {
+      resolved: !!resolved,
+      notes: notes?.slice(0, 2000) || null
+    };
+    if (resolved) {
+      update.resolvedBy = req.user.id;
+      update.resolvedAt = new Date();
+    } else {
+      update.resolvedBy = null;
+      update.resolvedAt = null;
+    }
+    const err = await ServerError.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+    if (!err) return res.status(404).json({ message: 'Chyba nenájdená' });
+    res.json(err);
+  } catch (error) {
+    logger.error('Error resolve error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// DELETE /api/admin/errors/:id — manuálne zmazať záznam
+router.delete('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await ServerError.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ message: 'Chyba nenájdená' });
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Error delete error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── PERFORMANCE ───────────────────────────────────────────────────
+
+// GET /api/admin/performance/slow — top pomalé routes
+router.get('/performance/slow', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const metrics = getMetrics();
+    const routes = (metrics.topRoutes || [])
+      .filter(r => r.avgDuration > 0)
+      .sort((a, b) => b.avgDuration - a.avgDuration)
+      .slice(0, 20);
+    res.json({ routes, totalRequests: metrics.totalRequests, errorRate: metrics.errorRate });
+  } catch (error) {
+    logger.error('Performance slow error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET /api/admin/performance/errors-by-route — 4xx/5xx rate
+router.get('/performance/errors-by-route', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const metrics = getMetrics();
+    res.json({
+      routes: metrics.topRoutes || [],
+      statusCodes: metrics.statusCodes || {},
+      hourly: metrics.hourly || []
+    });
+  } catch (error) {
+    logger.error('Performance errors-by-route error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── HEALTH (full snapshot) ────────────────────────────────────────
+
+// GET /api/admin/health/full — posledný snapshot z healthMonitor
+router.get('/health/full', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    let snapshot = healthMonitor.getLastSnapshot();
+    if (!snapshot.checkedAt) {
+      snapshot = await healthMonitor.runChecks();
+    }
+    res.json(snapshot);
+  } catch (error) {
+    logger.error('Health full error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST /api/admin/health/refresh — donúti okamžitý re-check
+router.post('/health/refresh', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await healthMonitor.runChecks();
+    res.json(snapshot);
+  } catch (error) {
+    logger.error('Health refresh error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── ACTIVE USERS ──────────────────────────────────────────────────
+
+// GET /api/admin/online-users — aktuálne pripojení cez Socket.IO
+router.get('/online-users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const users = onlineUsers.getOnlineUsers();
+    res.json({
+      count: onlineUsers.getOnlineCount(),
+      socketCount: onlineUsers.getSocketCount(),
+      users
+    });
+  } catch (error) {
+    logger.error('Online users error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET /api/admin/auth-events — login eventy za 24h
+router.get('/auth-events', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const logs = await AuditLog.find({
+      category: 'auth',
+      action: { $in: ['auth.login', 'auth.login_failed', 'auth.register'] },
+      createdAt: { $gte: since }
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    // Top IP-čky s najviac failed loginmi (potenciálny brute-force)
+    const byIp = {};
+    for (const log of logs) {
+      if (log.action !== 'auth.login_failed') continue;
+      const ip = log.ipAddress || 'unknown';
+      if (!byIp[ip]) byIp[ip] = { ip, count: 0, emails: new Set(), reasons: {} };
+      byIp[ip].count++;
+      if (log.email) byIp[ip].emails.add(log.email);
+      const reason = log.details?.reason || 'unknown';
+      byIp[ip].reasons[reason] = (byIp[ip].reasons[reason] || 0) + 1;
+    }
+    const topFailingIPs = Object.values(byIp)
+      .map(e => ({ ip: e.ip, count: e.count, emails: Array.from(e.emails), reasons: e.reasons }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    res.json({ events: logs, topFailingIPs });
+  } catch (error) {
+    logger.error('Auth events error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── FEATURE USAGE (agregované z existujúceho AuditLog) ────────────
+
+// GET /api/admin/usage?period=24h|7d|30d
+router.get('/usage', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const period = req.query.period || '7d';
+    const periodMs = {
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000
+    }[period] || 7 * 24 * 60 * 60 * 1000;
+    const since = new Date(Date.now() - periodMs);
+
+    const USAGE_ACTIONS = [
+      'contact.created', 'contact.updated', 'contact.deleted',
+      'task.created', 'task.deleted',
+      'message.created', 'message.approved', 'message.rejected',
+      'auth.register', 'auth.login',
+      'workspace.created'
+    ];
+
+    const aggregation = await AuditLog.aggregate([
+      { $match: { action: { $in: USAGE_ACTIONS }, createdAt: { $gte: since } } },
+      { $group: { _id: '$action', count: { $sum: 1 } } },
+      { $project: { _id: 0, action: '$_id', count: 1 } },
+      { $sort: { count: -1 } }
+    ]);
+
+    const daily = await AuditLog.aggregate([
+      { $match: { action: { $in: USAGE_ACTIONS }, createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } },
+      {
+        $group: {
+          _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } },
+          count: { $sum: 1 }
+        }
+      },
+      { $project: { _id: 0, day: '$_id.day', count: 1 } },
+      { $sort: { day: 1 } }
+    ]);
+
+    res.json({ period, since, actions: aggregation, dailyTrend: daily });
+  } catch (error) {
+    logger.error('Usage aggregation error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── REVENUE SNAPSHOT ──────────────────────────────────────────────
+
+// GET /api/admin/revenue — MRR, plans breakdown, trials ending
+router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const excludeSuperAdmin = { email: { $ne: SUPER_ADMIN_EMAIL } };
+
+    // Plan prices (EUR/mes) — udržuj sync s BillingPage
+    const PRICES = { free: 0, team: 4.99, pro: 9.99 };
+
+    const now = new Date();
+    const plans = await User.aggregate([
+      { $match: excludeSuperAdmin },
+      { $group: { _id: '$subscription.plan', count: { $sum: 1 } } }
+    ]);
+    const plansMap = plans.reduce((acc, p) => ({ ...acc, [p._id || 'free']: p.count }), {});
+
+    const activePaidUsers = await User.find({
+      ...excludeSuperAdmin,
+      'subscription.plan': { $in: ['team', 'pro'] },
+      'subscription.paidUntil': { $gt: now }
+    }).select('subscription.plan subscription.period').lean();
+
+    let mrr = 0;
+    for (const u of activePaidUsers) {
+      const plan = u.subscription?.plan;
+      const period = u.subscription?.period || 'monthly';
+      const price = PRICES[plan] || 0;
+      mrr += period === 'yearly' ? price * 0.83 : price;
+    }
+
+    const d30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const newSubs30d = await User.countDocuments({
+      ...excludeSuperAdmin,
+      'subscription.plan': { $in: ['team', 'pro'] },
+      'subscription.createdAt': { $gte: d30 }
+    });
+
+    const in7d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const endingSoon = await User.find({
+      ...excludeSuperAdmin,
+      'subscription.plan': { $in: ['team', 'pro'] },
+      'subscription.paidUntil': { $gte: now, $lte: in7d }
+    }).select('username email subscription.plan subscription.paidUntil').limit(20).lean();
+
+    res.json({
+      mrr: Math.round(mrr * 100) / 100,
+      activePaidCount: activePaidUsers.length,
+      plansBreakdown: plansMap,
+      newSubs30d,
+      endingSoon: endingSoon.map(u => ({
+        username: u.username,
+        email: u.email,
+        plan: u.subscription?.plan,
+        paidUntil: u.subscription?.paidUntil
+      }))
+    });
+  } catch (error) {
+    logger.error('Revenue error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

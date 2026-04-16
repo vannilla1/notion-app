@@ -34,6 +34,8 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
 const logger = require('./utils/logger');
 const { initSentry } = require('./utils/sentry');
+const { errorMiddleware: serverErrorMirrorMiddleware } = require('./services/serverErrorService');
+const onlineUsers = require('./services/onlineUsers');
 
 const app = express();
 
@@ -127,6 +129,12 @@ app.use('/api/admin', adminRoutes);
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
 
+// In-house server error mirror — beží paralelne so Sentry, errory
+// zapisuje aj do našej Mongo DB pre SuperAdmin Diagnostics dashboard.
+// Musí byť PRED Sentry handlerom aj finálnym handlerom, aby zachytila
+// všetky 5xx chyby. next(err) posúva chybu ďalej.
+app.use(serverErrorMirrorMiddleware);
+
 // Sentry error handler (must be before other error handlers)
 app.use(sentry.errorHandler);
 
@@ -152,6 +160,15 @@ io.use(authenticateSocket);
 
 io.on('connection', async (socket) => {
   logger.socket('connected', socket.user.id, socket.user.username);
+
+  // Registrácia do online-users registry pre SuperAdmin dashboard.
+  // Toto je ľahký in-memory Map, pri reštarte sa zmaže (a to je OK —
+  // klienti sa reconnectnú a znova zapíšu).
+  onlineUsers.addConnection(socket.user.id, socket.id, {
+    username: socket.user.username,
+    email: socket.user.email,
+    userAgent: socket.handshake?.headers?.['user-agent']
+  });
 
   // Join user's personal room for private updates
   socket.join(`user-${socket.user.id}`);
@@ -206,6 +223,7 @@ io.on('connection', async (socket) => {
 
   socket.on('disconnect', () => {
     logger.socket('disconnected', socket.user.id, socket.user.username);
+    onlineUsers.removeConnection(socket.id);
   });
 
   socket.on('error', (error) => {
@@ -302,6 +320,13 @@ server.listen(PORT, () => {
         scheduleSubscriptionCleanup();
         startGoogleTasksPolling(io);
         initializeCalendarWebhooks(io);
+        // Health monitor — každých 5 min kontroluje Mongo/SMTP/APNs/Google/Memory
+        // a pri 3× zlyhaní za sebou pošle email na support@prplcrm.eu
+        try {
+          require('./jobs/healthMonitor').start();
+        } catch (err) {
+          logger.error('Failed to start health monitor', { error: err.message });
+        }
       }, 60000);
 
     }

@@ -8,6 +8,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 const TABS = [
   { id: 'overview', label: 'Prehľad', icon: '📊' },
+  { id: 'diagnostics', label: 'Diagnostika', icon: '🔬' },
   { id: 'users', label: 'Používatelia', icon: '👥' },
   { id: 'workspaces', label: 'Workspace-y', icon: '🏢' },
   { id: 'charts', label: 'Grafy', icon: '📈' },
@@ -71,6 +72,7 @@ function AdminPanel() {
 
       <div className="sa-content">
         {activeTab === 'overview' && <OverviewTab />}
+        {activeTab === 'diagnostics' && <DiagnosticsTab />}
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'workspaces' && <WorkspacesTab />}
         {activeTab === 'charts' && <ChartsTab />}
@@ -2232,6 +2234,676 @@ function PromoCodesTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ─── DIAGNOSTICS TAB ────────────────────────────────────────────────
+// SuperAdmin diagnostické centrum. Sub-nav (local state) prepína
+// medzi šiestimi sekciami:
+//   - Chyby (default) — zoznam 5xx server errorov z našej DB
+//   - Výkon — top 10 najpomalších routes + 4xx/5xx rate
+//   - Zdravie — Mongo/SMTP/APNs/Google/Memory status
+//   - Aktívni — online users + failed logins
+//   - Využitie — agregované feature usage z AuditLog
+//   - Príjmy — MRR + plans breakdown + trials ending
+// ═══════════════════════════════════════════════════════════════════
+function DiagnosticsTab() {
+  const [section, setSection] = useState('errors');
+
+  const subTabs = [
+    { id: 'errors', label: 'Chyby', icon: '🔴' },
+    { id: 'performance', label: 'Výkon', icon: '🟡' },
+    { id: 'health', label: 'Zdravie', icon: '🟢' },
+    { id: 'active', label: 'Aktívni', icon: '🔵' },
+    { id: 'usage', label: 'Využitie', icon: '🟣' },
+    { id: 'revenue', label: 'Príjmy', icon: '💰' }
+  ];
+
+  return (
+    <div className="sa-diagnostics">
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', flexWrap: 'wrap' }}>
+        {subTabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setSection(t.id)}
+            style={{
+              padding: '8px 14px',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              background: section === t.id ? 'var(--accent-color, #6366f1)' : 'transparent',
+              color: section === t.id ? 'white' : 'var(--text-primary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: section === t.id ? 600 : 400
+            }}
+          >
+            <span style={{ marginRight: '6px' }}>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'errors' && <DiagErrorsSection />}
+      {section === 'performance' && <DiagPerformanceSection />}
+      {section === 'health' && <DiagHealthSection />}
+      {section === 'active' && <DiagActiveSection />}
+      {section === 'usage' && <DiagUsageSection />}
+      {section === 'revenue' && <DiagRevenueSection />}
+    </div>
+  );
+}
+
+// ─── DIAG: ERRORS ───────────────────────────────────────────────────
+function DiagErrorsSection() {
+  const [stats, setStats] = useState(null);
+  const [errors, setErrors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [filter, setFilter] = useState({ resolved: 'false', search: '' });
+  const [selected, setSelected] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { page, limit: 30 };
+      if (filter.resolved !== 'all') params.resolved = filter.resolved;
+      if (filter.search) params.search = filter.search;
+      const [listRes, statsRes] = await Promise.all([
+        adminApi.get('/api/admin/errors', { params }),
+        adminApi.get('/api/admin/errors/stats')
+      ]);
+      setErrors(listRes.data.errors);
+      setTotalPages(listRes.data.pages);
+      setStats(statsRes.data);
+    } catch (err) {
+      console.error('Errors load failed', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, filter.resolved, filter.search]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSendToClaude = (err) => {
+    const prompt = `Prosím oprav túto chybu v Prpl CRM.
+
+Error: ${err.message}
+Status: ${err.statusCode}
+Route: ${err.method} ${err.path}
+Count: ${err.count}× (prvý výskyt ${new Date(err.firstSeen).toLocaleString('sk-SK')})
+
+Stack:
+${err.stack || '(bez stacku)'}
+
+Kontext:
+${JSON.stringify(err.context || {}, null, 2)}
+
+User: ${err.userId?.email || 'nezalogovaný'}
+Workspace: ${err.workspaceId || 'N/A'}
+`;
+    navigator.clipboard.writeText(prompt).then(() => {
+      alert('Skopírované do schránky. Vlož do Claude Code.');
+    }).catch(() => alert('Kopírovanie zlyhalo'));
+  };
+
+  const handleResolve = async (err, resolved) => {
+    const notes = resolved ? (prompt('Poznámka k opraveniu (voliteľné):') || '') : '';
+    try {
+      await adminApi.put(`/api/admin/errors/${err._id}/resolve`, { resolved, notes });
+      await load();
+      setSelected(null);
+    } catch (e) {
+      alert('Nepodarilo sa zmeniť stav');
+    }
+  };
+
+  const handleDelete = async (err) => {
+    if (!confirm(`Zmazať záznam "${err.message.slice(0, 50)}..."?`)) return;
+    try {
+      await adminApi.delete(`/api/admin/errors/${err._id}`);
+      await load();
+      setSelected(null);
+    } catch (e) {
+      alert('Nepodarilo sa zmazať');
+    }
+  };
+
+  return (
+    <div>
+      {/* Stat karty */}
+      {stats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+          <DiagStat label="Chyby za 24h" value={stats.count24h} color="#ef4444" />
+          <DiagStat label="Chyby za 7d" value={stats.count7d} color="#f59e0b" />
+          <DiagStat label="Chyby za 30d" value={stats.count30d} color="#6366f1" />
+          <DiagStat label="Neopravené" value={stats.unresolved} color="#ef4444" />
+        </div>
+      )}
+
+      {/* Filtre */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <select
+          value={filter.resolved}
+          onChange={(e) => { setFilter({ ...filter, resolved: e.target.value }); setPage(1); }}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
+        >
+          <option value="false">Len neopravené</option>
+          <option value="true">Len opravené</option>
+          <option value="all">Všetky</option>
+        </select>
+        <input
+          type="text"
+          placeholder="Hľadať v message / path..."
+          value={filter.search}
+          onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
+          style={{ flex: 1, minWidth: '200px', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
+        />
+        <button onClick={() => { setPage(1); load(); }} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
+      </div>
+
+      {loading ? <div className="sa-loading">Načítavam...</div> : (
+        <>
+          {errors.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Žiadne chyby 🎉</div>
+          ) : (
+            <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                    <th style={{ padding: '10px' }}>Posledný výskyt</th>
+                    <th style={{ padding: '10px' }}>Route</th>
+                    <th style={{ padding: '10px' }}>Message</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>Count</th>
+                    <th style={{ padding: '10px' }}>User</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>Stav</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errors.map(err => (
+                    <tr key={err._id} onClick={() => setSelected(err)} style={{ cursor: 'pointer', borderTop: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(err.lastSeen).toLocaleString('sk-SK')}</td>
+                      <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '12px' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 6px', borderRadius: '3px', background: 'var(--bg-secondary)', marginRight: '6px' }}>{err.method}</span>
+                        {err.path}
+                      </td>
+                      <td style={{ padding: '10px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{err.message}</td>
+                      <td style={{ padding: '10px', textAlign: 'center', fontWeight: 600 }}>{err.count}</td>
+                      <td style={{ padding: '10px', fontSize: '12px' }}>{err.userId?.email || '—'}</td>
+                      <td style={{ padding: '10px', textAlign: 'center' }}>{err.resolved ? '✅' : '🔴'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '16px' }}>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn btn-secondary" style={{ fontSize: '13px' }}>◀</button>
+              <span style={{ padding: '6px 12px' }}>{page} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="btn btn-secondary" style={{ fontSize: '13px' }}>▶</button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Detail modal */}
+      {selected && (
+        <div
+          onClick={() => setSelected(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', padding: '24px', maxWidth: '900px', width: '92%', maxHeight: '85vh', overflow: 'auto' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Detail chyby</h3>
+              <button onClick={() => setSelected(null)} className="btn btn-secondary" style={{ fontSize: '13px' }}>Zavrieť</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '16px', fontSize: '13px' }}>
+              <div><strong>Status:</strong> {selected.statusCode}</div>
+              <div><strong>Count:</strong> {selected.count}×</div>
+              <div><strong>Route:</strong> <code>{selected.method} {selected.path}</code></div>
+              <div><strong>Name:</strong> {selected.name}</div>
+              <div><strong>Prvý výskyt:</strong> {new Date(selected.firstSeen).toLocaleString('sk-SK')}</div>
+              <div><strong>Posledný:</strong> {new Date(selected.lastSeen).toLocaleString('sk-SK')}</div>
+              <div><strong>User:</strong> {selected.userId?.email || 'nezalogovaný'}</div>
+              <div><strong>IP:</strong> {selected.ipAddress || '—'}</div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <strong>Message:</strong>
+              <div style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: '4px', fontFamily: 'monospace', fontSize: '13px' }}>{selected.message}</div>
+            </div>
+
+            {selected.stack && (
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Stack trace:</strong>
+                <pre style={{ padding: '10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '300px' }}>{selected.stack}</pre>
+              </div>
+            )}
+
+            {selected.context && Object.keys(selected.context).length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Kontext:</strong>
+                <pre style={{ padding: '10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>{JSON.stringify(selected.context, null, 2)}</pre>
+              </div>
+            )}
+
+            {selected.notes && (
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Poznámky:</strong>
+                <div style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: '4px', fontSize: '13px' }}>{selected.notes}</div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '20px' }}>
+              <button onClick={() => handleSendToClaude(selected)} className="btn btn-primary" style={{ fontSize: '13px' }}>
+                🤖 Skopírovať pre Claude
+              </button>
+              {!selected.resolved ? (
+                <button onClick={() => handleResolve(selected, true)} className="btn btn-secondary" style={{ fontSize: '13px' }}>
+                  ✅ Označiť opravené
+                </button>
+              ) : (
+                <button onClick={() => handleResolve(selected, false)} className="btn btn-secondary" style={{ fontSize: '13px' }}>
+                  🔄 Znova otvoriť
+                </button>
+              )}
+              <a
+                href="https://sentry.io/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                style={{ fontSize: '13px', textDecoration: 'none' }}
+              >
+                🔗 Otvoriť Sentry
+              </a>
+              <button onClick={() => handleDelete(selected)} style={{ fontSize: '13px', padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', marginLeft: 'auto' }}>
+                🗑️ Zmazať
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── DIAG: PERFORMANCE ──────────────────────────────────────────────
+function DiagPerformanceSection() {
+  const [slowData, setSlowData] = useState(null);
+  const [errData, setErrData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      adminApi.get('/api/admin/performance/slow'),
+      adminApi.get('/api/admin/performance/errors-by-route')
+    ])
+      .then(([s, e]) => { setSlowData(s.data); setErrData(e.data); })
+      .catch(err => console.error('Performance load', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+
+  return (
+    <div>
+      <h3 style={{ marginTop: 0 }}>Najpomalšie endpointy</h3>
+      <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+              <th style={{ padding: '10px' }}>Route</th>
+              <th style={{ padding: '10px', textAlign: 'right' }}>Avg (ms)</th>
+              <th style={{ padding: '10px', textAlign: 'right' }}>Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(slowData?.routes || []).map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
+                <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '12px' }}>{r.route || r.path || '—'}</td>
+                <td style={{ padding: '10px', textAlign: 'right', fontWeight: 600, color: (r.avgDuration > 1000 ? '#ef4444' : r.avgDuration > 500 ? '#f59e0b' : 'inherit') }}>{Math.round(r.avgDuration)}</td>
+                <td style={{ padding: '10px', textAlign: 'right' }}>{r.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {(slowData?.routes || []).length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Nie sú dáta (apiMetrics je in-memory, reštart ho vymaže)</div>}
+      </div>
+
+      {errData && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+          {Object.entries(errData.statusCodes || {}).map(([code, count]) => (
+            <DiagStat key={code} label={`Status ${code}`} value={count} color={code.startsWith('5') ? '#ef4444' : code.startsWith('4') ? '#f59e0b' : '#10b981'} />
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
+        Celkom requestov: {slowData?.totalRequests || 0} • Error rate: {slowData?.errorRate || '0'}%
+      </div>
+    </div>
+  );
+}
+
+// ─── DIAG: HEALTH ───────────────────────────────────────────────────
+function DiagHealthSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await adminApi.get('/api/admin/health/full');
+      setData(res.data);
+    } catch (err) {
+      console.error('Health load', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const res = await adminApi.post('/api/admin/health/refresh');
+      setData(res.data);
+    } catch (err) {
+      alert('Refresh zlyhal');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+  if (!data?.checks) return <div className="sa-error">Žiadne dáta</div>;
+
+  const statusColor = (s) => s === 'ok' ? '#10b981' : s === 'warn' ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+          Posledná kontrola: {data.checkedAt ? new Date(data.checkedAt).toLocaleString('sk-SK') : '—'}
+        </div>
+        <button onClick={refresh} disabled={refreshing} className="btn btn-secondary" style={{ fontSize: '13px' }}>
+          {refreshing ? 'Kontrolujem...' : '🔄 Re-check'}
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+        {Object.entries(data.checks).map(([name, check]) => (
+          <div key={name} style={{ padding: '16px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: statusColor(check.status) }} />
+              <strong style={{ textTransform: 'capitalize' }}>{name}</strong>
+              <span style={{ marginLeft: 'auto', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: statusColor(check.status), color: 'white', textTransform: 'uppercase' }}>
+                {check.status}
+              </span>
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{check.message}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── DIAG: ACTIVE USERS ─────────────────────────────────────────────
+function DiagActiveSection() {
+  const [online, setOnline] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const [o, a] = await Promise.all([
+        adminApi.get('/api/admin/online-users'),
+        adminApi.get('/api/admin/auth-events')
+      ]);
+      setOnline(o.data);
+      setAuth(a.data);
+    } catch (err) {
+      console.error('Active load', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15000); // auto-refresh každých 15s
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+        <DiagStat label="Online používatelia" value={online?.count || 0} color="#10b981" />
+        <DiagStat label="Aktívne sockety" value={online?.socketCount || 0} color="#6366f1" />
+        <DiagStat label="Failed logins (24h)" value={(auth?.events || []).filter(e => e.action === 'auth.login_failed').length} color="#ef4444" />
+        <DiagStat label="Registrácie (24h)" value={(auth?.events || []).filter(e => e.action === 'auth.register').length} color="#f59e0b" />
+      </div>
+
+      <h3 style={{ marginTop: 0 }}>Online teraz</h3>
+      <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+        {(online?.users || []).length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Nikto nie je online</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                <th style={{ padding: '10px' }}>Používateľ</th>
+                <th style={{ padding: '10px' }}>Email</th>
+                <th style={{ padding: '10px' }}>Od</th>
+                <th style={{ padding: '10px', textAlign: 'center' }}>Sockety</th>
+              </tr>
+            </thead>
+            <tbody>
+              {online.users.map(u => (
+                <tr key={u.userId} style={{ borderTop: '1px solid var(--border-color)' }}>
+                  <td style={{ padding: '10px' }}>{u.username || '—'}</td>
+                  <td style={{ padding: '10px' }}>{u.email || '—'}</td>
+                  <td style={{ padding: '10px', color: 'var(--text-muted)' }}>{u.since ? new Date(u.since).toLocaleTimeString('sk-SK') : '—'}</td>
+                  <td style={{ padding: '10px', textAlign: 'center' }}>{u.socketCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h3>Podozrivé IP adresy (neúspešné logins)</h3>
+      <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+        {(auth?.topFailingIPs || []).length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadne podozrivé IP</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                <th style={{ padding: '10px' }}>IP</th>
+                <th style={{ padding: '10px', textAlign: 'right' }}>Pokusy</th>
+                <th style={{ padding: '10px' }}>Email(y)</th>
+                <th style={{ padding: '10px' }}>Dôvody</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auth.topFailingIPs.map((ip, i) => (
+                <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
+                  <td style={{ padding: '10px', fontFamily: 'monospace' }}>{ip.ip}</td>
+                  <td style={{ padding: '10px', textAlign: 'right', fontWeight: 600, color: ip.count > 5 ? '#ef4444' : 'inherit' }}>{ip.count}</td>
+                  <td style={{ padding: '10px', fontSize: '12px' }}>{ip.emails.join(', ')}</td>
+                  <td style={{ padding: '10px', fontSize: '12px', color: 'var(--text-muted)' }}>{Object.entries(ip.reasons).map(([r, c]) => `${r}(${c})`).join(', ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── DIAG: USAGE ────────────────────────────────────────────────────
+function DiagUsageSection() {
+  const [period, setPeriod] = useState('7d');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    adminApi.get('/api/admin/usage', { params: { period } })
+      .then(res => setData(res.data))
+      .catch(err => console.error('Usage load', err))
+      .finally(() => setLoading(false));
+  }, [period]);
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        {['24h', '7d', '30d'].map(p => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            style={{
+              padding: '6px 14px',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              background: period === p ? 'var(--accent-color, #6366f1)' : 'var(--bg-primary)',
+              color: period === p ? 'white' : 'var(--text-primary)',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+        {(data?.actions || []).map(a => (
+          <DiagStat key={a.action} label={a.action} value={a.count} color="#6366f1" />
+        ))}
+      </div>
+
+      {(data?.dailyTrend || []).length > 0 && (
+        <div style={{ marginTop: '24px' }}>
+          <h3>Denný trend (7 dní)</h3>
+          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+            <Line
+              data={{
+                labels: data.dailyTrend.map(d => d.day),
+                datasets: [{
+                  label: 'Aktivita',
+                  data: data.dailyTrend.map(d => d.count),
+                  borderColor: '#6366f1',
+                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                  fill: true,
+                  tension: 0.3
+                }]
+              }}
+              options={{ responsive: true, plugins: { legend: { display: false } } }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── DIAG: REVENUE ──────────────────────────────────────────────────
+function DiagRevenueSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.get('/api/admin/revenue')
+      .then(res => setData(res.data))
+      .catch(err => console.error('Revenue load', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+  if (!data) return <div className="sa-error">Žiadne dáta</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+        <div style={{ padding: '24px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', borderRadius: 'var(--radius-md)', color: 'white' }}>
+          <div style={{ fontSize: '13px', opacity: 0.9 }}>MRR (mesačný príjem)</div>
+          <div style={{ fontSize: '32px', fontWeight: 700, marginTop: '8px' }}>{data.mrr.toFixed(2)} €</div>
+        </div>
+        <DiagStat label="Platení používatelia" value={data.activePaidCount} color="#10b981" />
+        <DiagStat label="Nové subs (30d)" value={data.newSubs30d} color="#f59e0b" />
+      </div>
+
+      <h3>Rozdelenie plánov</h3>
+      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '24px' }}>
+        {data.plansBreakdown && Object.keys(data.plansBreakdown).length > 0 ? (
+          <div style={{ maxWidth: '300px', margin: '0 auto' }}>
+            <Doughnut
+              data={{
+                labels: Object.keys(data.plansBreakdown),
+                datasets: [{
+                  data: Object.values(data.plansBreakdown),
+                  backgroundColor: ['#94a3b8', '#6366f1', '#8b5cf6', '#f59e0b']
+                }]
+              }}
+              options={{ responsive: true }}
+            />
+          </div>
+        ) : <div style={{ color: 'var(--text-muted)', textAlign: 'center' }}>Žiadne dáta</div>}
+      </div>
+
+      {data.endingSoon && data.endingSoon.length > 0 && (
+        <>
+          <h3>Predplatné končiace v nasledujúcich 7 dňoch</h3>
+          <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                  <th style={{ padding: '10px' }}>Používateľ</th>
+                  <th style={{ padding: '10px' }}>Email</th>
+                  <th style={{ padding: '10px' }}>Plán</th>
+                  <th style={{ padding: '10px' }}>Končí</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.endingSoon.map((u, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
+                    <td style={{ padding: '10px' }}>{u.username}</td>
+                    <td style={{ padding: '10px' }}>{u.email}</td>
+                    <td style={{ padding: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{u.plan}</td>
+                    <td style={{ padding: '10px', color: '#ef4444' }}>{new Date(u.paidUntil).toLocaleDateString('sk-SK')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Helper komponent pre stat karty (reused across diagnostics sections)
+function DiagStat({ label, value, color }) {
+  return (
+    <div style={{ padding: '16px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '24px', fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</div>
     </div>
   );
 }

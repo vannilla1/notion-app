@@ -303,6 +303,15 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       logger.auth('login', null, email, false, req.ip);
+      // Audit log failed login — email not found (pre SuperAdmin Diagnostics)
+      auditService.logAction({
+        action: 'auth.login_failed',
+        category: 'auth',
+        email,
+        details: { reason: 'email_not_found' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
       return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
@@ -310,6 +319,19 @@ router.post('/login', loginLimiter, async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       logger.auth('login', user._id, user.username, false, req.ip);
+      // Audit log failed login — wrong password
+      auditService.logAction({
+        userId: user._id.toString(),
+        username: user.username,
+        email: user.email,
+        action: 'auth.login_failed',
+        category: 'auth',
+        targetType: 'user',
+        targetId: user._id.toString(),
+        details: { reason: 'wrong_password' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
       return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 

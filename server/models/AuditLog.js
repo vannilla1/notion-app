@@ -5,7 +5,7 @@ const auditLogSchema = new mongoose.Schema({
   username: String,
   email: String,
   action: { type: String, required: true, index: true }, // e.g. 'user.role_changed', 'user.plan_changed', 'user.deleted', 'workspace.created', 'workspace.deleted', 'contact.created', 'task.created', etc.
-  category: { type: String, enum: ['user', 'workspace', 'contact', 'task', 'message', 'system', 'auth', 'billing'], index: true },
+  category: { type: String, enum: ['user', 'workspace', 'contact', 'task', 'message', 'system', 'auth', 'billing', 'usage'], index: true },
   targetType: String, // 'user', 'workspace', 'contact', 'task', 'message'
   targetId: String,
   targetName: String,

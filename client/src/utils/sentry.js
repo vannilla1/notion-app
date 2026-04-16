@@ -32,16 +32,17 @@ const initSentry = () => {
     environment: import.meta.env.MODE || 'development',
     // Capture 10% of transactions in production, 100% in dev
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
-    // Capture 100% of errors always
-    replaysOnErrorSampleRate: 1.0,
-    // Capture 10% of sessions for replay in production
-    replaysSessionSampleRate: import.meta.env.PROD ? 0.1 : 0,
+    // NOTE: Replay integrácia BOLA odstránená zámerne. Dôvody:
+    // 1) RAM footprint: rrweb-based Replay pridával ~10-15 MB RAM v
+    //    prehliadači a prispieval k WKWebView memory jetsam crashom na iOS.
+    // 2) GDPR: Replay nahráva celý DOM — aj s citlivými údajmi. Sentry.io
+    //    ukladá dáta v USA, čo je komplikácia pre EÚ GDPR.
+    // 3) Vlastný Diagnostics dashboard v SuperAdmin (stack + breadcrumbs +
+    //    server-side error mirror) pokrýva väčšinu potrieb bez video záznamu.
+    // Ak by si v budúcnosti chcel Replay naspäť, pridaj replayIntegration
+    // + replaysOnErrorSampleRate + replaysSessionSampleRate späť.
     integrations: [
       Sentry.browserTracingIntegration(),
-      Sentry.replayIntegration({
-        maskAllText: false,
-        blockAllMedia: false,
-      }),
     ],
     // Filter out sensitive data + drop non-actionable environment errors
     beforeSend(event, hint) {
