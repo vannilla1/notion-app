@@ -250,6 +250,17 @@ const sendAPNsNotification = async (userId, payload) => {
     const url = generateNotificationUrl(payload.type, payload.data);
     const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
+    // Diagnostic logging — verify ws= is actually in the URL we send.
+    // Appears in Render logs so we can confirm the server side of the
+    // cross-workspace deep-link flow is correct.
+    logger.info('[APNs] Sending push', {
+      userId: String(userId),
+      type: payload.type,
+      url,
+      hasWs: url.includes('ws='),
+      dataWorkspaceId: payload.data?.workspaceId || null
+    });
+
     const apnsPayload = {
       aps: {
         alert: {

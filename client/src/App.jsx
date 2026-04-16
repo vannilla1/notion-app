@@ -67,18 +67,25 @@ function AppContent() {
       const cleanPath = full.pathname + (full.searchParams.toString() ? '?' + full.searchParams.toString() : '');
 
       if (targetWs && targetWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId)) {
-        // Only switch if the target workspace is one the user belongs to
         const isMember = (workspaces || []).some(w => (w.id || w._id)?.toString() === targetWs);
+        console.log('[DeepLink] navigateWithWorkspace: target=', targetWs, 'current=', currentWorkspaceId, 'isMember=', isMember);
         if (isMember) {
           try {
             await switchWorkspace(targetWs);
+            console.log('[DeepLink] switchWorkspace resolved OK →', targetWs);
           } catch (e) {
-            // If switch fails, still navigate — user lands on wrong ws but visible
+            // Don't silently swallow — log loudly so we can see in Render logs
+            // / Sentry if the switch itself is what's breaking the flow. User
+            // still lands on the section with the wrong workspace visible.
+            console.error('[DeepLink] switchWorkspace FAILED:', e?.response?.status, e?.message);
           }
+        } else {
+          console.warn('[DeepLink] targetWs not in membership list — skipping switch. workspaces=', workspaces);
         }
       }
       navigate(cleanPath, { replace: true });
-    } catch {
+    } catch (e) {
+      console.error('[DeepLink] navigateWithWorkspace threw:', e?.message);
       navigate(rawPath, { replace: true });
     }
   }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
@@ -345,7 +352,19 @@ function AppContent() {
   const publicPages = ['/', '/login', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
 
-  if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading))) {
+  // Block child-route rendering while a deep-link workspace switch is still
+  // pending. Without this, Tasks/CRM/Messages mount with the OLD workspace,
+  // fire fetchTasks/fetchContacts/etc. against that workspace, and show the
+  // wrong data. The useLayoutEffect above is already handling the switch —
+  // we just need to pause rendering until `ws=` is either stripped (switch
+  // done) or resolved to the current workspace. Blocks only authenticated
+  // routes; public routes (landing page, login) don't care about workspace.
+  const urlParams = new URLSearchParams(location.search);
+  const urlWs = urlParams.get('ws');
+  const pendingWsSwitch = !!urlWs && !!currentWorkspaceId &&
+    urlWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId);
+
+  if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading) || (isAuthenticated && pendingWsSwitch))) {
     return (
       <div style={{
         display: 'flex',

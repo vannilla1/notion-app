@@ -149,8 +149,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     /// pushManager.pendingDeepLink. Shared by cold-start (launchOptions)
     /// and hot/background taps (didReceive response).
     fileprivate func extractDeepLink(from userInfo: [AnyHashable: Any]) {
+        // Diagnostic: dump entire payload so we can verify in Console.app
+        // that ws= actually arrived from the server. Cross-workspace routing
+        // depends on this — if ws= is missing here, the bug is server-side.
+        print("[Push] extractDeepLink: full userInfo=\(userInfo)")
         if let urlString = userInfo["url"] as? String, !urlString.isEmpty, urlString != "/" {
-            print("[Push] Deep link URL: \(urlString)")
+            let hasWs = urlString.contains("ws=")
+            print("[Push] Deep link URL: \(urlString) (hasWs=\(hasWs))")
             self.pushManager.pendingDeepLink = urlString
             return
         }
