@@ -34,6 +34,28 @@ export const AuthProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [token]);
 
+  // Cross-tab auth sync: ak iný tab zmení token v localStorage (login/logout
+  // ako iný user), tento tab má v React state stále starý token, ale axios
+  // interceptor v api.js číta localStorage.getItem('token') na KAŽDOM requeste
+  // — takže ďalší API call by šiel s novým tokenom, ale UI by ukazovalo
+  // starého usera / workspace / permissions. Plný reload je najbezpečnejší:
+  // reinicializuje všetky contexty (Auth, Workspace, Socket) konzistentne
+  // z novej hodnoty v localStorage.
+  //
+  // Storage event sa z princípu NEpáli v tabe, ktorý zmenu vyvolal — takže
+  // vlastný login()/logout()/register() v tomto tabe tu nespustí reload.
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key !== 'token') return;
+      // Ignorovať, ak sa hodnota reálne nemenila (niektoré prehliadače
+      // emitujú event aj pri setItem s rovnakou hodnotou).
+      if (e.newValue === e.oldValue) return;
+      window.location.reload();
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   const fetchUser = async () => {
     try {
       const res = await api.get('/api/auth/me');
