@@ -121,6 +121,13 @@ function Login() {
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Načítavam...' : isRegister ? 'Registrovať' : 'Prihlásiť'}
           </button>
+          {!isRegister && (
+            <p style={{ fontSize: '13px', textAlign: 'center', marginTop: '12px' }}>
+              <Link to="/forgot-password" style={{ color: 'var(--accent-color, #6366f1)', textDecoration: 'none' }}>
+                Zabudli ste heslo?
+              </Link>
+            </p>
+          )}
           {isRegister && (
             <p style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginTop: '12px', textAlign: 'center', lineHeight: '1.5' }}>
               Registráciou súhlasíte s{' '}

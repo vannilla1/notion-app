@@ -66,6 +66,17 @@ const userSchema = new mongoose.Schema({
     ref: 'Workspace',
     default: null
   },
+  // Password reset flow — token sa v DB ukladá ako SHA-256 hash, nie plain.
+  // Plain token vidí len user v emaili a v URL query stringu.
+  resetPasswordTokenHash: {
+    type: String,
+    default: null,
+    index: true // lookup pri POST /reset-password
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null
+  },
   lastCalendarExport: {
     type: Date,
     default: null

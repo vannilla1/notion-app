@@ -28,6 +28,8 @@ const BillingPage = lazy(() => import('./pages/BillingPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminPanel = lazy(() => import('./pages/AdminPanel'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 const RouteFallback = () => (
   <div style={{
@@ -357,7 +359,7 @@ function AppContent() {
     };
   }, [isAuthenticated, navigateWithWorkspace]);
 
-  const publicPages = ['/', '/login', '/ochrana-udajov', '/vop', '/invite', '/admin'];
+  const publicPages = ['/', '/login', '/forgot-password', '/reset-password', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
 
   // Block child-route rendering while a deep-link workspace switch is still
@@ -404,6 +406,14 @@ function AppContent() {
         <Route
           path="/login"
           element={isAuthenticated ? <Navigate to="/app" /> : <Login />}
+        />
+        <Route
+          path="/forgot-password"
+          element={isAuthenticated ? <Navigate to="/app" /> : <ForgotPassword />}
+        />
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
         />
         <Route
           path="/app"

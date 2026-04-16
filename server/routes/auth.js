@@ -1,12 +1,23 @@
 const express = require('express');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
-const { loginLimiter, registerLimiter, passwordChangeLimiter } = require('../middleware/rateLimiter');
+const {
+  loginLimiter,
+  registerLimiter,
+  passwordChangeLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter
+} = require('../middleware/rateLimiter');
 const auditService = require('../services/auditService');
-const { notifyNewRegistration } = require('../services/adminEmailService');
+const {
+  notifyNewRegistration,
+  sendWelcomeEmail,
+  sendPasswordResetEmail
+} = require('../services/adminEmailService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -112,9 +123,164 @@ router.post('/register', registerLimiter, async (req, res) => {
 
     // Admin email notification (fire and forget)
     notifyNewRegistration(user);
+
+    // Welcome email for the new user (fire and forget) — neblokuje
+    // HTTP odpoveď, aby SMTP latency nespomalovala registráciu.
+    sendWelcomeEmail({ toEmail: user.email, username: user.username })
+      .catch(err => logger.error('Welcome email failed', {
+        error: err.message, userId: user._id.toString()
+      }));
   } catch (error) {
     logger.error('Registration error', { error: error.message, ip: req.ip });
     res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Forgot / reset password flow
+//
+// Bezpečnostné pravidlá:
+//   1. Nikdy neprezraď, či email v DB existuje (prevencia user enumeration).
+//      Vždy vráť 200 s rovnakou správou, bez ohľadu na to, či sme email
+//      našli alebo nie.
+//   2. Token je kryptograficky bezpečný (crypto.randomBytes(32) = 256 bit
+//      entropy). V DB uchovávame SHA-256 hash, nie plain token — plain ide
+//      len do emailu (linku), ktorý user dostane. Keď útočník získa DB
+//      dump, nevie z hash-u odvodiť plain token.
+//   3. Expiry 1 hodina od vytvorenia.
+//   4. Jednorázové použitie — token sa maže pri úspešnom resete aj pri
+//      chybnom pokuse s expirovaným tokenom (cleanup).
+//   5. Super-admin (support@prplcrm.eu) nemôže používať password reset flow
+//      — musí používať admin panel.
+// ─────────────────────────────────────────────────────────────────────────
+
+const hashResetToken = (plainToken) =>
+  crypto.createHash('sha256').update(plainToken).digest('hex');
+
+// POST /api/auth/forgot-password — user zadá email, pošleme mu reset link
+router.post('/forgot-password', forgotPasswordLimiter, async (req, res) => {
+  const genericResponse = {
+    message: 'Ak je tento email zaregistrovaný, poslali sme na neho odkaz na obnovenie hesla.'
+  };
+
+  try {
+    const { email } = req.body || {};
+
+    if (!email || typeof email !== 'string') {
+      // Stále vrátime generickú odpoveď — útočník nemá vedieť, že email
+      // chýba vs. neexistuje. Minimálna validácia len aby sme nespustili
+      // DB lookup na absurdný payload.
+      return res.json(genericResponse);
+    }
+
+    // Super-admin nemôže používať reset flow
+    if (email.toLowerCase() === 'support@prplcrm.eu') {
+      logger.warn('forgot-password: super admin attempted', { ip: req.ip });
+      return res.json(genericResponse);
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    // Ak nenájdeme, stále vrátime "success" odpoveď — ale nič neposielame.
+    if (!user) {
+      logger.info('forgot-password: user not found', { email, ip: req.ip });
+      return res.json(genericResponse);
+    }
+
+    // Vygeneruj plain token (ide len do emailu) + ulož hash do DB.
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(plainToken);
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1h
+
+    user.resetPasswordTokenHash = tokenHash;
+    user.resetPasswordExpires = expires;
+    await user.save();
+
+    const clientUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
+    const resetLink = `${clientUrl}/reset-password?token=${plainToken}`;
+
+    // Fire and forget — neblokujeme odpoveď kvôli SMTP latency.
+    sendPasswordResetEmail({
+      toEmail: user.email,
+      username: user.username,
+      resetLink
+    }).catch(err => logger.error('Reset email failed', {
+      error: err.message, userId: user._id.toString()
+    }));
+
+    logger.info('forgot-password: reset link generated', {
+      userId: user._id.toString(), ip: req.ip
+    });
+
+    return res.json(genericResponse);
+  } catch (error) {
+    logger.error('Forgot password error', { error: error.message, ip: req.ip });
+    // Aj pri chybe vrátime generickú odpoveď — útočník nemá rozlišovať
+    // infrastructure error vs. "user nenájdený".
+    return res.json(genericResponse);
+  }
+});
+
+// POST /api/auth/reset-password — user zadá plain token + nové heslo
+router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ message: 'Neplatný alebo chýbajúci token.' });
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov.' });
+    }
+
+    const tokenHash = hashResetToken(token);
+
+    const user = await User.findOne({
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() }
+    });
+
+    if (!user) {
+      logger.warn('reset-password: invalid or expired token', { ip: req.ip });
+      return res.status(400).json({
+        message: 'Odkaz na obnovenie hesla je neplatný alebo expiroval.'
+      });
+    }
+
+    // Hashni nové heslo
+    const salt = await bcrypt.genSalt(12);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    user.password = hashedPassword;
+    user.resetPasswordTokenHash = null;
+    user.resetPasswordExpires = null;
+    await user.save();
+
+    logger.auth('password-reset', user._id, user.username, true, req.ip);
+
+    // Audit log
+    auditService.logAction({
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.password-reset',
+      category: 'auth',
+      targetType: 'user',
+      targetId: user._id.toString(),
+      targetName: user.username,
+      details: {},
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
+
+    return res.json({
+      message: 'Heslo bolo úspešne zmenené. Môžete sa prihlásiť.'
+    });
+  } catch (error) {
+    logger.error('Reset password error', { error: error.message, ip: req.ip });
+    return res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

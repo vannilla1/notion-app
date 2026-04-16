@@ -67,6 +67,49 @@ const passwordChangeLimiter = rateLimit({
   }
 });
 
+// Rate limiter for "Forgot password" requests.
+// 5 per hour per IP (balance: user zabudne, ale útočník nemôže spamovať).
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: {
+    message: 'Príliš veľa žiadostí o obnovenie hesla. Skúste znova o hodinu.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: forgot-password', {
+      ip: req.ip,
+      email: req.body?.email
+    });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development' && process.env.SKIP_RATE_LIMIT === 'true';
+  }
+});
+
+// Rate limiter for password reset confirmation (POST /reset-password).
+// 10 per hour per IP — vyššia tolerancia lebo user môže mistype nové heslo.
+const resetPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: {
+    message: 'Príliš veľa pokusov. Skúste znova o hodinu.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: reset-password', { ip: req.ip });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development' && process.env.SKIP_RATE_LIMIT === 'true';
+  }
+});
+
 // General API rate limiter
 // 100 requests per minute per IP
 const apiLimiter = rateLimit({
@@ -90,5 +133,7 @@ module.exports = {
   loginLimiter,
   registerLimiter,
   passwordChangeLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
   apiLimiter
 };
