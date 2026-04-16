@@ -266,6 +266,23 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
     invalidateCache(req.user.id);
 
+    // Build FULL workspace shape (same as GET /current) so the client can
+    // atomically update both currentWorkspaceId + currentWorkspace (details)
+    // from a single response. Previously this endpoint returned only the
+    // 5 core fields, forcing the client to follow up with GET /current —
+    // during that roundtrip the header/sidebar still showed the OLD
+    // workspace's name/color/role while currentWorkspaceId already pointed
+    // at the new one. That's the "push notification opens right section
+    // but wrong workspace" symptom on cross-workspace deep links.
+    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+    const owner = await User.findById(workspace.ownerId);
+    const paidSeats = workspace.paidSeats || 0;
+    const ownerPlan = owner?.subscription?.plan || 'free';
+    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
+    const baseLimit = memberLimitsMap[ownerPlan] || 2;
+    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
+    const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
+
     logger.info('Workspace switched', { workspaceId: objectId, userId: req.user.id });
 
     res.json({
@@ -274,8 +291,18 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
         id: workspace._id,
         name: workspace.name,
         slug: workspace.slug,
+        description: workspace.description,
         color: workspace.color,
-        role: membership.role
+        inviteCode: membership.canAdmin() ? workspace.inviteCode : undefined,
+        inviteCodeEnabled: workspace.inviteCodeEnabled,
+        settings: workspace.settings,
+        role: membership.role,
+        memberCount,
+        paidSeats,
+        maxMembers,
+        ownerPlan,
+        isOverLimit,
+        createdAt: workspace.createdAt
       }
     });
   } catch (error) {

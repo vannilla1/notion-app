@@ -89,32 +89,30 @@ export const WorkspaceProvider = ({ children }) => {
 
   const switchWorkspace = async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
-    setCurrentWorkspaceId(workspaceId);
-    // DO NOT call fetchWorkspaces() here. Previously we did, for "freshness",
-    // but on Render (potential multi-instance + 60s workspace middleware cache)
-    // the subsequent GET /workspaces can hit an instance whose cache still holds
-    // the PREVIOUS currentWorkspaceId. That stale value then overwrote the
-    // just-set target via setCurrentWorkspaceId(data.currentWorkspaceId) —
-    // which is the exact "push notification opens correct section but wrong
-    // workspace (first in list)" bug users reported.
+    // CRITICAL: update currentWorkspaceId AND currentWorkspace (details)
+    // ATOMICALLY from the single POST /switch response. React batches both
+    // setState calls into one render — so every component that reads either
+    // value sees a consistent workspace state in the next paint.
     //
-    // A workspace switch does not change the workspaces list or the user's
-    // memberships — only currentWorkspaceId changes. We already have the new
-    // value (Y) from the successful POST, so we trust it. For the current
-    // workspace DETAILS (name, color, role, memberCount...) we do a targeted
-    // fetch via getCurrentWorkspace(), which reads through requireWorkspace
-    // middleware — but even if that's briefly stale, the workspace-scoped data
-    // fetches (tasks/contacts/messages) triggered by the `workspace-switched`
-    // event below will hit the correct workspace because they use
-    // currentWorkspaceId from React state, which is Y.
-    try {
-      const current = await workspaceApi.getCurrentWorkspace();
-      setCurrentWorkspace(current);
-    } catch (err) {
-      // Non-fatal: currentWorkspace details stay stale (wrong name/color in
-      // header briefly) but currentWorkspaceId is correct, so data loading
-      // works. A manual refresh or next fetchWorkspaces call will reconcile.
-      console.warn('[Workspace] getCurrentWorkspace after switch failed:', err?.response?.status);
+    // Previously this function did:
+    //   setCurrentWorkspaceId(B)            ← id flipped to B
+    //   await getCurrentWorkspace()         ← yields a render tick
+    //   ... React renders here with:
+    //     currentWorkspaceId = B
+    //     currentWorkspace   = A (still!)   ← race window
+    //   setCurrentWorkspace(current)        ← finally updates details
+    //
+    // During the race window, the `pendingWsSwitch` gate in App.jsx (which
+    // only checks currentWorkspaceId) opened and unblocked child routes.
+    // Tasks/CRM/Messages mounted, but the header/sidebar kept showing the
+    // OLD workspace's name and color. That is the "push notification opens
+    // right section in wrong workspace" symptom users reported.
+    //
+    // POST /switch now returns the full workspace shape (matches GET /current),
+    // so we never need a second roundtrip for the critical path.
+    setCurrentWorkspaceId(workspaceId);
+    if (result?.workspace) {
+      setCurrentWorkspace(result.workspace);
     }
     // Tell every mounted page (Dashboard/CRM/Tasks/Messages) to refetch +
     // reset expanded/modal state. Without this, switching workspace via a
