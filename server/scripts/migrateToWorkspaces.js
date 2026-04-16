@@ -69,10 +69,14 @@ async function migrate() {
 
       for (const user of allUsers) {
         if (!memberUserIds.includes(user._id.toString())) {
+          // WorkspaceMember.role enum = ['owner', 'manager', 'member'] — NEobsahuje
+          // 'admin' (to je globálna User.role). Globálneho super-admina zmapujeme
+          // na workspace-scoped 'manager' (najbližší ekvivalent — canAdmin() true,
+          // ale nie owner). Tak to matchuje ostatnú app semantiku.
           const membership = new WorkspaceMember({
             workspaceId: existingWorkspace._id,
             userId: user._id,
-            role: user.role === 'admin' ? 'admin' : 'member'
+            role: user.role === 'admin' ? 'manager' : 'member'
           });
           await membership.save();
 
@@ -118,10 +122,13 @@ async function migrate() {
     // Create memberships for all users
     for (const user of users) {
       const isOwner = user._id.toString() === owner._id.toString();
+      // 'admin' NIE je platná WorkspaceMember.role hodnota (pozri WorkspaceMember.js
+       // enum: 'owner' | 'manager' | 'member'). Globálny User.role='admin' mapujeme
+       // na workspace 'manager'.
       const membership = new WorkspaceMember({
         workspaceId: workspace._id,
         userId: user._id,
-        role: isOwner ? 'owner' : (user.role === 'admin' ? 'admin' : 'member')
+        role: isOwner ? 'owner' : (user.role === 'admin' ? 'manager' : 'member')
       });
 
       await membership.save();

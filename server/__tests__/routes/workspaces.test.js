@@ -310,6 +310,80 @@ describe('/api/workspaces route', () => {
       const freshUser = await User.findById(ownerCtx.user._id);
       expect(freshUser.currentWorkspaceId.toString()).toBe(secondWs._id.toString());
     });
+
+    it('response má FULL workspace shape (rovnaký ako GET /current) — lock-in pre atomický client update', async () => {
+      // KĽÚČOVÉ: POST /switch musí vrátiť kompletný shape, aby klient vedel
+      // v jednom React render tiku atomicky nastaviť currentWorkspaceId AJ
+      // currentWorkspace. Inak vznikne race window (ID=B, details=A) a deep-link
+      // gate v App.jsx by odomkol stránku s nesprávnym header/sidebar.
+      // Ak niekto zjednoduší tento endpoint späť na 5 polí, tento test to chytí.
+      const anotherOwner = await User.create({
+        username: 'owner2', email: 'owner2@test.com', password: 'x'
+      });
+      const secondWs = await Workspace.create({
+        name: 'Second WS',
+        slug: 'second-ws',
+        ownerId: anotherOwner._id,
+        description: 'popis',
+        color: '#abcdef',
+        inviteCode: 'ABC12345',
+        inviteCodeEnabled: true
+      });
+      await WorkspaceMember.create({
+        workspaceId: secondWs._id, userId: ownerCtx.user._id, role: 'manager'
+      });
+      // Owner membership kvôli memberCount
+      await WorkspaceMember.create({
+        workspaceId: secondWs._id, userId: anotherOwner._id, role: 'owner'
+      });
+
+      const res = await request(app)
+        .post(`/api/workspaces/switch/${secondWs._id}`)
+        .set(authHeader(ownerCtx.token));
+
+      expect(res.status).toBe(200);
+      const ws = res.body.workspace;
+
+      // Všetky polia ktoré vracia GET /current MUSIA byť v POST /switch response
+      expect(ws).toHaveProperty('id');
+      expect(ws).toHaveProperty('name', 'Second WS');
+      expect(ws).toHaveProperty('slug', 'second-ws');
+      expect(ws).toHaveProperty('description', 'popis');
+      expect(ws).toHaveProperty('color', '#abcdef');
+      expect(ws).toHaveProperty('inviteCodeEnabled', true);
+      expect(ws).toHaveProperty('settings');
+      expect(ws).toHaveProperty('role', 'manager');
+      expect(ws).toHaveProperty('memberCount', 2);
+      expect(ws).toHaveProperty('paidSeats');
+      expect(ws).toHaveProperty('maxMembers');
+      expect(ws).toHaveProperty('ownerPlan');
+      expect(ws).toHaveProperty('isOverLimit');
+      expect(ws).toHaveProperty('createdAt');
+
+      // Manager smie vidieť inviteCode (canAdmin() = true)
+      expect(ws.inviteCode).toBe('ABC12345');
+    });
+
+    it('response skryje inviteCode pred members (canAdmin() = false)', async () => {
+      const anotherOwner = await User.create({
+        username: 'owner3', email: 'o3@test.com', password: 'x'
+      });
+      const ws3 = await Workspace.create({
+        name: 'Third', slug: 'third', ownerId: anotherOwner._id,
+        inviteCode: 'SECRET00', inviteCodeEnabled: true
+      });
+      await WorkspaceMember.create({
+        workspaceId: ws3._id, userId: ownerCtx.user._id, role: 'member'
+      });
+
+      const res = await request(app)
+        .post(`/api/workspaces/switch/${ws3._id}`)
+        .set(authHeader(ownerCtx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.workspace.role).toBe('member');
+      expect(res.body.workspace.inviteCode).toBeUndefined();
+    });
   });
 
   describe('PUT /current (admin only)', () => {

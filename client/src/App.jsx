@@ -274,22 +274,12 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [isAuthenticated, navigateWithWorkspace]);
 
-  // iOS hot-start deep link: Swift injects JS that dispatches this event
-  // instead of window.location.href (which would cause a full page reload).
-  // If authenticated, navigate immediately via React Router.
-  // If not yet authenticated, sessionStorage backup is already set by the
-  // Swift JS — Effect B above will pick it up after auth resolves.
-  useEffect(() => {
-    const handler = (e) => {
-      const path = e.detail;
-      if (path && isAuthenticated) {
-        sessionStorage.removeItem('pendingDeepLink');
-        navigateWithWorkspace(path);
-      }
-    };
-    window.addEventListener('iosDeepLink', handler);
-    return () => window.removeEventListener('iosDeepLink', handler);
-  }, [navigateWithWorkspace, isAuthenticated]);
+  // NOTE: starý `iosDeepLink` CustomEvent listener bol odstránený (bol orphan).
+  // Pôvodne Swift injecovol JS ktorý dispatchol tento event, aby sa predišlo
+  // full-page reloadu. Od commitu c18a9b2 Swift používa `webView.load(URLRequest(...))`
+  // pre hot-start deep linky (ContentView.swift:461-465) — event sa už nikdy
+  // nedispatchuje, takže listener bol dead code. Ak sa v budúcnosti vrátime
+  // k JS-injection prístupu, obnovíme listener + Swift injection spolu.
 
   useEffect(() => {
     if (!isAuthenticated) return;
