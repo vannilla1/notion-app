@@ -43,14 +43,33 @@ const initSentry = () => {
         blockAllMedia: false,
       }),
     ],
-    // Filter out sensitive data
-    beforeSend(event) {
+    // Filter out sensitive data + drop non-actionable environment errors
+    beforeSend(event, hint) {
+      // 1) Password scrubbing
       if (event.request?.data) {
         const data = event.request.data;
         if (data.password) data.password = '[FILTERED]';
         if (data.currentPassword) data.currentPassword = '[FILTERED]';
         if (data.newPassword) data.newPassword = '[FILTERED]';
       }
+
+      // 2) Service Worker registration rejections from /registerSW.js.
+      //    Typicky ide o environmentálne príčiny na strane klienta
+      //    (AdBlock/Privacy extensions blokujú SW, antivirus, corporate
+      //    firewall, stale cached SW referencia po deploy-i). App funguje
+      //    aj bez SW — stratí len offline cache. Tieto eventy nie sú
+      //    actionable a iba zaplavujú Sentry.
+      try {
+        const err = hint?.originalException;
+        const msg = (err && err.message) || event.exception?.values?.[0]?.value || '';
+        const stack = (err && err.stack) || event.exception?.values?.[0]?.stacktrace?.frames?.map(f => f.filename).join(' ') || '';
+        if (msg === 'Rejected' && /registerSW\.js/.test(stack)) {
+          return null;
+        }
+      } catch {
+        // never let the filter itself break Sentry
+      }
+
       return event;
     },
     // Ignore common non-actionable errors
