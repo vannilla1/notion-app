@@ -90,7 +90,32 @@ export const WorkspaceProvider = ({ children }) => {
   const switchWorkspace = async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
     setCurrentWorkspaceId(workspaceId);
-    await fetchWorkspaces();
+    // DO NOT call fetchWorkspaces() here. Previously we did, for "freshness",
+    // but on Render (potential multi-instance + 60s workspace middleware cache)
+    // the subsequent GET /workspaces can hit an instance whose cache still holds
+    // the PREVIOUS currentWorkspaceId. That stale value then overwrote the
+    // just-set target via setCurrentWorkspaceId(data.currentWorkspaceId) —
+    // which is the exact "push notification opens correct section but wrong
+    // workspace (first in list)" bug users reported.
+    //
+    // A workspace switch does not change the workspaces list or the user's
+    // memberships — only currentWorkspaceId changes. We already have the new
+    // value (Y) from the successful POST, so we trust it. For the current
+    // workspace DETAILS (name, color, role, memberCount...) we do a targeted
+    // fetch via getCurrentWorkspace(), which reads through requireWorkspace
+    // middleware — but even if that's briefly stale, the workspace-scoped data
+    // fetches (tasks/contacts/messages) triggered by the `workspace-switched`
+    // event below will hit the correct workspace because they use
+    // currentWorkspaceId from React state, which is Y.
+    try {
+      const current = await workspaceApi.getCurrentWorkspace();
+      setCurrentWorkspace(current);
+    } catch (err) {
+      // Non-fatal: currentWorkspace details stay stale (wrong name/color in
+      // header briefly) but currentWorkspaceId is correct, so data loading
+      // works. A manual refresh or next fetchWorkspaces call will reconcile.
+      console.warn('[Workspace] getCurrentWorkspace after switch failed:', err?.response?.status);
+    }
     // Tell every mounted page (Dashboard/CRM/Tasks/Messages) to refetch +
     // reset expanded/modal state. Without this, switching workspace via a
     // deep-link (push notification tap) changes the header but leaves the

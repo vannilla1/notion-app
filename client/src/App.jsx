@@ -74,12 +74,20 @@ function AppContent() {
             await switchWorkspace(targetWs);
             console.log('[DeepLink] switchWorkspace resolved OK →', targetWs);
           } catch (e) {
-            // Don't silently swallow — log loudly so we can see in Render logs
-            // / Sentry if the switch itself is what's breaking the flow. User
-            // still lands on the section with the wrong workspace visible.
-            console.error('[DeepLink] switchWorkspace FAILED:', e?.response?.status, e?.message);
+            // Switch FAILED — do NOT strip ws= and navigate. If we navigated,
+            // the URL would lose ws=, the `pendingWsSwitch` gate in AppContent
+            // would unblock, and the user would land on the wrong workspace
+            // (exactly the "correct section, wrong workspace" bug). Instead,
+            // leave ws= in the URL and return. The gate keeps showing
+            // "Načítavam..." until the switch is retried (useLayoutEffect
+            // re-fires when deps change) or the user acts manually.
+            console.error('[DeepLink] switchWorkspace FAILED — keeping ws= in URL:', e?.response?.status, e?.message);
+            return;
           }
         } else {
+          // Not a member — log and fall through to plain navigate (strip ws=).
+          // User will land on their current workspace; the target workspace
+          // was probably left or they weren't invited.
           console.warn('[DeepLink] targetWs not in membership list — skipping switch. workspaces=', workspaces);
         }
       }
