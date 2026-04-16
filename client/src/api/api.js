@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getStoredToken, removeStoredToken } from '../utils/authStorage';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -9,7 +10,9 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    // Per-tab token (sessionStorage on web, localStorage on iOS native).
+    // Viac v client/src/utils/authStorage.js.
+    const token = getStoredToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -42,8 +45,9 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 401 || error.response?.status === 403) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      // removeStoredToken() maže z sessionStorage (web) alebo localStorage (iOS)
+      // + cleanup legacy kľúčov (user, starý localStorage token z predošlej verzie).
+      removeStoredToken();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

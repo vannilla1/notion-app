@@ -10,6 +10,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
 import { linkifyText } from '../utils/linkify';
+import { getStoredToken } from '../utils/authStorage';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -475,7 +476,7 @@ function CRM() {
 
     setUploadingFile(contactId);
 
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     const uploadUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files`;
 
     return new Promise((resolve) => {

@@ -106,10 +106,18 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
 
-    <!-- Fonts -->
+    <!-- Fonts — loaded non-blocking for faster FCP. `display=swap` already
+         lets the page render with system fonts until Inter is ready; the
+         media=print + onload swap keeps the stylesheet request off the
+         critical path so it doesn't delay first paint. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"></noscript>
+
+    <!-- Preload landing-page logo — LCP candidate on "/" (hero/navbar). -->
+    <link rel="preload" as="image" href="/icons/icon-96x96.png" fetchpriority="high">
 
     <!-- GEO/AEO: JSON-LD Structured Data -->
     <script type="application/ld+json">
@@ -284,11 +292,11 @@
       "description": "Moderny slovensky CRM system pre spravu kontaktov, projektov a timovej spoluprace."
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-BghQvt9e.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/sentry-BVQC-vUp.js">
-    <link rel="modulepreload" crossorigin href="/assets/react-vendor-COwdbdS2.js">
+    <script type="module" crossorigin src="/assets/index-ttc61R_d.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-vendor-Cj9ot0au.js">
+    <link rel="modulepreload" crossorigin href="/assets/sentry-ClMUXr5Q.js">
     <link rel="modulepreload" crossorigin href="/assets/socket-XvGWOZWK.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-DcnD4KtD.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-B5AqSiHU.css">
   <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
     <div id="root"></div>

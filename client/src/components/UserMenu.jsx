@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
+import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
@@ -114,7 +115,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setLoading(true);
       setErrors({});
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/auth/profile`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -200,7 +201,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchCalendarFeedStatus = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/tasks/calendar/feed/status`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -217,7 +218,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleEnableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/generate`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -236,7 +237,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleDisableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       await axios.post(`${API_URL}/tasks/calendar/feed/disable`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -258,7 +259,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/regenerate`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -284,7 +285,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleCalendarStatus = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/status`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -302,7 +303,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleCalendar = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -319,7 +320,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       await axios.post(`${API_URL}/google-calendar/disconnect`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -339,7 +340,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleSyncGoogleCalendar = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-calendar/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -355,7 +356,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleCleanupGoogleCalendar = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-calendar/cleanup`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -371,7 +372,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/status`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 15000
@@ -398,7 +399,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -415,7 +416,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       await axios.post(`${API_URL}/google-tasks/disconnect`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -436,7 +437,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
 
       try {
         await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
@@ -472,7 +473,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
 
       await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
@@ -504,7 +505,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -525,7 +526,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('Mažem zoznam projektov z Google Tasks...');
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/remove-duplicates`, {}, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 30000
@@ -556,7 +557,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage(`Hľadám a mažem projekty s "${searchTerm}"...`);
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/delete-by-search`,
         { searchTerm },
         { headers: { Authorization: `Bearer ${token}` }, timeout: 300000 }
@@ -587,7 +588,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setErrors({});
       setMessage('');
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       const response = await axios.put(`${API_URL}/auth/profile`, formData, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -616,7 +617,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       await axios.put(`${API_URL}/auth/password`, {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
@@ -644,7 +645,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const formData = new FormData();
     formData.append('avatar', file);
 
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     const uploadUrl = `${API_URL}/auth/avatar`;
 
     const xhr = new XMLHttpRequest();
@@ -687,7 +688,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
   const handleDeleteAvatar = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getStoredToken();
       await axios.delete(`${API_URL}/auth/avatar`, {
         headers: { Authorization: `Bearer ${token}` }
       });

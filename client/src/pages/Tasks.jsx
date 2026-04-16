@@ -15,6 +15,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
+import { getStoredToken } from '../utils/authStorage';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -473,7 +474,7 @@ function Tasks() {
 
   // Define fetch functions early so they can be used in useEffects
   const exportTasksCsv = () => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
