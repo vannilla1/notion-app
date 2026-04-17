@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Internet — WebView potrebuje sieť. ACCESS_NETWORK_STATE pre detekciu online/offline
+         (neskôr ukážeme "No connection" banner). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- POST_NOTIFICATIONS — Android 13+ vyžaduje explicit runtime permission pre
+         notifikácie. Pred 13 boli povolené automaticky. My ho requestneme z MainActivity
+         po prvom spustení. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- WAKE_LOCK + VIBRATE — FCM high-priority message môže zobudiť zariadenie
+         a vibrovať pri prijatí notifikácie. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- USE_BIOMETRIC + USE_FINGERPRINT — pripravené pre druhú iteráciu (biometric lock).
+         Zatiaľ neblokuje, len vyžiadané permissions. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+    <application
+        android:name=".PrplApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.PrplCrm"
+        android:usesCleartextTraffic="false"
+        tools:targetApi="31">
+
+        <!-- Hlavná Activity — WebView wrapper nad https://prplcrm.eu/app -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.PrplCrm.Splash">
+
+            <!-- App launcher intent — zobrazí sa v Home screen / App drawer. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Deep link handling — akýkoľvek https://prplcrm.eu/app/* link otvorí appku
+                 namiesto Chrome, ak je verified cez Digital Asset Links (assetlinks.json).
+                 `autoVerify=true` vyvolá Android pri inštalácii overenie voči webu. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                    android:host="prplcrm.eu"
+                    android:pathPrefix="/app" />
+            </intent-filter>
+        </activity>
+
+        <!-- FCM Messaging Service — Firebase SDK ho hľadá podľa intent filtra. -->
+        <service
+            android:name=".PrplFcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Default notification channel + icon pre FCM notifikácie — zobrazí sa
+             v notification tray keď backend pošle push. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/default_notification_channel_id" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/brand_primary" />
+
+    </application>
+</manifest>

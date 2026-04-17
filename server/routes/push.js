@@ -3,6 +3,7 @@ const router = express.Router();
 const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
+const FcmDevice = require('../models/FcmDevice');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const { isVapidConfigured, getMetrics, resetMetrics } = require('../services/notificationService');
@@ -416,6 +417,101 @@ router.post('/apns/test', authenticateToken, async (req, res) => {
       type: 'test',
       data: {}
     });
+    res.json({ message: 'Test odoslaný', result });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// ===== FCM (Android native) Device Registration =====
+
+// Register Android device for push notifications
+router.post('/fcm/register', authenticateToken, async (req, res) => {
+  try {
+    const { fcmToken, platform, appVersion, packageName } = req.body;
+    const userId = req.user.id;
+
+    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20) {
+      return res.status(400).json({ message: 'Invalid FCM token' });
+    }
+
+    // FCM tokens sú globálne unikátne — findOneAndUpdate by token zabezpečuje
+    // že ak rovnaký token bol predtým zaregistrovaný pre iného usera (uninštalovaná
+    // appka + reinštalovaná pod iným účtom), prepíšeme mapping na aktuálneho usera.
+    await FcmDevice.findOneAndUpdate(
+      { fcmToken },
+      {
+        userId,
+        fcmToken,
+        platform: platform || 'android',
+        packageName: packageName || 'eu.prplcrm.app',
+        appVersion: appVersion || null,
+        lastUsed: new Date()
+      },
+      { upsert: true, new: true }
+    );
+
+    logger.info('[FCM] Device registered', { userId, tokenPrefix: fcmToken.substring(0, 12) });
+    res.json({ message: 'Device registered' });
+  } catch (error) {
+    logger.error('[FCM] Register error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Unregister Android device (on logout)
+router.post('/fcm/unregister', authenticateToken, async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+      return res.status(400).json({ message: 'fcmToken required' });
+    }
+    await FcmDevice.deleteOne({ fcmToken, userId: req.user.id });
+    logger.info('[FCM] Device unregistered', { userId: req.user.id });
+    res.json({ message: 'Device unregistered' });
+  } catch (error) {
+    logger.error('[FCM] Unregister error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Status & test
+router.get('/fcm/status', authenticateToken, async (req, res) => {
+  try {
+    const { getFCMStatus } = require('../services/notificationService');
+    const devices = await FcmDevice.find({ userId: req.user.id });
+    const status = getFCMStatus();
+    res.json({
+      fcmConfigured: status.configured,
+      projectId: status.projectId,
+      registeredDevices: devices.length,
+      devices: devices.map(d => ({
+        tokenPrefix: d.fcmToken.substring(0, 12) + '...',
+        platform: d.platform,
+        appVersion: d.appVersion,
+        packageName: d.packageName,
+        lastUsed: d.lastUsed,
+        createdAt: d.createdAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
+  }
+});
+
+// Test FCM push to current user
+router.post('/fcm/test', authenticateToken, async (req, res) => {
+  try {
+    const { sendFCMNotification, isFCMConfigured } = require('../services/notificationService');
+    if (!isFCMConfigured()) {
+      return res.status(503).json({ message: 'FCM not configured on server' });
+    }
+    const result = await sendFCMNotification(req.user.id, {
+      title: 'Test notifikácie',
+      body: 'Ak vidíte túto správu, Android push notifikácie fungujú správne.',
+      type: 'test',
+      data: {}
+    }, '/app');
     res.json({ message: 'Test odoslaný', result });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera', error: error.message });

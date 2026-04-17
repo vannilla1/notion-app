@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Prpl CRM</string>
+
+    <!-- Web URL ktorý WebView načíta. Musí zodpovedať Digital Asset Links host,
+         aby deep linking + intent filter v AndroidManifest fungoval bez URL baru. -->
+    <string name="webapp_url">https://prplcrm.eu/app</string>
+
+    <!-- Notification channel — FCM použije tento ID ako default. -->
+    <string name="default_notification_channel_id">prpl_notifications</string>
+    <string name="default_notification_channel_name">Notifikácie</string>
+    <string name="default_notification_channel_description">Upozornenia na úlohy, správy a aktivitu v tíme.</string>
+
+    <!-- User-facing error texty -->
+    <string name="offline_title">Žiadne pripojenie</string>
+    <string name="offline_message">Skontrolujte internetové pripojenie a skúste znova.</string>
+    <string name="retry">Skúsiť znova</string>
+</resources>

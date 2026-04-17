@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base téma — Material AppCompat s našimi farbami. -->
+    <style name="Theme.PrplCrm" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/brand_primary</item>
+        <item name="android:windowBackground">@color/white</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Splash téma — používa natívny Android 12 Splash Screen API cez compat lib.
+         iconBackground je farba pozadia splash obrazovky, icon je logo v strede. -->
+    <style name="Theme.PrplCrm.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.PrplCrm</item>
+    </style>
+</resources>

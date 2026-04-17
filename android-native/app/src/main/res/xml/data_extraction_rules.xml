@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ backup / device transfer rules.
+  Zakazujeme obidve operácie pre celú appku — EncryptedSharedPreferences obsahuje
+  JWT tokeny, ktoré nechceme aby sa prenášali cez Auto Backup alebo device-to-device
+  transfer (kľúč je viazaný na Keystore konkrétneho zariadenia, takže backup by
+  bol aj tak nepoužiteľný — radšej jasne blokneme).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

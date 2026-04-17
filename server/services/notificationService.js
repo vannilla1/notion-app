@@ -3,6 +3,8 @@ const User = require('../models/User');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
+const FcmDevice = require('../models/FcmDevice');
+const { sendFCMNotification, isFCMConfigured, getFCMStatus } = require('./fcmService');
 const webpush = require('web-push');
 const http2 = require('http2');
 const crypto = require('crypto');
@@ -736,15 +738,36 @@ const createNotification = async ({
 
     setImmediate(async () => {
       try {
-        const apnsDevices = apnConfigured ? await APNsDevice.find({ userId }) : [];
+        // Pre-compute URL once so všetky platformy dostanú identický deep link.
+        const url = generateNotificationUrl(pushPayload.type, pushPayload.data);
+
+        const [apnsDevices, fcmDevices] = await Promise.all([
+          apnConfigured ? APNsDevice.find({ userId }) : Promise.resolve([]),
+          isFCMConfigured() ? FcmDevice.find({ userId }) : Promise.resolve([])
+        ]);
+
+        const jobs = [];
+
+        // iOS native
         if (apnsDevices.length > 0) {
-          await sendAPNsNotification(userId, pushPayload);
-          // Send web push only to non-iOS subscriptions (desktop browsers)
-          await sendPushNotificationExcludeIOS(userId, pushPayload);
-        } else {
-          // No APNs devices — send web push to all subscriptions
-          await sendPushNotification(userId, pushPayload);
+          jobs.push(sendAPNsNotification(userId, pushPayload));
         }
+
+        // Android native (FCM data-only) — podobná rola ako APNs pre iOS
+        if (fcmDevices.length > 0) {
+          jobs.push(sendFCMNotification(userId, pushPayload, url));
+        }
+
+        // Web Push — ak má user iOS devices, vynechaj Apple web push endpointy
+        // (APNs ich už pokrýva). Ak nemá žiadne native devices, pošli na všetky
+        // webové subscriptiony.
+        if (apnsDevices.length > 0) {
+          jobs.push(sendPushNotificationExcludeIOS(userId, pushPayload));
+        } else {
+          jobs.push(sendPushNotification(userId, pushPayload));
+        }
+
+        await Promise.all(jobs);
       } catch (pushErr) {
         logger.error('[NotificationService] Async push send failed', {
           error: pushErr.message,
@@ -1237,6 +1260,9 @@ module.exports = {
   getAPNsStatus,
   sendAPNsNotification,
   sendAPNsDebug,
+  isFCMConfigured,
+  getFCMStatus,
+  sendFCMNotification,
   getMetrics,
   resetMetrics
 };

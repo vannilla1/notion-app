@@ -29,3 +29,20 @@ android/*.aab
 android/*.apk
 android/*.idsig
 
+# Android native Kotlin wrapper build artifacts
+android-native/build/
+android-native/app/build/
+android-native/.gradle/
+android-native/local.properties
+android-native/*.keystore
+android-native/*.aab
+android-native/*.apk
+android-native/*.idsig
+# Firebase config is committed per-file — google-services.json je OK commit-ovať
+# (obsahuje len public API key), ALE pre istotu radšej nie (projekt je proprietary).
+android-native/app/google-services.json
+
+# Firebase + keystore credentials — všetko čo neleží v repo ale musí sa niekde
+# uložiť. Obsah tu nikdy necommituj, na Render idú cez env variables.
+secrets/
+
