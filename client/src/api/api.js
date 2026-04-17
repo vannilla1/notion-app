@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getStoredToken, removeStoredToken } from '../utils/authStorage';
+import { getStoredWorkspaceId, removeStoredWorkspaceId } from '../utils/workspaceStorage';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -15,6 +16,15 @@ api.interceptors.request.use(
     const token = getStoredToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Per-device workspace intent. Backend (requireWorkspace middleware)
+    // ho preferuje pred user.currentWorkspaceId z DB → každé zariadenie
+    // má vlastný workspace bez multi-device interferencie. Ak header chýba
+    // (prvý request po logine, pred fetchWorkspaces), backend spadne na DB
+    // fallback. Viac v client/src/utils/workspaceStorage.js.
+    const wsId = getStoredWorkspaceId();
+    if (wsId) {
+      config.headers['X-Workspace-Id'] = wsId;
     }
     return config;
   },
@@ -42,6 +52,20 @@ api.interceptors.response.use(
       const delay = config._retryCount * 3000; // 3s, 6s, 9s
       await new Promise(r => setTimeout(r, delay));
       return api(config);
+    }
+
+    // 403 NOT_MEMBER = lokálny X-Workspace-Id ukazuje na workspace, z ktorého
+    // ma user medzitým vyhodili (membership zmena na inom zariadení, admin remove).
+    // Nezlogujeme usera — len zmažeme stale workspace storage a necháme Workspace
+    // Context refetchnúť. Ďalší request pôjde bez headera → backend fallback
+    // na User.currentWorkspaceId v DB a vráti niektorý z validných workspaces.
+    if (error.response?.status === 403 && error.response?.data?.code === 'NOT_MEMBER') {
+      removeStoredWorkspaceId();
+      if (!config._wsRetry) {
+        config._wsRetry = true;
+        delete config.headers['X-Workspace-Id'];
+        return api(config);
+      }
     }
 
     if (error.response?.status === 401 || error.response?.status === 403) {

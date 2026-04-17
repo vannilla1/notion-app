@@ -53,7 +53,7 @@ const server = http.createServer(app);
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || 'https://prplcrm.eu',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Workspace-Id'],
   credentials: false,
   optionsSuccessStatus: 200,
   maxAge: 86400

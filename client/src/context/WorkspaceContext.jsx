@@ -2,6 +2,11 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { useAuth } from './AuthContext';
 import * as workspaceApi from '../api/workspaces';
 import { APP_EVENTS } from '../utils/constants';
+import {
+  getStoredWorkspaceId,
+  setStoredWorkspaceId,
+  removeStoredWorkspaceId
+} from '../utils/workspaceStorage';
 
 const WorkspaceContext = createContext(null);
 
@@ -17,7 +22,10 @@ export const WorkspaceProvider = ({ children }) => {
   const { isAuthenticated } = useAuth();
   const [workspaces, setWorkspaces] = useState([]);
   const [currentWorkspace, setCurrentWorkspace] = useState(null);
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(null);
+  // Inicializujeme z per-device storage — prvý render má správny workspaceId
+  // hneď, čím sa axios interceptor pošle s headerom aj na prvý fetchWorkspaces()
+  // a server vie, ktorý workspace sme mali "otvorený" pred reloadom.
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(() => getStoredWorkspaceId());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
@@ -31,22 +39,46 @@ export const WorkspaceProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const [data, current] = await Promise.all([
-        workspaceApi.getWorkspaces(),
-        workspaceApi.getCurrentWorkspace().catch(err => {
-          if (err.response?.data?.code === 'NO_WORKSPACE') return null;
-          throw err;
-        })
-      ]);
-      setWorkspaces(data.workspaces || []);
-      setCurrentWorkspaceId(data.currentWorkspaceId);
 
-      if (data.workspaces.length === 0 || !data.currentWorkspaceId) {
+      // KROK 1: Memberships + server-side default current (z User.currentWorkspaceId).
+      // `getWorkspaces()` nepoužíva requireWorkspace middleware, takže tu header
+      // nerobí nič — dostaneme vždy zoznam membership-ov + DB default.
+      const data = await workspaceApi.getWorkspaces();
+      setWorkspaces(data.workspaces || []);
+
+      // KROK 2: Per-device workspace selection.
+      // - Ak máme lokálny workspaceId (z storage) a je v memberships → rešpektujeme
+      //   ho; device ostáva v "svojom" workspace aj keď user prepol na inom zariadení.
+      // - Inak (prvý login / nové zariadenie / stale storage po leave workspace) →
+      //   fallback na server-returned currentWorkspaceId.
+      const localWsId = getStoredWorkspaceId();
+      const localIsMember = localWsId && (data.workspaces || []).some(
+        w => (w.id || w._id)?.toString() === localWsId.toString()
+      );
+      const effectiveWsId = localIsMember ? localWsId : data.currentWorkspaceId;
+
+      // Storage MUSÍ byť nastavený PRED ďalším API callom — axios interceptor
+      // číta storage, takže getCurrentWorkspace dostane správny X-Workspace-Id.
+      setStoredWorkspaceId(effectiveWsId);
+      setCurrentWorkspaceId(effectiveWsId);
+
+      if (!data.workspaces || data.workspaces.length === 0 || !effectiveWsId) {
         setNeedsWorkspace(true);
         setCurrentWorkspace(null);
       } else {
         setNeedsWorkspace(false);
-        setCurrentWorkspace(current);
+        // KROK 3: Načítame details pre effectiveWsId (backend honorí header).
+        try {
+          const current = await workspaceApi.getCurrentWorkspace();
+          setCurrentWorkspace(current);
+        } catch (err) {
+          if (err.response?.data?.code === 'NO_WORKSPACE') {
+            setNeedsWorkspace(true);
+            setCurrentWorkspace(null);
+          } else {
+            throw err;
+          }
+        }
       }
     } catch (err) {
       if (err.response?.data?.code === 'NO_WORKSPACE') {
@@ -67,6 +99,7 @@ export const WorkspaceProvider = ({ children }) => {
       setCurrentWorkspace(null);
       setCurrentWorkspaceId(null);
       setNeedsWorkspace(false);
+      removeStoredWorkspaceId();
       // loading=true zachovávame zámerne — viď komentár v fetchWorkspaces.
     }
   }, [isAuthenticated, fetchWorkspaces]);
@@ -92,6 +125,7 @@ export const WorkspaceProvider = ({ children }) => {
     // čím by `pendingWsSwitch` gate v App.jsx odomkol stránku so stale headerom
     // — to bola "cross-workspace push notification" regresia, commit c18a9b2.)
     setCurrentWorkspaceId(workspaceId);
+    setStoredWorkspaceId(workspaceId);
     if (result?.workspace) {
       setCurrentWorkspace(result.workspace);
     }

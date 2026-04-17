@@ -5,27 +5,41 @@ const User = require('../models/User');
 const logger = require('../utils/logger');
 
 // In-memory cache for workspace validation (reduces 3 DB queries to 0 per request)
-// Key: `${userId}:${workspaceId}`, Value: { workspace, membership, cachedAt }
+// Kľúč: `${userId}:${workspaceId}` — per-device model, každý device môže mať iný
+// "current" workspace, takže cache MUSÍ byť key-ed aj podľa workspace, nie iba
+// user. Predtým bol key čisto userId, čo spôsobovalo cross-workspace cache hit
+// keď user zmenil workspace na inom zariadení.
 const workspaceCache = new Map();
 const CACHE_TTL = 60000; // 60 seconds
 
-const getCached = (userId) => {
-  const entry = workspaceCache.get(userId);
+const cacheKey = (userId, workspaceId) => `${userId}:${workspaceId}`;
+
+const getCached = (userId, workspaceId) => {
+  const entry = workspaceCache.get(cacheKey(userId, workspaceId));
   if (entry && Date.now() - entry.cachedAt < CACHE_TTL) return entry;
-  workspaceCache.delete(userId);
+  workspaceCache.delete(cacheKey(userId, workspaceId));
   return null;
 };
 
-const setCache = (userId, data) => {
-  workspaceCache.set(userId, { ...data, cachedAt: Date.now() });
+const setCache = (userId, workspaceId, data) => {
+  workspaceCache.set(cacheKey(userId, workspaceId), { ...data, cachedAt: Date.now() });
   // Limit cache size
-  if (workspaceCache.size > 200) {
+  if (workspaceCache.size > 400) {
     const firstKey = workspaceCache.keys().next().value;
     workspaceCache.delete(firstKey);
   }
 };
 
-const invalidateCache = (userId) => workspaceCache.delete(userId);
+// Invaliduje VŠETKY cached workspace entries pre daného usera (treba napr.
+// po membership zmene, role zmene, alebo leave/delete workspace). Iterujeme
+// keys a mažeme prefix-match — cena je O(n) kde n je cache size (max 400),
+// čo je zanedbateľné vs. 3 DB queries per request.
+const invalidateCache = (userId) => {
+  const prefix = `${userId}:`;
+  for (const key of workspaceCache.keys()) {
+    if (key.startsWith(prefix)) workspaceCache.delete(key);
+  }
+};
 
 /**
  * Middleware to check if user has access to current workspace
@@ -36,8 +50,65 @@ const requireWorkspace = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    // Check cache first (avoids 3 DB queries)
-    const cached = getCached(userId);
+    // 1) CLIENT-AUTHORITATIVE workspace intent.
+    // Klient posiela `X-Workspace-Id` header z lokálneho state-u. Toto je
+    // ground truth pre request — každé zariadenie si môže mať otvorený iný
+    // workspace a nezasahujú si. `User.currentWorkspaceId` v DB ostáva len
+    // ako "default pre ďalšie login-y / zariadenia bez localStorage state-u".
+    //
+    // Header ignorujeme keď nie je validný ObjectId shape — falošný alebo
+    // corrupted header → fallback na user.currentWorkspaceId namiesto 400,
+    // aby stará verzia klienta (pred týmto commitom) stále fungovala.
+    const rawHeader = req.headers['x-workspace-id'];
+    let requestedWsId = null;
+    if (rawHeader && typeof rawHeader === 'string' && mongoose.Types.ObjectId.isValid(rawHeader)) {
+      requestedWsId = new mongoose.Types.ObjectId(rawHeader);
+    }
+
+    // 2) Resolve target workspace
+    let workspaceObjId = requestedWsId;
+    let user = null;
+
+    if (!workspaceObjId) {
+      // Backward-compat path: žiadny header → čítame z DB.
+      user = await User.findById(userId);
+      if (!user) {
+        return res.status(401).json({ message: 'Používateľ nenájdený' });
+      }
+
+      if (!user.currentWorkspaceId) {
+        // Auto-assign prvé dostupné workspace
+        const firstMembership = await WorkspaceMember.findOne({ userId });
+        if (firstMembership) {
+          await User.findByIdAndUpdate(userId, { currentWorkspaceId: firstMembership.workspaceId });
+          workspaceObjId = firstMembership.workspaceId;
+          logger.info('Auto-assigned workspace', { userId, workspaceId: workspaceObjId });
+        } else {
+          return res.status(400).json({
+            message: 'Nie ste členom žiadneho pracovného prostredia',
+            code: 'NO_WORKSPACE'
+          });
+        }
+      } else {
+        workspaceObjId = user.currentWorkspaceId;
+        // Legacy dáta môžu byť string — prevedieme na ObjectId.
+        if (typeof workspaceObjId === 'string') {
+          if (!mongoose.Types.ObjectId.isValid(workspaceObjId)) {
+            await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
+            return res.status(400).json({
+              message: 'Neplatné ID pracovného prostredia',
+              code: 'NO_WORKSPACE'
+            });
+          }
+          workspaceObjId = new mongoose.Types.ObjectId(workspaceObjId);
+          await User.findByIdAndUpdate(userId, { currentWorkspaceId: workspaceObjId });
+        }
+      }
+    }
+
+    // 3) Cache check per (user, workspace) — ak klient posiela iný ws ako
+    // predtým, toto je cache miss a validujeme membership.
+    const cached = getCached(userId, workspaceObjId);
     if (cached) {
       req.workspace = cached.workspace;
       req.workspaceMember = cached.membership;
@@ -45,88 +116,61 @@ const requireWorkspace = async (req, res, next) => {
       return next();
     }
 
-    // Get user's current workspace
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ message: 'Používateľ nenájdený' });
-    }
-
-    // Check if user has a current workspace set
-    if (!user.currentWorkspaceId) {
-      // Try to auto-assign first available workspace
-      const firstMembership = await WorkspaceMember.findOne({ userId });
-      if (firstMembership) {
-        await User.findByIdAndUpdate(userId, { currentWorkspaceId: firstMembership.workspaceId });
-        user.currentWorkspaceId = firstMembership.workspaceId;
-        logger.info('Auto-assigned workspace', { userId, workspaceId: firstMembership.workspaceId });
-      } else {
-        return res.status(400).json({
-          message: 'Nie ste členom žiadneho pracovného prostredia',
-          code: 'NO_WORKSPACE'
-        });
-      }
-    }
-
-    // Ensure currentWorkspaceId is a proper ObjectId
-    let workspaceObjId = user.currentWorkspaceId;
-    if (typeof workspaceObjId === 'string') {
-      if (!mongoose.Types.ObjectId.isValid(workspaceObjId)) {
-        await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
-        return res.status(400).json({
-          message: 'Neplatné ID pracovného prostredia',
-          code: 'NO_WORKSPACE'
-        });
-      }
-      workspaceObjId = new mongoose.Types.ObjectId(workspaceObjId);
-      // Fix the stored value
-      await User.findByIdAndUpdate(userId, { currentWorkspaceId: workspaceObjId });
-      logger.info('Fixed string workspaceId to ObjectId', { userId, workspaceId: workspaceObjId });
-    }
-
-    // Check membership
+    // 4) Membership validácia — POVINNÁ pri každom novom (user, ws) pári.
+    // SECURITY: aj keď klient pošle header, musíme overiť že tam patrí,
+    // inak by ktokoľvek mohol nastaviť cudzí workspace-id a čítať dáta.
     const membership = await WorkspaceMember.findOne({
       workspaceId: workspaceObjId,
-      userId: userId
+      userId
     });
 
     if (!membership) {
-      // User's currentWorkspaceId is invalid, try to find any valid workspace
+      // Header bol explicitne poskytnutý a nie som člen → 403 (klient musí
+      // vedieť že má nastaviť iný workspace). Nesilent-fallback — to by
+      // spôsobilo "correct section, wrong workspace" bug.
+      if (requestedWsId) {
+        return res.status(403).json({
+          message: 'Nie ste členom tohto pracovného prostredia',
+          code: 'NOT_MEMBER'
+        });
+      }
+      // Fallback path: user.currentWorkspaceId je stale → skús recovery.
       const anyMembership = await WorkspaceMember.findOne({ userId });
       if (anyMembership) {
         await User.findByIdAndUpdate(userId, { currentWorkspaceId: anyMembership.workspaceId });
-        // Retry with the valid workspace
         const retryWorkspace = await Workspace.findById(anyMembership.workspaceId);
         if (retryWorkspace) {
           req.workspace = retryWorkspace;
           req.workspaceMember = anyMembership;
           req.workspaceId = retryWorkspace._id;
-          setCache(userId, { workspace: retryWorkspace, membership: anyMembership });
+          setCache(userId, retryWorkspace._id, { workspace: retryWorkspace, membership: anyMembership });
           logger.info('Auto-recovered to valid workspace', { userId, workspaceId: retryWorkspace._id });
           return next();
         }
       }
       await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
       return res.status(400).json({
-        message: 'Nie ste členom tohto pracovného prostredia',
+        message: 'Nie ste členom žiadneho pracovného prostredia',
         code: 'NO_WORKSPACE'
       });
     }
 
-    // Get workspace details
+    // 5) Workspace details
     const workspace = await Workspace.findById(workspaceObjId);
     if (!workspace) {
-      await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
+      if (!requestedWsId) {
+        await User.findByIdAndUpdate(userId, { currentWorkspaceId: null });
+      }
       return res.status(400).json({
         message: 'Pracovné prostredie neexistuje',
         code: 'NO_WORKSPACE'
       });
     }
 
-    // Attach to request + cache
     req.workspace = workspace;
     req.workspaceMember = membership;
     req.workspaceId = workspace._id;
-    setCache(userId, { workspace, membership });
+    setCache(userId, workspaceObjId, { workspace, membership });
 
     next();
   } catch (error) {

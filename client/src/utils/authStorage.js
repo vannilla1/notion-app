@@ -84,6 +84,11 @@ export const removeStoredToken = () => {
   try { sessionStorage.removeItem('token'); } catch { /* noop */ }
   try { localStorage.removeItem('token'); } catch { /* noop */ }
   try { localStorage.removeItem('user'); } catch { /* noop */ }
+  // Per-device workspace intent viaže sa na session — na logout ho zmažeme,
+  // inak by ďalší prihlásený user na tomto zariadení zdedil cudzí workspaceId
+  // a prvé API requesty by skončili 403 (NOT_MEMBER).
+  try { sessionStorage.removeItem('currentWorkspaceId'); } catch { /* noop */ }
+  try { localStorage.removeItem('currentWorkspaceId'); } catch { /* noop */ }
 };
 
 export { isNativeIOSApp };
