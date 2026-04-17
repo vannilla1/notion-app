@@ -10,6 +10,7 @@ import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
+import { reportError } from './utils/reportError';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -70,8 +71,16 @@ function AppContent() {
       const cleanPath = full.pathname + (full.searchParams.toString() ? '?' + full.searchParams.toString() : '');
 
       if (targetWs && targetWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId)) {
+        // Membership check optimalizuje len UX case — keď klient vie že
+        // nie som člen (workspace opustený), skipneme HTTP round-trip.
+        // ALE: lokálny `workspaces` list môže byť stale (notifikácia prišla
+        // pred fetchWorkspaces, alebo user bol práve pozvaný). V tom prípade
+        // skúsime switch aj tak — server je source of truth, vráti 403 iba
+        // keď naozaj nemám membership.
         const isMember = (workspaces || []).some(w => (w.id || w._id)?.toString() === targetWs);
-        if (isMember) {
+        const listLikelyStale = !workspaces || workspaces.length === 0;
+
+        if (isMember || listLikelyStale) {
           try {
             await switchWorkspace(targetWs);
           } catch (e) {
@@ -79,18 +88,54 @@ function AppContent() {
             // `pendingWsSwitch` gate v AppContent by odomkol a user by skončil
             // v zlom workspace ("correct section, wrong workspace" bug).
             // ws= necháme v URL, gate drží "Načítavam..." kým sa switch retryne.
-            console.error('[DeepLink] switchWorkspace zlyhal — ws= ponechávame:', e?.response?.status, e?.message);
+            // Reportneme do AdminPanel diagnostiky aby sme videli real-world zlyhanie.
+            const ctx1 = {
+              targetWs,
+              currentWs: currentWorkspaceId?.toString?.() || null,
+              path: rawPath,
+              workspacesCount: (workspaces || []).length,
+              httpStatus: e?.response?.status || null
+            };
+            reportError({
+              name: 'DeepLinkSwitchFailed',
+              message: `switchWorkspace zlyhal | ${JSON.stringify(ctx1)} | ${e?.message || 'unknown'}`,
+              stack: e?.stack
+            });
             return;
           }
         } else {
-          // Nie som člen → fall-through na čistý navigate (user skončí v svojom
-          // aktuálnom workspace; target workspace bol asi opustený alebo pozvanka zrušená).
-          console.warn('[DeepLink] targetWs nie je v membership liste — skip switch');
+          // Nie som člen — fallthrough na plain navigate by spôsobil "wrong workspace"
+          // bug lebo ws= by sa zmazalo a gate by odomkol. Toto sa stáva keď:
+          //  (a) user v medzičase opustil workspace (notif bola poslaná pred tým)
+          //  (b) `workspaces` list ešte nie je fresh (race medzi login/switch)
+          // Bezpečnejšie: nechať ws= v URL, gate drží "Načítavam...", useLayoutEffect
+          // sa re-fires po ďalšom fetchWorkspaces (napr. po resume alebo polling).
+          // Raz reportneme do AdminPanel aby sme vedeli že membership desync sa deje.
+          const ctx2 = {
+            targetWs,
+            currentWs: currentWorkspaceId?.toString?.() || null,
+            path: rawPath,
+            workspacesCount: (workspaces || []).length,
+            workspaceIds: (workspaces || []).map(w => (w.id || w._id)?.toString()).filter(Boolean)
+          };
+          reportError({
+            name: 'DeepLinkTargetNotMember',
+            message: `Deep link target nie je v membership | ${JSON.stringify(ctx2)}`
+          });
+          // Ponechávame ws= v URL — gate zostane, user uvidí "Načítavam..." namiesto
+          // tichej chyby v zlom workspace. Ak je to skutočne permanentný desync
+          // (user opustil workspace), user si musí appku restart-nuť alebo explicit
+          // clicknúť inam. Lepšie než ticho zobraziť nesprávne dáta.
+          return;
         }
       }
       navigate(cleanPath, { replace: true });
     } catch (e) {
-      console.error('[DeepLink] navigateWithWorkspace threw:', e?.message);
+      reportError({
+        name: 'DeepLinkNavigateThrew',
+        message: `navigateWithWorkspace threw path=${rawPath}: ${e?.message || 'unknown'}`,
+        stack: e?.stack
+      });
       navigate(rawPath, { replace: true });
     }
   }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
