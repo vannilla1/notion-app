@@ -20,9 +20,15 @@
 // sa cez BroadcastChannel spýta ostatných tabov, či mu požičajú token
 // (UX: nový tab zdedí existujúcu session). Vidieť v AuthContext.jsx.
 
-const isNativeIOSApp = () =>
-  /PrplCRM-iOS/.test(navigator.userAgent) ||
-  !!(window.webkit && window.webkit.messageHandlers);
+import {
+  isNativeIOSApp as _isNativeIOSApp,
+  isNativeAndroidApp,
+  nativeSetAuthToken,
+  nativeClearAll
+} from './nativeBridge';
+
+const isNativeIOSApp = _isNativeIOSApp;
+const isNativeApp = () => isNativeIOSApp() || isNativeAndroidApp();
 
 // PWA installed to home screen (iOS Safari add-to-home) alebo Android TWA
 // (launched cez Bubblewrap wrapper) reportuje display-mode: standalone.
@@ -39,7 +45,11 @@ const isPwaStandalone = () => {
   }
 };
 
-const usePersistentStorage = () => isNativeIOSApp() || isPwaStandalone();
+// Android native wrapper používa tiež persistent storage — WebView single-
+// -instance, swipe-kill zabije sessionStorage. Zároveň MainActivity.kt pri
+// každom onPageStarted injectuje token z EncryptedSharedPreferences naspäť
+// do localStorage, takže appka bootuje do prihláseného stavu bez /login flash.
+const usePersistentStorage = () => isNativeApp() || isPwaStandalone();
 
 const storage = () => (usePersistentStorage() ? localStorage : sessionStorage);
 
@@ -75,6 +85,12 @@ export const setStoredToken = (token) => {
     // zmena v architektúre, pre túto chvíľu necháme token len v pamäti
     // cez AuthContext state, ďalší refresh vyhodí usera na /login.
   }
+  // Write-through do natívnej vrstvy (Android EncryptedSharedPreferences).
+  // Pri cold-start appky MainActivity.onPageStarted číta tento token zo
+  // zariadenia a injectuje späť do localStorage pred načítaním React appky
+  // — bez tohto volania by user po swipe-kill skončil na /login aj keď
+  // má platný token.
+  nativeSetAuthToken(token);
 };
 
 export const removeStoredToken = () => {
@@ -89,6 +105,10 @@ export const removeStoredToken = () => {
   // a prvé API requesty by skončili 403 (NOT_MEMBER).
   try { sessionStorage.removeItem('currentWorkspaceId'); } catch { /* noop */ }
   try { localStorage.removeItem('currentWorkspaceId'); } catch { /* noop */ }
+  // Natívna vrstva — vymaž EncryptedSharedPreferences (token + workspace +
+  // cached FCM sync marker). Po logoute by starý JWT v keystore spôsobil že
+  // ďalší cold-start Android appky by bootol do cudzej session.
+  nativeClearAll();
 };
 
 export { isNativeIOSApp };

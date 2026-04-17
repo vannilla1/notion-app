@@ -19,10 +19,14 @@
 // z DB. Po prvom fetchWorkspaces() klient hodnotu nastaví a ďalšie requesty
 // idú s headerom.
 
-const isNativeIOSApp = () =>
-  typeof navigator !== 'undefined' &&
-  (/PrplCRM-iOS/.test(navigator.userAgent) ||
-    !!(typeof window !== 'undefined' && window.webkit && window.webkit.messageHandlers));
+import {
+  isNativeIOSApp as _isNativeIOSApp,
+  isNativeAndroidApp,
+  nativeSetWorkspaceId
+} from './nativeBridge';
+
+const isNativeIOSApp = _isNativeIOSApp;
+const isNativeApp = () => isNativeIOSApp() || isNativeAndroidApp();
 
 const isPwaStandalone = () => {
   try {
@@ -35,7 +39,7 @@ const isPwaStandalone = () => {
   }
 };
 
-const usePersistentStorage = () => isNativeIOSApp() || isPwaStandalone();
+const usePersistentStorage = () => isNativeApp() || isPwaStandalone();
 
 const storage = () => (usePersistentStorage() ? localStorage : sessionStorage);
 
@@ -59,6 +63,10 @@ export const setStoredWorkspaceId = (workspaceId) => {
   } catch {
     /* Private Browsing / quota — header sa nepošle, backend fallne na DB */
   }
+  // Write-through do natívnej Android vrstvy — MainActivity pri cold-start
+  // injectne tento workspaceId späť do localStorage, takže appka vidí
+  // správny workspace bez re-fetch z DB.
+  nativeSetWorkspaceId(workspaceId);
 };
 
 export const removeStoredWorkspaceId = () => {
