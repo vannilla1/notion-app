@@ -11402,6 +11402,12 @@ body.ios-app {
     min-width: 44px;
     padding: 8px;
   }
+
+  /* 7. Skry logo ikonu (P) v headeri na mobile — brand text "Prpl CRM" +
+        workspace name stačí, ikona je duplicitná a kradne priestor. */
+  .header-brand .header-logo-icon {
+    display: none;
+  }
 }
 
 /* Ultra-narrow phones (Galaxy Fold cover, staré Androidy ~320-360px):
