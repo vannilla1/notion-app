@@ -96,8 +96,10 @@ function Dashboard() {
 
   // Pri návrate z pozadia + pri prepnutí workspacu (deep-link z push môže
   // zmeniť aktívny workspace bez remountu stránky) — refetch dát.
-  useAppResume(fetchData);
-  useWorkspaceSwitched(fetchData);
+  // Arrow wrapper kvôli TDZ: `fetchData` je deklarované nižšie, ale hooks
+  // volajú handler až pri event-e, kedy je už inicializované.
+  useAppResume(() => fetchData());
+  useWorkspaceSwitched(() => fetchData());
 
   useEffect(() => {
     if (!socket || !isConnected) return;
