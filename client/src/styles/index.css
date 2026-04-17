@@ -11178,3 +11178,135 @@ body.ios-app {
     max-width: 100%;
   }
 }
+
+/* ==================== ANDROID + UNIVERSAL MOBILE POLISH ====================
+ * Cieľ: premium UX na Androide naprieč výrobcami (Samsung, Xiaomi, Pixel,
+ * Huawei, OnePlus...). Keďže každý OEM má iný Chrome/WebView, pravidlá sú
+ * zámerne konzervatívne — riešime len vec ktoré sú bezpečné všade:
+ *   1. Safe-area-inset pre PWA/TWA (status bar + punch-hole camera)
+ *   2. Material-friendly tap targets (≥44px, 48dp ideál)
+ *   3. Ellipsis na workspace názve (Samsung narrow UI)
+ *   4. Notification badge nesmie overlap-ovať avatar (flexbox gap + z-index)
+ *   5. Tap-highlight: transparent (inak ugly grey box na tap v Chrome)
+ *   6. Overscroll behavior: none na header (zabráni "bounce" bugom)
+ *
+ * Triedy sa doplnia z main.jsx podľa navigator.userAgent a display-mode.
+ * Body.ios-app naďalej injectuje Swift wrapper — toto je čisto Android path.
+ * =========================================================================== */
+
+/* Safe-area-inset-top pre PWA/TWA na Androide.
+   V normálnom Chrome browseri `pwa-standalone` NIE je — tam status bar
+   pokrýva Chrome, padding nie je potrebný a naopak by spôsobil dvojité
+   odsadenie. Media hack tu nestačí, musí to byť class-gated.
+
+   env(safe-area-inset-top) je 0 na telefónoch bez cutout-u (staré Androidy),
+   takže default padding 12px ostáva funkčný aj tam. */
+.pwa-standalone .crm-header {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+}
+
+/* Status bar color match — už máme meta theme-color #6366f1, toto je len
+   doplnkový guard pre older Chrome kde content-behind-status-bar vychádza
+   priesvitný. */
+.pwa-standalone body,
+.pwa-standalone .crm-container {
+  background-color: var(--accent-color, #6366f1);
+}
+
+/* Android tap highlight — Chrome defaultne dáva grey rectangle pri každom
+   tap-e čo vyzerá neprofesionálne. Radšej žiadny highlight (máme vlastné
+   :active styles na buttonoch). */
+.platform-android *,
+.pwa-standalone * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Header items — Material guideline 48dp minimum tap target.
+   Platí plošne (aj iOS) lebo 48dp je aj nad iOS HIG (44pt) a je to
+   user-friendlier pre všetkých. */
+.crm-header-right .notif-bell-btn,
+.crm-header-right .user-menu-trigger {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Workspace name sa nesmie nahrubo cut-nuť — elipsis na všetkých šírkach
+   kde hrozí overflow (do 480px). Bez tohto "Perun Electromobility" tečie
+   cez dot + title. */
+.header-workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.header-brand-text {
+  min-width: 0; /* allow flexbox children to shrink below content width */
+}
+
+/* Notification badge — pridaj pointer-events: none aby sa cez ňu dal klicknúť
+   na bell, a z-index aby nikdy nezmizla pod avatarom pri layout shiftoch. */
+.notif-bell-badge {
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Mobilný header — tighten pre Android (Samsung Galaxy width ~380-412px).
+   Existujúci 430px breakpoint overridneme iba tam kde to treba — nechceme
+   mu odporovať. */
+@media (max-width: 480px) {
+  .crm-header {
+    gap: 6px; /* default flex-gap pre celý header riadok */
+  }
+
+  .crm-header-right {
+    gap: 6px; /* medzera medzi bell a avatar — zabráni overlapu badge */
+    flex-shrink: 0;
+  }
+
+  .crm-header-left {
+    min-width: 0; /* critical — aby HeaderLogo text (workspace name) vedel
+                     ellipsis-nuť keď right side má svoje fixed items */
+    flex: 1 1 auto;
+  }
+
+  /* Workspace name width cap — max 140px na úzkom telefóne */
+  .header-workspace-name {
+    max-width: 160px;
+  }
+}
+
+/* Extrémne úzke zariadenia (Pixel 4a mini, staré Androidy) — skryj workspace
+   názov úplne, nechaj len farebný dot. Meno je aj v UserMenu dropdowne. */
+@media (max-width: 360px) {
+  .header-workspace-name {
+    max-width: 80px;
+  }
+
+  .crm-header {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+/* Prevent overscroll glow / bounce na Androide na header-i (vyzerá
+   broken pri swipe down). */
+.pwa-standalone .crm-header {
+  overscroll-behavior: none;
+}
+
+/* Dropdown menu na Androide — zabráni že sa panely otvoria pod status barom
+   v PWA mode. */
+.pwa-standalone .notif-panel,
+.pwa-standalone .user-menu-dropdown {
+  margin-top: calc(env(safe-area-inset-top, 0px) + 4px);
+}
+
+/* Smooth scrolling — Android WebView niekedy frame-drops pri hard snap;
+   `scroll-behavior: smooth` nie je vhodné plošne (ruší JS scrollTo()) ale
+   `overscroll-behavior-y: contain` zabráni že pull-to-refresh na home
+   screen-e reloadne celú PWA. */
+.pwa-standalone {
+  overscroll-behavior-y: contain;
+}

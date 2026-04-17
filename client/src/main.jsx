@@ -10,6 +10,28 @@ import './styles/index.css';
 // (SuperAdmin → Diagnostics → Chyby). Beží paralelne so Sentry.
 installGlobalErrorHandlers();
 
+// Platformové body classes — CSS cez ne cielene upravuje padding, tap targets,
+// safe-area insets. Analóg k 'ios-app' class ktorú injectuje Swift WKWebView
+// (ios/PrplCRM/ContentView.swift), ale pre Android to musíme urobiť z JS lebo
+// TWA nevie injektnúť kód pred React-om.
+//
+//   platform-android  — UA obsahuje Android (browser, PWA, TWA, WebView)
+//   pwa-standalone    — display-mode: standalone (installed PWA alebo TWA);
+//                        tu aplikujeme safe-area-inset-top kvôli status baru
+//                        a camera cutoutu. V normálnom browseri NIE — tam
+//                        browser chrome už status bar pokrýva.
+(function markPlatform() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Android/i.test(ua)) document.body.classList.add('platform-android');
+    const mql = window.matchMedia && window.matchMedia('(display-mode: standalone)');
+    const isStandalone = (mql && mql.matches) || window.navigator.standalone === true;
+    if (isStandalone) document.body.classList.add('pwa-standalone');
+    // Ak user v behu appku nainštaluje (A2HS), class sa nedoplní — to je OK,
+    // ďalší cold-start ju nastaví. Nestojí za to riešiť live switch.
+  } catch { /* never break boot */ }
+})();
+
 // Minimal local error boundary — renders fallback UI without requiring the
 // Sentry bundle on first paint. Sentry still captures errors via its global
 // handlers once it finishes loading (see deferred init below).
