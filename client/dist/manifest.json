@@ -4,10 +4,36 @@
   "description": "Moderný slovenský CRM systém pre správu kontaktov, projektov a tímovej spolupráce. Zadarmo na vyskúšanie.",
   "id": "/?source=pwa",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f8fafc",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Úlohy",
+      "short_name": "Úlohy",
+      "description": "Rýchly prístup k zoznamu úloh",
+      "url": "/tasks",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Kontakty",
+      "short_name": "CRM",
+      "description": "Zoznam kontaktov",
+      "url": "/crm",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Správy",
+      "short_name": "Chat",
+      "description": "Tímová komunikácia",
+      "url": "/messages",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    }
+  ],
   "icons": [
     {
       "src": "/icons/icon-72x72.png",

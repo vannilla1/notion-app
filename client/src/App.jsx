@@ -10,7 +10,6 @@ import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
-import { reportError } from './utils/reportError';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -83,59 +82,22 @@ function AppContent() {
         if (isMember || listLikelyStale) {
           try {
             await switchWorkspace(targetWs);
-          } catch (e) {
+          } catch {
             // Switch zlyhal → NEPRECHÁDZAME na cleanPath. Keby sme šli bez ws=,
             // `pendingWsSwitch` gate v AppContent by odomkol a user by skončil
             // v zlom workspace ("correct section, wrong workspace" bug).
             // ws= necháme v URL, gate drží "Načítavam..." kým sa switch retryne.
-            // Reportneme do AdminPanel diagnostiky aby sme videli real-world zlyhanie.
-            const ctx1 = {
-              targetWs,
-              currentWs: currentWorkspaceId?.toString?.() || null,
-              path: rawPath,
-              workspacesCount: (workspaces || []).length,
-              httpStatus: e?.response?.status || null
-            };
-            reportError({
-              name: 'DeepLinkSwitchFailed',
-              message: `switchWorkspace zlyhal | ${JSON.stringify(ctx1)} | ${e?.message || 'unknown'}`,
-              stack: e?.stack
-            });
             return;
           }
         } else {
           // Nie som člen — fallthrough na plain navigate by spôsobil "wrong workspace"
-          // bug lebo ws= by sa zmazalo a gate by odomkol. Toto sa stáva keď:
-          //  (a) user v medzičase opustil workspace (notif bola poslaná pred tým)
-          //  (b) `workspaces` list ešte nie je fresh (race medzi login/switch)
-          // Bezpečnejšie: nechať ws= v URL, gate drží "Načítavam...", useLayoutEffect
-          // sa re-fires po ďalšom fetchWorkspaces (napr. po resume alebo polling).
-          // Raz reportneme do AdminPanel aby sme vedeli že membership desync sa deje.
-          const ctx2 = {
-            targetWs,
-            currentWs: currentWorkspaceId?.toString?.() || null,
-            path: rawPath,
-            workspacesCount: (workspaces || []).length,
-            workspaceIds: (workspaces || []).map(w => (w.id || w._id)?.toString()).filter(Boolean)
-          };
-          reportError({
-            name: 'DeepLinkTargetNotMember',
-            message: `Deep link target nie je v membership | ${JSON.stringify(ctx2)}`
-          });
-          // Ponechávame ws= v URL — gate zostane, user uvidí "Načítavam..." namiesto
-          // tichej chyby v zlom workspace. Ak je to skutočne permanentný desync
-          // (user opustil workspace), user si musí appku restart-nuť alebo explicit
-          // clicknúť inam. Lepšie než ticho zobraziť nesprávne dáta.
+          // bug lebo ws= by sa zmazalo a gate by odomkol. Ponechávame ws= v URL,
+          // gate zostane, useLayoutEffect sa re-fires po ďalšom fetchWorkspaces.
           return;
         }
       }
       navigate(cleanPath, { replace: true });
-    } catch (e) {
-      reportError({
-        name: 'DeepLinkNavigateThrew',
-        message: `navigateWithWorkspace threw path=${rawPath}: ${e?.message || 'unknown'}`,
-        stack: e?.stack
-      });
+    } catch {
       navigate(rawPath, { replace: true });
     }
   }, [navigate, currentWorkspaceId, switchWorkspace, workspaces]);
