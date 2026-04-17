@@ -129,11 +129,28 @@ const apiLimiter = rateLimit({
   }
 });
 
+// Rate limiter for client error reporting
+// 60 per minute per IP — dostatočne štedré aby ErrorBoundary + window.onerror
+// + unhandledrejection mohli paralelne reportovať, ale tesne blokuje infinite
+// render loopy (tie by mali byť dedup-nuté v reportError.js aj tak).
+const errorReportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { message: 'Too many error reports' },
+  standardHeaders: false,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development' && process.env.SKIP_RATE_LIMIT === 'true';
+  }
+});
+
 module.exports = {
   loginLimiter,
   registerLimiter,
   passwordChangeLimiter,
   forgotPasswordLimiter,
   resetPasswordLimiter,
-  apiLimiter
+  apiLimiter,
+  errorReportLimiter
 };

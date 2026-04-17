@@ -13,15 +13,28 @@ const serverErrorSchema = new mongoose.Schema({
   // Hash identifikujúci "rovnakú" chybu pre dedup/agregáciu
   fingerprint: { type: String, required: true, unique: true, index: true },
 
+  // Zdroj chyby:
+  //   'server' — unhandled Express error (5xx, crash v route handleri)
+  //   'client' — prehliadač/PWA/TWA/WKWebView: ErrorBoundary,
+  //              window.onerror, unhandledrejection
+  // Pridané zámerne až po server-implementácii — existujúce dokumenty bez
+  // tohto poľa Mongoose dotiahne ako default 'server' (zachová backfill).
+  source: { type: String, enum: ['server', 'client'], default: 'server', index: true },
+
   // Základné info
   message: { type: String, required: true },
   stack: String,
   name: String, // Error.name (napr. 'TypeError', 'ValidationError')
 
   // Kontext požiadavky pri PRVOM výskyte (nepretáčame)
+  // Pre client chyby: method='GET', path=URL pathname, statusCode=0
   method: String,
   path: String,
   statusCode: { type: Number, default: 500 },
+
+  // Len pre source='client' — React component stack + URL v ktorom sa stalo
+  componentStack: String,
+  url: String,
 
   // Kto to trafil (prvý výskyt — pre ďalšie výskyty vidíme len count)
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

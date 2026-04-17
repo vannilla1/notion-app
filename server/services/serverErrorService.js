@@ -85,6 +85,20 @@ function computeFingerprint(err, req) {
 }
 
 /**
+ * Fingerprint pre client-side chyby — nemáme Express req, kombinujeme
+ * normalized stack + normalized URL pathname + error name. Prefix 'client::'
+ * aby sa nikdy nekolidoval so server fingerprintom pre rovnakú message.
+ */
+function computeClientFingerprint({ name, message, stack, url }) {
+  const normStack = normalizeStack(stack || '');
+  const urlPath = normalizePath((() => {
+    try { return new URL(url || '').pathname; } catch { return url || ''; }
+  })());
+  const input = `client::${name || 'Error'}::${urlPath}::${normStack || message || 'unknown'}`;
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
+
+/**
  * Scrub request body — odstráni citlivé polia pred uložením do Mongo.
  * Sentry beforeSend robí to isté, ale tu je vlastná cesta.
  */
@@ -172,11 +186,80 @@ function errorMiddleware(err, req, res, next) {
   next(err);
 }
 
+/**
+ * Record chyby reportovanej z browsera (ErrorBoundary, window.onerror,
+ * unhandledrejection). Rovnaký anti-spam mechanizmus ako pre server chyby
+ * (per-fingerprint sampling), rovnaký dedup cez fingerprint.
+ *
+ * payload: { name, message, stack, componentStack, url, userAgent,
+ *            line, column }
+ * context: { userId, workspaceId, ipAddress } — voliteľne z autentifikácie
+ */
+async function recordClientError(payload, context = {}) {
+  try {
+    const fingerprint = computeClientFingerprint(payload);
+    if (!shouldSample(fingerprint)) return null;
+
+    const now = new Date();
+    const existing = await ServerError.findOne({ fingerprint });
+
+    if (existing) {
+      existing.count += 1;
+      existing.lastSeen = now;
+      if (existing.resolved) {
+        existing.resolved = false;
+        existing.resolvedAt = null;
+      }
+      await existing.save();
+      return existing;
+    }
+
+    // Z URL urob path pre UI ("Route" stĺpec)
+    let urlPath = '';
+    try { urlPath = new URL(payload.url || '').pathname; } catch { urlPath = payload.url || ''; }
+
+    const doc = new ServerError({
+      fingerprint,
+      source: 'client',
+      message: (payload.message || 'Unknown client error').slice(0, 1000),
+      stack: (payload.stack || '').slice(0, 10000),
+      name: payload.name || 'Error',
+      method: 'GET',
+      path: urlPath.slice(0, 500),
+      statusCode: 0,
+      componentStack: (payload.componentStack || '').slice(0, 5000) || undefined,
+      url: (payload.url || '').slice(0, 500) || undefined,
+      userId: context.userId || null,
+      workspaceId: context.workspaceId || null,
+      userAgent: (payload.userAgent || context.userAgent || '').slice(0, 500),
+      ipAddress: context.ipAddress,
+      context: {
+        line: payload.line,
+        column: payload.column,
+        release: payload.release // napr. git SHA z buildu ak posielaš
+      },
+      firstSeen: now,
+      lastSeen: now,
+      count: 1
+    });
+    await doc.save();
+    return doc;
+  } catch (dbErr) {
+    logger.error('serverErrorService: failed to record client error', {
+      recordError: dbErr.message,
+      originalError: payload?.message
+    });
+    return null;
+  }
+}
+
 module.exports = {
   errorMiddleware,
   recordError,
+  recordClientError,
   // Exports pre testy / manual use
   _computeFingerprint: computeFingerprint,
+  _computeClientFingerprint: computeClientFingerprint,
   _normalizeStack: normalizeStack,
   _normalizePath: normalizePath
 };

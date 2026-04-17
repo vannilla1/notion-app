@@ -3,7 +3,12 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { reportError, installGlobalErrorHandlers } from './utils/reportError';
 import './styles/index.css';
+
+// Zachytí unhandled errors + promise rejections a pošle do /api/errors/client
+// (SuperAdmin → Diagnostics → Chyby). Beží paralelne so Sentry.
+installGlobalErrorHandlers();
 
 // Minimal local error boundary — renders fallback UI without requiring the
 // Sentry bundle on first paint. Sentry still captures errors via its global
@@ -15,6 +20,14 @@ class AppErrorBoundary extends React.Component {
   }
   static getDerivedStateFromError() {
     return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    reportError({
+      name: error?.name,
+      message: error?.message || 'React render error',
+      stack: error?.stack,
+      componentStack: errorInfo?.componentStack
+    });
   }
   reset = () => this.setState({ hasError: false });
   render() {

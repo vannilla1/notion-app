@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import PropTypes from 'prop-types';
+import { reportError } from '../utils/reportError';
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -17,6 +18,14 @@ class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     this.setState({ errorInfo });
+
+    // Pošli do SuperAdmin Diagnostics (dedup riešený v reportError).
+    reportError({
+      name: error?.name,
+      message: error?.message || 'React render error',
+      stack: error?.stack,
+      componentStack: errorInfo?.componentStack
+    });
 
     if (this.props.onError) {
       this.props.onError(error, errorInfo);

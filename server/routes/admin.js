@@ -1496,6 +1496,9 @@ router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
     const filter = {};
     if (req.query.resolved === 'true') filter.resolved = true;
     else if (req.query.resolved === 'false') filter.resolved = false;
+    if (req.query.source === 'server' || req.query.source === 'client') {
+      filter.source = req.query.source;
+    }
     if (req.query.search) {
       filter.$or = [
         { message: { $regex: req.query.search, $options: 'i' } },

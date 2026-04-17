@@ -2302,7 +2302,7 @@ function DiagErrorsSection() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [filter, setFilter] = useState({ resolved: 'false', search: '' });
+  const [filter, setFilter] = useState({ resolved: 'false', search: '', source: 'all' });
   const [selected, setSelected] = useState(null);
 
   const load = useCallback(async () => {
@@ -2310,6 +2310,7 @@ function DiagErrorsSection() {
     try {
       const params = { page, limit: 30 };
       if (filter.resolved !== 'all') params.resolved = filter.resolved;
+      if (filter.source !== 'all') params.source = filter.source;
       if (filter.search) params.search = filter.search;
       const [listRes, statsRes] = await Promise.all([
         adminApi.get('/api/admin/errors', { params }),
@@ -2323,7 +2324,7 @@ function DiagErrorsSection() {
     } finally {
       setLoading(false);
     }
-  }, [page, filter.resolved, filter.search]);
+  }, [page, filter.resolved, filter.source, filter.search]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2394,6 +2395,16 @@ Workspace: ${err.workspaceId || 'N/A'}
           <option value="true">Len opravené</option>
           <option value="all">Všetky</option>
         </select>
+        <select
+          value={filter.source}
+          onChange={(e) => { setFilter({ ...filter, source: e.target.value }); setPage(1); }}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
+          title="Zdroj chyby"
+        >
+          <option value="all">Všetky zdroje</option>
+          <option value="server">🖥️ Server</option>
+          <option value="client">🌐 Klient (prehliadač/PWA)</option>
+        </select>
         <input
           type="text"
           placeholder="Hľadať v message / path..."
@@ -2415,6 +2426,7 @@ Workspace: ${err.workspaceId || 'N/A'}
                 <thead>
                   <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
                     <th style={{ padding: '10px' }}>Posledný výskyt</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>Zdroj</th>
                     <th style={{ padding: '10px' }}>Route</th>
                     <th style={{ padding: '10px' }}>Message</th>
                     <th style={{ padding: '10px', textAlign: 'center' }}>Count</th>
@@ -2426,6 +2438,9 @@ Workspace: ${err.workspaceId || 'N/A'}
                   {errors.map(err => (
                     <tr key={err._id} onClick={() => setSelected(err)} style={{ cursor: 'pointer', borderTop: '1px solid var(--border-color)' }}>
                       <td style={{ padding: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(err.lastSeen).toLocaleString('sk-SK')}</td>
+                      <td style={{ padding: '10px', textAlign: 'center', fontSize: '14px' }} title={err.source === 'client' ? 'Klient (prehliadač)' : 'Server'}>
+                        {err.source === 'client' ? '🌐' : '🖥️'}
+                      </td>
                       <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '12px' }}>
                         <span style={{ display: 'inline-block', padding: '2px 6px', borderRadius: '3px', background: 'var(--bg-secondary)', marginRight: '6px' }}>{err.method}</span>
                         {err.path}
@@ -2466,6 +2481,7 @@ Workspace: ${err.workspaceId || 'N/A'}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '16px', fontSize: '13px' }}>
+              <div><strong>Zdroj:</strong> {selected.source === 'client' ? '🌐 Klient (prehliadač/PWA)' : '🖥️ Server'}</div>
               <div><strong>Status:</strong> {selected.statusCode}</div>
               <div><strong>Count:</strong> {selected.count}×</div>
               <div><strong>Route:</strong> <code>{selected.method} {selected.path}</code></div>
@@ -2474,7 +2490,16 @@ Workspace: ${err.workspaceId || 'N/A'}
               <div><strong>Posledný:</strong> {new Date(selected.lastSeen).toLocaleString('sk-SK')}</div>
               <div><strong>User:</strong> {selected.userId?.email || 'nezalogovaný'}</div>
               <div><strong>IP:</strong> {selected.ipAddress || '—'}</div>
+              {selected.url && <div style={{ gridColumn: 'span 2' }}><strong>URL:</strong> <code style={{ wordBreak: 'break-all' }}>{selected.url}</code></div>}
+              {selected.userAgent && <div style={{ gridColumn: 'span 2', fontSize: '11px', color: 'var(--text-muted)' }}><strong>UA:</strong> {selected.userAgent}</div>}
             </div>
+
+            {selected.componentStack && (
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Component stack (React):</strong>
+                <pre style={{ padding: '10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>{selected.componentStack}</pre>
+              </div>
+            )}
 
             <div style={{ marginBottom: '16px' }}>
               <strong>Message:</strong>

@@ -24,6 +24,7 @@ const messageRoutes = require('./routes/messages');
 const adminRoutes = require('./routes/admin');
 const billingRoutes = require('./routes/billing');
 const contactFormRoutes = require('./routes/contact-form');
+const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
@@ -126,6 +127,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/contact-form', contactFormRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/errors', errorRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
