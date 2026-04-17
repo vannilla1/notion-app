@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "eu.prplcrm.app",
       "sha256_cert_fingerprints": [
-        "AC:FF:32:D3:5F:C0:C7:96:2E:CB:D8:AD:9C:75:56:D5:8F:7D:03:BF:92:0B:F8:40:1D:9F:1D:4D:B6:9C:AC:98"
+        "AC:FF:32:D3:5F:C0:C7:96:2E:CB:D8:AD:9C:75:56:D5:8F:7D:03:BF:92:0B:F8:40:1D:9F:1D:4D:B6:9C:AC:98",
+        "86:B8:BE:DD:F5:33:47:16:02:E8:DB:A8:65:FB:4D:D3:71:AE:F4:32:4F:80:1D:AC:87:BC:51:32:29:A5:24:6C"
       ]
     }
   }
