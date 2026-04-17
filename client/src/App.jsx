@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
 import NotificationToast from './components/NotificationToast';
+import PushPermissionBanner from './components/PushPermissionBanner';
 import BottomNav from './components/BottomNav';
 import api from './api/api';
 import { useSocket } from './hooks/useSocket';
@@ -364,6 +365,9 @@ function AppContent() {
           mounting NotificationToast would duplicate every notification.
           Web/Android (no APNs) still get the in-app toast. */}
       {isAuthenticated && !isIosNativeApp() && <NotificationToast />}
+      {/* Android/PWA first-run push permission banner. Skip v iOS native app —
+          APNs tam rieši permission cez systémovú Swift vrstvu (UNUserNotificationCenter). */}
+      {isAuthenticated && !isIosNativeApp() && <PushPermissionBanner />}
       {isAuthenticated && <BottomNav unreadCounts={unreadCounts} />}
       <Suspense fallback={<RouteFallback />}>
       <Routes>
