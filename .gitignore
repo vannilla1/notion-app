@@ -35,6 +35,7 @@ android-native/app/build/
 android-native/.gradle/
 android-native/local.properties
 android-native/*.keystore
+android-native/keystore.properties
 android-native/*.aab
 android-native/*.apk
 android-native/*.idsig
