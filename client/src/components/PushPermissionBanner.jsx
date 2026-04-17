@@ -52,6 +52,11 @@ const PushPermissionBanner = () => {
     let cancelled = false;
 
     (async () => {
+      // Android-only — desktop users majú browser notification UI (icon v URL
+      // bare) a vedia si to zapnúť sami. Banner by tam bol rušivý.
+      const isAndroid = /Android/i.test(navigator.userAgent || '');
+      if (!isAndroid) return;
+
       if (!isPushSupported()) return;
       if (isDismissed()) return;
       if (getPermissionStatus() !== 'default') return;
