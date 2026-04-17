@@ -11310,3 +11310,112 @@ body.ios-app {
 .pwa-standalone {
   overscroll-behavior-y: contain;
 }
+
+/* =============================================================================
+ * MOBILE HEADER CRAMP FIX  (universal Android + iOS phones ≤ 600px)
+ * =============================================================================
+ * Problém: Dashboard header má v pravej časti 3 nav tlačidlá (Kontakty / Projekty
+ * / Správy), WorkspaceSwitcher, NotificationBell a UserMenu (avatar + meno + email
+ * + šípka). To sa NIKDY nezmestí na 360-412px telefón, a ani nemá — sidebar
+ * (cez hamburger) obsahuje tie isté linky.
+ *
+ * Existujúce media queries sa pokúšali skryť `span.btn-text` v nav buttonoch, ale
+ * DOM ten wrapper nemá (text je raw child), takže buttony stále zaberali miesto.
+ * Preto bell padal cez brand text. Fix je brutálne jednoduchý: na mobile tieto
+ * duplicitné prvky nemajú čo robiť v headeri — sú dostupné cez hamburger/sidebar
+ * a cez UserMenu dropdown.
+ *
+ * Cieľ layoutu na telefóne (≤ 600px):
+ *   [≡] [P] [Prpl CRM ▸ workspace name] .................. [🔔] [M▾]
+ *        ↑ flex 1, ellipsis                                 ↑ fixed, min 44px tap
+ * ============================================================================= */
+@media (max-width: 600px) {
+  /* 1. Skry 3 duplicitné nav buttony v crm-header-right — sú aj v sidebare */
+  .crm-header-right > .btn.btn-secondary {
+    display: none !important;
+  }
+
+  /* 2. Skry WorkspaceSwitcher v header-right — workspace name je už viditeľné
+        v HeaderLogo (header-workspace-name) a prepínač je dostupný tapom naň +
+        v UserMenu dropdowne. Duplicita zbytočne kradne priestor. */
+  .crm-header-right > .workspace-switcher {
+    display: none !important;
+  }
+
+  /* 3. UserMenu trigger = len avatar + šípka. Žiadne meno, žiadny email —
+        tie sú vo dropdowne po tape. Drží tap target min 44px. */
+  .crm-header-right .user-menu-trigger .user-menu-info {
+    display: none !important;
+  }
+  .crm-header-right .user-menu-trigger .dropdown-arrow {
+    font-size: 9px;
+    margin-left: 2px;
+  }
+  .crm-header-right .user-menu-trigger {
+    padding: 4px 6px;
+    min-height: 44px;
+    min-width: 44px;
+    gap: 2px;
+  }
+
+  /* 4. Header flex — left grabs remaining space, right stays compact. */
+  .crm-header {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .crm-header-left {
+    flex: 1 1 auto;
+    min-width: 0; /* critical pre ellipsis fungovanie */
+    overflow: hidden;
+  }
+  .crm-header-right {
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+
+  /* 5. HeaderLogo text — celý blok smie shrinknúť, workspace name dostane
+        elipsis namiesto wrap/overflow. */
+  .header-brand {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .header-brand-text {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .header-title-link {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header-workspace-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 6. Notification bell tap target. */
+  .crm-header-right .notif-bell-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px;
+  }
+}
+
+/* Ultra-narrow phones (Galaxy Fold cover, staré Androidy ~320-360px):
+   aj brand subtitle môže byť príliš dlhý — cappuj. */
+@media (max-width: 380px) {
+  .header-title-link {
+    font-size: 14px;
+  }
+  .header-workspace-name {
+    font-size: 10px;
+  }
+  .crm-header {
+    padding-left: 8px;
+    padding-right: 8px;
+    gap: 6px;
+  }
+}
