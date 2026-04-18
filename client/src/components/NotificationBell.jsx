@@ -159,21 +159,35 @@ function NotificationBell() {
     const type = notif.type || '';
     const notifWs = notif.workspaceId || data.workspaceId || null;
 
-    // Use relatedType first (reliable), then fall back to type prefix
+    // Route priority: message > task/subtask > contact > fallback.
+    //
+    // Task/subtask ide PRED contact zámerne — due-date notifikácie pre
+    // contact-embedded úlohu (Contact.tasks[]) majú `relatedType='contact'`
+    // z histórických dôvodov (dueDateChecker.checkContactDueDates), ale
+    // `type='task.dueDate'` + `data.taskId`. User však chce kliknutím
+    // otvoriť samotnú úlohu, nie iba expand kontaktu.
+    //
+    // GET /api/tasks na serveri zlučuje global Task collection + embedded
+    // Contact.tasks[] do jedného zoznamu (routes/tasks.js:215), takže
+    // Tasks page vie zobraziť embedded úlohy a urobiť highlight/scroll
+    // aj keď task žije v Contact modeli. Tým pádom `/tasks?highlightTask=X
+    // &contactId=Y` funguje korektne pre oba zdroje.
+    //
+    // Pure contact notifikácie (napr. contact.created, contact.tagged),
+    // ktoré nemajú `data.taskId`, stále padajú do contact vetvy → /crm.
     if ((related === 'message' || type.startsWith('message')) && data.messageId) {
       let url = `/messages?highlight=${data.messageId}&_t=${ts}`;
       if (data.commentId) url += `&comment=${data.commentId}`;
-      navigateForNotif(url, notifWs);
-    } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
-      // Contact-embedded tasks: if we also have taskId, include it
-      let url = `/crm?expandContact=${data.contactId}&_t=${ts}`;
-      if (data.taskId) url += `&highlightTask=${data.taskId}`;
-      if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       navigateForNotif(url, notifWs);
     } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
       let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       if (data.contactId) url += `&contactId=${data.contactId}`;
+      navigateForNotif(url, notifWs);
+    } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
+      // Pure contact notif bez data.taskId — napr. contact.created.
+      // (Task-related contact notifikácie sú odchytené vyššie task vetvou.)
+      let url = `/crm?expandContact=${data.contactId}&_t=${ts}`;
       navigateForNotif(url, notifWs);
     } else if (notif.relatedId) {
       // Fallback: use relatedType + relatedId

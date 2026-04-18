@@ -51,16 +51,26 @@ function NotificationToast() {
   const handleClick = useCallback((toast) => {
     removeToast(toast.id);
     const ts = Date.now();
+    const type = toast.type || '';
+    const related = toast.relatedType || '';
+    const data = toast.data || {};
 
-    if (toast.relatedType === 'message' && toast.data?.messageId) {
-      navigate(`/messages?highlight=${toast.data.messageId}&_t=${ts}`);
-    } else if (toast.relatedType === 'contact' && toast.data?.contactId) {
-      navigate(`/crm?expandContact=${toast.data.contactId}&_t=${ts}`);
-    } else if ((toast.relatedType === 'task' || toast.relatedType === 'subtask') && toast.data?.taskId) {
-      let url = `/tasks?highlightTask=${toast.data.taskId}&_t=${ts}`;
-      if (toast.data.subtaskId) url += `&subtask=${toast.data.subtaskId}`;
-      if (toast.data.contactId) url += `&contactId=${toast.data.contactId}`;
+    // Route priority: message > task/subtask > contact.
+    // Task ide PRED contact lebo due-date notifikácie pre contact-embedded
+    // úlohy majú `relatedType='contact'` (historicky), ale `type='task.dueDate'`
+    // + `data.taskId`. User chce otvoriť úlohu, nie kontakt. Tasks page vie
+    // zobraziť aj contact-embedded úlohy (server routes/tasks.js zlučuje oba
+    // zdroje), takže highlight + scroll funguje bez ohľadu na zdroj úlohy.
+    // Viď identickú logiku v NotificationBell.jsx.
+    if ((related === 'message' || type.startsWith('message')) && data.messageId) {
+      navigate(`/messages?highlight=${data.messageId}&_t=${ts}`);
+    } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
+      let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
+      if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
+      if (data.contactId) url += `&contactId=${data.contactId}`;
       navigate(url);
+    } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
+      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}`);
     }
   }, [navigate, removeToast]);
 
