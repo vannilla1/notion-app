@@ -4,11 +4,25 @@ import { useSocket } from '../hooks/useSocket';
 import { useWorkspace } from '../context/WorkspaceContext';
 import api from '../api/api';
 
+// Stránkovanie notifikácií v belli. Používame offset-based pagination
+// (nie cursor) — backend akceptuje `?limit=&offset=` a vracia `total` +
+// `unreadCount` v každej odpovedi, takže ľahko vieme, či sa má zobraziť
+// "Zobraziť viac" tlačidlo.
+//
+// 30 per page je dobrý default — prvý fetch je rýchly (menej DB work,
+// menej JSON payloadu), a user zvyčajne klikne 1-2x load-more ak sa chce
+// dostať hlbšie. Infinite scroll v tak malom popover paneli (max-height
+// 460px) by bol zmätočný, lebo user nie vždy rozozná, že tam niečo
+// dole pribúda.
+const PAGE_SIZE = 30;
+
 function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const panelRef = useRef(null);
   const bellRef = useRef(null);
   const navigate = useNavigate();
@@ -38,16 +52,46 @@ function NotificationBell() {
     } catch {}
   }, []);
 
-  // Fetch notifications list
+  // Fetch prvej stránky notifikácií — volá sa pri otvorení panelu alebo
+  // pri socket `notification` evente. Reset-uje pagination od začiatku.
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/notifications?limit=30');
+      const res = await api.get(`/api/notifications?limit=${PAGE_SIZE}&offset=0`);
       setNotifications(res.data.notifications || []);
       setUnreadCount(res.data.unreadCount ?? 0);
+      setTotal(res.data.total ?? 0);
     } catch {}
     setLoading(false);
   }, []);
+
+  // Load-more tlačidlo → appenduje ďalšiu stránku 30 notifikácií.
+  // Offset je `notifications.length` (nie fixný page number) — tak nám
+  // neprekáža ani real-time socket event medzi stránkami; ak by sa v
+  // medzi-stránkovej medziere objavila nová notifikácia, hrozí duplicit
+  // v zozname. Dedupujeme podľa `id` cez Map, aby sme sa tomu vyhli.
+  const loadMore = useCallback(async () => {
+    if (loadingMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.get(`/api/notifications?limit=${PAGE_SIZE}&offset=${notifications.length}`);
+      const newItems = res.data.notifications || [];
+      setNotifications(prev => {
+        // Dedup podľa id — socket event mohol medzi-tým vložiť novú notifikáciu
+        // pred aktuálny zoznam, a server by ju vrátil druhý krát na novom
+        // offsete. Map zachová poradie (najnovšie prvé).
+        const map = new Map();
+        [...prev, ...newItems].forEach(n => {
+          const key = n.id || n._id;
+          if (key && !map.has(key)) map.set(key, n);
+        });
+        return Array.from(map.values());
+      });
+      setTotal(res.data.total ?? 0);
+      setUnreadCount(res.data.unreadCount ?? 0);
+    } catch {}
+    setLoadingMore(false);
+  }, [notifications.length, loadingMore, loading]);
 
   // Initial load + periodic refresh
   useEffect(() => {
@@ -225,6 +269,21 @@ function NotificationBell() {
                 </div>
               </div>
             ))}
+            {/* Load-more — zobrazíme iba ak server hlási viac položiek
+                než máme aktuálne v zozname. Počet zostávajúcich ukážeme
+                v labeli, aby user vedel, koľko ešte čaká. */}
+            {!loading && total > notifications.length && (
+              <button
+                type="button"
+                className="notif-load-more"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore
+                  ? 'Načítavam…'
+                  : `Zobraziť ďalšie (${Math.min(PAGE_SIZE, total - notifications.length)})`}
+              </button>
+            )}
           </div>
         </div>
       )}
