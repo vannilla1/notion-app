@@ -41,6 +41,16 @@ services:
         name: Cache-Control
         value: no-cache
     routes:
+      # Pre-rendered statické stránky pre Google OAuth verification
+      # (reviewer + Googlebot vidia plný text policy/VOP bez JS).
+      # MUSIA ísť PRED catch-all, lebo Render spracováva routes zhora dolu.
+      - type: rewrite
+        source: /ochrana-udajov
+        destination: /ochrana-udajov.html
+      - type: rewrite
+        source: /vop
+        destination: /vop.html
+      # SPA fallback pre všetky ostatné routes (React Router zaberie).
       - type: rewrite
         source: /*
         destination: /index.html
