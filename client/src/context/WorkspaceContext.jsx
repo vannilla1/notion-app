@@ -2,11 +2,28 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { useAuth } from './AuthContext';
 import * as workspaceApi from '../api/workspaces';
 import { APP_EVENTS } from '../utils/constants';
+import { reportError } from '../utils/reportError';
 import {
   getStoredWorkspaceId,
   setStoredWorkspaceId,
   removeStoredWorkspaceId
 } from '../utils/workspaceStorage';
+
+// Čítať `ws=` z aktuálnej URL pri boot-e / fetchWorkspaces. Pre push notification
+// deep linky toto MUSÍ vyhrať nad localStorage (per-device) aj DB default —
+// inak by fetchWorkspaces nastavilo `currentWorkspace` na stale A-object z DB
+// defaultu a následný switchWorkspace(X) by v race-window nechal header visieť
+// so starým názvom (observed: "po kliknutí na notifikáciu otvorí správny
+// workspace + úlohu, ale názov workspace v headeri je zlý — je to prvý
+// workspace v poradí").
+const readUrlWsId = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('ws');
+  } catch {
+    return null;
+  }
+};
 
 const WorkspaceContext = createContext(null);
 
@@ -22,10 +39,23 @@ export const WorkspaceProvider = ({ children }) => {
   const { isAuthenticated } = useAuth();
   const [workspaces, setWorkspaces] = useState([]);
   const [currentWorkspace, setCurrentWorkspace] = useState(null);
-  // Inicializujeme z per-device storage — prvý render má správny workspaceId
-  // hneď, čím sa axios interceptor pošle s headerom aj na prvý fetchWorkspaces()
-  // a server vie, ktorý workspace sme mali "otvorený" pred reloadom.
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(() => getStoredWorkspaceId());
+  // Inicializujeme z URL `ws=` (deep link priorita) alebo per-device storage —
+  // prvý render má správny workspaceId hneď, čím sa axios interceptor pošle
+  // s headerom aj na prvý fetchWorkspaces() a server vie, ktorý workspace sme
+  // mali "otvorený" pred reloadom. Push notification tap (iOS cold start) má
+  // URL už s `ws=X` v čase ReactDOM mount — tu to zachytíme, aby po fetchu
+  // detailov bol currentWorkspace hneď X-object a nie DB-default-object.
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(() => {
+    const urlWs = readUrlWsId();
+    if (urlWs) {
+      // Sync do storage okamžite — axios interceptor číta z storage, takže
+      // prvý GET /workspaces/current pošle X-Workspace-Id=X a server vráti
+      // správny workspace namiesto DB defaultu.
+      try { setStoredWorkspaceId(urlWs); } catch { /* noop */ }
+      return urlWs;
+    }
+    return getStoredWorkspaceId();
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
@@ -46,21 +76,42 @@ export const WorkspaceProvider = ({ children }) => {
       const data = await workspaceApi.getWorkspaces();
       setWorkspaces(data.workspaces || []);
 
-      // KROK 2: Per-device workspace selection.
-      // - Ak máme lokálny workspaceId (z storage) a je v memberships → rešpektujeme
-      //   ho; device ostáva v "svojom" workspace aj keď user prepol na inom zariadení.
-      // - Inak (prvý login / nové zariadenie / stale storage po leave workspace) →
-      //   fallback na server-returned currentWorkspaceId.
+      // KROK 2: Workspace priority — URL `ws=` > localStorage > DB default.
+      // - URL `ws=` (deep link) MUSÍ vyhrať — inak by fetchWorkspaces nastavilo
+      //   currentWorkspace na DB-default-object, potom by switchWorkspace(X)
+      //   v useLayoutEffect race-window nechal header zobrazený s A-name.
+      //   (Bug report: "názov workspace je zlý — je to prvý workspace v poradí"
+      //   = DB default.)
+      // - Inak localStorage — device ostáva v "svojom" workspace aj keď user
+      //   prepol na inom zariadení.
+      // - Inak (prvý login / nové zariadenie / stale storage) → DB default.
+      const urlWsId = readUrlWsId();
+      const memberIdSet = new Set((data.workspaces || []).map(
+        w => (w.id || w._id)?.toString()
+      ));
+      const urlIsMember = urlWsId && memberIdSet.has(urlWsId.toString());
       const localWsId = getStoredWorkspaceId();
-      const localIsMember = localWsId && (data.workspaces || []).some(
-        w => (w.id || w._id)?.toString() === localWsId.toString()
-      );
-      const effectiveWsId = localIsMember ? localWsId : data.currentWorkspaceId;
+      const localIsMember = localWsId && memberIdSet.has(localWsId.toString());
+
+      const effectiveWsId = urlIsMember
+        ? urlWsId
+        : (localIsMember ? localWsId : data.currentWorkspaceId);
 
       // Storage MUSÍ byť nastavený PRED ďalším API callom — axios interceptor
       // číta storage, takže getCurrentWorkspace dostane správny X-Workspace-Id.
       setStoredWorkspaceId(effectiveWsId);
       setCurrentWorkspaceId(effectiveWsId);
+
+      // Diagnostika: logujeme do AdminPanel → Chyby aby sme vedeli, ktorá
+      // vetva sa spustila pri deep-link boot-e. Ak by fix nefungoval, uvidíme
+      // presne, čo fetchWorkspaces zvolil. Log je lacný (1 API call po boot).
+      if (urlWsId) {
+        reportError({
+          name: 'DeepLinkWorkspaceResolved',
+          message: `fetchWorkspaces: url=${urlWsId} local=${localWsId || 'null'} dbDefault=${data.currentWorkspaceId || 'null'} chosen=${effectiveWsId} urlIsMember=${urlIsMember} localIsMember=${localIsMember}`,
+          level: 'info'
+        });
+      }
 
       if (!data.workspaces || data.workspaces.length === 0 || !effectiveWsId) {
         setNeedsWorkspace(true);
@@ -128,6 +179,15 @@ export const WorkspaceProvider = ({ children }) => {
     setStoredWorkspaceId(workspaceId);
     if (result?.workspace) {
       setCurrentWorkspace(result.workspace);
+    } else {
+      // Diagnostika: server MÁ vždy vrátiť workspace field. Ak ho nevráti,
+      // currentWorkspace ostane stale a header zobrazí starý názov. Logujeme,
+      // aby sme vedeli, keby sa to v proďákcii stalo.
+      reportError({
+        name: 'SwitchWorkspaceMissingWorkspace',
+        message: `POST /switch/${workspaceId} returned result without workspace field. result=${JSON.stringify(result)?.slice(0, 200)}`,
+        level: 'warn'
+      });
     }
     // Stránky (Dashboard/CRM/Tasks/Messages) nie sú odpojené od toho istého
     // URL pri `ws=` zmene, preto im eventom povieme: refetch + reset modalov.
