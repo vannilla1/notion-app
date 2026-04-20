@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 101      // internal.2 — po reset upload key (2026-04-19). versionCode 100 mohol byť skúsený predtým, 101 je bezpečný.
+        versionCode = 102      // internal.3 — fix splash screen icon (replace placeholder "P" vector s plným logom z icon-512x512.png)
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

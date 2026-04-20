@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Splash screen logo — Android 12 Splash API požaduje vector ktorý pasuje do kruhu
-  s priemerom 240dp (icon 108dp, safe zone 66dp). Jednoduché "P" v strede.
+  Splash screen logo — plné PRPL CRM logo (fialový gradient + "P" + sparkles),
+  zhodné so zobrazením v Bubblewrap TWA verzii a na web/iOS PWA.
+
+  Zdroj: client/public/icons/icon-512x512.png, kopírovaný do mipmap-*/ic_splash_src.png
+  v rôznych densitách (hdpi 288px, xhdpi 384px, xxhdpi 432px, xxxhdpi 512px) aby
+  Android pri splash screen rendering (192dp visible area) vybral najvhodnejšiu
+  rezolúciu a nebol blurry.
+
+  Android 12+ splash API ho kruhovo orezáva; safe zone (center 66dp/108dp) obsahuje
+  "P" s gradientom, takže orezanie vyzerá čisto. Sparkles v rohoch sa možno odrežú.
 -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M40,30 L40,78 L48,78 L48,60 L58,60 C66.28,60 73,53.28 73,45 C73,36.72 66.28,30 58,30 Z M48,38 L58,38 C61.87,38 65,41.13 65,45 C65,48.87 61.87,52 58,52 L48,52 Z" />
-</vector>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@mipmap/ic_splash_src"
+    android:gravity="center" />
