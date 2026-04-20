@@ -798,11 +798,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       onClick={async () => {
                         const wsId = ws.id || ws._id;
                         await switchWorkspaceApi(wsId);
-                        // Per-device storage (+ native Android bridge write-through),
-                        // aby po window.location reload-e X-Workspace-Id header
-                        // a Android TokenStore injection mali nový workspace.
+                        // Per-device storage + native Android bridge write-through.
                         setStoredWorkspaceId(wsId);
-                        window.location.href = '/app';
+                        // ws= URL param má v WorkspaceContext najvyššiu prioritu
+                        // (nad localStorage aj DB default) → bulletproof pre
+                        // Android race medzi MainActivity inject a React boot.
+                        window.location.href = `/app?ws=${encodeURIComponent(wsId)}`;
                       }}
                     >
                       <span

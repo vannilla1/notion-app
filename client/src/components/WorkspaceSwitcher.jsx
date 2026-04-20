@@ -79,11 +79,13 @@ const WorkspaceSwitcher = () => {
 
     try {
       await switchWorkspaceApi(workspaceId);
-      // Per-device storage (+ native Android bridge write-through), aby po
-      // window.location reload-e X-Workspace-Id header a Android TokenStore
-      // injection mali nový workspace.
+      // 1) Per-device storage + native Android bridge write-through.
       setStoredWorkspaceId(workspaceId);
-      window.location.href = '/app';
+      // 2) `ws=` URL param — WorkspaceContext má URL prioritu vyššiu ako
+      //    localStorage aj DB default, takže aj keby Android MainActivity
+      //    stihol re-injectnuť stale wsId z TokenStore do localStorage pred
+      //    React bootom, URL param vyhrá. Bulletproof pre Android race.
+      window.location.href = `/app?ws=${encodeURIComponent(workspaceId)}`;
     } catch {
       // Switch failed — stay on current workspace
     }
