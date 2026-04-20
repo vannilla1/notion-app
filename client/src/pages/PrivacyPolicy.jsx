@@ -21,7 +21,7 @@ export default function PrivacyPolicy() {
       lineHeight: '1.7'
     }}>
       <h1 style={{ fontSize: '28px', marginBottom: '8px' }}>Zásady ochrany osobných údajov</h1>
-      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 16. apríla 2026</p>
+      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 20. apríla 2026</p>
 
       <section style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>1. Prevádzkovateľ</h2>
@@ -117,7 +117,34 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>7. Uchovávanie dát</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>7. Ako zmazať svoj účet</h2>
+        <p>Účet a všetky súvisiace údaje môžete zmazať jedným z týchto spôsobov:</p>
+        <h3 style={{ fontSize: '16px', marginTop: '16px', marginBottom: '8px' }}>a) Emailová žiadosť (odporúčané)</h3>
+        <ol style={{ paddingLeft: '20px' }}>
+          <li>Pošlite email na adresu <a href="mailto:support@prplcrm.eu" style={{ color: '#6366f1' }}>support@prplcrm.eu</a> z emailovej adresy, na ktorú je registrovaný váš účet.</li>
+          <li>Do predmetu uveďte: <code>Žiadosť o zmazanie účtu</code>.</li>
+          <li>V tele správy potvrďte, že žiadate o trvalé odstránenie účtu a všetkých súvisiacich údajov.</li>
+        </ol>
+        <p>Žiadosť spracujeme do <strong>7 pracovných dní</strong>. Po spracovaní vám potvrdíme vymazanie emailom.</p>
+
+        <h3 style={{ fontSize: '16px', marginTop: '16px', marginBottom: '8px' }}>b) Čo sa vymaže</h3>
+        <ul style={{ paddingLeft: '20px' }}>
+          <li>Registračné údaje (email, používateľské meno, hashované heslo)</li>
+          <li>Všetky vaše kontakty, projekty, úlohy, poznámky, správy a pripojené súbory</li>
+          <li>Google OAuth prístupové a obnovovacie tokeny (okamžite revokované v Google účte)</li>
+          <li>Push notifikačné tokeny (FCM / APNs) — okamžite</li>
+          <li>Diagnostické a technické dáta (crash logy, audit logy prihlásenia)</li>
+        </ul>
+
+        <h3 style={{ fontSize: '16px', marginTop: '16px', marginBottom: '8px' }}>c) Čo sa môže ponechať</h3>
+        <ul style={{ paddingLeft: '20px' }}>
+          <li><strong>Fakturačné a účtovné záznamy</strong> — v súlade so zákonom č. 431/2002 Z. z. o účtovníctve musíme uchovávať faktúry a platobné záznamy po dobu <strong>10 rokov</strong>.</li>
+          <li><strong>Anonymizované štatistické dáta</strong> — môžu byť ponechané bez možnosti identifikácie (napr. počet uzavretých účtov za mesiac).</li>
+        </ul>
+      </section>
+
+      <section style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>8. Uchovávanie dát</h2>
         <ul style={{ paddingLeft: '20px' }}>
           <li>Vaše údaje uchovávame po dobu aktivity účtu. Po jeho zmazaní odstránime všetky osobné údaje do 30 dní.</li>
           <li>Google OAuth tokeny sú vymazané okamžite po odpojení Google integrácie alebo zmazaní účtu.</li>
@@ -126,7 +153,7 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '32px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>8. Kontakt</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>9. Kontakt</h2>
         <p>
           V prípade otázok ohľadom ochrany osobných údajov nás kontaktujte na adrese uvedenej v aplikácii alebo cez{' '}
           <a href="https://prplcrm.eu" style={{ color: '#6366f1' }}>prplcrm.eu</a>.
