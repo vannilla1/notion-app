@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 102      // internal.3 — fix splash screen icon (replace placeholder "P" vector s plným logom z icon-512x512.png)
+        versionCode = 103      // internal.4 — hi-res splash bitmap (432/576/864/1152 px) aby Android 12+ splash 192dp visible area neupscalovával 512px → fixuje "hranaté" logo na xxxhdpi
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
