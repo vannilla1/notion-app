@@ -6,6 +6,7 @@ import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
+import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import { getWorkspaceRoleLabel } from '../utils/constants';
 
 const translateErrorMessage = (message) => {
@@ -795,7 +796,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       key={ws.id || ws._id}
                       className="mobile-workspace-item"
                       onClick={async () => {
-                          await switchWorkspaceApi(ws.id || ws._id);
+                        const wsId = ws.id || ws._id;
+                        await switchWorkspaceApi(wsId);
+                        // Per-device storage (+ native Android bridge write-through),
+                        // aby po window.location reload-e X-Workspace-Id header
+                        // a Android TokenStore injection mali nový workspace.
+                        setStoredWorkspaceId(wsId);
                         window.location.href = '/app';
                       }}
                     >

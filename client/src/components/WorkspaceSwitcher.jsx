@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
+import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import api from '../api/api';
 import { getWorkspaceRoleLabel } from '../utils/constants';
 import './WorkspaceSwitcher.css';
@@ -78,6 +79,10 @@ const WorkspaceSwitcher = () => {
 
     try {
       await switchWorkspaceApi(workspaceId);
+      // Per-device storage (+ native Android bridge write-through), aby po
+      // window.location reload-e X-Workspace-Id header a Android TokenStore
+      // injection mali nový workspace.
+      setStoredWorkspaceId(workspaceId);
       window.location.href = '/app';
     } catch {
       // Switch failed — stay on current workspace
