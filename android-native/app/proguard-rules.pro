@@ -24,3 +24,10 @@
 
 # AndroidX Security (EncryptedSharedPreferences) — interne reflection na Tink.
 -keep class com.google.crypto.tink.** { *; }
+
+# Tink KeysDownloader referencuje Google HTTP client + Joda Time iba v utility
+# path ktorý my nepoužívame (kľúče generujeme lokálne cez Android Keystore TEE,
+# žiadne key fetching z webu). R8 by inak failnulo na missing classes.
+-dontwarn com.google.api.client.http.**
+-dontwarn com.google.api.client.http.javanet.**
+-dontwarn org.joda.time.**

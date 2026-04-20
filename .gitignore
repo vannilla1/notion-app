@@ -35,6 +35,10 @@ android-native/app/build/
 android-native/.gradle/
 android-native/local.properties
 android-native/*.keystore
+# Keystore backup súbory (napr. android.keystore.LOST-PASSWORD.bak) —
+# glob "*.keystore" chytí len "android.keystore", ale NIE "android.keystore.*" variant.
+android-native/*.keystore.*
+android-native/*.bak
 android-native/keystore.properties
 android-native/*.aab
 android-native/*.apk
