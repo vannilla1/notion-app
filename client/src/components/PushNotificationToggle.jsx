@@ -133,6 +133,81 @@ const PushNotificationToggle = () => {
     }
   };
 
+  // Android native appka — samostatné renderovanie. Web push (service worker /
+  // VAPID) sa v WebView nepoužíva; notifikácie idú cez natívny FCM kanál, takže
+  // toggle "Aktívne/Neaktívne" ani "nie sú podporované" upozornenie tu nemá zmysel.
+  if (isAndroid) {
+    return (
+      <div className="push-notification-toggle">
+        <div className="push-header">
+          <div className="push-info">
+            <span className="icon">🔔</span>
+            <div>
+              <strong>Notifikácie (Android)</strong>
+              <p>Riadia sa cez systémové nastavenia a FCM</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="fcm-diag">
+          <div className="fcm-diag-header">Diagnostika</div>
+          {!fcmStatus && !fcmError && <div className="fcm-diag-row">Načítavam…</div>}
+          {fcmStatus && (
+            <>
+              <div className="fcm-diag-row">
+                <span>FCM na serveri:</span>
+                <strong className={fcmStatus.fcmConfigured ? 'ok' : 'bad'}>
+                  {fcmStatus.fcmConfigured ? '✓ aktívne' : '✗ neaktívne'}
+                </strong>
+              </div>
+              {fcmStatus.fcmConfigured && fcmStatus.projectId && (
+                <div className="fcm-diag-row">
+                  <span>Firebase projekt:</span>
+                  <code>{fcmStatus.projectId}</code>
+                </div>
+              )}
+              <div className="fcm-diag-row">
+                <span>Registrované zariadenia:</span>
+                <strong className={fcmStatus.registeredDevices > 0 ? 'ok' : 'bad'}>
+                  {fcmStatus.registeredDevices}
+                </strong>
+              </div>
+              {fcmStatus.devices?.map((d, i) => (
+                <div key={i} className="fcm-diag-device">
+                  <div>Token: <code>{d.tokenPrefix}</code></div>
+                  <div>Verzia: {d.appVersion || '—'} · {d.packageName || '—'}</div>
+                  <div>Naposledy: {d.lastUsed ? new Date(d.lastUsed).toLocaleString('sk-SK') : '—'}</div>
+                </div>
+              ))}
+              <button
+                className="test-btn"
+                style={{ marginTop: 12 }}
+                onClick={handleFcmTest}
+                disabled={!fcmStatus.fcmConfigured || fcmStatus.registeredDevices === 0}
+              >
+                Odoslať test notifikáciu na moje zariadenia
+              </button>
+              {fcmTestResult && (
+                <div className="fcm-diag-row" style={{ marginTop: 8 }}>
+                  <span>Výsledok:</span>
+                  <span>
+                    odoslané {fcmTestResult.sent} ·
+                    zlyhali {fcmTestResult.failed} ·
+                    odstránené {fcmTestResult.removed}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+          {fcmError && <div className="push-error">{fcmError}</div>}
+        </div>
+
+        <style>{styles}</style>
+      </div>
+    );
+  }
+
+  // Desktop / web browser — pôvodné web-push UI (service worker + VAPID).
   return (
     <div className="push-notification-toggle">
       <div className="push-header">
@@ -185,56 +260,6 @@ const PushNotificationToggle = () => {
         >
           {testSent ? '✓ Odoslané' : 'Odoslať testovaciu notifikáciu'}
         </button>
-      )}
-
-      {isAndroid && (
-        <div className="fcm-diag">
-          <div className="fcm-diag-header">Android push diagnostika</div>
-          {!fcmStatus && !fcmError && <div className="fcm-diag-row">Načítavam…</div>}
-          {fcmStatus && (
-            <>
-              <div className="fcm-diag-row">
-                <span>FCM na serveri:</span>
-                <strong className={fcmStatus.fcmConfigured ? 'ok' : 'bad'}>
-                  {fcmStatus.fcmConfigured ? '✓ aktívne' : '✗ neaktívne'}
-                </strong>
-              </div>
-              {fcmStatus.fcmConfigured && fcmStatus.projectId && (
-                <div className="fcm-diag-row">
-                  <span>Firebase projekt:</span>
-                  <code>{fcmStatus.projectId}</code>
-                </div>
-              )}
-              <div className="fcm-diag-row">
-                <span>Registrované zariadenia:</span>
-                <strong className={fcmStatus.registeredDevices > 0 ? 'ok' : 'bad'}>
-                  {fcmStatus.registeredDevices}
-                </strong>
-              </div>
-              {fcmStatus.devices?.map((d, i) => (
-                <div key={i} className="fcm-diag-device">
-                  <div>Token: <code>{d.tokenPrefix}</code></div>
-                  <div>Verzia: {d.appVersion || '—'} · {d.packageName || '—'}</div>
-                  <div>Naposledy: {d.lastUsed ? new Date(d.lastUsed).toLocaleString('sk-SK') : '—'}</div>
-                </div>
-              ))}
-              <button
-                className="test-btn"
-                style={{ marginTop: 8 }}
-                onClick={handleFcmTest}
-                disabled={!fcmStatus.fcmConfigured || fcmStatus.registeredDevices === 0}
-              >
-                Odoslať test FCM push na moje zariadenia
-              </button>
-              {fcmTestResult && (
-                <div className="fcm-diag-row" style={{ marginTop: 8 }}>
-                  Výsledok: odoslané {fcmTestResult.sent}, zlyhali {fcmTestResult.failed}, odstránené {fcmTestResult.removed}
-                </div>
-              )}
-            </>
-          )}
-          {fcmError && <div className="push-error">{fcmError}</div>}
-        </div>
       )}
 
       <style>{styles}</style>
