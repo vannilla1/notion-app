@@ -11,6 +11,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -50,6 +51,33 @@ class MainActivity : AppCompatActivity() {
     ) { granted ->
         // Ak user denied, banner vo web appke mu neskôr vysvetlí ako to zapnúť
         // v systémových nastaveniach. Žiadna akcia tu.
+    }
+
+    /**
+     * Callback z WebView `<input type="file">` — uložíme si ho pri otvorení
+     * file chooseru a doručíme doň URIs vybratých súborov po návrate z Activity
+     * resultu. Ak user chooser zruší, musíme zavolať callback s null, inak by
+     * WebView ostal v "čaká na súbor" stave a ďalší klik na input by nefungoval.
+     */
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /** Picker pre `<input type="file">` — zvláda single aj multiple, všetky mime typy. */
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = filePathCallback ?: return@registerForActivityResult
+        val uris: Array<Uri>? = when {
+            result.resultCode != android.app.Activity.RESULT_OK -> null
+            result.data?.clipData != null -> {
+                // Multiple files (user podržal a vybral viac)
+                val clip = result.data!!.clipData!!
+                Array(clip.itemCount) { clip.getItemAt(it).uri }
+            }
+            result.data?.data != null -> arrayOf(result.data!!.data!!)
+            else -> null
+        }
+        callback.onReceiveValue(uris)
+        filePathCallback = null
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -218,6 +246,52 @@ class MainActivity : AppCompatActivity() {
                 // Users nikdy nevidia, ale pri `adb logcat` si môžeme prečítať
                 // web app JS errory pri debugingu.
                 android.util.Log.d("WebViewConsole", "${consoleMessage?.message()} -- ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}")
+                return true
+            }
+
+            // File chooser pre HTML input[type=file] — bez override-u WebView
+            // na Androide file inputs ignoruje. ACTION_OPEN_DOCUMENT (Storage
+            // Access Framework) zvláda obrázky aj dokumenty bez runtime permissions.
+            // Rešpektuje accept mime typy aj multiple atribút z HTML.
+            override fun onShowFileChooser(
+                webView: WebView?,
+                callback: ValueCallback<Array<Uri>>?,
+                params: FileChooserParams?
+            ): Boolean {
+                // Ak už čakáme na iný picker, zatvoríme ho s null aby sa WebView
+                // neupchalo.
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+
+                // MIME typy podľa accept atribútu z HTML inputu.
+                val acceptTypes: Array<String> = params?.acceptTypes
+                    ?.filter { it.isNotBlank() }
+                    ?.toTypedArray()
+                    ?: emptyArray()
+
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                if (acceptTypes.isEmpty()) {
+                    intent.type = "*/*"
+                } else if (acceptTypes.size == 1) {
+                    intent.type = acceptTypes[0]
+                } else {
+                    intent.type = "*/*"
+                    intent.putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes)
+                }
+                if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+
+                try {
+                    val chooser = Intent.createChooser(intent, "Vyberte súbor")
+                    filePickerLauncher.launch(chooser)
+                } catch (e: Exception) {
+                    android.util.Log.w("MainActivity", "File chooser launch failed", e)
+                    filePathCallback?.onReceiveValue(null)
+                    filePathCallback = null
+                    return false
+                }
                 return true
             }
         }

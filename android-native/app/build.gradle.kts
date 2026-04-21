@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 110      // internal.11 — (a) oprava bielej stránky po klike na notifikáciu: resolveAgainstBase už nepridáva /app pred relatívne paths (routes /tasks, /crm, /messages sú na koreňovej úrovni, nie pod /app); (b) deduplikácia notifikácií: ak je appka na popredí, PrplFcmService neukáže systémovú notifikáciu (NotificationToast v UI ju cez WebSocket zobrazí ako in-app toast)
+        versionCode = 111      // internal.12 — file picker: WebChromeClient.onShowFileChooser override, aby `<input type="file">` fungoval v WebView. Bez toho Android na rozdiel od desktop browseru a iOS WKWebView ignoroval všetky file inputy → user nevedel priložiť obrázok / dokument k úlohe, správe, kontaktu. Chooser cez ACTION_OPEN_DOCUMENT (Storage Access Framework — no runtime permissions), rešpektuje accept type aj multiple atribút.
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
