@@ -7,6 +7,8 @@ import {
   isSubscribedToPush,
   sendTestPush
 } from '../services/pushNotifications';
+import api from '../api/api';
+import { isNativeAndroidApp } from '../utils/nativeBridge';
 
 const areNotificationsEnabled = () => {
   const setting = localStorage.getItem('notificationsEnabled');
@@ -26,10 +28,40 @@ const PushNotificationToggle = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [testSent, setTestSent] = useState(false);
+  // Android native — diagnostické info pre FCM push (na diagnostiku problémov
+  // s notifikáciami medzi Android zariadeniami).
+  const isAndroid = isNativeAndroidApp();
+  const [fcmStatus, setFcmStatus] = useState(null); // { fcmConfigured, registeredDevices, devices[] }
+  const [fcmError, setFcmError] = useState(null);
+  const [fcmTestResult, setFcmTestResult] = useState(null);
 
   useEffect(() => {
     checkStatus();
-  }, []);
+    if (isAndroid) fetchFcmStatus();
+  }, [isAndroid]);
+
+  const fetchFcmStatus = async () => {
+    try {
+      const res = await api.get('/api/push/fcm/status');
+      setFcmStatus(res.data);
+      setFcmError(null);
+    } catch (err) {
+      setFcmError(err.response?.data?.message || err.message || 'Chyba pri načítaní FCM stavu');
+    }
+  };
+
+  const handleFcmTest = async () => {
+    setFcmTestResult(null);
+    setFcmError(null);
+    try {
+      const res = await api.post('/api/push/fcm/test');
+      setFcmTestResult(res.data.result || { sent: 0, failed: 0, removed: 0 });
+      // Refresh status after test (tokens môžu byť auto-removed ak padli)
+      await fetchFcmStatus();
+    } catch (err) {
+      setFcmError(err.response?.data?.message || err.message || 'Chyba pri odoslaní test push');
+    }
+  };
 
   const checkStatus = async () => {
     setLoading(true);
@@ -153,6 +185,56 @@ const PushNotificationToggle = () => {
         >
           {testSent ? '✓ Odoslané' : 'Odoslať testovaciu notifikáciu'}
         </button>
+      )}
+
+      {isAndroid && (
+        <div className="fcm-diag">
+          <div className="fcm-diag-header">Android push diagnostika</div>
+          {!fcmStatus && !fcmError && <div className="fcm-diag-row">Načítavam…</div>}
+          {fcmStatus && (
+            <>
+              <div className="fcm-diag-row">
+                <span>FCM na serveri:</span>
+                <strong className={fcmStatus.fcmConfigured ? 'ok' : 'bad'}>
+                  {fcmStatus.fcmConfigured ? '✓ aktívne' : '✗ neaktívne'}
+                </strong>
+              </div>
+              {fcmStatus.fcmConfigured && fcmStatus.projectId && (
+                <div className="fcm-diag-row">
+                  <span>Firebase projekt:</span>
+                  <code>{fcmStatus.projectId}</code>
+                </div>
+              )}
+              <div className="fcm-diag-row">
+                <span>Registrované zariadenia:</span>
+                <strong className={fcmStatus.registeredDevices > 0 ? 'ok' : 'bad'}>
+                  {fcmStatus.registeredDevices}
+                </strong>
+              </div>
+              {fcmStatus.devices?.map((d, i) => (
+                <div key={i} className="fcm-diag-device">
+                  <div>Token: <code>{d.tokenPrefix}</code></div>
+                  <div>Verzia: {d.appVersion || '—'} · {d.packageName || '—'}</div>
+                  <div>Naposledy: {d.lastUsed ? new Date(d.lastUsed).toLocaleString('sk-SK') : '—'}</div>
+                </div>
+              ))}
+              <button
+                className="test-btn"
+                style={{ marginTop: 8 }}
+                onClick={handleFcmTest}
+                disabled={!fcmStatus.fcmConfigured || fcmStatus.registeredDevices === 0}
+              >
+                Odoslať test FCM push na moje zariadenia
+              </button>
+              {fcmTestResult && (
+                <div className="fcm-diag-row" style={{ marginTop: 8 }}>
+                  Výsledok: odoslané {fcmTestResult.sent}, zlyhali {fcmTestResult.failed}, odstránené {fcmTestResult.removed}
+                </div>
+              )}
+            </>
+          )}
+          {fcmError && <div className="push-error">{fcmError}</div>}
+        </div>
       )}
 
       <style>{styles}</style>
@@ -305,6 +387,64 @@ const styles = `
   .test-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .fcm-diag {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .fcm-diag-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #aaa;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .fcm-diag-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #ccc;
+    padding: 4px 0;
+  }
+
+  .fcm-diag-row code {
+    font-family: monospace;
+    font-size: 11px;
+    color: #8b9eff;
+    background: rgba(99, 102, 241, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .fcm-diag-row strong.ok {
+    color: #10b981;
+  }
+
+  .fcm-diag-row strong.bad {
+    color: #ef4444;
+  }
+
+  .fcm-diag-device {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #999;
+    line-height: 1.5;
+  }
+
+  .fcm-diag-device code {
+    font-family: monospace;
+    font-size: 10px;
+    color: #8b9eff;
   }
 `;
 
