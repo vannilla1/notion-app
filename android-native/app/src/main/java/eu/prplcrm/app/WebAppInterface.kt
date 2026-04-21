@@ -25,7 +25,22 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     /** Web appka po úspešnom login/register zavolá túto metódu s JWT tokenom. */
     @JavascriptInterface
     fun setAuthToken(token: String?) {
+        val previous = TokenStore.getAuthToken(context)
         TokenStore.setAuthToken(context, token)
+        // Po login (alebo user-switch): reset FCM "last synced" cache a zaregistruj
+        // FCM token na backend. Bez tohto trigger-u by onCreate FCM register skončil
+        // skip-om (lebo auth token bol null pri starte appky), a notifikácie medzi
+        // zariadeniami by nefungovali kým user neukončí appku a znovu neotvorí.
+        if (!token.isNullOrEmpty() && token != previous) {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        task.result?.let { fcmToken ->
+                            FcmRegistrar.forceReregister(context, fcmToken)
+                        }
+                    }
+                }
+        }
     }
 
     @JavascriptInterface

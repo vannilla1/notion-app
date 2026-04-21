@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 104      // internal.5 — splash safe-zone fix: logo v 66% center (192/288 dp) s transparentným paddingom, aby Android 12+ kruhové orezanie (192dp z 288dp) ukázalo celú ikonu a nie len "P" v strede
+        versionCode = 105      // internal.6 — FCM push fix: register v onResume + force-reregister pri setAuthToken, aby sa po login okamžite zaregistroval FCM token na backend (predtým FcmDevice záznam nikdy nevznikol ak bol user pri onCreate nelogovaný)
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

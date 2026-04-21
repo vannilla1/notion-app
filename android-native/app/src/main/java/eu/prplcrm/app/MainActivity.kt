@@ -236,6 +236,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Retry FCM registration pri každom resume — rieši edge case keď user
+        // bol pri onCreate nelogovaný (ensureFcmTokenRegistered skipol) a medzitým
+        // sa prihlásil. FcmRegistrar.registerIfNeeded je idempotentný (skip ak
+        // lastSynced == current token), takže opakovaný resume nespamuje backend.
+        ensureFcmTokenRegistered()
     }
 
     override fun onPause() {
