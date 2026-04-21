@@ -34,6 +34,13 @@ const PushNotificationToggle = () => {
   const [fcmStatus, setFcmStatus] = useState(null); // { fcmConfigured, registeredDevices, devices[] }
   const [fcmError, setFcmError] = useState(null);
   const [fcmTestResult, setFcmTestResult] = useState(null);
+  const [forceRegisterResult, setForceRegisterResult] = useState(null);
+  // APK verzia z NativeBridge (teraz zahŕňa aj versionCode: "1.0.0 (106)")
+  const nativeAppVersion = isAndroid && window.NativeBridge?.getAppVersion
+    ? window.NativeBridge.getAppVersion()
+    : null;
+  const hasForceFcmRegister = isAndroid
+    && typeof window.NativeBridge?.forceFcmRegister === 'function';
 
   useEffect(() => {
     checkStatus();
@@ -47,6 +54,19 @@ const PushNotificationToggle = () => {
       setFcmError(null);
     } catch (err) {
       setFcmError(err.response?.data?.message || err.message || 'Chyba pri načítaní FCM stavu');
+    }
+  };
+
+  const handleForceRegister = async () => {
+    setForceRegisterResult(null);
+    setFcmError(null);
+    try {
+      const result = window.NativeBridge?.forceFcmRegister?.() || 'unknown';
+      setForceRegisterResult(result);
+      // Po 2s refresh status (FCM register je async, dáme backendu chvíľu na uloženie)
+      setTimeout(() => fetchFcmStatus(), 2500);
+    } catch (err) {
+      setFcmError('Force register error: ' + (err.message || 'unknown'));
     }
   };
 
@@ -151,6 +171,29 @@ const PushNotificationToggle = () => {
 
         <div className="fcm-diag">
           <div className="fcm-diag-header">Diagnostika</div>
+          {nativeAppVersion && (
+            <div className="fcm-diag-row">
+              <span>Verzia appky:</span>
+              <code>{nativeAppVersion}</code>
+            </div>
+          )}
+          {hasForceFcmRegister && (
+            <>
+              <button
+                className="test-btn"
+                style={{ marginTop: 8, marginBottom: 8 }}
+                onClick={handleForceRegister}
+              >
+                Vynútiť FCM registráciu
+              </button>
+              {forceRegisterResult && (
+                <div className="fcm-diag-row">
+                  <span>Stav:</span>
+                  <code>{forceRegisterResult}</code>
+                </div>
+              )}
+            </>
+          )}
           {!fcmStatus && !fcmError && <div className="fcm-diag-row">Načítavam…</div>}
           {fcmStatus && (
             <>

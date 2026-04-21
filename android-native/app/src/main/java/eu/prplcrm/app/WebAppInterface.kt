@@ -76,5 +76,28 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     fun getPlatform(): String = "android"
 
     @JavascriptInterface
-    fun getAppVersion(): String = BuildConfig.VERSION_NAME
+    fun getAppVersion(): String = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+
+    /**
+     * Force FCM registration — pre diagnostiku. Web appka môže zavolať aby si
+     * vynútila re-register FCM tokenu na backend (bez waiting for onResume).
+     * Vracia stav: "ok-fired" ak sa register POST spustil, "no-auth" ak user
+     * nie je prihlásený, "no-token" ak Firebase ešte nemá token.
+     */
+    @JavascriptInterface
+    fun forceFcmRegister(): String {
+        val authToken = TokenStore.getAuthToken(context)
+        if (authToken.isNullOrEmpty()) return "no-auth"
+        try {
+            val task = com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+            task.addOnCompleteListener { t ->
+                if (t.isSuccessful) {
+                    t.result?.let { FcmRegistrar.forceReregister(context, it) }
+                }
+            }
+            return "ok-fired"
+        } catch (e: Exception) {
+            return "error: ${e.message}"
+        }
+    }
 }

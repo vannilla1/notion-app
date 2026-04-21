@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 105      // internal.6 — FCM push fix: register v onResume + force-reregister pri setAuthToken, aby sa po login okamžite zaregistroval FCM token na backend (predtým FcmDevice záznam nikdy nevznikol ak bol user pri onCreate nelogovaný)
+        versionCode = 106      // internal.7 — diagnostika: getAppVersion zobrazí aj versionCode, pridaný bridge method forceFcmRegister pre manuálny trigger FCM registrácie z web UI
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
