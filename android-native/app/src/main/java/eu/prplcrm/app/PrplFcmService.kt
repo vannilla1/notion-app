@@ -47,6 +47,16 @@ class PrplFcmService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        // Ak je appka aktuálne na popredí, web appka má svoj vlastný
+        // NotificationToast (WebSocket in-app toast) ktorý zobrazí notifikáciu
+        // v UI. Duplikovať to ešte aj systémovou notifikáciou v trayi nedáva
+        // zmysel — user by videl dve rovnaké notifikácie. Skipneme; keď appka
+        // pôjde do pozadia, ďalšie push-e pôjdu systémovo normálne.
+        if (MainActivity.isAppInForeground) {
+            Log.d(TAG, "App is in foreground — skip system notification (in-app toast will handle it)")
+            return
+        }
+
         val data = message.data
         val title = data["title"] ?: getString(R.string.app_name)
         val body = data["body"] ?: ""

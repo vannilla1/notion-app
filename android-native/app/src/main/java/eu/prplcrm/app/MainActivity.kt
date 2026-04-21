@@ -121,24 +121,21 @@ class MainActivity : AppCompatActivity() {
     /**
      * Normalizuje deep link na absolútnu https URL.
      *  - "https://..."  → nezmenené
-     *  - "/tasks?..."   → "<host>/app/tasks?..."
-     *  - "tasks?..."    → "<host>/app/tasks?..." (fallback bez leading slashu)
-     *  - "/app/tasks..." → "<host>/app/tasks..." (už má app prefix, nezdvojujeme)
+     *  - "/tasks?..."   → "<host>/tasks?..."
+     *  - "tasks?..."    → "<host>/tasks?..."
      *
-     * Base je derivovaný z webapp_url (napr. "https://prplcrm.eu/app").
+     * POZOR: Client-side routes (`/app`, `/tasks`, `/crm`, `/messages`) sú všetky
+     * na koreňovej úrovni. Úvodné webapp_url = "https://prplcrm.eu/app" je len
+     * vstupná URL (dashboard route), NIE je to path prefix. Ak by sme pridali
+     * "/app" pred "/tasks", dostali by sme "/app/tasks" ktoré ako route neexistuje
+     * a React vráti biely fallback.
      */
     private fun resolveAgainstBase(link: String): String {
         if (link.startsWith("https://") || link.startsWith("http://")) return link
         val webappUrl = getString(R.string.webapp_url).removeSuffix("/")
         val host = Uri.parse(webappUrl).let { "${it.scheme}://${it.host}" }
-        val appPrefix = webappUrl.removePrefix(host)  // napr. "/app"
         val normalizedPath = if (link.startsWith("/")) link else "/$link"
-        val finalPath = if (normalizedPath.startsWith("$appPrefix/") || normalizedPath == appPrefix) {
-            normalizedPath
-        } else {
-            "$appPrefix$normalizedPath"
-        }
-        return "$host$finalPath"
+        return "$host$normalizedPath"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -266,6 +263,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Appka ide na popredie → NotificationToast (WebSocket in-app toast)
+        // preberá zobrazovanie notifikácií. PrstFcmService sa pozrie na tento
+        // flag a ak je true, vypadne bez zobrazenia systémovej notifikácie
+        // (inak by user videl duplicitu: systémová notifikácia + in-app toast).
+        isAppInForeground = true
         // Retry FCM registration pri každom resume — rieši edge case keď user
         // bol pri onCreate nelogovaný (ensureFcmTokenRegistered skipol) a medzitým
         // sa prihlásil. FcmRegistrar.registerIfNeeded je idempotentný (skip ak
@@ -275,15 +277,32 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         webView.onPause()
+        // Appka ide na pozadie → FCM zobrazí systémovú notifikáciu normálne.
+        isAppInForeground = false
         super.onPause()
     }
 
     override fun onDestroy() {
         webView.destroy()
+        // Kill swiped alebo destroy → určite nie na popredí. Ak by onPause
+        // nestihlo bežat (rare race), tento fallback zabezpečí že ďalšia push
+        // sa zobrazí systémovo.
+        isAppInForeground = false
         super.onDestroy()
     }
 
     companion object {
         const val EXTRA_DEEP_LINK = "deep_link"
+
+        /**
+         * Jednoduchý volatile flag pre foreground stav. Alternatíva by bola
+         * ProcessLifecycleOwner + ProcessLifecycleObserver, ale to by vyžadovalo
+         * extra lifecycle-process dependency a Application subclass. Pre jedno-
+         * -activity appku s WebView postačuje tento flag nastavovaný v Activity
+         * onResume/onPause. PrplFcmService ho číta pri každej prichádzajúcej
+         * push správe.
+         */
+        @Volatile
+        var isAppInForeground: Boolean = false
     }
 }

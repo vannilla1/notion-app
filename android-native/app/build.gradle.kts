@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 109      // internal.10 — deep link fix: resolveStartUrl teraz resolvuje relatívne URL (/tasks?highlightTask=...) proti webapp_url base → "https://prplcrm.eu/app/tasks?...". Predtým WebView interpretoval relatívny link ako file:// scheme a vyhadzoval ERR_ACCESS_DENIED pri klikaní na notifikáciu zo zamknutej obrazovky.
+        versionCode = 110      // internal.11 — (a) oprava bielej stránky po klike na notifikáciu: resolveAgainstBase už nepridáva /app pred relatívne paths (routes /tasks, /crm, /messages sú na koreňovej úrovni, nie pod /app); (b) deduplikácia notifikácií: ak je appka na popredí, PrplFcmService neukáže systémovú notifikáciu (NotificationToast v UI ju cez WebSocket zobrazí ako in-app toast)
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
