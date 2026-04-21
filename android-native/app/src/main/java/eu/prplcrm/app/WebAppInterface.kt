@@ -84,6 +84,14 @@ class WebAppInterface(private val context: Context, private val webView: WebView
      * Vracia stav: "ok-fired" ak sa register POST spustil, "no-auth" ak user
      * nie je prihlásený, "no-token" ak Firebase ešte nemá token.
      */
+    /**
+     * Posledný stav FCM registrácie — čo sa stalo pri poslednom POST-e.
+     * Hodnoty: "OK HTTP 200 · ...", "HTTP 401 · ...", "IOException: ...",
+     * "skip: no auth token", "POST in flight → ..." ap.
+     */
+    @JavascriptInterface
+    fun getLastFcmStatus(): String? = TokenStore.getLastFcmStatus(context)
+
     @JavascriptInterface
     fun forceFcmRegister(): String {
         val authToken = TokenStore.getAuthToken(context)

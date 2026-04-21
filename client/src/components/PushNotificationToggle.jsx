@@ -44,7 +44,10 @@ const PushNotificationToggle = () => {
 
   useEffect(() => {
     checkStatus();
-    if (isAndroid) fetchFcmStatus();
+    if (isAndroid) {
+      fetchFcmStatus();
+      refreshLastFcmStatus();
+    }
   }, [isAndroid]);
 
   const fetchFcmStatus = async () => {
@@ -57,14 +60,26 @@ const PushNotificationToggle = () => {
     }
   };
 
+  const [lastFcmStatus, setLastFcmStatus] = useState(null);
+
+  const refreshLastFcmStatus = () => {
+    if (window.NativeBridge?.getLastFcmStatus) {
+      setLastFcmStatus(window.NativeBridge.getLastFcmStatus() || '—');
+    }
+  };
+
   const handleForceRegister = async () => {
     setForceRegisterResult(null);
     setFcmError(null);
     try {
       const result = window.NativeBridge?.forceFcmRegister?.() || 'unknown';
       setForceRegisterResult(result);
-      // Po 2s refresh status (FCM register je async, dáme backendu chvíľu na uloženie)
-      setTimeout(() => fetchFcmStatus(), 2500);
+      refreshLastFcmStatus();
+      // Po 3s refresh status (FCM register je async, dáme backendu chvíľu na uloženie)
+      setTimeout(() => {
+        refreshLastFcmStatus();
+        fetchFcmStatus();
+      }, 3500);
     } catch (err) {
       setFcmError('Force register error: ' + (err.message || 'unknown'));
     }
@@ -193,6 +208,12 @@ const PushNotificationToggle = () => {
                 </div>
               )}
             </>
+          )}
+          {lastFcmStatus && (
+            <div className="fcm-diag-row">
+              <span>Posledný POST:</span>
+              <code style={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', wordBreak: 'break-all' }}>{lastFcmStatus}</code>
+            </div>
           )}
           {!fcmStatus && !fcmError && <div className="fcm-diag-row">Načítavam…</div>}
           {fcmStatus && (

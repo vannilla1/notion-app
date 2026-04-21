@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 106      // internal.7 — diagnostika: getAppVersion zobrazí aj versionCode, pridaný bridge method forceFcmRegister pre manuálny trigger FCM registrácie z web UI
+        versionCode = 107      // internal.8 — rozšírená FCM diagnostika: TokenStore teraz trackuje posledný stav register POST-u (OK HTTP / HTTP kód / IOException s message), WebAppInterface.getLastFcmStatus() ho exponuje do web UI, takže vidíme prečo OkHttp request buď zlyhá alebo sa nedostane na server
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

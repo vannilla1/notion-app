@@ -43,11 +43,13 @@ object FcmRegistrar {
     fun registerIfNeeded(context: Context, fcmToken: String) {
         val authToken = TokenStore.getAuthToken(context)
         if (authToken.isNullOrEmpty()) {
+            TokenStore.setLastFcmStatus(context, "skip: no auth token")
             Log.d(TAG, "Skip: user not logged in yet, will register after login")
             return
         }
         val lastSynced = TokenStore.getLastSyncedFcmToken(context)
         if (lastSynced == fcmToken) {
+            TokenStore.setLastFcmStatus(context, "skip: token unchanged (already synced)")
             Log.d(TAG, "Skip: FCM token unchanged since last sync")
             return
         }
@@ -59,10 +61,12 @@ object FcmRegistrar {
             .removeSuffix("/")
             .substringBefore("/app") + "/api/push/fcm/register"
 
+        TokenStore.setLastFcmStatus(context, "POST in flight → $url")
+
         val body = JSONObject().apply {
             put("fcmToken", fcmToken)
             put("platform", "android")
-            put("appVersion", BuildConfig.VERSION_NAME)
+            put("appVersion", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             put("packageName", BuildConfig.APPLICATION_ID)
         }.toString().toRequestBody("application/json".toMediaType())
 
@@ -75,16 +79,21 @@ object FcmRegistrar {
 
         client.newCall(request).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                val msg = "IOException: ${e.javaClass.simpleName}: ${e.message?.take(200)}"
+                TokenStore.setLastFcmStatus(context, msg)
                 Log.w(TAG, "FCM registration failed (will retry on next app resume)", e)
             }
 
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                 response.use {
+                    val bodyText = it.body?.string()?.take(200) ?: ""
                     if (it.isSuccessful) {
                         TokenStore.setLastSyncedFcmToken(context, fcmToken)
+                        TokenStore.setLastFcmStatus(context, "OK HTTP ${it.code} · $bodyText")
                         Log.i(TAG, "FCM token registered successfully")
                     } else {
-                        Log.w(TAG, "FCM registration HTTP ${it.code}: ${it.body?.string()?.take(200)}")
+                        TokenStore.setLastFcmStatus(context, "HTTP ${it.code} · $bodyText")
+                        Log.w(TAG, "FCM registration HTTP ${it.code}: $bodyText")
                     }
                 }
             }

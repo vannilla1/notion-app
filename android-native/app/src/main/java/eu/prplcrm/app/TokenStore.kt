@@ -22,6 +22,7 @@ object TokenStore {
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_CURRENT_WORKSPACE = "current_workspace_id"
     private const val KEY_FCM_TOKEN = "fcm_token_last_synced"
+    private const val KEY_FCM_LAST_STATUS = "fcm_last_status"
 
     private fun prefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context.applicationContext)
@@ -63,6 +64,17 @@ object TokenStore {
     fun setLastSyncedFcmToken(context: Context, token: String?) {
         prefs(context).edit().apply {
             if (token.isNullOrEmpty()) remove(KEY_FCM_TOKEN) else putString(KEY_FCM_TOKEN, token)
+        }.apply()
+    }
+
+    /** Posledný stav FCM register POST — pre diagnostiku (úspech / chyba / HTTP kód). */
+    fun getLastFcmStatus(context: Context): String? =
+        prefs(context).getString(KEY_FCM_LAST_STATUS, null)
+
+    fun setLastFcmStatus(context: Context, status: String?) {
+        prefs(context).edit().apply {
+            if (status.isNullOrEmpty()) remove(KEY_FCM_LAST_STATUS)
+            else putString(KEY_FCM_LAST_STATUS, status)
         }.apply()
     }
 
