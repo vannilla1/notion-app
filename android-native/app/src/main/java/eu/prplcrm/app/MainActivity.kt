@@ -102,13 +102,43 @@ class MainActivity : AppCompatActivity() {
      */
     private fun resolveStartUrl(intent: Intent?): String? {
         if (intent == null) return null
-        // Explicit extra z PrplFcmService
-        intent.getStringExtra(EXTRA_DEEP_LINK)?.takeIf { it.isNotBlank() }?.let { return it }
+        // Explicit extra z PrplFcmService — môže byť absolútny (https://...) alebo
+        // relatívny (/tasks?highlightTask=...), keďže backend `generateNotificationUrl`
+        // vracia relatívne cesty (ten istý deep-link formát používa aj iOS a rieši to
+        // tam vo Swifte). Musíme ich resolvovať proti webapp_url hostu — inak
+        // WebView.loadUrl("/tasks?...") sa pokúsi načítať ako file:// scheme a vráti
+        // net::ERR_ACCESS_DENIED.
+        intent.getStringExtra(EXTRA_DEEP_LINK)?.takeIf { it.isNotBlank() }?.let {
+            return resolveAgainstBase(it)
+        }
         // ACTION_VIEW → data Uri
         if (intent.action == Intent.ACTION_VIEW) {
             intent.data?.toString()?.takeIf { it.startsWith("https://") }?.let { return it }
         }
         return null
+    }
+
+    /**
+     * Normalizuje deep link na absolútnu https URL.
+     *  - "https://..."  → nezmenené
+     *  - "/tasks?..."   → "<host>/app/tasks?..."
+     *  - "tasks?..."    → "<host>/app/tasks?..." (fallback bez leading slashu)
+     *  - "/app/tasks..." → "<host>/app/tasks..." (už má app prefix, nezdvojujeme)
+     *
+     * Base je derivovaný z webapp_url (napr. "https://prplcrm.eu/app").
+     */
+    private fun resolveAgainstBase(link: String): String {
+        if (link.startsWith("https://") || link.startsWith("http://")) return link
+        val webappUrl = getString(R.string.webapp_url).removeSuffix("/")
+        val host = Uri.parse(webappUrl).let { "${it.scheme}://${it.host}" }
+        val appPrefix = webappUrl.removePrefix(host)  // napr. "/app"
+        val normalizedPath = if (link.startsWith("/")) link else "/$link"
+        val finalPath = if (normalizedPath.startsWith("$appPrefix/") || normalizedPath == appPrefix) {
+            normalizedPath
+        } else {
+            "$appPrefix$normalizedPath"
+        }
+        return "$host$finalPath"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
