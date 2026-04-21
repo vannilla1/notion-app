@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 107      // internal.8 — rozšírená FCM diagnostika: TokenStore teraz trackuje posledný stav register POST-u (OK HTTP / HTTP kód / IOException s message), WebAppInterface.getLastFcmStatus() ho exponuje do web UI, takže vidíme prečo OkHttp request buď zlyhá alebo sa nedostane na server
+        versionCode = 108      // internal.9 — CRITICAL FIX: FCM register POST išiel na prplcrm.eu (frontend static site) namiesto perun-crm-api.onrender.com (backend API). SPA fallback vracal index.html s HTTP 200 → OkHttp to bral ako úspech → lokálny lastSynced sa nastavil napriek tomu že register nikdy nedorazil na server. Odteraz používame api_base_url string resource ktorý mieri priamo na Render web service doménu.
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

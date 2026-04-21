@@ -57,9 +57,14 @@ object FcmRegistrar {
     }
 
     private fun register(context: Context, authToken: String, fcmToken: String) {
-        val url = context.getString(R.string.webapp_url)
-            .removeSuffix("/")
-            .substringBefore("/app") + "/api/push/fcm/register"
+        // POZOR: API beží na samostatnej Render web service doméne, NIE na prplcrm.eu
+        // (tam je len frontend static site ktorý by nám pri neexistujúcej route
+        // vrátil index.html s HTTP 200 — OkHttp by to považoval za úspech a my
+        // by sme si lokálne uložili `lastSynced` napriek tomu že register POST
+        // nikdy nedorazil na backend. Bug ktorý nás stál dve iterácie interného
+        // testovania.)
+        val url = context.getString(R.string.api_base_url).removeSuffix("/") +
+            "/api/push/fcm/register"
 
         TokenStore.setLastFcmStatus(context, "POST in flight → $url")
 

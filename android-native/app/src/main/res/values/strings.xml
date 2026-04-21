@@ -6,6 +6,13 @@
          aby deep linking + intent filter v AndroidManifest fungoval bez URL baru. -->
     <string name="webapp_url">https://prplcrm.eu/app</string>
 
+    <!-- Backend API base URL. POZOR: toto je SAMOSTATNÁ doména od webapp_url —
+         frontend beží na prplcrm.eu (Render static site), backend API na
+         perun-crm-api.onrender.com (Render web service). Toto používajú natívne
+         OkHttp requesty (napr. FCM register) ktoré NEIDÚ cez WebView. WebView
+         volá API cez relative URL a CORS ich rieši na úrovni Render routingu. -->
+    <string name="api_base_url">https://perun-crm-api.onrender.com</string>
+
     <!-- Notification channel — FCM použije tento ID ako default. -->
     <string name="default_notification_channel_id">prpl_notifications</string>
     <string name="default_notification_channel_name">Notifikácie</string>
