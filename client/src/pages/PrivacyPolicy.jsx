@@ -21,14 +21,23 @@ export default function PrivacyPolicy() {
       lineHeight: '1.7'
     }}>
       <h1 style={{ fontSize: '28px', marginBottom: '8px' }}>Zásady ochrany osobných údajov</h1>
-      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 20. apríla 2026</p>
+      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 21. apríla 2026</p>
 
       <section style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>1. Prevádzkovateľ</h2>
         <p>
           Prevádzkovateľom aplikácie <strong>Prpl CRM</strong> (ďalej len "aplikácia") dostupnej na adrese{' '}
-          <a href="https://prplcrm.eu" style={{ color: '#6366f1' }}>prplcrm.eu</a>.
+          <a href="https://prplcrm.eu" style={{ color: '#6366f1' }}>prplcrm.eu</a> je:
         </p>
+        <ul style={{ paddingLeft: '20px' }}>
+          <li><strong>Obchodné meno:</strong> Perun Electromobility s.r.o.</li>
+          <li><strong>Sídlo:</strong> Fraňa Kráľa 66, 071 01 Michalovce, Slovenská republika</li>
+          <li><strong>IČO:</strong> 55 454 241</li>
+          <li><strong>DIČ:</strong> 2121992147</li>
+          <li><strong>IČ DPH:</strong> SK2121992147</li>
+          <li><strong>Zápis:</strong> Obchodný register Mestského súdu Košice, oddiel Sro, vložka č. 56823/V</li>
+          <li><strong>Kontakt:</strong> <a href="mailto:support@prplcrm.eu" style={{ color: '#6366f1' }}>support@prplcrm.eu</a></li>
+        </ul>
       </section>
 
       <section style={{ marginBottom: '24px' }}>
@@ -85,6 +94,7 @@ export default function PrivacyPolicy() {
           <li>Dáta <strong>neprenášame</strong> tretím stranám, okrem prípadov keď je to nevyhnutné na poskytnutie služby (napr. cloud hosting), pri dodržaní právnych predpisov alebo s vaším výslovným súhlasom.</li>
           <li>Dáta <strong>nepoužívame na reklamu</strong> — žiadnu, ani personalizovanú.</li>
           <li>Dáta <strong>nepredávame</strong> — ani tretím stranám, ani data brokerom, ani pre iné informačné účely.</li>
+          <li>Dáta <strong>nepoužívame na tréning generatívnych AI/ML modelov</strong> — ani vlastných, ani tretích strán. Obsah z Google Calendar a Google Tasks nikdy neposielame do AI/LLM služieb (OpenAI, Anthropic, Google Gemini API a pod.).</li>
           <li>Dáta <strong>nečítajú ľudia</strong>, okrem prípadov vášho výslovného súhlasu, na účely bezpečnosti (vyšetrovanie útoku), alebo keď to vyžaduje zákon.</li>
         </ul>
       </section>

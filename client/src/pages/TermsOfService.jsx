@@ -16,7 +16,7 @@ export default function TermsOfService() {
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto', padding: '40px 20px', fontFamily: 'Inter, sans-serif', color: '#1e293b', lineHeight: '1.7' }}>
       <h1 style={{ fontSize: '28px', marginBottom: '8px' }}>Všeobecné obchodné podmienky</h1>
-      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 31. marca 2026</p>
+      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 21. apríla 2026</p>
 
       {/* 1 */}
       <section style={s.section}>
@@ -36,10 +36,18 @@ export default function TermsOfService() {
       <section style={s.section}>
         <h2 style={s.h2}>2. Identifikácia Poskytovateľa</h2>
         <p>
-          Poskytovateľom Služby je prevádzkovateľ aplikácie Prpl CRM dostupnej na adrese{' '}
-          <a href="https://prplcrm.eu" style={s.a}>prplcrm.eu</a>.
+          Poskytovateľom Služby Prpl CRM, dostupnej na adrese{' '}
+          <a href="https://prplcrm.eu" style={s.a}>prplcrm.eu</a>, je:
         </p>
-        <p>Kontaktný email: <a href="mailto:support@prplcrm.eu" style={s.a}>support@prplcrm.eu</a></p>
+        <ul style={{ paddingLeft: '20px' }}>
+          <li><strong>Obchodné meno:</strong> Perun Electromobility s.r.o.</li>
+          <li><strong>Sídlo:</strong> Fraňa Kráľa 66, 071 01 Michalovce, Slovenská republika</li>
+          <li><strong>IČO:</strong> 55 454 241</li>
+          <li><strong>DIČ:</strong> 2121992147</li>
+          <li><strong>IČ DPH:</strong> SK2121992147</li>
+          <li><strong>Zápis:</strong> Obchodný register Mestského súdu Košice, oddiel Sro, vložka č. 56823/V</li>
+          <li><strong>Kontaktný email:</strong> <a href="mailto:support@prplcrm.eu" style={s.a}>support@prplcrm.eu</a></li>
+        </ul>
       </section>
 
       {/* 3 */}
