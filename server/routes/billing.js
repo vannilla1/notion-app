@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-11-20.acacia' });
 const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const { authenticateToken } = require('../middleware/auth');

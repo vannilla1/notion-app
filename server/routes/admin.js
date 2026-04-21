@@ -1225,7 +1225,7 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
 
 // ─── PROMO CODES MANAGEMENT ──────────────────────────────────
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-11-20.acacia' });
 
 // List all promo codes
 router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
