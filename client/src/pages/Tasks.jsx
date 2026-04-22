@@ -573,7 +573,7 @@ function Tasks() {
       if (googleCalendarStatus === 'connected') {
         setGoogleCalendarNotification({
           type: 'success',
-          message: 'Google Calendar bol úspešne pripojený!'
+          message: 'Google Calendar bol úspešne pripojený! Úlohy s termínom sa budú automaticky synchronizovať.'
         });
       } else if (googleCalendarStatus === 'error') {
         setGoogleCalendarNotification({
