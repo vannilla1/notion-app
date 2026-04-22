@@ -28,36 +28,57 @@ const VALID_TAB_IDS = new Set([
   'api', 'storage', 'comparison', 'promo', 'audit', 'sync'
 ]);
 
-// Persistencia aktívneho tabu cez URL hash (#users, #diagnostics, …).
+// Povolené sub-filtre pre Sync tab. Rozlišujú, ktorú Google službu chceme
+// zobraziť — Calendar/Tasks majú síce spoločný backend endpoint, ale karty
+// v Prehľade vedú každá na vlastný filter.
+const VALID_SYNC_FILTERS = new Set(['calendar', 'tasks']);
+
+// Persistencia aktívneho tabu cez URL hash (#users, #diagnostics,
+// #sync, #sync/calendar, #sync/tasks).
 // Hash preferujeme pred localStorage: je bookmarkovateľný, zdieľateľný
 // a prežije refresh bez ďalšieho state managementu.
-function readTabFromHash() {
-  if (typeof window === 'undefined') return 'overview';
-  const h = (window.location.hash || '').replace(/^#/, '');
-  return VALID_TAB_IDS.has(h) ? h : 'overview';
+function parseHash() {
+  if (typeof window === 'undefined') return { tab: 'overview', filter: null };
+  const raw = (window.location.hash || '').replace(/^#/, '');
+  const [tab, sub] = raw.split('/');
+  if (!VALID_TAB_IDS.has(tab)) return { tab: 'overview', filter: null };
+  const filter = tab === 'sync' && VALID_SYNC_FILTERS.has(sub) ? sub : null;
+  return { tab, filter };
 }
 
 function AdminPanel() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState(readTabFromHash);
+  const initial = parseHash();
+  const [activeTab, setActiveTab] = useState(initial.tab);
+  const [syncFilter, setSyncFilter] = useState(initial.filter);
+
+  // Helper — navigácia z kariet v Prehľade. Prijíma (tab, filter?) — filter
+  // je relevantný iba pre 'sync'. Overview card pre Google Calendar volá
+  // ('sync', 'calendar'), pre Google Tasks ('sync', 'tasks').
+  const handleNavigate = useCallback((tab, filter = null) => {
+    setActiveTab(tab);
+    setSyncFilter(tab === 'sync' ? filter : null);
+  }, []);
 
   // Refresh / initial load → čítaj z hash; zmena tabu používateľom → zapíš
   // do hash. Tiež reagujeme na back/forward button (popstate) aby sa
   // history navigácia správala prirodzene.
   useEffect(() => {
-    // Syncni hash pri zmene activeTab. replaceState = nevytvárame novú
-    // history položku pri každom kliknutí, inak by back button bol nepoužiteľný.
-    const desired = `#${activeTab}`;
+    // Syncni hash pri zmene activeTab / syncFilter. replaceState = nevytvárame
+    // novú history položku pri každom kliknutí, inak by back button bol nepoužiteľný.
+    let desired = `#${activeTab}`;
+    if (activeTab === 'sync' && syncFilter) desired += `/${syncFilter}`;
     if (window.location.hash !== desired) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search + desired);
     }
-  }, [activeTab]);
+  }, [activeTab, syncFilter]);
 
   useEffect(() => {
     // Reaguje na manuálnu zmenu URL alebo back/forward tlačidlo.
     const onHashChange = () => {
-      const next = readTabFromHash();
-      setActiveTab(prev => (prev === next ? prev : next));
+      const next = parseHash();
+      setActiveTab(prev => (prev === next.tab ? prev : next.tab));
+      setSyncFilter(prev => (prev === next.filter ? prev : next.filter));
     };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('popstate', onHashChange);
@@ -113,7 +134,7 @@ function AdminPanel() {
       </div>
 
       <div className="sa-content">
-        {activeTab === 'overview' && <OverviewTab onNavigate={setActiveTab} />}
+        {activeTab === 'overview' && <OverviewTab onNavigate={handleNavigate} />}
         {activeTab === 'diagnostics' && <DiagnosticsTab />}
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'workspaces' && <WorkspacesTab />}
@@ -124,7 +145,7 @@ function AdminPanel() {
         {activeTab === 'comparison' && <WorkspaceComparisonTab />}
         {activeTab === 'promo' && <PromoCodesTab />}
         {activeTab === 'audit' && <AuditLogTab />}
-        {activeTab === 'sync' && <SyncTab />}
+        {activeTab === 'sync' && <SyncTab filter={syncFilter} onFilterChange={setSyncFilter} />}
       </div>
     </div>
   );
@@ -207,8 +228,8 @@ function OverviewTab({ onNavigate }) {
         <StatCard icon="🏢" label="Workspace-y" value={stats.totalWorkspaces} sub={`${stats.activeWorkspaces} aktívnych`} onClick={() => onNavigate?.('workspaces')} />
         <StatCard icon="📋" label="Projekty" value={stats.totalTasks} onClick={() => onNavigate?.('comparison')} />
         <StatCard icon="👤" label="Kontakty" value={stats.totalContacts} onClick={() => onNavigate?.('comparison')} />
-        <StatCard icon="📅" label="Google Calendar" value={stats.usersWithGoogleCalendar} sub="pripojených" onClick={() => onNavigate?.('sync')} />
-        <StatCard icon="✅" label="Google Tasks" value={stats.usersWithGoogleTasks} sub="pripojených" onClick={() => onNavigate?.('sync')} />
+        <StatCard icon="📅" label="Google Calendar" value={stats.usersWithGoogleCalendar} sub="pripojených" onClick={() => onNavigate?.('sync', 'calendar')} />
+        <StatCard icon="✅" label="Google Tasks" value={stats.usersWithGoogleTasks} sub="pripojených" onClick={() => onNavigate?.('sync', 'tasks')} />
       </div>
 
       <div className="sa-breakdowns">
@@ -1196,7 +1217,32 @@ function DiscountEditor({ user, onUpdate }) {
 }
 
 // ─── SYNC DIAGNOSTICS TAB ───────────────────────────────────────
-function SyncTab() {
+// Prepínač Všetko / Calendar / Tasks. Mení filter v URL hash cez
+// onFilterChange prop, takže state je persistentný cez refresh.
+function SyncFilterBar({ filter, onFilterChange }) {
+  const btn = (value, label) => {
+    const active = filter === value;
+    return (
+      <button
+        key={label}
+        onClick={() => onFilterChange?.(value)}
+        className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
+        style={{ fontSize: '13px', padding: '6px 14px' }}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      {btn(null, 'Všetko')}
+      {btn('calendar', '📅 Google Calendar')}
+      {btn('tasks', '✅ Google Tasks')}
+    </div>
+  );
+}
+
+function SyncTab({ filter, onFilterChange }) {
   const [diagnostics, setDiagnostics] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1209,23 +1255,47 @@ function SyncTab() {
 
   if (loading) return <div className="sa-loading">Načítavam diagnostiku...</div>;
 
-  if (diagnostics.length === 0) {
-    return <div className="sa-empty">Žiadny používateľ nemá prepojenú Google synchronizáciu.</div>;
-  }
-
   const formatDate = (d) => {
     if (!d) return '—';
     return new Date(d).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  // Aplikuj filter z URL hash. `calendar` → zobraz iba usera s enabled Calendar
+  // a skryj Tasks sekciu. `tasks` → zrkadlovo. `null` → všetko ako doteraz.
+  const showCalendar = filter === null || filter === 'calendar';
+  const showTasks = filter === null || filter === 'tasks';
+
+  const filtered = diagnostics.filter(d => {
+    if (filter === 'calendar') return d.calendar.enabled;
+    if (filter === 'tasks') return d.tasks.enabled;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    const msg = filter === 'calendar'
+      ? 'Žiadny používateľ nemá prepojený Google Calendar.'
+      : filter === 'tasks'
+      ? 'Žiadny používateľ nemá prepojené Google Tasks.'
+      : 'Žiadny používateľ nemá prepojenú Google synchronizáciu.';
+    return (
+      <div className="sa-sync-diag">
+        <SyncFilterBar filter={filter} onFilterChange={onFilterChange} />
+        <div className="sa-empty">{msg}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="sa-sync-diag">
+      <SyncFilterBar filter={filter} onFilterChange={onFilterChange} />
       <div className="sa-toolbar">
-        <span className="sa-count">{diagnostics.length} používateľov so synchronizáciou</span>
+        <span className="sa-count">
+          {filtered.length} {filter === 'calendar' ? 'používateľov s Google Calendar' : filter === 'tasks' ? 'používateľov s Google Tasks' : 'používateľov so synchronizáciou'}
+        </span>
       </div>
 
       <div className="sa-sync-cards">
-        {diagnostics.map(d => (
+        {filtered.map(d => (
           <div key={d.id} className="sa-sync-card">
             <div className="sa-sync-card-header">
               <strong>{d.username}</strong>
@@ -1233,7 +1303,7 @@ function SyncTab() {
             </div>
 
             <div className="sa-sync-sections">
-              {d.calendar.enabled && (
+              {showCalendar && d.calendar.enabled && (
                 <div className="sa-sync-section">
                   <div className="sa-sync-section-title">📅 Google Calendar</div>
                   <div className="sa-sync-detail">
@@ -1259,7 +1329,7 @@ function SyncTab() {
                 </div>
               )}
 
-              {d.tasks.enabled && (
+              {showTasks && d.tasks.enabled && (
                 <div className="sa-sync-section">
                   <div className="sa-sync-section-title">✅ Google Tasks</div>
                   <div className="sa-sync-detail">
