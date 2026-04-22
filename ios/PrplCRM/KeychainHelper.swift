@@ -28,9 +28,9 @@ struct KeychainHelper {
         ]
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         if status == errSecSuccess {
-            print("[Keychain] Token saved successfully")
+            debugLog("[Keychain] Token saved successfully")
         } else {
-            print("[Keychain] Save failed: \(status)")
+            debugLog("[Keychain] Save failed: \(status)")
         }
     }
 
@@ -61,6 +61,6 @@ struct KeychainHelper {
             kSecAttrAccount as String: tokenAccount
         ]
         let status = SecItemDelete(query as CFDictionary)
-        print("[Keychain] Token deleted: \(status == errSecSuccess ? "OK" : "status \(status)")")
+        debugLog("[Keychain] Token deleted: \(status == errSecSuccess ? "OK" : "status \(status)")")
     }
 }

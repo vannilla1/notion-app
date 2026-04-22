@@ -1,6 +1,20 @@
 import SwiftUI
 import UserNotifications
 
+// MARK: - Debug logging
+//
+// V DEBUG buildoch sa loguje do Console (rovnako ako print). V RELEASE buildoch
+// sa volanie kompletne odstráni optimalizátorom (`@inline` s prázdnym telom).
+// Takto nebudeme v App Store build-e leakovať interné diagnostické hlášky do
+// zariadeniovho Console, ale stále máme plný debug logging lokálne v Xcode.
+#if DEBUG
+@inline(__always) func debugLog(_ items: Any...) {
+    print(items.map { "\($0)" }.joined(separator: " "))
+}
+#else
+@inline(__always) func debugLog(_: Any...) {}
+#endif
+
 @main
 struct PrplCRMApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -21,7 +35,7 @@ class PushNotificationManager: ObservableObject {
         didSet {
             // Whenever auth token is set/changed, try to register device
             if let token = authToken, !token.isEmpty {
-                print("[Push] Auth token received, attempting device registration")
+                debugLog("[Push] Auth token received, attempting device registration")
                 tryRegisterDevice()
             }
         }
@@ -36,10 +50,10 @@ class PushNotificationManager: ObservableObject {
     func registerDeviceToken(_ tokenHex: String) {
         // Always save the device token
         UserDefaults.standard.set(tokenHex, forKey: "deviceToken")
-        print("[Push] Device token saved: \(tokenHex.prefix(16))...")
+        debugLog("[Push] Device token saved: \(tokenHex.prefix(16))...")
 
         guard let token = authToken, !token.isEmpty else {
-            print("[Push] No auth token yet, saved device token for later")
+            debugLog("[Push] No auth token yet, saved device token for later")
             return
         }
         retryCount = 0
@@ -50,25 +64,25 @@ class PushNotificationManager: ObservableObject {
     func tryRegisterDevice() {
         guard let deviceToken = UserDefaults.standard.string(forKey: "deviceToken"),
               !deviceToken.isEmpty else {
-            print("[Push] No device token available yet")
+            debugLog("[Push] No device token available yet")
             return
         }
         guard let token = authToken, !token.isEmpty else {
-            print("[Push] No auth token available yet")
+            debugLog("[Push] No auth token available yet")
             return
         }
         retryCount = 0
-        print("[Push] Registering device token \(deviceToken.prefix(16))... with auth token")
+        debugLog("[Push] Registering device token \(deviceToken.prefix(16))... with auth token")
         sendTokenToServer(deviceToken, authToken: token)
     }
 
     func sendTokenToServer(_ tokenHex: String, authToken: String) {
         guard let url = URL(string: "\(PushNotificationManager.baseURL)/api/push/apns/register") else {
-            print("[Push] Invalid URL")
+            debugLog("[Push] Invalid URL")
             return
         }
 
-        print("[Push] Sending registration to \(PushNotificationManager.baseURL)")
+        debugLog("[Push] Sending registration to \(PushNotificationManager.baseURL)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -80,26 +94,26 @@ class PushNotificationManager: ObservableObject {
             guard let self = self else { return }
 
             if let error = error {
-                print("[Push] Register failed: \(error.localizedDescription)")
+                debugLog("[Push] Register failed: \(error.localizedDescription)")
                 self.retryWithBackoff(tokenHex: tokenHex, authToken: authToken)
                 return
             }
 
             if let httpResponse = response as? HTTPURLResponse {
-                print("[Push] Register response: \(httpResponse.statusCode)")
+                debugLog("[Push] Register response: \(httpResponse.statusCode)")
 
                 if let data = data, let body = String(data: data, encoding: .utf8) {
-                    print("[Push] Response body: \(body.prefix(200))")
+                    debugLog("[Push] Response body: \(body.prefix(200))")
                 }
 
                 if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
-                    print("[Push] Device token registered successfully!")
+                    debugLog("[Push] Device token registered successfully!")
                     self.retryCount = 0
                 } else if httpResponse.statusCode == 401 {
-                    print("[Push] Auth token invalid (401)")
+                    debugLog("[Push] Auth token invalid (401)")
                     // Don't retry — wait for new auth token from WebView
                 } else {
-                    print("[Push] Registration failed with status \(httpResponse.statusCode)")
+                    debugLog("[Push] Registration failed with status \(httpResponse.statusCode)")
                     self.retryWithBackoff(tokenHex: tokenHex, authToken: authToken)
                 }
             }
@@ -108,14 +122,14 @@ class PushNotificationManager: ObservableObject {
 
     private func retryWithBackoff(tokenHex: String, authToken: String) {
         guard retryCount < maxRetries else {
-            print("[Push] Max retries (\(maxRetries)) reached")
+            debugLog("[Push] Max retries (\(maxRetries)) reached")
             retryCount = 0
             return
         }
 
         retryCount += 1
         let delay = pow(2.0, Double(retryCount)) // 2s, 4s, 8s, 16s, 32s
-        print("[Push] Retrying in \(delay)s (attempt \(retryCount)/\(maxRetries))")
+        debugLog("[Push] Retrying in \(delay)s (attempt \(retryCount)/\(maxRetries))")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.sendTokenToServer(tokenHex, authToken: authToken)
@@ -138,7 +152,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // the default /app. Without this the hardcoded /app loads first
         // and there's a race with updateUIView to redirect.
         if let remoteNotif = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
-            print("[Push] Cold launch via notification, extracting deep link")
+            debugLog("[Push] Cold launch via notification, extracting deep link")
             self.extractDeepLink(from: remoteNotif)
         }
 
@@ -152,10 +166,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Diagnostic: dump entire payload so we can verify in Console.app
         // that ws= actually arrived from the server. Cross-workspace routing
         // depends on this — if ws= is missing here, the bug is server-side.
-        print("[Push] extractDeepLink: full userInfo=\(userInfo)")
+        debugLog("[Push] extractDeepLink: full userInfo=\(userInfo)")
         if let urlString = userInfo["url"] as? String, !urlString.isEmpty, urlString != "/" {
             let hasWs = urlString.contains("ws=")
-            print("[Push] Deep link URL: \(urlString) (hasWs=\(hasWs))")
+            debugLog("[Push] Deep link URL: \(urlString) (hasWs=\(hasWs))")
             self.pushManager.pendingDeepLink = urlString
             // Also broadcast via Cocoa NotificationCenter so the WebView
             // Coordinator can load the URL directly — bypasses SwiftUI's
@@ -171,15 +185,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let type = userInfo["type"] as? String ?? ""
-        print("[Push] No valid URL in payload (url=\(userInfo["url"] ?? "nil")), type=\(type)")
+        debugLog("[Push] No valid URL in payload (url=\(userInfo["url"] ?? "nil")), type=\(type)")
 
         var fallbackUrl: String?
         if type.hasPrefix("message"), let messageId = userInfo["messageId"] as? String {
             fallbackUrl = "/messages?highlight=\(messageId)"
-            print("[Push] Constructed message deep link: \(fallbackUrl!)")
+            debugLog("[Push] Constructed message deep link: \(fallbackUrl!)")
         } else if type.hasPrefix("contact"), let contactId = userInfo["contactId"] as? String {
             fallbackUrl = "/crm?expandContact=\(contactId)"
-            print("[Push] Constructed contact deep link: \(fallbackUrl!)")
+            debugLog("[Push] Constructed contact deep link: \(fallbackUrl!)")
         } else if type.hasPrefix("task") || type.hasPrefix("subtask"),
                   let taskId = userInfo["taskId"] as? String {
             // NOTE: zámerne NEpridávame contactId do URL — Tasks.jsx by ho
@@ -196,9 +210,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 url += "&ws=\(wsId)"
             }
             fallbackUrl = url
-            print("[Push] Constructed task deep link: \(url)")
+            debugLog("[Push] Constructed task deep link: \(url)")
         } else {
-            print("[Push] Could not construct deep link, no matching data")
+            debugLog("[Push] Could not construct deep link, no matching data")
         }
         if let url = fallbackUrl {
             self.pushManager.pendingDeepLink = url
@@ -211,8 +225,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Clear badge when app is opened
-        application.applicationIconBadgeNumber = 0
+        // Clear badge when app is opened. `setBadgeCount` je iOS 16+ API ktoré
+        // nahradzuje deprecated `applicationIconBadgeNumber` z iOS 17+. Deployment
+        // target = 16.0, takže sa na deprecation warning už nebojíme.
+        UNUserNotificationCenter.current().setBadgeCount(0)
         // Clear delivered notifications from Notification Center too — user is
         // now in the app and can see their unread state there, so stale APNs
         // banners in the Center are noise. Matches Slack/Messenger behavior.
@@ -221,28 +237,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     private func requestPushPermission(_ application: UIApplication) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            print("[Push] Permission granted: \(granted)")
+            debugLog("[Push] Permission granted: \(granted)")
             if let error = error {
-                print("[Push] Permission error: \(error.localizedDescription)")
+                debugLog("[Push] Permission error: \(error.localizedDescription)")
             }
             if granted {
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
                 }
             } else {
-                print("[Push] User denied push notifications")
+                debugLog("[Push] User denied push notifications")
             }
         }
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenHex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        print("[Push] Got device token from Apple: \(tokenHex.prefix(16))...")
+        debugLog("[Push] Got device token from Apple: \(tokenHex.prefix(16))...")
         pushManager.registerDeviceToken(tokenHex)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("[Push] Apple registration FAILED: \(error.localizedDescription)")
+        debugLog("[Push] Apple registration FAILED: \(error.localizedDescription)")
     }
 
     // Handle notification when app is in foreground — show banner + keep in notification center
@@ -267,15 +283,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
 
-        // Clear badge on notification tap
-        UIApplication.shared.applicationIconBadgeNumber = 0
+        // Clear badge on notification tap (iOS 16+ API, viď poznámka vyššie).
+        UNUserNotificationCenter.current().setBadgeCount(0)
         // Also clear all delivered notifications — user actively engaged with
         // one, so the rest in the Center are stale context.
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
 
-        print("[Push] Notification tapped, userInfo keys: \(Array(userInfo.keys))")
+        debugLog("[Push] Notification tapped, userInfo keys: \(Array(userInfo.keys))")
         self.extractDeepLink(from: userInfo)
-        print("[Push] pendingDeepLink after processing: \(self.pushManager.pendingDeepLink ?? "nil")")
+        debugLog("[Push] pendingDeepLink after processing: \(self.pushManager.pendingDeepLink ?? "nil")")
         completionHandler()
     }
 }

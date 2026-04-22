@@ -2,7 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- APNs environment — "production" pre App Store builds (Release scheme).
+	     Debug buildy stále dostanú sandbox APNs cez Xcode automatic provisioning
+	     (dev profile vie handle-nut "production" value aj pre sandbox). Pre
+	     TestFlight/App Store je "production" povinné aby production APNs server
+	     prijal notifikácie. -->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 </dict>
 </plist>

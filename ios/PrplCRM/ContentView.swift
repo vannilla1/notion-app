@@ -328,7 +328,7 @@ struct WebView: UIViewRepresentable {
                 forMainFrameOnly: true
             )
             config.userContentController.addUserScript(restoreScript)
-            print("[Keychain] Injecting saved token into WebView localStorage (only if empty)")
+            debugLog("[Keychain] Injecting saved token into WebView localStorage (only if empty)")
         }
 
         // Inject CSS safe area variables + auth token bridge
@@ -420,7 +420,7 @@ struct WebView: UIViewRepresentable {
             let sep = link.contains("?") ? "&" : "?"
             let ts = Int(Date().timeIntervalSince1970 * 1000)
             if let u = URL(string: base + link + sep + "_t=\(ts)") {
-                print("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
+                debugLog("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
                 initialURL = u
                 // Clear now so updateUIView doesn't try to reload it again
                 let pm = pushManager
@@ -443,7 +443,7 @@ struct WebView: UIViewRepresentable {
         // updateUIView never used the resulting URL, so deep links were lost.
         guard let deepLink = pushManager.pendingDeepLink else { return }
 
-        print("[Push] updateUIView: deepLink = \(deepLink), pageLoaded = \(context.coordinator.hasFinishedInitialLoad)")
+        debugLog("[Push] updateUIView: deepLink = \(deepLink), pageLoaded = \(context.coordinator.hasFinishedInitialLoad)")
 
         // Clear pendingDeepLink asynchronously to avoid "mutating state
         // during view update" warnings from SwiftUI
@@ -468,7 +468,7 @@ struct WebView: UIViewRepresentable {
         // and routes the user correctly.
         let fullUrl = base + link + sep + "_t=\(ts)"
         if let deepLinkUrl = URL(string: fullUrl) {
-            print("[Push] Loading deep link URL directly = \(fullUrl) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
+            debugLog("[Push] Loading deep link URL directly = \(fullUrl) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
             webView.load(URLRequest(url: deepLinkUrl))
         }
     }
@@ -523,7 +523,7 @@ struct WebView: UIViewRepresentable {
         @objc private func handleDeepLinkReceived(_ notification: Notification) {
             guard let urlString = notification.userInfo?["url"] as? String,
                   let webView = webView else {
-                print("[Push] Coordinator.handleDeepLinkReceived: no URL or no webView")
+                debugLog("[Push] Coordinator.handleDeepLinkReceived: no URL or no webView")
                 return
             }
             let base = "https://prplcrm.eu"
@@ -532,14 +532,14 @@ struct WebView: UIViewRepresentable {
             let ts = Int(Date().timeIntervalSince1970 * 1000)
             let fullUrl = base + link + sep + "_t=\(ts)"
             guard let url = URL(string: fullUrl) else { return }
-            print("[Push] Coordinator: loading deep link via NotificationCenter bypass = \(fullUrl)")
+            debugLog("[Push] Coordinator: loading deep link via NotificationCenter bypass = \(fullUrl)")
             DispatchQueue.main.async {
                 webView.load(URLRequest(url: url))
             }
         }
 
         @objc private func appDidReceiveMemoryWarning() {
-            print("[WebView] ⚠ Memory warning received — at URL \(lastURL?.absoluteString ?? "nil")")
+            debugLog("[WebView] ⚠ Memory warning received — at URL \(lastURL?.absoluteString ?? "nil")")
         }
 
         @objc private func appWillEnterForeground() {
@@ -559,6 +559,21 @@ struct WebView: UIViewRepresentable {
         // Handle messages from JavaScript (auth token + file downloads + external URLs)
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
+            // Hostname guard (defence-in-depth):
+            // WKScriptMessage bridge môže byť potenciálne volaný z ľubovoľnej stránky
+            // ktorá beží v tomto WKWebView. `decidePolicyFor` a `createWebViewWith`
+            // blokujú navigáciu na cudzie domény, ale ak by sa cudzia stránka predsa
+            // dostala do hlavného frame (XSS na prplcrm.eu, otvorený iframe, race
+            // condition), mohla by zavolať `iosNative.postMessage({type:'authToken',
+            // token:'fake'})` a otráviť nám Keychain. Odmietneme všetky správy ktoré
+            // nevznikli na našej doméne.
+            let senderHost = message.frameInfo.request.url?.host
+            let isOurDomain = senderHost == "prplcrm.eu"
+            if !isOurDomain {
+                debugLog("[WebView] DROP message from untrusted origin: \(senderHost ?? "nil") name=\(message.name)")
+                return
+            }
+
             if message.name == "fileDownload" {
                 handleFileDownload(message)
                 return
@@ -568,7 +583,7 @@ struct WebView: UIViewRepresentable {
             if message.name == "openExternal",
                let urlString = message.body as? String,
                let url = URL(string: urlString) {
-                print("[WebView] Opening external URL: \(urlString.prefix(60))")
+                debugLog("[WebView] Opening external URL: \(urlString.prefix(60))")
                 UIApplication.shared.open(url)
                 return
             }
@@ -578,7 +593,7 @@ struct WebView: UIViewRepresentable {
                   let type = body["type"] as? String else { return }
 
             if type == "authToken", let token = body["token"] as? String {
-                print("[Push] Got auth token from WebView: \(token.prefix(20))...")
+                debugLog("[Push] Got auth token from WebView: \(token.prefix(20))...")
                 parent.pushManager.authToken = token
                 // Save to Keychain for persistent login + Face ID
                 KeychainHelper.saveToken(token)
@@ -586,7 +601,7 @@ struct WebView: UIViewRepresentable {
             }
 
             if type == "logout" {
-                print("[Auth] User logged out, clearing Keychain")
+                debugLog("[Auth] User logged out, clearing Keychain")
                 KeychainHelper.deleteToken()
                 parent.pushManager.authToken = nil
             }
@@ -597,7 +612,7 @@ struct WebView: UIViewRepresentable {
                   let base64Data = body["data"] as? String,
                   let fileName = body["fileName"] as? String,
                   let data = Data(base64Encoded: base64Data) else {
-                print("[FileDownload] Invalid message data")
+                debugLog("[FileDownload] Invalid message data")
                 return
             }
 
@@ -625,7 +640,7 @@ struct WebView: UIViewRepresentable {
 
                     viewController.present(activityVC, animated: true)
                 } catch {
-                    print("[FileDownload] Failed to write temp file: \(error)")
+                    debugLog("[FileDownload] Failed to write temp file: \(error)")
                 }
             }
         }
@@ -659,7 +674,7 @@ struct WebView: UIViewRepresentable {
                 // deep link URL directly in ContentView.
                 if let deepLinkJS = pendingDeepLinkJS {
                     pendingDeepLinkJS = nil
-                    print("[Push] Executing deferred deep link after page load")
+                    debugLog("[Push] Executing deferred deep link after page load")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         webView.evaluateJavaScript(deepLinkJS, completionHandler: nil)
                     }
@@ -680,7 +695,7 @@ struct WebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             if let url = webView.url {
                 lastURL = url
-                print("[WebView] didCommit \(url.absoluteString)")
+                debugLog("[WebView] didCommit \(url.absoluteString)")
             }
         }
 
@@ -690,7 +705,7 @@ struct WebView: UIViewRepresentable {
         // loses their current location. We reload the last known URL.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             let restoreURL = lastURL ?? parent.url
-            print("[WebView] ⚠ WebContent process terminated — reloading \(restoreURL.absoluteString)")
+            debugLog("[WebView] ⚠ WebContent process terminated — reloading \(restoreURL.absoluteString)")
             webView.load(URLRequest(url: restoreURL))
         }
 

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Apple Privacy Manifest — povinné od mája 2024.
+  Deklaruje:
+   1. Required Reason APIs, ktoré používame (UserDefaults)
+   2. Typy tracking-u (žiadne — appka netraceuje)
+   3. Collected data types (nastavené na empty; samotné collection rieši Privacy Nutrition Label v App Store Connect)
+
+  Zdroje:
+   - https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
+   - https://developer.apple.com/documentation/bundleresources/privacy_manifest_files/describing_use_of_required_reason_api
+-->
+<plist version="1.0">
+<dict>
+    <key>NSPrivacyTracking</key>
+    <false/>
+
+    <!-- Žiadne tracking domény. Appka neposiela dáta ad-networks, analytickým
+         tretím stranám, a FCM/APNs nie sú tracking (sú transactional push). -->
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <!-- Collected data — prázdne. Privacy Nutrition Label (textový formulár
+         v App Store Connect) opisuje collection dát. Tento súbor sa používa
+         pre API-level deklarácie. -->
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <!-- Required Reason APIs — povinné deklarácie ktoré Apple kontroluje pri
+         submite. -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <!-- UserDefaults API — ukladáme deviceToken (APNs) aby sme ho vedeli
+             znovu zaregistrovať po reštarte appky, a aby sme ho vedeli spárovať
+             s auth tokenom keď user príde zo splash + login. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- CA92.1: Access info about the app itself (no cross-app or device-wide data) -->
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
