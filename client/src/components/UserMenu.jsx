@@ -97,6 +97,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
   const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
   const [deleteSearchTerm, setDeleteSearchTerm] = useState('');
+  const [showGoogleTasksAdvanced, setShowGoogleTasksAdvanced] = useState(false);
   const [avatarTimestamp, setAvatarTimestamp] = useState(() => user?.avatarTimestamp || 1);
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -524,7 +525,19 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleRemoveDuplicatesGoogleTasks = async () => {
-    if (!confirm('Vymazať VŠETKY projekty z Google Tasks a vytvoriť čistý zoznam? Po dokončení spustite "Synchronizovať" pre opätovné vytvorenie projektov.')) return;
+    // Typed confirm — drastic action that nukes the whole Google Tasks list
+    const typed = window.prompt(
+      'POZOR: Táto akcia VYMAŽE VŠETKY projekty zo zoznamu "Prpl CRM" v Google Tasks.\n\n' +
+      'Ak máte v tomto zozname úlohy, ktoré pochádzajú mimo Prpl CRM, STRATÍTE ich.\n\n' +
+      'Pre potvrdenie napíšte presne: VYMAZAT'
+    );
+    if (typed !== 'VYMAZAT') {
+      if (typed !== null) {
+        setGoogleTasksMessage('Akcia zrušená – text sa nezhoduje.');
+        setGoogleTasksMessageType('error');
+      }
+      return;
+    }
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('Mažem zoznam projektov z Google Tasks...');
@@ -552,7 +565,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       return;
     }
 
-    if (!confirm(`Naozaj chcete vymazať všetky projekty obsahujúce "${searchTerm}" z Google Tasks?`)) {
+    // Typed confirm — drastic action
+    const typed = window.prompt(
+      `POZOR: Vymažú sa VŠETKY projekty v Google Tasks obsahujúce "${searchTerm}".\n\n` +
+      `Pre potvrdenie napíšte presne: VYMAZAT`
+    );
+    if (typed !== 'VYMAZAT') {
+      if (typed !== null) {
+        setGoogleTasksMessage('Akcia zrušená – text sa nezhoduje.');
+        setGoogleTasksMessageType('error');
+      }
       return;
     }
 
@@ -1247,41 +1269,73 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       >
                         {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
                       </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={handleRemoveDuplicatesGoogleTasks}
-                        disabled={googleTasks.syncing}
-                        title="Vymaže všetky projekty z Google Tasks a vytvorí čistý zoznam. Potom spustite Synchronizovať."
-                        style={{ background: '#e67e22', color: 'white', border: 'none' }}
-                      >
-                        🧹 Vymazať a obnoviť
-                      </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks} disabled={googleTasks.syncing}>
                         Odpojiť
                       </button>
                     </div>
-                    <div style={{ marginTop: '12px', padding: '10px', background: '#f8f9fa', borderRadius: '6px' }}>
-                      <label style={{ fontSize: '12px', color: '#666', marginBottom: '4px', display: 'block' }}>
-                        Vymazať z Google Tasks podľa názvu:
-                      </label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <input
-                          type="text"
-                          value={deleteSearchTerm}
-                          onChange={(e) => setDeleteSearchTerm(e.target.value)}
-                          placeholder="napr. vzor"
-                          style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '14px' }}
-                          disabled={googleTasks.syncing}
-                        />
-                        <button
-                          className="btn btn-warning"
-                          onClick={() => handleDeleteBySearch(deleteSearchTerm)}
-                          disabled={googleTasks.syncing || deleteSearchTerm.length < 2}
-                          style={{ whiteSpace: 'nowrap' }}
-                        >
-                          Vymazať
-                        </button>
-                      </div>
+
+                    {/* Advanced / destructive tools — hidden behind toggle to protect regular users */}
+                    <div style={{ marginTop: '16px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowGoogleTasksAdvanced(v => !v)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#666',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          padding: '4px 0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <span style={{ transform: showGoogleTasksAdvanced ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                        Pokročilé nastavenia
+                      </button>
+
+                      {showGoogleTasksAdvanced && (
+                        <div style={{ marginTop: '10px', padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px' }}>
+                          <p style={{ fontSize: '12px', color: '#92400e', margin: '0 0 10px 0' }}>
+                            ⚠️ Tieto nástroje môžu nenávratne zmazať dáta v Google Tasks. Použite iba ak viete, čo robíte.
+                          </p>
+
+                          <button
+                            className="btn"
+                            onClick={handleRemoveDuplicatesGoogleTasks}
+                            disabled={googleTasks.syncing}
+                            title="Vymaže všetky projekty zo zoznamu Prpl CRM v Google Tasks a vytvorí čistý zoznam."
+                            style={{ background: '#e67e22', color: 'white', border: 'none', width: '100%', marginBottom: '10px' }}
+                          >
+                            🧹 Vymazať celý zoznam a obnoviť
+                          </button>
+
+                          <div>
+                            <label style={{ fontSize: '12px', color: '#666', marginBottom: '4px', display: 'block' }}>
+                              Vymazať projekty podľa názvu:
+                            </label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <input
+                                type="text"
+                                value={deleteSearchTerm}
+                                onChange={(e) => setDeleteSearchTerm(e.target.value)}
+                                placeholder="napr. vzor"
+                                style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '14px' }}
+                                disabled={googleTasks.syncing}
+                              />
+                              <button
+                                className="btn btn-warning"
+                                onClick={() => handleDeleteBySearch(deleteSearchTerm)}
+                                disabled={googleTasks.syncing || deleteSearchTerm.length < 2}
+                                style={{ whiteSpace: 'nowrap' }}
+                              >
+                                Vymazať
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     {googleTasksMessage && (
                       <div className="form-success" style={{

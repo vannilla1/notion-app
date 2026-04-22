@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
@@ -19,7 +20,15 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-calendar/callback';
 
-const oauth2Client = new google.auth.OAuth2(
+// Webhook verification secret (used as x-goog-channel-token)
+const WEBHOOK_TOKEN_SECRET = process.env.GOOGLE_WEBHOOK_SECRET || process.env.JWT_SECRET || GOOGLE_CLIENT_SECRET || 'prplcrm-webhook-fallback';
+
+/**
+ * Create a fresh OAuth2Client for each request.
+ * CRITICAL: Must NOT be a module-level singleton — credentials on a shared client
+ * race across concurrent requests and can leak data between users.
+ */
+const createOAuth2Client = () => new google.auth.OAuth2(
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI
@@ -27,6 +36,17 @@ const oauth2Client = new google.auth.OAuth2(
 
 // Scopes required for Google Calendar
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+
+/**
+ * Compute a deterministic HMAC token for a watch channel.
+ * Used as x-goog-channel-token so we can verify webhook POSTs really came from Google.
+ */
+const computeWatchToken = (userId, channelId) => {
+  return crypto
+    .createHmac('sha256', WEBHOOK_TOKEN_SECRET)
+    .update(`${userId}:${channelId}`)
+    .digest('hex');
+};
 
 // Helper to get authenticated calendar client for user
 const getCalendarClient = async (user, forceRefresh = false) => {
@@ -36,11 +56,13 @@ const getCalendarClient = async (user, forceRefresh = false) => {
 
   // Check if we have a refresh token - this is critical for long-term access
   if (!user.googleCalendar.refreshToken) {
-    console.warn('[Google Calendar] No refresh token stored - user needs to reconnect', { userId: user._id });
+    logger.warn('[Google Calendar] No refresh token stored - user needs to reconnect', { userId: user._id });
     throw new Error('Google Calendar token expired. Please reconnect your account.');
   }
 
-  oauth2Client.setCredentials({
+  // Per-request OAuth client — never share across requests
+  const client = createOAuth2Client();
+  client.setCredentials({
     access_token: user.googleCalendar.accessToken,
     refresh_token: user.googleCalendar.refreshToken,
     expiry_date: user.googleCalendar.tokenExpiry?.getTime()
@@ -53,27 +75,25 @@ const getCalendarClient = async (user, forceRefresh = false) => {
   const needsRefresh = forceRefresh || !tokenExpiry || now.getTime() >= tokenExpiry.getTime() - expiryBuffer;
 
   if (needsRefresh) {
-    console.log('[Google Calendar] Token refresh needed', {
+    logger.debug('[Google Calendar] Token refresh needed', {
       userId: user._id,
-      forceRefresh,
-      tokenExpiry: tokenExpiry?.toISOString(),
-      now: now.toISOString()
+      forceRefresh
     });
 
     try {
-      const { credentials } = await oauth2Client.refreshAccessToken();
+      const { credentials } = await client.refreshAccessToken();
       user.googleCalendar.accessToken = credentials.access_token;
       user.googleCalendar.tokenExpiry = new Date(credentials.expiry_date);
       // Google sometimes returns a new refresh token - always save it
       if (credentials.refresh_token) {
         user.googleCalendar.refreshToken = credentials.refresh_token;
-        console.log('[Google Calendar] New refresh token received', { userId: user._id });
+        logger.info('[Google Calendar] New refresh token received', { userId: user._id });
       }
       await user.save();
-      oauth2Client.setCredentials(credentials);
-      console.log('[Google Calendar] Token refreshed successfully', { userId: user._id });
+      client.setCredentials(credentials);
+      logger.info('[Google Calendar] Token refreshed successfully', { userId: user._id });
     } catch (refreshError) {
-      console.error('[Google Calendar] Token refresh failed', {
+      logger.error('[Google Calendar] Token refresh failed', {
         userId: user._id,
         error: refreshError.message,
         code: refreshError.code
@@ -94,37 +114,40 @@ const getCalendarClient = async (user, forceRefresh = false) => {
         user.googleCalendar.enabled = false;
         await user.save();
 
-        console.warn('[Google Calendar] Credentials cleared due to invalid grant', { userId: user._id });
+        logger.warn('[Google Calendar] Credentials cleared due to invalid grant', { userId: user._id });
         throw new Error('Google Calendar token expired. Please reconnect your account.');
       }
 
       // For other errors, try to continue with existing token
-      console.warn('[Google Calendar] Continuing with existing token after refresh failure', { userId: user._id });
+      logger.warn('[Google Calendar] Continuing with existing token after refresh failure', { userId: user._id });
     }
   }
 
-  return google.calendar({ version: 'v3', auth: oauth2Client });
+  return google.calendar({ version: 'v3', auth: client });
 };
 
 // Get Google Calendar authorization URL
 router.get('/auth-url', authenticateToken, (req, res) => {
   try {
-    const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
-    console.log('Generating auth URL for user:', state);
-    console.log('GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID ? 'set' : 'NOT SET');
-    console.log('GOOGLE_REDIRECT_URI:', GOOGLE_REDIRECT_URI);
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      logger.error('[Google Calendar] OAuth not configured');
+      return res.status(503).json({ message: 'Google Calendar integrácia nie je nakonfigurovaná' });
+    }
 
-    const authUrl = oauth2Client.generateAuthUrl({
+    const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
+    logger.info('[Google Calendar] Generating auth URL', { userId: state });
+
+    const client = createOAuth2Client();
+    const authUrl = client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
       state: state,
       prompt: 'consent' // Force consent to get refresh token
     });
 
-    console.log('Generated auth URL:', authUrl);
     res.json({ authUrl });
   } catch (error) {
-    console.error('Error generating auth URL:', error);
+    logger.error('[Google Calendar] Error generating auth URL', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri generovaní autorizačného linku' });
   }
 });
@@ -133,38 +156,40 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 router.get('/callback', async (req, res) => {
   const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
-  // Log all query parameters for debugging
-  console.log('Google Calendar callback - full query:', req.query);
-  console.log('Google Calendar callback - baseUrl:', baseUrl);
+  // NOTE: never log req.query verbatim — it contains the OAuth authorization `code`
+  logger.info('[Google Calendar] Callback received', {
+    hasCode: !!req.query.code,
+    hasState: !!req.query.state
+  });
 
   try {
     const { code, state: userId } = req.query;
 
-    console.log('Google Calendar callback received:', { code: !!code, userId, codeLength: code?.length });
-
     if (!code || !userId) {
-      console.log('Missing params in callback - redirecting to error page');
-      const redirectUrl = `${baseUrl}/tasks?google_calendar=error&message=missing_params`;
-      console.log('Redirect URL:', redirectUrl);
-      return res.redirect(redirectUrl);
+      logger.warn('[Google Calendar] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
+      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=missing_params`);
     }
 
-    // Exchange code for tokens
-    console.log('Exchanging code for tokens...');
-    const { tokens } = await oauth2Client.getToken(code);
-    console.log('Tokens received:', { hasAccessToken: !!tokens.access_token, hasRefreshToken: !!tokens.refresh_token });
+    // Exchange code for tokens — use fresh per-request client
+    const client = createOAuth2Client();
+    const { tokens } = await client.getToken(code);
+    logger.debug('[Google Calendar] Tokens received', {
+      userId,
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token
+    });
 
     // Update user with Google Calendar credentials
     const user = await User.findById(userId);
     if (!user) {
-      console.log('User not found:', userId);
+      logger.warn('[Google Calendar] User not found in callback', { userId });
       return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=user_not_found`);
     }
 
     // IMPORTANT: Google only sends refresh_token on first authorization
     // or if we use prompt: 'consent'. Make sure we save it!
     if (!tokens.refresh_token) {
-      console.warn('[Google Calendar] No refresh token received! User may need to reconnect later.', { userId });
+      logger.warn('[Google Calendar] No refresh token received! User may need to reconnect later.', { userId });
     }
 
     user.googleCalendar = {
@@ -181,8 +206,7 @@ router.get('/callback', async (req, res) => {
     logger.info('[Google Calendar] User connected successfully', {
       userId,
       username: user.username,
-      hasRefreshToken: !!user.googleCalendar.refreshToken,
-      tokenExpiry: user.googleCalendar.tokenExpiry
+      hasRefreshToken: !!user.googleCalendar.refreshToken
     });
 
     // Start watching for calendar changes (Google → CRM push notifications)
@@ -193,7 +217,7 @@ router.get('/callback', async (req, res) => {
     // Redirect back to app with success
     res.redirect(`${baseUrl}/tasks?google_calendar=connected`);
   } catch (error) {
-    console.error('Error in Google Calendar callback:', error);
+    logger.error('[Google Calendar] Callback error', { error: error.message });
     res.redirect(`${baseUrl}/tasks?google_calendar=error&message=` + encodeURIComponent(error.message));
   }
 });
@@ -209,10 +233,11 @@ router.get('/status', authenticateToken, async (req, res) => {
 
     res.json({
       connected: user.googleCalendar?.enabled || false,
-      connectedAt: user.googleCalendar?.connectedAt || null
+      connectedAt: user.googleCalendar?.connectedAt || null,
+      lastSyncAt: user.googleCalendar?.lastSyncAt || null
     });
   } catch (error) {
-    console.error('Error getting Google Calendar status:', error);
+    logger.error('[Google Calendar] Error getting status', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
   }
 });
@@ -222,17 +247,24 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
-    // Revoke token if possible
+    // Revoke token if possible (fire-and-forget with 3s timeout so disconnect never blocks)
     if (user.googleCalendar?.accessToken) {
-      try {
-        await oauth2Client.revokeToken(user.googleCalendar.accessToken);
-      } catch (e) {
-        console.log('Token revocation failed (may already be revoked):', e.message);
-      }
+      const client = createOAuth2Client();
+      const tokenToRevoke = user.googleCalendar.accessToken;
+      Promise.race([
+        client.revokeToken(tokenToRevoke),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('revoke timeout')), 3000))
+      ]).catch((e) => {
+        logger.debug('[Google Calendar] Token revocation skipped', { error: e.message });
+      });
     }
 
-    // Stop watching for changes
-    await stopCalendarWatch(user);
+    // Stop watching for changes (best-effort)
+    try {
+      await stopCalendarWatch(user);
+    } catch (e) {
+      logger.debug('[Google Calendar] stopCalendarWatch error', { error: e.message });
+    }
 
     user.googleCalendar = {
       accessToken: null,
@@ -249,10 +281,11 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     };
 
     await user.save();
+    logger.info('[Google Calendar] Disconnected', { userId: req.user.id, username: user.username });
 
     res.json({ success: true, message: 'Google Calendar bol odpojený' });
   } catch (error) {
-    console.error('Error disconnecting Google Calendar:', error);
+    logger.error('[Google Calendar] Disconnect error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri odpájaní' });
   }
 });
@@ -265,11 +298,13 @@ const WATCH_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (Google max)
 /**
  * Start watching a user's Google Calendar for changes.
  * Creates a push notification channel so Google sends us a POST when events change.
+ * We include a signed token so incoming webhook POSTs can be verified (HMAC of userId+channelId).
  */
 const startCalendarWatch = async (user) => {
   try {
     const calendar = await getCalendarClient(user);
     const channelId = uuidv4();
+    const channelToken = computeWatchToken(user._id.toString(), channelId);
 
     const res = await calendar.events.watch({
       calendarId: user.googleCalendar.calendarId || 'primary',
@@ -277,6 +312,7 @@ const startCalendarWatch = async (user) => {
         id: channelId,
         type: 'web_hook',
         address: `${WEBHOOK_BASE_URL}/api/google-calendar/webhook`,
+        token: channelToken,
         expiration: String(Date.now() + WATCH_EXPIRY_MS)
       }
     });
@@ -501,6 +537,7 @@ router.post('/webhook', async (req, res) => {
   res.status(200).end();
 
   const channelId = req.headers['x-goog-channel-id'];
+  const channelToken = req.headers['x-goog-channel-token'];
   const resourceState = req.headers['x-goog-resource-state'];
 
   if (!channelId) return;
@@ -518,6 +555,20 @@ router.post('/webhook', async (req, res) => {
     const user = await User.findOne({ 'googleCalendar.watchChannelId': channelId });
     if (!user) {
       logger.warn('[Calendar Webhook] No user found for channel', { channelId });
+      return;
+    }
+
+    // Verify HMAC token so random attackers can't trigger sync for arbitrary users
+    const expectedToken = computeWatchToken(user._id.toString(), channelId);
+    if (!channelToken) {
+      logger.warn('[Calendar Webhook] Missing channel token', { channelId, userId: user._id });
+      return;
+    }
+    // Use timingSafeEqual to prevent timing attacks
+    const a = Buffer.from(channelToken);
+    const b = Buffer.from(expectedToken);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      logger.warn('[Calendar Webhook] Invalid channel token', { channelId, userId: user._id });
       return;
     }
 
@@ -596,12 +647,14 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const tasksToSync = [];
 
-    console.log('Found global tasks:', globalTasks.length);
-    console.log('Found contacts:', contacts.length);
+    logger.debug('[Google Calendar] Sync starting', {
+      userId: user._id,
+      globalTaskCount: globalTasks.length,
+      contactCount: contacts.length
+    });
 
     // Collect global tasks
     for (const task of globalTasks) {
-      console.log('Task:', task.title, 'dueDate:', task.dueDate);
       if (task.dueDate) {
         tasksToSync.push({
           id: task._id.toString(),
@@ -641,46 +694,44 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     let updated = 0;
     let errors = 0;
 
-    console.log('Tasks to sync (with dueDate):', tasksToSync.length);
-    console.log('Tasks details:', tasksToSync.map(t => ({ title: t.title, dueDate: t.dueDate })));
+    logger.info('[Google Calendar] Syncing tasks', { userId: user._id, count: tasksToSync.length });
 
     for (const task of tasksToSync) {
       try {
-        console.log(`Syncing task: ${task.title} (${task.id})`);
         const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
-
         const eventData = createEventData(task);
-        console.log('Event data:', JSON.stringify(eventData));
 
         if (existingEventId) {
           // Update existing event
-          console.log(`Updating existing event: ${existingEventId}`);
           await calendar.events.update({
             calendarId: user.googleCalendar.calendarId,
             eventId: existingEventId,
             resource: eventData
           });
           updated++;
-          console.log('Event updated successfully');
         } else {
           // Create new event
-          console.log('Creating new event...');
           const event = await calendar.events.insert({
             calendarId: user.googleCalendar.calendarId,
             resource: eventData
           });
-          console.log('Event created:', event.data.id);
           user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
           synced++;
         }
       } catch (error) {
-        console.error(`Error syncing task ${task.id}:`, error.message);
-        console.error('Full error:', error);
+        logger.warn('[Google Calendar] Task sync error', {
+          userId: user._id,
+          taskId: task.id,
+          error: error.message
+        });
         errors++;
       }
     }
 
+    user.googleCalendar.lastSyncAt = new Date();
     await user.save();
+
+    logger.info('[Google Calendar] Sync finished', { userId: user._id, synced, updated, errors });
 
     res.json({
       success: true,
@@ -690,7 +741,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       errors
     });
   } catch (error) {
-    console.error('Error syncing to Google Calendar:', error);
+    logger.error('[Google Calendar] Sync error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
   }
 });
@@ -770,7 +821,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
 
     res.json({ success: true, message: 'Úloha bola synchronizovaná' });
   } catch (error) {
-    console.error('Error syncing single task:', error);
+    logger.error('[Google Calendar] Single task sync error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
   }
 });
@@ -798,7 +849,10 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
         eventId: eventId
       });
     } catch (e) {
-      console.log('Event deletion failed (may already be deleted):', e.message);
+      // 404 = already deleted, that's fine
+      if (e.code !== 404) {
+        logger.warn('[Google Calendar] Event deletion failed', { error: e.message, eventId });
+      }
     }
 
     user.googleCalendar.syncedTaskIds.delete(taskId);
@@ -806,7 +860,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
 
     res.json({ success: true, message: 'Udalosť bola odstránená z kalendára' });
   } catch (error) {
-    console.error('Error deleting calendar event:', error);
+    logger.error('[Google Calendar] Event delete error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri odstraňovaní: ' + error.message });
   }
 });
@@ -849,7 +903,10 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
     // First, clean up from syncedTaskIds map
     if (user.googleCalendar.syncedTaskIds) {
       const syncedTaskIds = Array.from(user.googleCalendar.syncedTaskIds.entries());
-      console.log('Synced task IDs in database:', syncedTaskIds.length);
+      logger.debug('[Google Calendar] Cleanup starting', {
+        userId: user._id,
+        mappedCount: syncedTaskIds.length
+      });
 
       for (const [taskId, eventId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
@@ -860,10 +917,11 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
               eventId: eventId
             });
             deleted++;
-            console.log(`Deleted orphaned event: ${eventId} (task: ${taskId})`);
           } catch (e) {
-            console.log(`Failed to delete event ${eventId}:`, e.message);
-            errors++;
+            if (e.code !== 404) {
+              logger.warn('[Google Calendar] Cleanup delete failed', { eventId, error: e.message });
+              errors++;
+            }
           }
           user.googleCalendar.syncedTaskIds.delete(taskId);
         }
@@ -871,6 +929,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
     }
 
     await user.save();
+    logger.info('[Google Calendar] Cleanup finished', { userId: user._id, deleted, errors });
 
     res.json({
       success: true,
@@ -879,7 +938,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
       errors
     });
   } catch (error) {
-    console.error('Error cleaning up calendar:', error);
+    logger.error('[Google Calendar] Cleanup error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
   }
 });
@@ -991,7 +1050,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
   try {
     // Skip if task has no due date (for create/update)
     if (action !== 'delete' && !taskData.dueDate) {
-      console.log('[Auto-sync Calendar] Task has no due date, skipping sync');
+      logger.debug('[Auto-sync Calendar] Task has no due date, skipping');
       return;
     }
 
@@ -1003,7 +1062,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
 
     // Validate taskId
     if (!taskId) {
-      console.warn('[Auto-sync Calendar] Missing task ID', { title: taskData.title });
+      logger.warn('[Auto-sync Calendar] Missing task ID');
       return;
     }
 
@@ -1033,7 +1092,10 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
     for (const user of users) {
       try {
         const calendar = await getCalendarClient(user);
-        console.log(`[Auto-sync Calendar] Processing for user ${user.username}, syncedTaskIds has ${user.googleCalendar.syncedTaskIds?.size || 0} entries`);
+        logger.debug('[Auto-sync Calendar] Processing', {
+          userId: user._id,
+          mappedCount: user.googleCalendar.syncedTaskIds?.size || 0
+        });
 
         if (action === 'delete') {
           // Delete event from calendar
@@ -1105,16 +1167,16 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
           }
         }
       } catch (error) {
-        // Check if this is a token expired error - log it prominently
+        // Check if this is a token expired error
         if (error.message?.includes('token expired') || error.message?.includes('reconnect')) {
-          console.warn(`[Auto-sync Calendar] Token expired for user ${user.username}, skipping sync`);
+          logger.warn('[Auto-sync Calendar] Token expired for user, skipping', { userId: user._id });
         } else {
-          console.error(`[Auto-sync Calendar] Error syncing for user ${user.username}:`, error.message);
+          logger.error('[Auto-sync Calendar] Error syncing for user', { userId: user._id, error: error.message });
         }
       }
     }
   } catch (error) {
-    console.error('[Auto-sync Calendar] Error in autoSyncTaskToCalendar:', error.message);
+    logger.error('[Auto-sync Calendar] Error in autoSyncTaskToCalendar', { error: error.message });
   }
 };
 

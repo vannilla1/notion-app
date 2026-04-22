@@ -30,16 +30,19 @@ if (!isOAuthConfigured()) {
   logger.warn('[Google Tasks] OAuth not configured - integration will be disabled');
 }
 
-let oauth2Client = null;
-try {
-  oauth2Client = new google.auth.OAuth2(
+/**
+ * Create a fresh OAuth2Client for each request.
+ * CRITICAL: Must NOT be a module-level singleton — credentials on a shared client
+ * race across concurrent requests and can leak data between users.
+ */
+const createOAuth2Client = () => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return null;
+  return new google.auth.OAuth2(
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_TASKS_REDIRECT_URI
   );
-} catch (error) {
-  logger.error('[Google Tasks] Failed to initialize OAuth client', { error: error.message });
-}
+};
 
 // Scopes required for Google Tasks
 const SCOPES = ['https://www.googleapis.com/auth/tasks'];
@@ -91,7 +94,9 @@ const incrementQuota = (user, count = 1) => {
 
 // Helper to get authenticated tasks client for user
 const getTasksClient = async (user, forceRefresh = false) => {
-  if (!oauth2Client) {
+  // Per-request OAuth client — never share across requests
+  const client = createOAuth2Client();
+  if (!client) {
     throw new Error('Google Tasks OAuth not configured');
   }
 
@@ -105,7 +110,7 @@ const getTasksClient = async (user, forceRefresh = false) => {
     throw new Error('Google Tasks token expired. Please reconnect your account.');
   }
 
-  oauth2Client.setCredentials({
+  client.setCredentials({
     access_token: user.googleTasks.accessToken,
     refresh_token: user.googleTasks.refreshToken,
     expiry_date: user.googleTasks.tokenExpiry?.getTime()
@@ -120,13 +125,11 @@ const getTasksClient = async (user, forceRefresh = false) => {
   if (needsRefresh) {
     logger.debug('[Google Tasks] Token refresh needed', {
       userId: user._id,
-      forceRefresh,
-      tokenExpiry: tokenExpiry?.toISOString(),
-      now: now.toISOString()
+      forceRefresh
     });
 
     try {
-      const { credentials } = await oauth2Client.refreshAccessToken();
+      const { credentials } = await client.refreshAccessToken();
       user.googleTasks.accessToken = credentials.access_token;
       user.googleTasks.tokenExpiry = new Date(credentials.expiry_date);
       // Google sometimes returns a new refresh token - always save it
@@ -135,7 +138,7 @@ const getTasksClient = async (user, forceRefresh = false) => {
         logger.info('[Google Tasks] New refresh token received', { userId: user._id });
       }
       await user.save();
-      oauth2Client.setCredentials(credentials);
+      client.setCredentials(credentials);
       logger.info('[Google Tasks] Token refreshed successfully', { userId: user._id });
     } catch (refreshError) {
       logger.error('[Google Tasks] Token refresh failed', {
@@ -169,7 +172,7 @@ const getTasksClient = async (user, forceRefresh = false) => {
     }
   }
 
-  return google.tasks({ version: 'v1', auth: oauth2Client });
+  return google.tasks({ version: 'v1', auth: client });
 };
 
 // Get Google Tasks authorization URL
@@ -184,7 +187,8 @@ router.get('/auth-url', authenticateToken, (req, res) => {
     const state = req.user.id.toString();
     logger.info('[Google Tasks] Generating auth URL', { userId: state });
 
-    const authUrl = oauth2Client.generateAuthUrl({
+    const client = createOAuth2Client();
+    const authUrl = client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
       state: state,
@@ -203,7 +207,8 @@ router.get('/auth-url', authenticateToken, (req, res) => {
 router.get('/callback', async (req, res) => {
   const baseUrl = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
-  logger.info('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state, query: JSON.stringify(req.query) });
+  // NOTE: never log req.query verbatim — it contains the OAuth authorization `code`
+  logger.info('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
 
   try {
     const { code, state: userId } = req.query;
@@ -222,8 +227,9 @@ router.get('/callback', async (req, res) => {
 
     logger.info('[Google Tasks] Processing callback', { userId });
 
-    // Exchange code for tokens
-    const { tokens } = await oauth2Client.getToken(code);
+    // Exchange code for tokens — use fresh per-request client
+    const client = createOAuth2Client();
+    const { tokens } = await client.getToken(code);
     logger.debug('[Google Tasks] Tokens received', {
       userId,
       hasAccessToken: !!tokens.access_token,
@@ -237,9 +243,9 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=user_not_found`);
     }
 
-    // Set credentials to create task list
-    oauth2Client.setCredentials(tokens);
-    const tasksApi = google.tasks({ version: 'v1', auth: oauth2Client });
+    // Set credentials on the per-request client to create task list
+    client.setCredentials(tokens);
+    const tasksApi = google.tasks({ version: 'v1', auth: client });
 
     // Try to find or create "Prpl CRM" task list
     let taskListId = null;
@@ -247,7 +253,7 @@ router.get('/callback', async (req, res) => {
       const taskListsResponse = await tasksApi.tasklists.list();
       const taskLists = taskListsResponse.data.items || [];
 
-      // Find existing task list (check both new and old name)
+      // Find existing task list (check both new and legacy name for backward compat)
       const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
 
       if (existingList) {
@@ -456,12 +462,18 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     }
 
     if (user.googleTasks?.accessToken) {
-      try {
-        await oauth2Client.revokeToken(user.googleTasks.accessToken);
-        logger.info('[Google Tasks] Token revoked', { userId: req.user.id });
-      } catch (e) {
-        // Token revocation can fail if token is already invalid - that's OK
-        logger.warn('[Google Tasks] Token revocation failed', { error: e.message, userId: req.user.id });
+      // Fire-and-forget with timeout so disconnect never blocks on Google being slow
+      const client = createOAuth2Client();
+      if (client) {
+        const tokenToRevoke = user.googleTasks.accessToken;
+        Promise.race([
+          client.revokeToken(tokenToRevoke).then(() =>
+            logger.info('[Google Tasks] Token revoked', { userId: req.user.id })
+          ),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('revoke timeout')), 3000))
+        ]).catch((e) => {
+          logger.debug('[Google Tasks] Token revocation skipped', { error: e.message, userId: req.user.id });
+        });
       }
     }
 

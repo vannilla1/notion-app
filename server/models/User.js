@@ -106,6 +106,7 @@ const userSchema = new mongoose.Schema({
     calendarId: { type: String, default: 'primary' },
     enabled: { type: Boolean, default: false },
     connectedAt: { type: Date, default: null },
+    lastSyncAt: { type: Date, default: null },
     syncedTaskIds: { type: Map, of: String, default: new Map() }, // taskId -> googleEventId
     // Watch channel for push notifications (Google → CRM)
     watchChannelId: { type: String, default: null },
