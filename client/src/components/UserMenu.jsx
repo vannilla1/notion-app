@@ -84,7 +84,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     lastSyncAt: null,
     loading: false,
     syncing: false,
-    pendingTasks: null
+    pendingTasks: null,
+    isDedicatedCalendar: false
   });
   const [googleTasks, setGoogleTasks] = useState({
     connected: false,
@@ -101,6 +102,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
   const [deleteSearchTerm, setDeleteSearchTerm] = useState('');
   const [showGoogleTasksAdvanced, setShowGoogleTasksAdvanced] = useState(false);
+  const [showGoogleCalendarAdvanced, setShowGoogleCalendarAdvanced] = useState(false);
   const [avatarTimestamp, setAvatarTimestamp] = useState(() => user?.avatarTimestamp || 1);
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -301,7 +303,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         lastSyncAt: response.data.lastSyncAt || null,
         loading: false,
         syncing: false,
-        pendingTasks: response.data.pendingTasks || null
+        pendingTasks: response.data.pendingTasks || null,
+        isDedicatedCalendar: !!response.data.isDedicatedCalendar
       });
     } catch {
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
@@ -338,7 +341,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         lastSyncAt: null,
         loading: false,
         syncing: false,
-        pendingTasks: null
+        pendingTasks: null,
+        isDedicatedCalendar: false
       });
       setMessage('Google Calendar bol odpojený');
     } catch {
@@ -377,6 +381,43 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       await fetchGoogleCalendarStatus();
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
+      setErrors({ general: translateErrorMessage(errorMsg) });
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  const handleDeleteAllGoogleCalendar = async () => {
+    const isDedicated = googleCalendar.isDedicatedCalendar;
+    const warningText = isDedicated
+      ? 'POZOR: Úplne sa vymaže celý kalendár "Prpl CRM" z vášho Google Calendar, vrátane všetkých synchronizovaných úloh.\n\n' +
+        'Po potvrdení budete musieť kalendár znova pripojiť, ak budete chcieť synchronizáciu obnoviť.\n\n' +
+        'Pre potvrdenie napíšte presne: VYMAZAT'
+      : 'POZOR: Zo svojho hlavného Google Calendara sa vymažú VŠETKY udalosti, ktoré pochádzajú z Prpl CRM.\n\n' +
+        'Vaše ostatné udalosti (osobné, pracovné mimo CRM) ostanú nedotknuté.\n\n' +
+        'Pre potvrdenie napíšte presne: VYMAZAT';
+
+    const typed = window.prompt(warningText);
+    if (typed !== 'VYMAZAT') {
+      if (typed !== null) {
+        setErrors({ general: 'Akcia zrušená – text sa nezhoduje.' });
+      }
+      return;
+    }
+
+    try {
+      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
+      setMessage(isDedicated ? 'Mažem kalendár Prpl CRM...' : 'Mažem udalosti z kalendára...');
+      const token = getStoredToken();
+      const response = await axios.post(`${API_URL}/google-calendar/delete-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 600000
+      });
+      setMessage(response.data.message);
+      setErrors({});
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleCalendarStatus();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri mazaní';
       setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
@@ -1176,6 +1217,22 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
+                    {googleCalendar.isDedicatedCalendar && (
+                      <div style={{
+                        marginTop: '10px',
+                        padding: '10px 12px',
+                        background: '#EEF2FF',
+                        border: '1px solid #C7D2FE',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        color: '#3730A3'
+                      }}>
+                        ℹ️ Úlohy sa synchronizujú do samostatného kalendára <strong>„Prpl CRM"</strong>.
+                        Môžete si ho v Google Calendar kedykoľvek skryť (zaškrtávací políčko) alebo úplne vymazať
+                        cez Nastavenia → Kalendáre → Prpl CRM → Odstrániť kalendár.
+                      </div>
+                    )}
+
                     <div className="calendar-actions" style={{ marginTop: '12px' }}>
                       <button
                         className="btn btn-primary"
@@ -1184,18 +1241,66 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       >
                         {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať teraz'}
                       </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={handleCleanupGoogleCalendar}
-                        disabled={googleCalendar.syncing}
-                        title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúci projekt"
-                      >
-                        Vycistit stare
-                      </button>
-                      <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar}>
+                      <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar} disabled={googleCalendar.syncing}>
                         Odpojiť
                       </button>
                     </div>
+
+                    {/* Advanced / destructive tools — hidden behind toggle to protect regular users */}
+                    <div style={{ marginTop: '16px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowGoogleCalendarAdvanced(v => !v)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#666',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          padding: '4px 0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <span style={{ transform: showGoogleCalendarAdvanced ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                        Pokročilé nastavenia
+                      </button>
+
+                      {showGoogleCalendarAdvanced && (
+                        <div style={{ marginTop: '10px', padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px' }}>
+                          <p style={{ fontSize: '12px', color: '#92400e', margin: '0 0 10px 0' }}>
+                            ⚠️ Tieto nástroje môžu nenávratne zmazať dáta v Google Calendar. Použite iba ak viete, čo robíte.
+                          </p>
+
+                          <button
+                            className="btn"
+                            onClick={handleCleanupGoogleCalendar}
+                            disabled={googleCalendar.syncing}
+                            title="Odstráni z kalendára udalosti, ktoré už nemajú zodpovedajúci projekt v Prpl CRM"
+                            style={{ background: '#6B7280', color: 'white', border: 'none', width: '100%', marginBottom: '10px' }}
+                          >
+                            🧽 Vyčistiť siroty (udalosti bez CRM úlohy)
+                          </button>
+
+                          <button
+                            className="btn"
+                            onClick={handleDeleteAllGoogleCalendar}
+                            disabled={googleCalendar.syncing}
+                            title={googleCalendar.isDedicatedCalendar
+                              ? 'Úplne vymaže celý samostatný kalendár Prpl CRM z Google Calendar.'
+                              : 'Vymaže všetky udalosti pochádzajúce z Prpl CRM z vášho hlavného Google Calendara.'
+                            }
+                            style={{ background: '#e67e22', color: 'white', border: 'none', width: '100%' }}
+                          >
+                            🧹 {googleCalendar.isDedicatedCalendar
+                              ? 'Vymazať celý kalendár „Prpl CRM"'
+                              : 'Vymazať všetky Prpl CRM udalosti'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     {message && (
                       <div className="form-success" style={{ marginTop: '12px' }}>
                         {message}

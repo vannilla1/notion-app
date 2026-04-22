@@ -35,8 +35,21 @@ const createOAuth2Client = () => new google.auth.OAuth2(
   GOOGLE_REDIRECT_URI
 );
 
-// Scopes required for Google Calendar
-const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+// Scopes required for Google Calendar.
+// - calendar.events: read/write events on user's calendars (kept — existing users have this)
+// - calendar.app.created: allows our app to create its own secondary calendars ("Prpl CRM")
+//   and manage them. This is the minimal "non-sensitive" scope for creating calendars,
+//   so we don't need to re-verify the OAuth consent screen for a broader scope.
+// Existing users who only have calendar.events will keep working — we just fall back to
+// primary calendar if calendar creation fails.
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.app.created'
+];
+
+// Marker attached to every event we create — lets us find OUR events in primary calendar
+// later (for bulk cleanup) without needing to remember individual event IDs.
+const EVENT_MARKER = { source: 'prplcrm' };
 
 /**
  * Compute a deterministic HMAC token for a watch channel.
@@ -193,21 +206,81 @@ router.get('/callback', async (req, res) => {
       logger.warn('[Google Calendar] No refresh token received! User may need to reconnect later.', { userId });
     }
 
+    // Try to find or create a dedicated "Prpl CRM" calendar using the just-granted
+    // tokens. If the user didn't grant the calendar.app.created scope (old OAuth
+    // consent, or scope stripped server-side) we silently fall back to primary
+    // calendar so existing flows keep working.
+    let finalCalendarId = 'primary';
+    try {
+      client.setCredentials(tokens);
+      const cal = google.calendar({ version: 'v3', auth: client });
+
+      // Look for existing "Prpl CRM" calendar first (handles reconnect case)
+      const listResp = await cal.calendarList.list({ maxResults: 250 });
+      const existing = (listResp.data.items || []).find(c => c.summary === 'Prpl CRM');
+      if (existing) {
+        finalCalendarId = existing.id;
+        logger.info('[Google Calendar] Reusing existing dedicated calendar', { userId, calendarId: finalCalendarId });
+      } else {
+        const created = await cal.calendars.insert({
+          resource: {
+            summary: 'Prpl CRM',
+            description: 'Synchronizované úlohy z Prpl CRM. Môžete tento kalendár kedykoľvek vymazať.',
+            timeZone: 'Europe/Bratislava'
+          }
+        });
+        finalCalendarId = created.data.id;
+        logger.info('[Google Calendar] Created dedicated calendar', { userId, calendarId: finalCalendarId });
+
+        // Set purple color on the calendar entry (optional, non-fatal if it fails)
+        try {
+          await cal.calendarList.patch({
+            calendarId: finalCalendarId,
+            resource: { colorId: '3' } // grape / purple
+          });
+        } catch (colorErr) {
+          logger.debug('[Google Calendar] Could not set calendar color', { error: colorErr.message });
+        }
+      }
+    } catch (e) {
+      // Insufficient scope, API error, etc. — fall back to primary to preserve
+      // current behavior. This is the explicit "don't break existing users" path.
+      logger.warn('[Google Calendar] Could not set up dedicated calendar, using primary', {
+        userId,
+        error: e.message,
+        code: e.code
+      });
+      finalCalendarId = 'primary';
+    }
+
+    // If the user is reconnecting and we're switching calendars, reset the task→event
+    // mapping so we don't try to update old event IDs in the new calendar.
+    const previousCalendarId = user.googleCalendar?.calendarId;
+    const calendarChanged = previousCalendarId && previousCalendarId !== finalCalendarId;
+
     user.googleCalendar = {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken, // Keep old if not provided
       tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      calendarId: 'primary',
+      calendarId: finalCalendarId,
       enabled: true,
       connectedAt: new Date(),
-      syncedTaskIds: user.googleCalendar?.syncedTaskIds || new Map()
+      lastSyncAt: null,
+      syncedTaskIds: calendarChanged ? new Map() : (user.googleCalendar?.syncedTaskIds || new Map()),
+      // Reset watch state if calendar changed — old channel points to old calendar
+      watchChannelId: calendarChanged ? null : (user.googleCalendar?.watchChannelId || null),
+      watchResourceId: calendarChanged ? null : (user.googleCalendar?.watchResourceId || null),
+      watchExpiry: calendarChanged ? null : (user.googleCalendar?.watchExpiry || null),
+      syncToken: calendarChanged ? null : (user.googleCalendar?.syncToken || null)
     };
 
     await user.save();
     logger.info('[Google Calendar] User connected successfully', {
       userId,
       username: user.username,
-      hasRefreshToken: !!user.googleCalendar.refreshToken
+      hasRefreshToken: !!user.googleCalendar.refreshToken,
+      calendarId: finalCalendarId,
+      isDedicated: finalCalendarId !== 'primary'
     });
 
     // Start watching for calendar changes (Google → CRM push notifications)
@@ -316,10 +389,12 @@ router.get('/status', authenticateToken, async (req, res) => {
 
     const pendingCount = totalTasks - syncedCount;
 
+    const calId = user.googleCalendar?.calendarId || 'primary';
     res.json({
       connected: user.googleCalendar?.enabled || false,
       connectedAt: user.googleCalendar?.connectedAt || null,
       lastSyncAt: user.googleCalendar?.lastSyncAt || null,
+      isDedicatedCalendar: calId !== 'primary',
       pendingTasks: {
         total: totalTasks,
         synced: syncedCount,
@@ -1033,6 +1108,131 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
   }
 });
 
+/**
+ * DELETE ALL — remove every Prpl CRM event from the user's Google Calendar.
+ *
+ * Two code paths depending on how the user is connected:
+ *
+ * 1. Dedicated "Prpl CRM" calendar (new connections): delete the whole calendar
+ *    via calendars.delete(). One API call, instant, and the calendar disappears
+ *    from the user's Google Calendar UI too — cleanest outcome.
+ *
+ * 2. Primary calendar (legacy connections): query events tagged with the
+ *    source=prplcrm marker via privateExtendedProperty filter, union with the
+ *    legacy syncedTaskIds mapping (for pre-marker events), batch delete all.
+ *    Primary calendar itself is preserved (Google blocks deleting primary).
+ *
+ * Either way we clear syncedTaskIds + sync state so the next sync starts fresh.
+ */
+router.post('/delete-all', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    if (!user.googleCalendar?.enabled) {
+      return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
+    }
+
+    const calendar = await getCalendarClient(user);
+    const calendarId = user.googleCalendar.calendarId || 'primary';
+    const isDedicated = calendarId !== 'primary';
+
+    let deleted = 0;
+    let errors = 0;
+
+    if (isDedicated) {
+      // Path 1: nuke the whole dedicated calendar
+      try {
+        await calendar.calendars.delete({ calendarId });
+        logger.info('[Google Calendar] Dedicated calendar deleted', { userId: user._id, calendarId });
+        deleted = 1; // "1 calendar" — exact event count is unknown after delete
+      } catch (e) {
+        if (e.code === 404) {
+          // Already gone, treat as success
+          logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
+        } else {
+          logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code });
+          return res.status(500).json({ message: 'Nepodarilo sa vymazať kalendár: ' + e.message });
+        }
+      }
+    } else {
+      // Path 2: batch-delete events from primary
+      // 2a — events with our source=prplcrm marker (preferred, new events)
+      const markedEventIds = new Set();
+      try {
+        let pageToken;
+        do {
+          const resp = await calendar.events.list({
+            calendarId: 'primary',
+            privateExtendedProperty: 'source=prplcrm',
+            maxResults: 2500,
+            showDeleted: false,
+            singleEvents: true,
+            pageToken
+          });
+          for (const ev of (resp.data.items || [])) {
+            if (ev.id) markedEventIds.add(ev.id);
+          }
+          pageToken = resp.data.nextPageToken;
+        } while (pageToken);
+      } catch (e) {
+        logger.warn('[Google Calendar] Marker query failed, relying on syncedTaskIds only', { error: e.message });
+      }
+
+      // 2b — union with legacy mapping (covers events created before the marker existed)
+      const legacyIds = Array.from(user.googleCalendar.syncedTaskIds?.values() || []);
+      for (const id of legacyIds) markedEventIds.add(id);
+
+      const allIds = Array.from(markedEventIds);
+      logger.info('[Google Calendar] Bulk delete starting', {
+        userId: user._id,
+        totalEvents: allIds.length
+      });
+
+      for (const eventId of allIds) {
+        try {
+          await calendar.events.delete({ calendarId: 'primary', eventId });
+          deleted++;
+        } catch (e) {
+          if (e.code === 404 || e.code === 410) {
+            // Already deleted, not an error
+          } else {
+            errors++;
+            logger.warn('[Google Calendar] Bulk delete event failed', { eventId, error: e.message });
+          }
+        }
+      }
+
+      logger.info('[Google Calendar] Bulk delete finished', { userId: user._id, deleted, errors });
+    }
+
+    // Reset sync state regardless of path — fresh slate
+    user.googleCalendar.syncedTaskIds = new Map();
+    user.googleCalendar.watchChannelId = null;
+    user.googleCalendar.watchResourceId = null;
+    user.googleCalendar.watchExpiry = null;
+    user.googleCalendar.syncToken = null;
+    user.googleCalendar.lastSyncAt = null;
+    // For dedicated-calendar users: flip back to 'primary' so next sync doesn't
+    // try to write into a calendar that no longer exists. User can reconnect to
+    // recreate a dedicated calendar.
+    if (isDedicated) user.googleCalendar.calendarId = 'primary';
+    await user.save();
+
+    return res.json({
+      success: true,
+      mode: isDedicated ? 'dedicated' : 'primary',
+      deleted,
+      errors,
+      message: isDedicated
+        ? 'Kalendár "Prpl CRM" bol vymazaný z Google Calendar.'
+        : `Vymazaných ${deleted} udalostí z Google Calendar${errors ? ` (${errors} chýb)` : ''}.`
+    });
+  } catch (error) {
+    logger.error('[Google Calendar] Delete-all error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+  }
+});
+
 // Helper functions
 function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync) {
   if (!subtasks) return;
@@ -1125,7 +1325,9 @@ function createEventData(task) {
     },
     colorId: colorId,
     transparency: 'transparent', // Don't block time
-    status: task.completed ? 'cancelled' : 'confirmed'
+    status: task.completed ? 'cancelled' : 'confirmed',
+    // Marker so we can find our events later (bulk delete in primary calendar use-case)
+    extendedProperties: { private: { ...EVENT_MARKER } }
   };
 }
 
