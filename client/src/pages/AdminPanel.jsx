@@ -71,7 +71,7 @@ function AdminPanel() {
       </div>
 
       <div className="sa-content">
-        {activeTab === 'overview' && <OverviewTab />}
+        {activeTab === 'overview' && <OverviewTab onNavigate={setActiveTab} />}
         {activeTab === 'diagnostics' && <DiagnosticsTab />}
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'workspaces' && <WorkspacesTab />}
@@ -89,7 +89,7 @@ function AdminPanel() {
 }
 
 // ─── OVERVIEW TAB ───────────────────────────────────────────────
-function OverviewTab() {
+function OverviewTab({ onNavigate }) {
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -161,12 +161,12 @@ function OverviewTab() {
       )}
 
       <div className="sa-stats-grid">
-        <StatCard icon="👥" label="Používatelia" value={stats.totalUsers} sub={`+${stats.recentRegistrations} za 30 dní`} />
-        <StatCard icon="🏢" label="Workspace-y" value={stats.totalWorkspaces} sub={`${stats.activeWorkspaces} aktívnych`} />
-        <StatCard icon="📋" label="Projekty" value={stats.totalTasks} />
-        <StatCard icon="👤" label="Kontakty" value={stats.totalContacts} />
-        <StatCard icon="📅" label="Google Calendar" value={stats.usersWithGoogleCalendar} sub="pripojených" />
-        <StatCard icon="✅" label="Google Tasks" value={stats.usersWithGoogleTasks} sub="pripojených" />
+        <StatCard icon="👥" label="Používatelia" value={stats.totalUsers} sub={`+${stats.recentRegistrations} za 30 dní`} onClick={() => onNavigate?.('users')} />
+        <StatCard icon="🏢" label="Workspace-y" value={stats.totalWorkspaces} sub={`${stats.activeWorkspaces} aktívnych`} onClick={() => onNavigate?.('workspaces')} />
+        <StatCard icon="📋" label="Projekty" value={stats.totalTasks} onClick={() => onNavigate?.('comparison')} />
+        <StatCard icon="👤" label="Kontakty" value={stats.totalContacts} onClick={() => onNavigate?.('comparison')} />
+        <StatCard icon="📅" label="Google Calendar" value={stats.usersWithGoogleCalendar} sub="pripojených" onClick={() => onNavigate?.('sync')} />
+        <StatCard icon="✅" label="Google Tasks" value={stats.usersWithGoogleTasks} sub="pripojených" onClick={() => onNavigate?.('sync')} />
       </div>
 
       <div className="sa-breakdowns">
@@ -197,9 +197,17 @@ function OverviewTab() {
   );
 }
 
-function StatCard({ icon, label, value, sub }) {
+function StatCard({ icon, label, value, sub, onClick }) {
+  const clickable = typeof onClick === 'function';
   return (
-    <div className="sa-stat-card">
+    <div
+      className={`sa-stat-card${clickable ? ' sa-stat-card-clickable' : ''}`}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `Otvoriť ${label}` : undefined}
+    >
       <div className="sa-stat-icon">{icon}</div>
       <div className="sa-stat-info">
         <div className="sa-stat-value">{value}</div>
