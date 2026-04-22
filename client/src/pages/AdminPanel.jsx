@@ -21,9 +21,51 @@ const TABS = [
   { id: 'sync', label: 'Sync', icon: '🔄' }
 ];
 
+// Valid tab IDs — použité na validáciu URL hash pri boot-e, aby manipulácia
+// s URL (napr. ?foo=bar#fake) nenastavila neznámy tab a render nepadol.
+const VALID_TAB_IDS = new Set([
+  'overview', 'diagnostics', 'users', 'workspaces', 'charts', 'activity',
+  'api', 'storage', 'comparison', 'promo', 'audit', 'sync'
+]);
+
+// Persistencia aktívneho tabu cez URL hash (#users, #diagnostics, …).
+// Hash preferujeme pred localStorage: je bookmarkovateľný, zdieľateľný
+// a prežije refresh bez ďalšieho state managementu.
+function readTabFromHash() {
+  if (typeof window === 'undefined') return 'overview';
+  const h = (window.location.hash || '').replace(/^#/, '');
+  return VALID_TAB_IDS.has(h) ? h : 'overview';
+}
+
 function AdminPanel() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(readTabFromHash);
+
+  // Refresh / initial load → čítaj z hash; zmena tabu používateľom → zapíš
+  // do hash. Tiež reagujeme na back/forward button (popstate) aby sa
+  // history navigácia správala prirodzene.
+  useEffect(() => {
+    // Syncni hash pri zmene activeTab. replaceState = nevytvárame novú
+    // history položku pri každom kliknutí, inak by back button bol nepoužiteľný.
+    const desired = `#${activeTab}`;
+    if (window.location.hash !== desired) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + desired);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    // Reaguje na manuálnu zmenu URL alebo back/forward tlačidlo.
+    const onHashChange = () => {
+      const next = readTabFromHash();
+      setActiveTab(prev => (prev === next ? prev : next));
+    };
+    window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
