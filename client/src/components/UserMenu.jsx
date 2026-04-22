@@ -117,6 +117,47 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Po OAuth návrate z Google (query ?google_calendar=connected | ?google_tasks=connected)
+  // automaticky otvoríme "Synchronizácia kalendára" modal a scrollneme k relevantnej
+  // sekcii. User začínal flow klikom na "Pripojiť Google ..." v tomto modali — vracať
+  // ho na samotný /tasks list by znamenalo, že sa musí znova prekliknúť, aby videl
+  // úspešné pripojenie v kontexte integrácie.
+  // URL query si po spracovaní čistíme, aby pri ďalšom refresh-i modal nenapáril znova.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const calendarConnected = params.get('google_calendar') === 'connected';
+      const tasksConnected = params.get('google_tasks') === 'connected';
+      if (!calendarConnected && !tasksConnected) return;
+
+      // Otvorí modal + fetchne statusy; pozrie, ktorú sekciu scrollnúť do viewportu.
+      handleOpenCalendarSettings();
+
+      // Scroll k relevantnej sekcii po tom, čo modal zrendruje. 300 ms pokryje aj
+      // fetchCalendar*/fetchGoogleTasksStatus dokončenie (bežia paralelne ~100-300 ms),
+      // aby sekcia bola vo finálnom stave pred scrollom.
+      setTimeout(() => {
+        const selector = calendarConnected
+          ? '.google-calendar-section'
+          : '.google-tasks-section';
+        const el = document.querySelector(selector);
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 300);
+
+      // Vyčisti query-string, aby refresh modal znova neautomatizoval.
+      params.delete('google_calendar');
+      params.delete('google_tasks');
+      params.delete('message');
+      const newSearch = params.toString();
+      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '') + window.location.hash;
+      window.history.replaceState({}, '', newUrl);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fetchProfile = async () => {
     try {
       setLoading(true);
