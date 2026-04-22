@@ -4,10 +4,13 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { reportError, installGlobalErrorHandlers } from './utils/reportError';
+import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
 import './styles/index.css';
 
-// Zachytí unhandled errors + promise rejections a pošle do /api/errors/client
-// (SuperAdmin → Diagnostics → Chyby). Beží paralelne so Sentry.
+// In-house error tracking (nahrada Sentry). Poradie záleží — breadcrumbs
+// musia byť nainštalované PRED prvým error handlerom, aby sme pri prvej
+// chybe mali context aspoň pár "app boot" udalostí.
+installBreadcrumbInstrumentation();
 installGlobalErrorHandlers();
 
 // Platformové body classes — CSS cez ne cielene upravuje padding, tap targets,
@@ -85,21 +88,3 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </AppErrorBoundary>
   </React.StrictMode>
 );
-
-// Defer Sentry init — previously static-imported at the top of this file,
-// which pulled ~100 KB of gzipped JS (including Replay integration) onto the
-// critical path and cost ~500 ms on LCP for mobile visitors. The dynamic
-// import keeps Sentry in its own chunk (see vite.config manualChunks) AND
-// delays fetching it until the browser is idle.
-const isNativeIOSApp = /PrplCRM-iOS/.test(navigator.userAgent) ||
-  !!(window.webkit && window.webkit.messageHandlers);
-if (import.meta.env.VITE_SENTRY_DSN && !isNativeIOSApp) {
-  const start = () => {
-    import('./utils/sentry').then(m => m.default()).catch(() => {});
-  };
-  if ('requestIdleCallback' in window) {
-    window.requestIdleCallback(start, { timeout: 3000 });
-  } else {
-    setTimeout(start, 1500);
-  }
-}

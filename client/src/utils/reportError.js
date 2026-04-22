@@ -17,11 +17,36 @@
  */
 
 import { getStoredToken } from './authStorage';
+import { getBreadcrumbs } from './breadcrumbs';
 
 const DEDUP_WINDOW_MS = 30 * 1000;
 const MAX_REPORTS_PER_SESSION = 50; // safety cap
 const recentHashes = new Map(); // hash → timestamp
 let reportCount = 0;
+
+// Non-actionable chyby — Sentry ich mal v `ignoreErrors`. Najčastejšie sú
+// to environmentálne problémy (AdBlock, slabá sieť, scroll observer race),
+// nie naše bugy. Zahltili by dashboard bez hodnoty pre debug.
+const IGNORED_PATTERNS = [
+  /ResizeObserver loop/i,
+  /ResizeObserver.*limit exceeded/i,
+  /Non-Error promise rejection/i,
+  /Load failed/i,
+  /Failed to fetch/i,
+  /NetworkError/i,
+  /AbortError/i,
+  /The operation was aborted/i,
+  /Script error\.?$/i, // cross-origin script — nedáva stack, bez hodnoty
+  // Service Worker registration rejections — typicky AdBlock/privacy extensions
+  /^Rejected$/i,
+  // iOS WKWebView specific — fetch zrušený pri zatvorení appky
+  /cancelled/i
+];
+
+function isIgnored(payload) {
+  const msg = payload?.message || '';
+  return IGNORED_PATTERNS.some(p => p.test(msg));
+}
 
 function hashKey(payload) {
   // Jednoduchý kľúč — message + first line of stack + pathname
@@ -59,6 +84,7 @@ function shouldSend(payload) {
 export function reportError(payload) {
   try {
     if (!payload || !payload.message) return;
+    if (isIgnored(payload)) return;
     const enriched = {
       name: payload.name || 'Error',
       message: String(payload.message).slice(0, 1000),
@@ -68,7 +94,10 @@ export function reportError(payload) {
       column: payload.column,
       url: location.href,
       userAgent: navigator.userAgent,
-      release: import.meta.env.VITE_RELEASE_SHA || undefined
+      release: import.meta.env.VITE_RELEASE_SHA || undefined,
+      // Snímka posledných ~30 breadcrumbs (navigation, fetch, clicks, console).
+      // Server ich uloží do ServerError.context.breadcrumbs.
+      breadcrumbs: getBreadcrumbs()
     };
 
     if (!shouldSend(enriched)) return;

@@ -2540,15 +2540,6 @@ Workspace: ${err.workspaceId || 'N/A'}
                   🔄 Znova otvoriť
                 </button>
               )}
-              <a
-                href="https://sentry.io/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-secondary"
-                style={{ fontSize: '13px', textDecoration: 'none' }}
-              >
-                🔗 Otvoriť Sentry
-              </a>
               <button onClick={() => handleDelete(selected)} style={{ fontSize: '13px', padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', marginLeft: 'auto' }}>
                 🗑️ Zmazať
               </button>

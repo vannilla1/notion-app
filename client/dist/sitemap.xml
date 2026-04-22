@@ -10,18 +10,18 @@
     <xhtml:link rel="alternate" hreflang="sk" href="https://prplcrm.eu/" />
   </url>
 
-  <!-- Privacy Policy -->
+  <!-- Privacy Policy (canonical URL with trailing slash — directory-style static HTML on Render) -->
   <url>
-    <loc>https://prplcrm.eu/ochrana-udajov</loc>
-    <lastmod>2026-04-07</lastmod>
+    <loc>https://prplcrm.eu/ochrana-udajov/</loc>
+    <lastmod>2026-04-18</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
 
-  <!-- Terms of Service -->
+  <!-- Terms of Service (canonical URL with trailing slash) -->
   <url>
-    <loc>https://prplcrm.eu/vop</loc>
-    <lastmod>2026-04-07</lastmod>
+    <loc>https://prplcrm.eu/vop/</loc>
+    <lastmod>2026-04-18</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>

@@ -28,6 +28,7 @@ const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
+const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
@@ -35,17 +36,13 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
 const Page = require('./models/Page');
 const logger = require('./utils/logger');
-const { initSentry } = require('./utils/sentry');
-const { errorMiddleware: serverErrorMirrorMiddleware } = require('./services/serverErrorService');
+const { errorMiddleware: serverErrorMirrorMiddleware, recordError } = require('./services/serverErrorService');
 const onlineUsers = require('./services/onlineUsers');
 
 const app = express();
 
 // Trust proxy for rate limiting behind reverse proxy (Render, Heroku, etc.)
 app.set('trust proxy', 1);
-
-// Initialize Sentry
-const sentry = initSentry(app);
 
 const server = http.createServer(app);
 
@@ -132,14 +129,10 @@ app.use('/api/errors', errorRoutes);
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
 
-// In-house server error mirror — beží paralelne so Sentry, errory
-// zapisuje aj do našej Mongo DB pre SuperAdmin Diagnostics dashboard.
-// Musí byť PRED Sentry handlerom aj finálnym handlerom, aby zachytila
-// všetky 5xx chyby. next(err) posúva chybu ďalej.
+// In-house server error mirror — zapisuje všetky 5xx chyby do Mongo
+// (ServerError model) pre SuperAdmin → Diagnostics → Chyby dashboard.
+// Musí byť PRED finálnym error handlerom. next(err) posúva chybu ďalej.
 app.use(serverErrorMirrorMiddleware);
-
-// Sentry error handler (must be before other error handlers)
-app.use(sentry.errorHandler);
 
 // Global error handler
 app.use((err, req, res, next) => {
@@ -327,17 +320,21 @@ io.on('connection', async (socket) => {
 
 const PORT = process.env.PORT || 5001;
 
-// Handle uncaught exceptions
+// Handle uncaught exceptions — zapíše do ServerError mirror pred exit
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
-  sentry.captureException(error);
-  process.exit(1);
+  // Fire-and-forget — proces už aj tak padá; ak sa Mongo nestihne, trudno.
+  recordError(error, null).catch(() => {});
+  // Daj 500 ms na flush IO, potom exit
+  setTimeout(() => process.exit(1), 500).unref?.();
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
+// Handle unhandled promise rejections — NEexitujeme (historicky sme to tak
+// mali so Sentry), ale zapíšeme do mirror, aby sme videli trend.
+process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled Rejection', { reason: reason?.message || reason, stack: reason?.stack });
-  sentry.captureException(reason);
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  recordError(err, null).catch(() => {});
 });
 
 // Start server FIRST (so Render sees it's alive), then connect DB in background
@@ -408,6 +405,7 @@ server.listen(PORT, () => {
       setTimeout(() => {
         scheduleDueDateChecks();
         scheduleSubscriptionCleanup();
+        scheduleErrorAlerter();
         startGoogleTasksPolling(io);
         initializeCalendarWebhooks(io);
         // Health monitor — každých 5 min kontroluje Mongo/SMTP/APNs/Google/Memory

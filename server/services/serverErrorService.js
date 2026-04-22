@@ -218,6 +218,19 @@ async function recordClientError(payload, context = {}) {
     let urlPath = '';
     try { urlPath = new URL(payload.url || '').pathname; } catch { urlPath = payload.url || ''; }
 
+    // Breadcrumbs — najviac 30 posledných udalostí pred chybou (navigation,
+     // fetch, clicks, console.warn/error). Scrubneme dlhé stringy a cap-neme
+     // počet — defenzívne, payload môže byť zmanipulovaný klientom.
+    let breadcrumbs;
+    if (Array.isArray(payload.breadcrumbs)) {
+      breadcrumbs = payload.breadcrumbs.slice(-30).map(b => ({
+        ts: typeof b?.ts === 'number' ? b.ts : Date.now(),
+        category: typeof b?.category === 'string' ? b.category.slice(0, 40) : 'unknown',
+        level: typeof b?.level === 'string' ? b.level.slice(0, 20) : 'info',
+        message: typeof b?.message === 'string' ? b.message.slice(0, 300) : undefined
+      }));
+    }
+
     const doc = new ServerError({
       fingerprint,
       source: 'client',
@@ -236,7 +249,8 @@ async function recordClientError(payload, context = {}) {
       context: {
         line: payload.line,
         column: payload.column,
-        release: payload.release // napr. git SHA z buildu ak posielaš
+        release: payload.release, // napr. git SHA z buildu ak posielaš
+        breadcrumbs
       },
       firstSeen: now,
       lastSeen: now,

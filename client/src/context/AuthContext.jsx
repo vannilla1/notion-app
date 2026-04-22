@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import api from '@/api/api';
-import { setSentryUser, clearSentryUser } from '../utils/sentry';
 import {
   getStoredToken,
   setStoredToken,
@@ -120,7 +119,6 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.get('/api/auth/me');
       setUser(res.data);
-      setSentryUser(res.data);
     } catch {
       removeStoredToken();
       setToken(null);
@@ -137,7 +135,6 @@ export const AuthProvider = ({ children }) => {
     api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
-    setSentryUser(userData);
     return userData;
   };
 
@@ -148,7 +145,6 @@ export const AuthProvider = ({ children }) => {
     api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
-    setSentryUser(userData);
     return userData;
   };
 
@@ -157,7 +153,6 @@ export const AuthProvider = ({ children }) => {
     delete api.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
-    clearSentryUser();
   };
 
   const updateUser = (updates) => {

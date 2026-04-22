@@ -63,7 +63,6 @@ export default defineConfig({
         // per-page JS delivered to WKWebView on iOS (memory win).
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'sentry': ['@sentry/react'],
           'socket': ['socket.io-client'],
         },
       },

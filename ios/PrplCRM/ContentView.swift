@@ -752,6 +752,10 @@ struct WebView: UIViewRepresentable {
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             let restoreURL = lastURL ?? parent.url
             debugLog("[WebView] ⚠ WebContent process terminated — reloading \(restoreURL.absoluteString)")
+            reportNativeError(
+                name: "iOSWebContentProcessTerminated",
+                message: "WKWebView WebContent process terminated (memory jetsam). URL: \(restoreURL.absoluteString)"
+            )
             webView.load(URLRequest(url: restoreURL))
         }
 
@@ -760,6 +764,36 @@ struct WebView: UIViewRepresentable {
                 parent.loadError = true
                 parent.isLoading = false
             }
+            let nsErr = error as NSError
+            // -999 = NSURLErrorCancelled (user zrušil — neignoruj ak to je legitímny abort)
+            if nsErr.code != NSURLErrorCancelled {
+                reportNativeError(
+                    name: "iOSProvisionalNavigationFailed",
+                    message: "\(nsErr.domain) code=\(nsErr.code): \(nsErr.localizedDescription)"
+                )
+            }
+        }
+
+        // Pošle native iOS chybu na in-house tracking (nahradí Sentry).
+        // Volá sa pri WebContent jetsam + failed navigation. Best-effort,
+        // fire-and-forget. Endpoint je rovnaký ako pre web errory, iba
+        // s platform='ios' markerom v userAgent a v kontexte.
+        private func reportNativeError(name: String, message: String) {
+            let body: [String: Any] = [
+                "name": name,
+                "message": message,
+                "url": (lastURL ?? parent.url).absoluteString,
+                "userAgent": "PrplCRM-iOS/native",
+                "release": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+            ]
+            guard let json = try? JSONSerialization.data(withJSONObject: body),
+                  let endpoint = URL(string: "https://prplcrm.eu/api/errors/client") else { return }
+            var req = URLRequest(url: endpoint)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = json
+            req.timeoutInterval = 5
+            URLSession.shared.dataTask(with: req).resume()
         }
 
         // Handle JavaScript alert()
