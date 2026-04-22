@@ -838,7 +838,7 @@ function Tasks() {
     if (attempts < 20) { // 20 × 100ms = 2s
       setTimeout(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
     } else {
-      console.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
+      debug.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
     }
   }, []);
 
@@ -855,7 +855,7 @@ function Tasks() {
     if (attempts < 30) {
       setTimeout(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
     } else {
-      console.warn('[DeepLink] Tasks: gave up scrolling to subtask', subtaskId);
+      debug.warn('[DeepLink] Tasks: gave up scrolling to subtask', subtaskId);
     }
   }, []);
 
@@ -985,7 +985,7 @@ function Tasks() {
         // node renders. Small delay lets expand state propagate first.
         setTimeout(() => scrollToSubtaskWithRetry(subtaskId), 150);
       } else {
-        console.warn('[DeepLink] Tasks: subtask not found in tree, scrolling to task', subtaskId);
+        debug.warn('[DeepLink] Tasks: subtask not found in tree, scrolling to task', subtaskId);
         scrollToTaskWithRetry(taskId);
       }
     } else {
