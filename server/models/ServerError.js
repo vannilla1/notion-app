@@ -1,10 +1,9 @@
 const mongoose = require('mongoose');
 
 /**
- * ServerError — paralelný in-house mirror server-side 5xx chýb.
- * Sentry zostáva primárny tracker (má source maps + breadcrumbs),
- * tento model slúži na SuperAdmin Diagnostics dashboard kde vidíme
- * chyby agregované, s count per fingerprint a resolve workflow.
+ * ServerError — in-house error tracker (nahrada Sentry).
+ * Slúži ako data source pre SuperAdmin → Diagnostics → Chyby dashboard.
+ * Agreguje chyby cez fingerprint, umožňuje resolve workflow.
  *
  * Fingerprint = sha256(normalized_stack + method + route_pattern)
  * → rovnaké chyby sa zlúčia do jedného dokumentu s `count++`.

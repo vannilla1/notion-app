@@ -103,9 +103,8 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Make io and sentry accessible to routes
+// Make io accessible to routes
 app.set('io', io);
-app.set('sentry', sentry);
 
 // Static files for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

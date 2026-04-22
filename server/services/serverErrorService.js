@@ -3,14 +3,14 @@ const ServerError = require('../models/ServerError');
 const logger = require('../utils/logger');
 
 /**
- * Paralelný server-side error mirror popri Sentry.
+ * In-house server-side error tracker (nahrada Sentry).
  *
  * Flow:
  *   Express error → errorMiddleware() → recordError() → Mongo upsert
- *                                     → next(err) → sentry.errorHandler
+ *                                     → next(err) → finálny error handler
  *
- * Zámerne neblokujeme Sentry — errorMiddleware vždy volá next(err).
- * Ak zápis do Mongo zlyhá, chybu len zalogujeme a pokračujeme.
+ * Ak zápis do Mongo zlyhá, chybu len zalogujeme a pokračujeme — middleware
+ * musí vždy volať next(err), nikdy neblokovať response.
  *
  * Anti-spam:
  *  - Sampling 1:10 ak z jedného fingerprintu pribudlo > 100 zápisov za minútu
@@ -100,7 +100,6 @@ function computeClientFingerprint({ name, message, stack, url }) {
 
 /**
  * Scrub request body — odstráni citlivé polia pred uložením do Mongo.
- * Sentry beforeSend robí to isté, ale tu je vlastná cesta.
  */
 function scrubBody(body) {
   if (!body || typeof body !== 'object') return undefined;
