@@ -114,16 +114,15 @@ export const WorkspaceProvider = ({ children }) => {
       }
       setCurrentWorkspaceId(effectiveWsId);
 
-      // Diagnostika: logujeme do AdminPanel → Chyby aby sme vedeli, ktorá
-      // vetva sa spustila pri deep-link boot-e. Ak by fix nefungoval, uvidíme
-      // presne, čo fetchWorkspaces zvolil. Log je lacný (1 API call po boot).
-      if (urlWsId) {
-        reportError({
-          name: 'DeepLinkWorkspaceResolved',
-          message: `fetchWorkspaces: url=${urlWsId} local=${localWsId || 'null'} dbDefault=${data.currentWorkspaceId || 'null'} chosen=${effectiveWsId} urlIsMember=${urlIsMember} localIsMember=${localIsMember}`,
-          level: 'info'
-        });
-      }
+      // Diagnostika: logujeme VŽDY do AdminPanel → Chyby, aby sme vedeli,
+      // ktorú vetvu fetchWorkspaces zvolil. Pomáha debugovať "cross-device
+      // workspace bleed" problém kde refresh desktopu vezme iOS workspace.
+      // Log je lacný (1 API call per boot) a pomôže nájsť koreň problému.
+      reportError({
+        name: 'WorkspaceResolved',
+        message: `fetchWorkspaces: session=${(typeof window !== 'undefined' ? window.sessionStorage.getItem('currentWorkspaceId') : '?') || 'null'} local=${(typeof window !== 'undefined' ? window.localStorage.getItem('currentWorkspaceId') : '?') || 'null'} url=${urlWsId || 'null'} dbDefault=${data.currentWorkspaceId || 'null'} chosen=${effectiveWsId} urlIsMember=${urlIsMember} localIsMember=${localIsMember} ua=${navigator?.userAgent?.slice(0, 60) || '?'}`,
+        level: 'info'
+      });
 
       if (!data.workspaces || data.workspaces.length === 0 || !effectiveWsId) {
         setNeedsWorkspace(true);
