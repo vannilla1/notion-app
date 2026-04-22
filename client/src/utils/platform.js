@@ -33,4 +33,23 @@ export const isIosNativeApp = () => {
 };
 
 // Reset cache (only for tests)
-export const __resetPlatformCache = () => { cached = undefined; };
+export const __resetPlatformCache = () => { cached = undefined; mobileCached = undefined; };
+
+// Mobile / tablet detection. Used to hide desktop-only UI like the Web Push
+// notifications toggle:
+//  - iOS native app uses APNs (not Web Push)
+//  - Android native app uses FCM (not Web Push)
+//  - iOS Safari doesn't support Web Push outside installed PWA
+//  - Android Chrome supports Web Push but the native app is the recommended path
+// Matches UA tokens for phones/tablets; treats everything else as desktop.
+let mobileCached;
+export const isMobileDevice = () => {
+  if (mobileCached !== undefined) return mobileCached;
+  try {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    mobileCached = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+  } catch {
+    mobileCached = false;
+  }
+  return mobileCached;
+};

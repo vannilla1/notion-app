@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
+import { isMobileDevice } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId } from '../utils/workspaceStorage';
@@ -1034,7 +1035,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
-              {!document.body.classList.contains('ios-app') && (
+              {/* Web Push toggle — desktop-only.
+                  Hidden on all mobile (iOS native → APNs, Android native → FCM,
+                  iOS Safari → no Web Push outside PWA, Android Chrome → native app
+                  is the recommended path). Also keeps the legacy ios-app body-class
+                  gate for older WebView shells. */}
+              {!isMobileDevice() && !document.body.classList.contains('ios-app') && (
               <div className="calendar-section push-notifications-section">
                 <h3>🔔 Push notifikácie</h3>
                 <p className="section-description">
