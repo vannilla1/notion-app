@@ -107,9 +107,17 @@ export function reportError(payload) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
+    // MUSÍ byť absolútna URL — frontend beží na prplcrm.eu, API na
+    // perun-crm-api.onrender.com. Relatívna `/api/errors/client` by
+    // narazila na SPA catch-all v _redirects a dostala by index.html
+    // s 200, takže by reporter hlásil úspech, ale backend by o chybe
+    // nikdy nevedel. (Bug found after Sentry removal.)
+    const apiBase = import.meta.env.VITE_API_URL || '';
+    const endpoint = `${apiBase}/api/errors/client`;
+
     // keepalive: true aby sa request dokončil aj keď user zatvára tab,
     // alebo aj keď practicky immediately potom React padne do fallback UI.
-    fetch('/api/errors/client', {
+    fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(enriched),
