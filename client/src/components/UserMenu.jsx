@@ -315,6 +315,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // Belt-and-suspenders flag — if the URL redirect query param doesn't reach
+      // us (iOS/Android WebView quirks), this flag still triggers the toast once
+      // we detect the integration became connected.
+      try { sessionStorage.setItem('pending_google_connect', 'calendar'); } catch { /* ignore */ }
       window.location.href = response.data.authUrl;
     } catch {
       setErrors({ general: 'Chyba pri pripájaní Google Calendar' });
@@ -405,6 +409,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      try { sessionStorage.setItem('pending_google_connect', 'tasks'); } catch { /* ignore */ }
       window.location.href = response.data.authUrl;
     } catch {
       setErrors({ general: 'Chyba pri pripájaní Google Tasks' });

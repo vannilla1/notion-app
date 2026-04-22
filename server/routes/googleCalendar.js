@@ -206,72 +206,22 @@ router.get('/callback', async (req, res) => {
       logger.warn('[Google Calendar] No refresh token received! User may need to reconnect later.', { userId });
     }
 
-    // Try to find or create a dedicated "Prpl CRM" calendar using the just-granted
-    // tokens. If the user didn't grant the calendar.app.created scope (old OAuth
-    // consent, or scope stripped server-side) we silently fall back to primary
-    // calendar so existing flows keep working.
-    let finalCalendarId = 'primary';
-    try {
-      client.setCredentials(tokens);
-      const cal = google.calendar({ version: 'v3', auth: client });
-
-      // Look for existing "Prpl CRM" calendar first (handles reconnect case)
-      const listResp = await cal.calendarList.list({ maxResults: 250 });
-      const existing = (listResp.data.items || []).find(c => c.summary === 'Prpl CRM');
-      if (existing) {
-        finalCalendarId = existing.id;
-        logger.info('[Google Calendar] Reusing existing dedicated calendar', { userId, calendarId: finalCalendarId });
-      } else {
-        const created = await cal.calendars.insert({
-          resource: {
-            summary: 'Prpl CRM',
-            description: 'Synchronizované úlohy z Prpl CRM. Môžete tento kalendár kedykoľvek vymazať.',
-            timeZone: 'Europe/Bratislava'
-          }
-        });
-        finalCalendarId = created.data.id;
-        logger.info('[Google Calendar] Created dedicated calendar', { userId, calendarId: finalCalendarId });
-
-        // Set purple color on the calendar entry (optional, non-fatal if it fails)
-        try {
-          await cal.calendarList.patch({
-            calendarId: finalCalendarId,
-            resource: { colorId: '3' } // grape / purple
-          });
-        } catch (colorErr) {
-          logger.debug('[Google Calendar] Could not set calendar color', { error: colorErr.message });
-        }
-      }
-    } catch (e) {
-      // Insufficient scope, API error, etc. — fall back to primary to preserve
-      // current behavior. This is the explicit "don't break existing users" path.
-      logger.warn('[Google Calendar] Could not set up dedicated calendar, using primary', {
-        userId,
-        error: e.message,
-        code: e.code
-      });
-      finalCalendarId = 'primary';
-    }
-
-    // If the user is reconnecting and we're switching calendars, reset the task→event
-    // mapping so we don't try to update old event IDs in the new calendar.
-    const previousCalendarId = user.googleCalendar?.calendarId;
-    const calendarChanged = previousCalendarId && previousCalendarId !== finalCalendarId;
-
+    // Save tokens immediately with primary as initial calendar. We intentionally
+    // do NOT block the redirect on dedicated-calendar creation — that can be slow
+    // and mobile Safari / WebView give up if the callback takes too long.
     user.googleCalendar = {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken, // Keep old if not provided
+      refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken,
       tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      calendarId: finalCalendarId,
+      calendarId: user.googleCalendar?.calendarId || 'primary',
       enabled: true,
       connectedAt: new Date(),
       lastSyncAt: null,
-      syncedTaskIds: calendarChanged ? new Map() : (user.googleCalendar?.syncedTaskIds || new Map()),
-      // Reset watch state if calendar changed — old channel points to old calendar
-      watchChannelId: calendarChanged ? null : (user.googleCalendar?.watchChannelId || null),
-      watchResourceId: calendarChanged ? null : (user.googleCalendar?.watchResourceId || null),
-      watchExpiry: calendarChanged ? null : (user.googleCalendar?.watchExpiry || null),
-      syncToken: calendarChanged ? null : (user.googleCalendar?.syncToken || null)
+      syncedTaskIds: user.googleCalendar?.syncedTaskIds || new Map(),
+      watchChannelId: user.googleCalendar?.watchChannelId || null,
+      watchResourceId: user.googleCalendar?.watchResourceId || null,
+      watchExpiry: user.googleCalendar?.watchExpiry || null,
+      syncToken: user.googleCalendar?.syncToken || null
     };
 
     await user.save();
@@ -279,17 +229,90 @@ router.get('/callback', async (req, res) => {
       userId,
       username: user.username,
       hasRefreshToken: !!user.googleCalendar.refreshToken,
-      calendarId: finalCalendarId,
-      isDedicated: finalCalendarId !== 'primary'
+      calendarId: user.googleCalendar.calendarId
     });
 
-    // Start watching for calendar changes (Google → CRM push notifications)
-    startCalendarWatch(user).catch(err =>
-      logger.warn('[Google Calendar] Watch setup failed on connect', { error: err.message })
-    );
-
-    // Redirect back to app with success
+    // Fire-and-forget: redirect NOW, do the rest in the background so the user
+    // returns to the app immediately and sees the success toast.
     res.redirect(`${baseUrl}/tasks?google_calendar=connected`);
+
+    // Background: try to create dedicated "Prpl CRM" calendar + start watch.
+    // Any failure here is non-fatal — user already sees "connected" and primary
+    // calendar sync works regardless.
+    setImmediate(async () => {
+      try {
+        client.setCredentials(tokens);
+        const cal = google.calendar({ version: 'v3', auth: client });
+
+        // Only try to create a dedicated calendar if we're currently on primary
+        // (skip for users who already have one, including this just-reconnected user)
+        if (user.googleCalendar.calendarId === 'primary') {
+          try {
+            // Look for an existing "Prpl CRM" calendar
+            const listResp = await cal.calendarList.list({ maxResults: 250 });
+            const existing = (listResp.data.items || []).find(c => c.summary === 'Prpl CRM');
+
+            let finalCalendarId = null;
+            if (existing) {
+              finalCalendarId = existing.id;
+              logger.info('[Google Calendar] Found existing dedicated calendar (bg)', { userId, calendarId: finalCalendarId });
+            } else {
+              const created = await cal.calendars.insert({
+                resource: {
+                  summary: 'Prpl CRM',
+                  description: 'Synchronizované úlohy z Prpl CRM. Môžete tento kalendár kedykoľvek vymazať.',
+                  timeZone: 'Europe/Bratislava'
+                }
+              });
+              finalCalendarId = created.data.id;
+              logger.info('[Google Calendar] Created dedicated calendar (bg)', { userId, calendarId: finalCalendarId });
+
+              try {
+                await cal.calendarList.patch({
+                  calendarId: finalCalendarId,
+                  resource: { colorId: '3' }
+                });
+              } catch (colorErr) {
+                logger.debug('[Google Calendar] Could not set calendar color (bg)', { error: colorErr.message });
+              }
+            }
+
+            if (finalCalendarId && finalCalendarId !== 'primary') {
+              // Update user atomically — don't blow away concurrent changes
+              await User.findByIdAndUpdate(userId, {
+                $set: {
+                  'googleCalendar.calendarId': finalCalendarId,
+                  'googleCalendar.syncedTaskIds': {}, // reset — old IDs point to primary
+                  'googleCalendar.watchChannelId': null,
+                  'googleCalendar.watchResourceId': null,
+                  'googleCalendar.watchExpiry': null,
+                  'googleCalendar.syncToken': null
+                }
+              });
+            }
+          } catch (dedErr) {
+            logger.warn('[Google Calendar] Dedicated calendar setup skipped (bg)', {
+              userId,
+              error: dedErr.message,
+              code: dedErr.code
+            });
+          }
+        }
+
+        // Set up push watch so Google → CRM live sync works
+        const freshUser = await User.findById(userId);
+        if (freshUser) {
+          await startCalendarWatch(freshUser).catch(err =>
+            logger.warn('[Google Calendar] Watch setup failed on connect (bg)', { error: err.message })
+          );
+        }
+      } catch (bgErr) {
+        logger.warn('[Google Calendar] Post-connect background task failed', {
+          userId,
+          error: bgErr.message
+        });
+      }
+    });
   } catch (error) {
     logger.error('[Google Calendar] Callback error', { error: error.message });
     res.redirect(`${baseUrl}/tasks?google_calendar=error&message=` + encodeURIComponent(error.message));

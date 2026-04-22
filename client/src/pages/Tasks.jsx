@@ -562,56 +562,63 @@ function Tasks() {
     }).catch(() => {});
   }, [expandedTask]);
 
-  // Handle Google Calendar and Google Tasks OAuth callback parameters
+  // Handle Google Calendar and Google Tasks OAuth callback parameters.
+  // Belt-and-suspenders: reads both URL query params AND a sessionStorage flag set
+  // before redirect — so the toast still shows when the query param is lost (iOS
+  // WebView return-from-Safari path, or slow backend callback that the browser gives
+  // up on before we can redirect).
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const googleCalendarStatus = params.get('google_calendar');
     const googleTasksStatus = params.get('google_tasks');
     const errorMessage = params.get('message');
 
-    if (googleCalendarStatus) {
-      if (googleCalendarStatus === 'connected') {
-        setGoogleCalendarNotification({
-          type: 'success',
-          message: 'Google Calendar bol úspešne pripojený! Úlohy s termínom sa budú automaticky synchronizovať.'
-        });
-      } else if (googleCalendarStatus === 'error') {
-        setGoogleCalendarNotification({
-          type: 'error',
-          message: `Chyba pri pripájaní Google Calendar: ${errorMessage || 'Neznáma chyba'}`
-        });
-      }
+    // Pull the sessionStorage fallback flag (cleared on read so we only fire once)
+    let pendingConnect = null;
+    try {
+      pendingConnect = sessionStorage.getItem('pending_google_connect');
+      if (pendingConnect) sessionStorage.removeItem('pending_google_connect');
+    } catch { /* sessionStorage may be unavailable */ }
 
-      // Clear URL parameters
-      navigate('/tasks', { replace: true });
+    // Resolve what just happened, preferring explicit URL param over the fallback flag
+    const calendarConnected = googleCalendarStatus === 'connected' || pendingConnect === 'calendar';
+    const calendarError = googleCalendarStatus === 'error';
+    const tasksConnected = googleTasksStatus === 'connected' || pendingConnect === 'tasks';
+    const tasksError = googleTasksStatus === 'error';
 
-      // Auto-hide notification after 5 seconds
-      setTimeout(() => {
-        setGoogleCalendarNotification(null);
-      }, 5000);
+    const hasAnySignal = calendarConnected || calendarError || tasksConnected || tasksError;
+    if (!hasAnySignal) return;
+
+    if (calendarConnected) {
+      setGoogleCalendarNotification({
+        type: 'success',
+        message: 'Google Calendar bol úspešne pripojený! Úlohy s termínom sa budú automaticky synchronizovať.'
+      });
+    } else if (calendarError) {
+      setGoogleCalendarNotification({
+        type: 'error',
+        message: `Chyba pri pripájaní Google Calendar: ${errorMessage || 'Neznáma chyba'}`
+      });
+    } else if (tasksConnected) {
+      setGoogleCalendarNotification({
+        type: 'success',
+        message: 'Google Tasks bol úspešne pripojený! Projekty sa budú automaticky synchronizovať.'
+      });
+    } else if (tasksError) {
+      setGoogleCalendarNotification({
+        type: 'error',
+        message: `Chyba pri pripájaní Google Tasks: ${errorMessage || 'Neznáma chyba'}`
+      });
     }
 
-    if (googleTasksStatus) {
-      if (googleTasksStatus === 'connected') {
-        setGoogleCalendarNotification({
-          type: 'success',
-          message: 'Google Tasks bol úspešne pripojený! Projekty sa budú automaticky synchronizovať.'
-        });
-      } else if (googleTasksStatus === 'error') {
-        setGoogleCalendarNotification({
-          type: 'error',
-          message: `Chyba pri pripájaní Google Tasks: ${errorMessage || 'Neznáma chyba'}`
-        });
-      }
-
-      // Clear URL parameters
+    // Clear URL parameters (only if they were actually present)
+    if (googleCalendarStatus || googleTasksStatus) {
       navigate('/tasks', { replace: true });
-
-      // Auto-hide notification after 5 seconds
-      setTimeout(() => {
-        setGoogleCalendarNotification(null);
-      }, 5000);
     }
+
+    // Auto-hide after 5 seconds
+    const hideTimer = setTimeout(() => setGoogleCalendarNotification(null), 5000);
+    return () => clearTimeout(hideTimer);
   }, [location.search, navigate]);
 
   // Handle contact filter from URL (when navigating from CRM's "Zobraziť
