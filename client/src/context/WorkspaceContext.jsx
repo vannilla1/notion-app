@@ -114,15 +114,22 @@ export const WorkspaceProvider = ({ children }) => {
       }
       setCurrentWorkspaceId(effectiveWsId);
 
-      // Diagnostika: logujeme VŽDY do AdminPanel → Chyby, aby sme vedeli,
-      // ktorú vetvu fetchWorkspaces zvolil. Pomáha debugovať "cross-device
-      // workspace bleed" problém kde refresh desktopu vezme iOS workspace.
-      // Log je lacný (1 API call per boot) a pomôže nájsť koreň problému.
-      reportError({
-        name: 'WorkspaceResolved',
-        message: `fetchWorkspaces: session=${(typeof window !== 'undefined' ? window.sessionStorage.getItem('currentWorkspaceId') : '?') || 'null'} local=${(typeof window !== 'undefined' ? window.localStorage.getItem('currentWorkspaceId') : '?') || 'null'} url=${urlWsId || 'null'} dbDefault=${data.currentWorkspaceId || 'null'} chosen=${effectiveWsId} urlIsMember=${urlIsMember} localIsMember=${localIsMember} ua=${navigator?.userAgent?.slice(0, 60) || '?'}`,
-        level: 'info'
-      });
+      // Diagnostika: logujeme do browser console aby user vedel ľahko
+      // skopírovať výstup cez DevTools. reportError posielal info-level
+      // logy ktoré sa v AdminPanel nezobrazovali.
+      const diag = {
+        tag: '[WorkspaceResolved]',
+        session: (typeof window !== 'undefined' ? window.sessionStorage.getItem('currentWorkspaceId') : null) || null,
+        local: (typeof window !== 'undefined' ? window.localStorage.getItem('currentWorkspaceId') : null) || null,
+        url: urlWsId || null,
+        dbDefault: data.currentWorkspaceId || null,
+        chosen: effectiveWsId || null,
+        urlIsMember,
+        localIsMember,
+        memberIds: Array.from(memberIdSet)
+      };
+      // eslint-disable-next-line no-console
+      console.warn('[WorkspaceResolved]', diag);
 
       if (!data.workspaces || data.workspaces.length === 0 || !effectiveWsId) {
         setNeedsWorkspace(true);
