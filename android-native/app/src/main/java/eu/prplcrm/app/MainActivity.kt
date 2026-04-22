@@ -97,7 +97,8 @@ class MainActivity : AppCompatActivity() {
         configureWebView()
         injectLocalStorageBootstrap()
         setupWebViewClients()
-        webView.addJavascriptInterface(WebAppInterface(this, webView), "NativeBridge")
+        // NativeBridge sa registruje podmieňne v WebViewClient.onPageStarted podľa hostu
+        // (hostname guard, defence-in-depth pre prípad navigácie mimo našej domény).
 
         // Načítaj web appku — alebo deep link URL z intentu ak appka bola otvorená
         // kliknutím na notifikáciu.
@@ -225,7 +226,28 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+
+                // Defence-in-depth hostname guard na NativeBridge:
+                // Ak sa WebView akýmkoľvek spôsobom dostal na cudziu doménu (napr. OAuth
+                // callback, server redirect, XSS scenario), odstráni NativeBridge aby
+                // untrusted stránka nemohla volať setAuthToken/clearAll a krajdúc token
+                // z Keystore. Po návrate na našu doménu ho znovu registrujeme.
+                // shouldOverrideUrlLoading už bloknut externé navigácie, ale toto je
+                // druhá vrstva pre edge cases (in-document redirect, history.pushState).
+                val ourHost = Uri.parse(getString(R.string.webapp_url)).host
+                val currentHost = url?.let { Uri.parse(it).host }
+                if (currentHost == ourHost) {
+                    webView.addJavascriptInterface(WebAppInterface(this@MainActivity, webView), "NativeBridge")
+                } else {
+                    webView.removeJavascriptInterface("NativeBridge")
+                }
+
                 // Token bridge — tokeny z Keystore → localStorage (pre React appku).
+                // Injectneme len na našej doméne; localStorage je beztak origin-scoped,
+                // takže inject na cudziu doménu by bol no-op na našich dátach, ale
+                // leak by nás stál token — radšej skip.
+                if (currentHost != ourHost) return
+
                 val token = TokenStore.getAuthToken(this@MainActivity)
                 val workspaceId = TokenStore.getCurrentWorkspaceId(this@MainActivity)
                 val sb = StringBuilder("(function(){try{")

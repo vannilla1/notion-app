@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 111      // internal.12 — file picker: WebChromeClient.onShowFileChooser override, aby `<input type="file">` fungoval v WebView. Bez toho Android na rozdiel od desktop browseru a iOS WKWebView ignoroval všetky file inputy → user nevedel priložiť obrázok / dokument k úlohe, správe, kontaktu. Chooser cez ACTION_OPEN_DOCUMENT (Storage Access Framework — no runtime permissions), rešpektuje accept type aj multiple atribút.
+        versionCode = 200      // production.1 — prvé vydanie na Production track. Skok zo 111 (internal.12) na 200 aby internal testing a production nekolidovali (ďalšie internal buildy ostanú 112-199, production 200+). versionCode MUSÍ monotónne rásť naprieč všetkými track-mi — Play Store ich porovnáva globálne.
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

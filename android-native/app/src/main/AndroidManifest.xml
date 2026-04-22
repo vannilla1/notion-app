@@ -17,10 +17,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- USE_BIOMETRIC + USE_FINGERPRINT — pripravené pre druhú iteráciu (biometric lock).
-         Zatiaľ neblokuje, len vyžiadané permissions. -->
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <!-- POZN: USE_BIOMETRIC + USE_FINGERPRINT sme odstránili pre 1.0.0 lebo
+         biometric lock ešte nie je implementovaný. Keď pridáme v druhej iterácii,
+         znovu ich sem pridáme spolu s BiometricPrompt kódom. Mať ich v manifeste
+         bez použitia by znamenalo vysvetľovať "prečo" v Data Safety form bez
+         dôvodu. -->
+
 
     <application
         android:name=".PrplApplication"
