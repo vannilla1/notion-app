@@ -262,8 +262,28 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Nie ste členom tohto pracovného prostredia' });
     }
 
-    // Update current workspace with proper ObjectId
-    await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
+    // IMPORTANT: do NOT overwrite User.currentWorkspaceId here.
+    //
+    // Workspace context is PER-DEVICE, driven by the X-Workspace-Id header that
+    // each client (desktop tab, iOS app, Android app, PWA) sends on every
+    // request. User.currentWorkspaceId in the DB is meant only as a "first-login
+    // / fresh-device default" — set when the user initially creates or joins a
+    // workspace, never changed by explicit switches.
+    //
+    // Writing it on every switch caused cross-device bleed: switching workspace
+    // on iOS would silently become the default for a desktop tab that had no
+    // sessionStorage yet, so a refresh there snapped the user into the mobile's
+    // workspace. We only invalidate the request-scoped workspace cache so the
+    // next request picks up the new client-authoritative header value.
+    //
+    // Backfill: if the user has no DB default at all (legacy account created
+    // before this middleware, or the field was cleared on a prior
+    // NO_WORKSPACE recovery), we DO set it here — otherwise a brand new device
+    // without any local state would have nothing to fall back to.
+    const user = await User.findById(req.user.id).select('currentWorkspaceId');
+    if (!user?.currentWorkspaceId) {
+      await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: objectId });
+    }
     invalidateCache(req.user.id);
 
     // Vraciame FULL workspace shape (rovnaký ako GET /current), aby klient
