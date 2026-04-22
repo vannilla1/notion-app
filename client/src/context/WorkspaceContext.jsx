@@ -114,23 +114,6 @@ export const WorkspaceProvider = ({ children }) => {
       }
       setCurrentWorkspaceId(effectiveWsId);
 
-      // Diagnostika: logujeme do browser console aby user vedel ľahko
-      // skopírovať výstup cez DevTools. reportError posielal info-level
-      // logy ktoré sa v AdminPanel nezobrazovali.
-      const diag = {
-        tag: '[WorkspaceResolved]',
-        session: (typeof window !== 'undefined' ? window.sessionStorage.getItem('currentWorkspaceId') : null) || null,
-        local: (typeof window !== 'undefined' ? window.localStorage.getItem('currentWorkspaceId') : null) || null,
-        url: urlWsId || null,
-        dbDefault: data.currentWorkspaceId || null,
-        chosen: effectiveWsId || null,
-        urlIsMember,
-        localIsMember,
-        memberIds: Array.from(memberIdSet)
-      };
-      // eslint-disable-next-line no-console
-      console.warn('[WorkspaceResolved]', diag);
-
       if (!data.workspaces || data.workspaces.length === 0 || !effectiveWsId) {
         setNeedsWorkspace(true);
         setCurrentWorkspace(null);
