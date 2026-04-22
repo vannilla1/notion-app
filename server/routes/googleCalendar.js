@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
@@ -222,7 +223,29 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-// Get connection status
+// Helper: count synced/pending tasks for Calendar (only tasks with dueDate are eligible)
+function countCalendarSubtasks(subtasks, syncedMap) {
+  let total = 0;
+  let synced = 0;
+  if (!subtasks || !Array.isArray(subtasks)) return { total, synced };
+  for (const sub of subtasks) {
+    if (!sub.completed && sub.dueDate) {
+      total++;
+      const eventId = syncedMap?.get(sub.id);
+      if (eventId && typeof eventId === 'string' && eventId.length > 0) synced++;
+    }
+    if (sub.subtasks && sub.subtasks.length > 0) {
+      const childCounts = countCalendarSubtasks(sub.subtasks, syncedMap);
+      total += childCounts.total;
+      synced += childCounts.synced;
+    }
+  }
+  return { total, synced };
+}
+
+// Get connection status (also reports how many tasks are synced vs pending)
+// NOTE: we do NOT use requireWorkspace here — workspace is optional. If the user
+// hasn't picked one yet we still want the connection state to render.
 router.get('/status', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -231,10 +254,77 @@ router.get('/status', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
+    let totalTasks = 0;
+    let syncedCount = 0;
+
+    if (user.googleCalendar?.enabled) {
+      // Read workspace id from header (client-authoritative) or fall back to user default.
+      const headerWs = req.headers['x-workspace-id'];
+      const workspaceId = (headerWs && typeof headerWs === 'string' && mongoose.Types.ObjectId.isValid(headerWs))
+        ? headerWs
+        : user.currentWorkspaceId;
+      const userId = req.user.id.toString();
+      const syncedMap = user.googleCalendar.syncedTaskIds;
+
+      const isUserTask = (task) => {
+        const assignedTo = task.assignedTo || [];
+        if (assignedTo.length === 0) return true;
+        return assignedTo.some(id => id && id.toString() === userId);
+      };
+
+      const globalTasks = workspaceId ? await Task.find(
+        { workspaceId, completed: { $ne: true } },
+        { _id: 1, subtasks: 1, assignedTo: 1, dueDate: 1 }
+      ).lean() : [];
+      const contacts = workspaceId ? await Contact.find(
+        { workspaceId },
+        { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1, 'tasks.dueDate': 1 }
+      ).lean() : [];
+
+      for (const task of globalTasks) {
+        if (!isUserTask(task)) continue;
+        if (task.dueDate) {
+          totalTasks++;
+          const eventId = syncedMap?.get(task._id.toString());
+          if (eventId && typeof eventId === 'string' && eventId.length > 0) syncedCount++;
+        }
+        if (task.subtasks) {
+          const c = countCalendarSubtasks(task.subtasks, syncedMap);
+          totalTasks += c.total;
+          syncedCount += c.synced;
+        }
+      }
+
+      for (const contact of contacts) {
+        if (contact.tasks) {
+          for (const task of contact.tasks) {
+            if (task.completed || !isUserTask(task)) continue;
+            if (task.dueDate) {
+              totalTasks++;
+              const eventId = syncedMap?.get(task.id);
+              if (eventId && typeof eventId === 'string' && eventId.length > 0) syncedCount++;
+            }
+            if (task.subtasks) {
+              const c = countCalendarSubtasks(task.subtasks, syncedMap);
+              totalTasks += c.total;
+              syncedCount += c.synced;
+            }
+          }
+        }
+      }
+    }
+
+    const pendingCount = totalTasks - syncedCount;
+
     res.json({
       connected: user.googleCalendar?.enabled || false,
       connectedAt: user.googleCalendar?.connectedAt || null,
-      lastSyncAt: user.googleCalendar?.lastSyncAt || null
+      lastSyncAt: user.googleCalendar?.lastSyncAt || null,
+      pendingTasks: {
+        total: totalTasks,
+        synced: syncedCount,
+        pending: pendingCount
+      }
     });
   } catch (error) {
     logger.error('[Google Calendar] Error getting status', { error: error.message, userId: req.user?.id });

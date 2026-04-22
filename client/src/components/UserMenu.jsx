@@ -81,12 +81,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [googleCalendar, setGoogleCalendar] = useState({
     connected: false,
     connectedAt: null,
+    lastSyncAt: null,
     loading: false,
-    syncing: false
+    syncing: false,
+    pendingTasks: null
   });
   const [googleTasks, setGoogleTasks] = useState({
     connected: false,
     connectedAt: null,
+    lastSyncAt: null,
     loading: false,
     syncing: false,
     pendingTasks: null,
@@ -295,8 +298,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar({
         connected: response.data.connected,
         connectedAt: response.data.connectedAt,
+        lastSyncAt: response.data.lastSyncAt || null,
         loading: false,
-        syncing: false
+        syncing: false,
+        pendingTasks: response.data.pendingTasks || null
       });
     } catch {
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
@@ -330,8 +335,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar({
         connected: false,
         connectedAt: null,
+        lastSyncAt: null,
         loading: false,
-        syncing: false
+        syncing: false,
+        pendingTasks: null
       });
       setMessage('Google Calendar bol odpojený');
     } catch {
@@ -349,6 +356,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+      // Refresh to get updated pending counts + lastSyncAt
+      await fetchGoogleCalendarStatus();
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
       setErrors({ general: translateErrorMessage(errorMsg) });
@@ -365,6 +374,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleCalendarStatus();
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri čistení';
       setErrors({ general: translateErrorMessage(errorMsg) });
@@ -383,6 +393,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks({
         connected: response.data.connected,
         connectedAt: response.data.connectedAt,
+        lastSyncAt: response.data.lastSyncAt || null,
         loading: false,
         syncing: false,
         pendingTasks: response.data.pendingTasks || null,
@@ -1127,8 +1138,44 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     {googleCalendar.connectedAt && (
                       <p className="connected-info">
                         Pripojený od: {new Date(googleCalendar.connectedAt).toLocaleDateString('sk-SK')}
+                        {googleCalendar.lastSyncAt && (
+                          <span style={{ marginLeft: '8px', color: '#6B7280' }}>
+                            · Posledná sync: {new Date(googleCalendar.lastSyncAt).toLocaleString('sk-SK', { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
+                        )}
                       </p>
                     )}
+
+                    {googleCalendar.pendingTasks && (
+                      <div className="sync-status-info" style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        backgroundColor: googleCalendar.pendingTasks.pending > 0 ? '#FEF3C7' : '#D1FAE5',
+                        borderRadius: '8px',
+                        fontSize: '14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Synchronizované:</span>
+                          <strong>{googleCalendar.pendingTasks.synced} / {googleCalendar.pendingTasks.total}</strong>
+                        </div>
+                        {googleCalendar.pendingTasks.pending > 0 && (
+                          <div style={{ color: '#B45309', fontWeight: '500' }}>
+                            ⏳ Čaká na synchronizáciu: {googleCalendar.pendingTasks.pending} úloh
+                          </div>
+                        )}
+                        {googleCalendar.pendingTasks.pending === 0 && googleCalendar.pendingTasks.total > 0 && (
+                          <div style={{ color: '#059669', fontWeight: '500' }}>
+                            ✅ Všetky úlohy sú synchronizované
+                          </div>
+                        )}
+                        {googleCalendar.pendingTasks.total === 0 && (
+                          <div style={{ color: '#059669', fontWeight: '500' }}>
+                            Žiadne úlohy s termínom na synchronizáciu
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="calendar-actions" style={{ marginTop: '12px' }}>
                       <button
                         className="btn btn-primary"
@@ -1192,6 +1239,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     {googleTasks.connectedAt && (
                       <p className="connected-info">
                         Pripojený od: {new Date(googleTasks.connectedAt).toLocaleDateString('sk-SK')}
+                        {googleTasks.lastSyncAt && (
+                          <span style={{ marginLeft: '8px', color: '#6B7280' }}>
+                            · Posledná sync: {new Date(googleTasks.lastSyncAt).toLocaleString('sk-SK', { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
+                        )}
                       </p>
                     )}
 
@@ -1215,47 +1267,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         {googleTasks.pendingTasks.pending === 0 && (
                           <div style={{ color: '#059669', fontWeight: '500' }}>
                             ✅ Všetky projekty sú synchronizované
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {googleTasks.quota && (
-                      <div style={{
-                        marginTop: '12px',
-                        padding: '12px',
-                        backgroundColor: googleTasks.quota.remaining < 1000 ? '#FEE2E2' : '#F3F4F6',
-                        borderRadius: '8px',
-                        fontSize: '13px'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                          <span>Denná kvóta API:</span>
-                          <strong>{googleTasks.quota.used.toLocaleString()} / {googleTasks.quota.limit.toLocaleString()}</strong>
-                        </div>
-                        <div style={{
-                          width: '100%',
-                          height: '6px',
-                          backgroundColor: '#E5E7EB',
-                          borderRadius: '3px',
-                          marginBottom: '6px'
-                        }}>
-                          <div style={{
-                            width: `${Math.min(googleTasks.quota.percentUsed, 100)}%`,
-                            height: '100%',
-                            backgroundColor: googleTasks.quota.percentUsed > 80 ? '#EF4444' : googleTasks.quota.percentUsed > 50 ? '#F59E0B' : '#10B981',
-                            borderRadius: '3px',
-                            transition: 'width 0.3s ease'
-                          }} />
-                        </div>
-                        <div style={{ color: '#6B7280', fontSize: '12px' }}>
-                          Zostáva: {googleTasks.quota.remaining.toLocaleString()} volaní
-                          <span style={{ float: 'right' }}>
-                            Reset: {new Date(googleTasks.quota.resetsAt).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' })} UTC
-                          </span>
-                        </div>
-                        {googleTasks.pendingTasks && googleTasks.pendingTasks.pending > 0 && (
-                          <div style={{ marginTop: '8px', color: '#6B7280', fontSize: '12px', fontStyle: 'italic' }}>
-                            Tip: Ak kvóta nestačí, zvyšné projekty sa dosyncujú zajtra automaticky pri ďalšej synchronizácii.
                           </div>
                         )}
                       </div>
