@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>55</string>
+	<string>56</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -35,8 +35,6 @@
 	<string>Prpl CRM potrebuje pristup ku kamere na pridavanie fotiek k projektom a kontaktom.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Prpl CRM používa Face ID na rýchle a bezpečné prihlásenie do aplikácie.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Prpl CRM potrebuje pristup k mikrofonu pre nahravanie videa.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Prpl CRM potrebuje pristup k fotoalbumu na pridavanie fotiek k projektom a kontaktom.</string>
 	<key>UIBackgroundModes</key>
