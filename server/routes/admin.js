@@ -1243,11 +1243,38 @@ router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => 
 // Create promo code
 router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { code, name, type, value, validForPlans, validForPeriods, maxUses, maxUsesPerUser, expiresAt } = req.body;
+    const {
+      code, name, type, value,
+      duration, durationInMonths,
+      validForPlans, validForPeriods,
+      maxUses, maxUsesPerUser, expiresAt
+    } = req.body;
 
     // Validate required fields
     if (!code || !name || !type || value === undefined) {
       return res.status(400).json({ message: 'Vyplňte všetky povinné polia (kód, názov, typ, hodnota)' });
+    }
+
+    // Resolve effective duration + duration_in_months.
+    //   - freeMonths typ má duration vždy 'repeating' s durationInMonths=value
+    //     (100% off for X months — to je jeho semantika).
+    //   - Pre percentage/fixed používame user-provided duration ('once',
+    //     'repeating', 'forever'). Default 'once' kvôli backwards compat —
+    //     existujúce kódy a staré frontend verzie neposielajú pole.
+    let effectiveDuration, effectiveDurationInMonths;
+    if (type === 'freeMonths') {
+      effectiveDuration = 'repeating';
+      effectiveDurationInMonths = value;
+    } else {
+      effectiveDuration = ['once', 'repeating', 'forever'].includes(duration) ? duration : 'once';
+      effectiveDurationInMonths = null;
+      if (effectiveDuration === 'repeating') {
+        const months = Number(durationInMonths);
+        if (!Number.isFinite(months) || months < 1 || months > 36) {
+          return res.status(400).json({ message: 'Pri opakovanej zľave musíš zadať počet mesiacov (1–36).' });
+        }
+        effectiveDurationInMonths = Math.round(months);
+      }
     }
 
     // Validate code format (alphanumeric, hyphens, underscores)
@@ -1292,13 +1319,19 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
         } else if (type === 'freeMonths') {
           // For free months, use 100% off for X months
           couponParams.percent_off = 100;
-          couponParams.duration = 'repeating';
-          couponParams.duration_in_months = value;
         }
 
-        // Set duration for percentage/fixed
-        if (type !== 'freeMonths') {
-          couponParams.duration = 'once'; // One-time discount on first payment
+        // Duration — KRITICKÉ pre opakované zľavy.
+        //   'once'      → Stripe aplikuje zľavu iba na prvú faktúru.
+        //   'repeating' → Stripe aplikuje zľavu na N nasledujúcich faktúr
+        //                 (napr. 50% po dobu 6 mesiacov = user platí diskontovanú
+        //                 sumu 6× po sebe).
+        //   'forever'   → zľava zostáva po celý život subscription.
+        // Bez tohto by "-50% na 6 mesiacov" znamenalo iba 1. mesiac → user by
+        // od 2. mesiaca platil plnú cenu, čo bola práve sťažnosť.
+        couponParams.duration = effectiveDuration;
+        if (effectiveDuration === 'repeating') {
+          couponParams.duration_in_months = effectiveDurationInMonths;
         }
 
         if (maxUses > 0) {
@@ -1344,6 +1377,8 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       name,
       type,
       value,
+      duration: effectiveDuration,
+      durationInMonths: effectiveDurationInMonths,
       validForPlans: validForPlans || [],
       validForPeriods: validForPeriods || [],
       maxUses: maxUses || 0,

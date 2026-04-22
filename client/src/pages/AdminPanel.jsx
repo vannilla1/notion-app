@@ -2067,6 +2067,7 @@ function PromoCodesTab() {
   // Form state
   const [form, setForm] = useState({
     code: '', name: '', type: 'percentage', value: '',
+    duration: 'once', durationInMonths: '3',
     validForPlans: [], validForPeriods: [],
     maxUses: '', maxUsesPerUser: '1', expiresAt: ''
   });
@@ -2085,7 +2086,7 @@ function PromoCodesTab() {
   useEffect(() => { fetchCodes(); }, [fetchCodes]);
 
   const resetForm = () => {
-    setForm({ code: '', name: '', type: 'percentage', value: '', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '' });
+    setForm({ code: '', name: '', type: 'percentage', value: '', duration: 'once', durationInMonths: '3', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '' });
     setShowForm(false);
   };
 
@@ -2106,6 +2107,12 @@ function PromoCodesTab() {
       await adminApi.post('/api/admin/promo-codes', {
         ...form,
         value: parseFloat(form.value),
+        // Pre freeMonths server ignoruje duration a nastaví si 'repeating' sám.
+        // Pre ostatné typy posielame zvolenú hodnotu + mesiace keď ide o 'repeating'.
+        duration: form.type === 'freeMonths' ? 'repeating' : form.duration,
+        durationInMonths: form.duration === 'repeating' && form.type !== 'freeMonths'
+          ? parseInt(form.durationInMonths, 10) || null
+          : null,
         maxUses: form.maxUses ? parseInt(form.maxUses) : 0,
         maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : 1,
         expiresAt: form.expiresAt || null
@@ -2221,6 +2228,42 @@ function PromoCodesTab() {
                 onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
                 placeholder={form.type === 'percentage' ? '20' : form.type === 'fixed' ? '5.00' : '3'} />
             </div>
+
+            {/* Platnosť zľavy — iba pre percentage a fixed. freeMonths má implicitne 'repeating' = X mesiacov,
+                ten počet zadáva používateľ v poli "Hodnota". */}
+            {form.type !== 'freeMonths' && (
+              <>
+                <div>
+                  <label style={labelStyle}>Platnosť zľavy *</label>
+                  <select
+                    style={inputStyle}
+                    value={form.duration}
+                    onChange={e => setForm(f => ({ ...f, duration: e.target.value }))}
+                  >
+                    <option value="once">Len prvá platba</option>
+                    <option value="repeating">Opakovane X mesiacov</option>
+                    <option value="forever">Navždy (celý život predplatného)</option>
+                  </select>
+                </div>
+                {form.duration === 'repeating' ? (
+                  <div>
+                    <label style={labelStyle}>Počet mesiacov so zľavou *</label>
+                    <input
+                      style={inputStyle}
+                      type="number"
+                      min="1"
+                      max="36"
+                      value={form.durationInMonths}
+                      onChange={e => setForm(f => ({ ...f, durationInMonths: e.target.value }))}
+                      placeholder="3"
+                    />
+                  </div>
+                ) : (
+                  <div /> /* placeholder aby grid zachoval 2-stĺpcový layout */
+                )}
+              </>
+            )}
+
             <div>
               <label style={labelStyle}>Platné pre plány (prázdne = všetky)</label>
               <div style={{ display: 'flex', gap: '6px' }}>
@@ -2286,8 +2329,23 @@ function PromoCodesTab() {
                       {c.stripeCouponId && <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '8px', background: '#DBEAFE', color: '#2563EB', fontWeight: 600 }}>STRIPE</span>}
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{c.name}</div>
-                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                       <span>{PROMO_TYPES[c.type]?.icon} {c.value}{PROMO_TYPES[c.type]?.unit}</span>
+                      <span>
+                        {/* Ľudsky zrozumiteľná platnosť zľavy. freeMonths má duration
+                            vždy 'repeating' — vtedy je počet totožný s hodnotou. */}
+                        ⏱️ {
+                          c.type === 'freeMonths'
+                            ? `${c.value} mes. zdarma`
+                            : c.duration === 'once'
+                              ? 'Len 1. platba'
+                              : c.duration === 'forever'
+                                ? 'Navždy'
+                                : c.duration === 'repeating' && c.durationInMonths
+                                  ? `${c.durationInMonths} mes. opakovane`
+                                  : 'Len 1. platba'
+                        }
+                      </span>
                       <span>Použití: {c.usedCount}{c.maxUses > 0 ? `/${c.maxUses}` : '/∞'}</span>
                       {c.expiresAt && <span>Do: {formatDate(c.expiresAt)}</span>}
                       {c.validForPlans?.length > 0 && <span>Plány: {c.validForPlans.join(', ')}</span>}

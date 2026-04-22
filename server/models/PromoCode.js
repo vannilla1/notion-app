@@ -27,6 +27,25 @@ const promoCodeSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // How long the discount applies to the Stripe subscription:
+  //   'once'      — only the first invoice (default for backwards compat)
+  //   'repeating' — the first `durationInMonths` invoices
+  //   'forever'   — every invoice while the subscription is active
+  //
+  // Pre freeMonths typ má fixný význam 'repeating' s durationInMonths=value,
+  // toto pole sa vtedy ignoruje na serveri.
+  duration: {
+    type: String,
+    enum: ['once', 'repeating', 'forever'],
+    default: 'once'
+  },
+  // Required when duration === 'repeating'. Počet fakturačných období,
+  // počas ktorých sa zľava uplatní (Stripe interpretuje ako mesiace pre
+  // monthly subscription aj pre yearly — "forever" je pre yearly rozumnejšie).
+  durationInMonths: {
+    type: Number,
+    default: null
+  },
   // Which plans this code is valid for (empty = all paid plans)
   validForPlans: {
     type: [String],
