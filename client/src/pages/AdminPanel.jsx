@@ -2346,17 +2346,23 @@ function DiagnosticsTab() {
 }
 
 // ─── DIAG: ERRORS ───────────────────────────────────────────────────
+const ERRORS_POLL_INTERVAL_MS = 30000; // auto-refresh každých 30s
+
 function DiagErrorsSection() {
   const [stats, setStats] = useState(null);
   const [errors, setErrors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [filter, setFilter] = useState({ resolved: 'false', search: '', source: 'all' });
   const [selected, setSelected] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` = true pri polling refresh — neukazuje full-page loading overlay,
+  // len malý indicator. Bez neho by sa zoznam pri každom 30s tick mihal prázdnym.
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = { page, limit: 30 };
       if (filter.resolved !== 'all') params.resolved = filter.resolved;
@@ -2369,14 +2375,30 @@ function DiagErrorsSection() {
       setErrors(listRes.data.errors);
       setTotalPages(listRes.data.pages);
       setStats(statsRes.data);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Errors load failed', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [page, filter.resolved, filter.source, filter.search]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh — pozastaví sa keď:
+  //  a) používateľ má otvorený detail modal (selected !== null) — nechceme
+  //     mu meniť data pod rukami pokiaľ sa na niečo pozerá
+  //  b) browser tab nie je viditeľný (šetríme CPU + API calls)
+  useEffect(() => {
+    if (selected) return;
+    const tick = () => {
+      if (document.hidden) return;
+      load(true);
+    };
+    const id = setInterval(tick, ERRORS_POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [selected, load]);
 
   const handleSendToClaude = (err) => {
     const prompt = `Prosím oprav túto chybu v Prpl CRM.
@@ -2464,6 +2486,22 @@ Workspace: ${err.workspaceId || 'N/A'}
           style={{ flex: 1, minWidth: '200px', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
         />
         <button onClick={() => { setPage(1); load(); }} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
+        <button
+          onClick={() => load(true)}
+          className="btn btn-secondary"
+          style={{ fontSize: '13px' }}
+          disabled={refreshing}
+          title="Auto-refresh beží každých 30s. Tlačidlom vynútiš okamžitú obnovu."
+        >
+          {refreshing ? '⟳…' : '⟳'} Obnoviť
+        </button>
+      </div>
+
+      {/* Stav auto-refresh — indikuje že dáta nie sú statický snapshot */}
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+        {selected
+          ? '⏸ Auto-refresh pozastavený (otvorený detail)'
+          : `Auto-refresh: každých 30 s${lastUpdated ? ` · naposledy ${lastUpdated.toLocaleTimeString('sk-SK')}` : ''}`}
       </div>
 
       {loading ? <div className="sa-loading">Načítavam...</div> : (
