@@ -456,6 +456,9 @@ struct WebView: UIViewRepresentable {
         // and routes the user correctly.
         if let deepLinkUrl = buildDeepLinkURL(deepLink) {
             debugLog("[Push] Loading deep link URL directly = \(deepLinkUrl.absoluteString) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
+            // Oznámime foreground handleru: tento cyklus sme obslúžili deep linkom,
+            // reload treba preskočiť, inak by zahodil práve navigovanú URL.
+            context.coordinator.didHandleDeepLinkThisCycle = true
             webView.load(URLRequest(url: deepLinkUrl))
         }
     }
@@ -486,6 +489,11 @@ struct WebView: UIViewRepresentable {
         weak var webView: WKWebView?
         var hasFinishedInitialLoad = false
         private var didOpenExternalAuth = false
+        // Nastavuje sa keď updateUIView stihne obslúžiť pendingDeepLink v tomto
+        // foreground cykle — napr. Universal Link z OAuth redirectu. appWillEnter-
+        // Foreground potom vynechá fallback `webView.reload()`, ktorý predtým
+        // clobberol deep-link navigáciu a hodil užívateľa späť na /app dashboard.
+        fileprivate var didHandleDeepLinkThisCycle = false
         var pendingDeepLinkJS: String?
         // Track last successfully loaded URL so we can restore it if the
         // WebContent process terminates (iOS jetsam kills it under memory
@@ -551,12 +559,27 @@ struct WebView: UIViewRepresentable {
         }
 
         @objc private func appWillEnterForeground() {
-            // If we opened Safari for OAuth, reload WebView when user returns
-            if didOpenExternalAuth {
-                didOpenExternalAuth = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.webView?.reload()
+            // Po návrate zo Safari (napr. OAuth flow) bol fallback reload WebView,
+            // aby sa stránka dozvedela aktuálny stav integrácie. S Universal Links
+            // ale deep link (prplcrm.eu/tasks?google_tasks=connected) sám navigačne
+            // pristane na správnej URL a React ju obslúži. Reload v tom prípade
+            // clobberol deep-link navigáciu: Tasks sa nakrátko zobrazil a appka
+            // padla späť na /app dashboard, lebo reload prebehol na pôvodnej URL.
+            //
+            // Preto reload spúšťame iba ak tento foreground cyklus NEBUDE obsluhovať
+            // deep link. Po 0.5s skontrolujeme, či medzičasom updateUIView nastavil
+            // didHandleDeepLinkThisCycle; ak áno, preskočíme. Ak nie, bežne reloadneme.
+            guard didOpenExternalAuth else { return }
+            didOpenExternalAuth = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self = self else { return }
+                if self.didHandleDeepLinkThisCycle {
+                    debugLog("[Foreground] Skipping reload — deep link already handled this cycle")
+                    self.didHandleDeepLinkThisCycle = false
+                    return
                 }
+                debugLog("[Foreground] No deep link this cycle, reloading WebView (OAuth-return fallback)")
+                self.webView?.reload()
             }
         }
 
