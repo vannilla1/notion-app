@@ -542,13 +542,28 @@ struct WebView: UIViewRepresentable {
                 debugLog("[Push] Coordinator.handleDeepLinkReceived: no URL or no webView")
                 return
             }
+            // Universal Links prichádzajú ako plné URL ("https://..."). Push deep
+            // linky historicky ako bare path ("/tasks?..."). Normalizujeme oboje
+            // do plnej URL, inak by buildDeepLinkURL-like logika zlyhala na prefix.
+            let isFullUrl = urlString.hasPrefix("http://") || urlString.hasPrefix("https://")
             let base = "https://prplcrm.eu"
-            let link = urlString.hasPrefix("/") ? urlString : "/\(urlString)"
-            let sep = link.contains("?") ? "&" : "?"
+            let normalized: String
+            if isFullUrl {
+                normalized = urlString
+            } else {
+                let link = urlString.hasPrefix("/") ? urlString : "/\(urlString)"
+                normalized = base + link
+            }
+            let sep = normalized.contains("?") ? "&" : "?"
             let ts = Int(Date().timeIntervalSince1970 * 1000)
-            let fullUrl = base + link + sep + "_t=\(ts)"
+            let fullUrl = "\(normalized)\(sep)_t=\(ts)"
             guard let url = URL(string: fullUrl) else { return }
             debugLog("[Push] Coordinator: loading deep link via NotificationCenter bypass = \(fullUrl)")
+            // KRITICKÉ: nastaviť flag SYNCHRÓNNE pred akýmkoľvek async dispatch,
+            // aby príslušný appWillEnterForeground (ktorý môže fire-nuť tesne
+            // pred týmto observer-om) videl, že už sme handle-li deep link a
+            // skipol by inak destructive reload na pôvodnú URL.
+            didHandleDeepLinkThisCycle = true
             DispatchQueue.main.async {
                 webView.load(URLRequest(url: url))
             }

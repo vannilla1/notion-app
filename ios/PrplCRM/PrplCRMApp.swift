@@ -19,6 +19,26 @@ import UserNotifications
 struct PrplCRMApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    /// Deterministicky dispatchne Universal Link do Coordinatora cez NSNotification-
+    /// Center. Obchádza SwiftUI render cyklus (@Published/updateUIView), ktorý v
+    /// kombinácii s `appWillEnterForeground`-delayed-reload vytváral race window:
+    /// reload vyplavil práve navigovanú deep-link URL a user skončil späť na /app.
+    /// Coordinator pozoruje `PrplCRMDeepLinkReceived` synchrónne → webView.load()
+    /// prebehne ešte pred tým, ako sa vôbec naplánuje foreground reload.
+    ///
+    /// `pendingDeepLink` stále nastavíme kvôli UI state visibility (napr. ak by
+    /// sme chceli vizuálne loading feedback) a pre kompatibilitu s fallback
+    /// updateUIView vetvou pre edge case-y (prvé mount-y keď Coordinator observer
+    /// ešte nie je nainštalovaný).
+    fileprivate static func dispatchDeepLink(_ urlString: String, via appDelegate: AppDelegate) {
+        NotificationCenter.default.post(
+            name: Notification.Name("PrplCRMDeepLinkReceived"),
+            object: nil,
+            userInfo: ["url": urlString]
+        )
+        appDelegate.pushManager.pendingDeepLink = urlString
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -31,7 +51,7 @@ struct PrplCRMApp: App {
                 // WebView na danú URL.
                 .onOpenURL { url in
                     debugLog("[UniversalLink] Received: \(url.absoluteString)")
-                    appDelegate.pushManager.pendingDeepLink = url.absoluteString
+                    Self.dispatchDeepLink(url.absoluteString, via: appDelegate)
                 }
                 // Scene-level handler pre continue-user-activity (Safari → app
                 // transition používa NSUserActivity s webpageURL, nie onOpenURL).
@@ -40,7 +60,7 @@ struct PrplCRMApp: App {
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL {
                         debugLog("[UniversalLink] Continue activity: \(url.absoluteString)")
-                        appDelegate.pushManager.pendingDeepLink = url.absoluteString
+                        Self.dispatchDeepLink(url.absoluteString, via: appDelegate)
                     }
                 }
         }
