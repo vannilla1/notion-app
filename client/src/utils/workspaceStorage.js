@@ -42,6 +42,8 @@ const isNativeIOSApp = _isNativeIOSApp;
 const isNativeApp = () => isNativeIOSApp() || isNativeAndroidApp();
 
 const KEY = 'currentWorkspaceId';
+const SCHEMA_KEY = 'currentWorkspaceId__schema';
+const SCHEMA_VERSION = '2';
 
 const safeGet = (store) => {
   try { return store?.getItem(KEY) || null; } catch { return null; }
@@ -53,6 +55,22 @@ const safeSet = (store, value) => {
     else store?.removeItem(KEY);
   } catch { /* Private Browsing / quota */ }
 };
+
+// Jednorázová migrácia: predchádzajúci commit 1a06477 seeduje localStorage
+// z DB defaultu pri prvom fetchu, čo "zacementovalo" stale workspace. Tento
+// commit prestal to robiť, ale users ktorí medzitým loadli appku majú už
+// stale localStorage. Clear-once podľa schema verzie.
+const migrateStorageIfNeeded = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const v = window.localStorage.getItem(SCHEMA_KEY);
+    if (v !== SCHEMA_VERSION) {
+      window.localStorage.removeItem(KEY);
+      window.localStorage.setItem(SCHEMA_KEY, SCHEMA_VERSION);
+    }
+  } catch { /* noop */ }
+};
+migrateStorageIfNeeded();
 
 export const getStoredWorkspaceId = () => {
   if (typeof window === 'undefined') return null;
@@ -66,12 +84,28 @@ export const setStoredWorkspaceId = (workspaceId) => {
   if (typeof window !== 'undefined') {
     // Dual-write: sessionStorage (per-tab authority) + localStorage (device-wide
     // fallback pre nový tab / refresh s vyexpirovaným session-om).
+    //
+    // POUŽÍVAŤ IBA PRE EXPLICITNÚ USER ACTION (switchWorkspace, deep link
+    // z URL). Pre bootstrapping fallback na DB default použi
+    // `setSessionOnlyWorkspaceId` — inak by sa stale DB default zapísal do
+    // localStorage a "zacementoval" sa naprieč refreshmi.
     safeSet(window.sessionStorage, workspaceId);
     safeSet(window.localStorage, workspaceId);
   }
   // Write-through do natívnej Android/iOS vrstvy — MainActivity pri cold-start
   // injectne tento workspaceId späť do localStorage, takže appka vidí
   // správny workspace bez re-fetch z DB.
+  nativeSetWorkspaceId(workspaceId);
+};
+
+// Session-only zápis. Používa sa pri bootstrapping fetchWorkspaces keď
+// effectiveWsId pochádza z DB defaultu — nechceme tú hodnotu "zabetónovať"
+// do localStorage (ktorá je device-wide memory usera), lebo DB default
+// môže byť stale (iné zariadenie menilo, legacy migrácie...).
+export const setSessionOnlyWorkspaceId = (workspaceId) => {
+  if (typeof window !== 'undefined') {
+    safeSet(window.sessionStorage, workspaceId);
+  }
   nativeSetWorkspaceId(workspaceId);
 };
 

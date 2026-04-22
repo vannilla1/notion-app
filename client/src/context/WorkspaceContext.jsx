@@ -6,6 +6,7 @@ import { reportError } from '../utils/reportError';
 import {
   getStoredWorkspaceId,
   setStoredWorkspaceId,
+  setSessionOnlyWorkspaceId,
   removeStoredWorkspaceId
 } from '../utils/workspaceStorage';
 
@@ -99,7 +100,18 @@ export const WorkspaceProvider = ({ children }) => {
 
       // Storage MUSÍ byť nastavený PRED ďalším API callom — axios interceptor
       // číta storage, takže getCurrentWorkspace dostane správny X-Workspace-Id.
-      setStoredWorkspaceId(effectiveWsId);
+      //
+      // KRITICKÉ rozlíšenie zdroja:
+      //  - URL `ws=` alebo localStorage → USER INTENT → device-wide persist
+      //    (dual-write session + local).
+      //  - DB default → iba sessionStorage. Inak by sme stale DB hodnotu
+      //    zapísali do localStorage a "zacementovali" ju naprieč refreshmi
+      //    aj keď user medzitým prepol na inom zariadení.
+      if (urlIsMember || localIsMember) {
+        setStoredWorkspaceId(effectiveWsId);
+      } else {
+        setSessionOnlyWorkspaceId(effectiveWsId);
+      }
       setCurrentWorkspaceId(effectiveWsId);
 
       // Diagnostika: logujeme do AdminPanel → Chyby aby sme vedeli, ktorá
