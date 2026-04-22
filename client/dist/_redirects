@@ -1,1 +1,5 @@
-/*    /index.html   200
+# Pre-rendered policy/VOP pre Google OAuth verification.
+# Musia byť PRED catch-all — Render/Netlify _redirects spracúva zhora dolu.
+/ochrana-udajov   /ochrana-udajov.html   200
+/vop              /vop.html              200
+/*                /index.html            200
