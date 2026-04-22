@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import * as workspaceApi from '../api/workspaces';
 import { APP_EVENTS } from '../utils/constants';
@@ -160,15 +160,31 @@ export const WorkspaceProvider = ({ children }) => {
     }
   }, [isAuthenticated]);
 
+  // Tracking: bol user prihlásený v predchádzajúcom renderi? Rozlíšenie medzi:
+  //  A) Bootstrap: AuthContext ešte neresolvol → isAuthenticated=false DEFAULT.
+  //     V tomto stave NECHCEME mazať storage, lebo prerušíme workspace state
+  //     užívateľa medzi refreshmi. Práve toto spôsobovalo, že refresh desktopu
+  //     vyčistil session/localStorage a fetchWorkspaces padol na stale DB
+  //     default (= iOS workspace po switchoch).
+  //  B) Explicit logout: isAuthenticated true → false transition. Vtedy chceme
+  //     zmazať všetko, lebo ďalší prihlásený user by zdedil cudzí workspaceId.
+  const wasAuthenticatedRef = useRef(false);
+
   useEffect(() => {
     if (isAuthenticated) {
+      wasAuthenticatedRef.current = true;
       fetchWorkspaces();
     } else {
       setWorkspaces([]);
       setCurrentWorkspace(null);
       setCurrentWorkspaceId(null);
       setNeedsWorkspace(false);
-      removeStoredWorkspaceId();
+      // Iba ak bol user v predchádzajúcom renderi prihlásený (skutočný logout).
+      // Boot-time false → false hýbať storage-om nesmieme.
+      if (wasAuthenticatedRef.current) {
+        removeStoredWorkspaceId();
+        wasAuthenticatedRef.current = false;
+      }
       // loading=true zachovávame zámerne — viď komentár v fetchWorkspaces.
     }
   }, [isAuthenticated, fetchWorkspaces]);
