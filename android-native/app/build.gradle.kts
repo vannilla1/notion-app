@@ -29,7 +29,7 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 200      // production.1 — prvé vydanie na Production track. Skok zo 111 (internal.12) na 200 aby internal testing a production nekolidovali (ďalšie internal buildy ostanú 112-199, production 200+). versionCode MUSÍ monotónne rásť naprieč všetkými track-mi — Play Store ich porovnáva globálne.
+        versionCode = 201      // production.2 — App Links rozšírené na /tasks, /crm, /messages, /workspace (pôvodne len /app) aby post-OAuth redirect z Google správne otvoril appku namiesto Chrome.
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

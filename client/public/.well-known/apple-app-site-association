@@ -1,0 +1,22 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "Q4KXURZ973.sk.perunelectromobility.prplcrm",
+        "paths": [
+          "/app",
+          "/app/*",
+          "/tasks",
+          "/tasks/*",
+          "/crm",
+          "/crm/*",
+          "/messages",
+          "/messages/*",
+          "/workspace",
+          "/workspace/*"
+        ]
+      }
+    ]
+  }
+}

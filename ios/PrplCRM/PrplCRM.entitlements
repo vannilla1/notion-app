@@ -9,5 +9,16 @@
 	     prijal notifikácie. -->
 	<key>aps-environment</key>
 	<string>production</string>
+
+	<!-- Universal Links — iOS overí apple-app-site-association na
+	     https://prplcrm.eu/.well-known/apple-app-site-association pri inštalácii
+	     appky. Keď Safari potom navštívi URL matchujúcu `paths`, iOS ju
+	     automaticky presmeruje do natívnej appky namiesto Safari taba.
+	     Použitie: post-OAuth redirect z Google sa vráti priamo do appky bez
+	     ručného prepnutia z Safari. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:prplcrm.eu</string>
+	</array>
 </dict>
 </plist>

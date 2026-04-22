@@ -23,7 +23,6 @@ struct ContentView: View {
                 SplashView()
                     .transition(.opacity)
             }
-
             if loadError {
                 ErrorView(onRetry: {
                     loadError = false
@@ -414,18 +413,12 @@ struct WebView: UIViewRepresentable {
         // deep link URL directly instead of the default /app. Avoids race
         // where /app finishes loading first and the deep link never applies.
         var initialURL = url
-        if let deepLink = pushManager.pendingDeepLink {
-            let base = "https://prplcrm.eu"
-            let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
-            let sep = link.contains("?") ? "&" : "?"
-            let ts = Int(Date().timeIntervalSince1970 * 1000)
-            if let u = URL(string: base + link + sep + "_t=\(ts)") {
-                debugLog("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
-                initialURL = u
-                // Clear now so updateUIView doesn't try to reload it again
-                let pm = pushManager
-                DispatchQueue.main.async { pm.pendingDeepLink = nil }
-            }
+        if let deepLink = pushManager.pendingDeepLink, let u = buildDeepLinkURL(deepLink) {
+            debugLog("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
+            initialURL = u
+            // Clear now so updateUIView doesn't try to reload it again
+            let pm = pushManager
+            DispatchQueue.main.async { pm.pendingDeepLink = nil }
         }
         webView.load(URLRequest(url: initialURL))
         return webView
@@ -452,11 +445,6 @@ struct WebView: UIViewRepresentable {
             pm.pendingDeepLink = nil
         }
 
-        let base = "https://prplcrm.eu"
-        let link = deepLink.hasPrefix("/") ? deepLink : "/\(deepLink)"
-        let sep = link.contains("?") ? "&" : "?"
-        let ts = Int(Date().timeIntervalSince1970 * 1000)
-
         // Always use direct webView.load for deep links — reliable across
         // cold-start AND hot-start. Previously hot-start relied on JS injection
         // + custom event dispatch, which silently failed when:
@@ -466,11 +454,31 @@ struct WebView: UIViewRepresentable {
         // A full page load costs ~300ms of cache-warm render but is 100%
         // deterministic. React (App.jsx) reads ws= + highlight params on mount
         // and routes the user correctly.
-        let fullUrl = base + link + sep + "_t=\(ts)"
-        if let deepLinkUrl = URL(string: fullUrl) {
-            debugLog("[Push] Loading deep link URL directly = \(fullUrl) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
+        if let deepLinkUrl = buildDeepLinkURL(deepLink) {
+            debugLog("[Push] Loading deep link URL directly = \(deepLinkUrl.absoluteString) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
             webView.load(URLRequest(url: deepLinkUrl))
         }
+    }
+
+    /// Build a loadable URL from either a path ("/tasks?x=1") or a full URL
+    /// ("https://prplcrm.eu/tasks?x=1"). Universal Links arrive as full URLs
+    /// via SwiftUI .onOpenURL / .onContinueUserActivity; push notifications
+    /// traditionally arrive as bare paths. Both flow through pendingDeepLink,
+    /// so this normalises them in one place. Always appends a timestamp to
+    /// bypass any stale cache from a prior visit to the same path.
+    private func buildDeepLinkURL(_ raw: String) -> URL? {
+        let base = "https://prplcrm.eu"
+        let isFullUrl = raw.hasPrefix("http://") || raw.hasPrefix("https://")
+        let urlString: String
+        if isFullUrl {
+            urlString = raw
+        } else {
+            let path = raw.hasPrefix("/") ? raw : "/\(raw)"
+            urlString = base + path
+        }
+        let sep = urlString.contains("?") ? "&" : "?"
+        let ts = Int(Date().timeIntervalSince1970 * 1000)
+        return URL(string: "\(urlString)\(sep)_t=\(ts)")
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {

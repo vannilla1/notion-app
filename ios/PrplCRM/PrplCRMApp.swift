@@ -24,6 +24,25 @@ struct PrplCRMApp: App {
             ContentView()
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .environmentObject(appDelegate.pushManager)
+                // Universal Links — iOS sem doručí URL keď Safari narazí na
+                // applinks match (post-OAuth redirect z Google, push deep linky
+                // mimo natívnu APNs payload, atď.). Uložíme do pushManager-a
+                // `pendingDeepLink` → ContentView `onChange(of:)` reloadne
+                // WebView na danú URL.
+                .onOpenURL { url in
+                    debugLog("[UniversalLink] Received: \(url.absoluteString)")
+                    appDelegate.pushManager.pendingDeepLink = url.absoluteString
+                }
+                // Scene-level handler pre continue-user-activity (Safari → app
+                // transition používa NSUserActivity s webpageURL, nie onOpenURL).
+                // Obidva volajú ten istý state setter, takže je jedno ktorý cestou
+                // iOS systém sa rozhodne posielať — vždy to zachytíme.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL {
+                        debugLog("[UniversalLink] Continue activity: \(url.absoluteString)")
+                        appDelegate.pushManager.pendingDeepLink = url.absoluteString
+                    }
+                }
         }
     }
 }

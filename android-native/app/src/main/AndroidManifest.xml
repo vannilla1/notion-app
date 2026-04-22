@@ -52,16 +52,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link handling — akýkoľvek https://prplcrm.eu/app/* link otvorí appku
-                 namiesto Chrome, ak je verified cez Digital Asset Links (assetlinks.json).
-                 `autoVerify=true` vyvolá Android pri inštalácii overenie voči webu. -->
+            <!-- App Links — akýkoľvek https://prplcrm.eu/{app,tasks,crm,messages,workspace}(/*)
+                 link sa otvorí v natívnej appke namiesto Chrome, ak je verified cez
+                 Digital Asset Links (assetlinks.json). `autoVerify=true` vyvolá Android
+                 pri inštalácii overenie voči webu.
+                 Post-OAuth redirect z Google smeruje na /tasks — preto /tasks MUSÍ byť
+                 v tomto filtri, inak by sa user po Google prihlásení nevrátil do appky.
+                 Všetky `data` entry v JEDNOM intent-filter, aby autoVerify fungoval pre
+                 celý blok (Android >= 12 overuje per-filter nie per-data entry). -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https"
-                    android:host="prplcrm.eu"
-                    android:pathPrefix="/app" />
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/app" />
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/tasks" />
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/crm" />
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/messages" />
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/workspace" />
             </intent-filter>
         </activity>
 
