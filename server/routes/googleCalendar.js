@@ -1975,8 +1975,42 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
     }
 
     // Set a color so workspaces are visually distinct. Non-fatal.
+    //
+    // Curated palette — picked to avoid meanings already used elsewhere in
+    // the app:
+    //   '11' (Tomato / red)   — high-priority events + in-app notification
+    //                           badges, would falsely read as "urgent"
+    //   '4'  (Flamingo)        — near-red, same confusion
+    //   '8'  (Graphite / gray) — used for low-priority events
+    //   '9'  (Blueberry / blue)— used for default events
+    //
+    // Everything else from Google's 24-color calendar palette is fair game.
+    // Hash the workspaceId so the same workspace gets a stable color across
+    // disconnect/reconnect cycles.
     try {
-      const colorId = String((Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0)) % 24) + 1);
+      const SAFE_COLOR_IDS = [
+        '1',  // Cocoa
+        '2',  // Flamingo-ish (actually Graphite in some palettes — verify)
+        '3',  // Tomato (will remove below) — kept out
+        '5',  // Banana
+        '6',  // Sage
+        '7',  // Peacock (teal)
+        '10', // Basil (dark green)
+        '12', // Blueberry variant
+        '13', // Lavender
+        '14', // Grape
+        '15', // Radicchio — dark red, removed below
+        '16', // Pumpkin (orange)
+        '17', // Cocoa dark
+        '18', // Wisteria
+        '19', // Graphite (safe medium gray)
+        '20', // Birch (brown)
+        '21', // Sage variant
+        '22', // Pistachio
+        '23'  // Eucalyptus
+      ].filter(id => !['3', '4', '8', '9', '11', '15'].includes(id));
+      const hash = Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0));
+      const colorId = SAFE_COLOR_IDS[hash % SAFE_COLOR_IDS.length];
       await calendarClient.calendarList.patch({
         calendarId: newCalendarId,
         resource: { colorId }
