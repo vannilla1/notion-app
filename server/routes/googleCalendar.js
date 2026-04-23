@@ -420,9 +420,32 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     // because Google is flaky.
     let eventsDeleted = 0;
     let calendarsDeleted = 0;
-    if (user.googleCalendar?.accessToken) {
+    // Snapshot tokens before anything that might mutate user state —
+    // getCalendarClient() silently clears tokens on invalid_grant refresh
+    // failure, which caused cleanup to be skipped. Build a local disposable
+    // client so cleanup always runs regardless.
+    const snapshotAccessToken = user.googleCalendar?.accessToken;
+    const snapshotRefreshToken = user.googleCalendar?.refreshToken;
+    const snapshotTokenExpiry = user.googleCalendar?.tokenExpiry;
+
+    if (snapshotAccessToken) {
       try {
-        const calendar = await getCalendarClient(user);
+        const client = createOAuth2Client();
+        client.setCredentials({
+          access_token: snapshotAccessToken,
+          refresh_token: snapshotRefreshToken,
+          expiry_date: snapshotTokenExpiry?.getTime()
+        });
+        const needsRefresh = !snapshotTokenExpiry || Date.now() >= snapshotTokenExpiry.getTime() - 5 * 60 * 1000;
+        if (needsRefresh && snapshotRefreshToken) {
+          try {
+            const { credentials } = await client.refreshAccessToken();
+            client.setCredentials(credentials);
+          } catch (refreshErr) {
+            logger.warn('[Google Calendar] Disconnect: token refresh failed, trying with stale token', { error: refreshErr.message });
+          }
+        }
+        const calendar = google.calendar({ version: 'v3', auth: client });
 
         // Pass 1: delete calendars we explicitly manage.
         const dedicatedIds = new Set();
@@ -521,12 +544,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       }
     }
 
-    // Revoke token (fire-and-forget) — now that we've finished using it.
-    if (user.googleCalendar?.accessToken) {
+    // Revoke token (fire-and-forget) — use snapshot, cleanup may have
+    // invalidated the DB copy.
+    if (snapshotAccessToken) {
       const client = createOAuth2Client();
-      const tokenToRevoke = user.googleCalendar.accessToken;
       Promise.race([
-        client.revokeToken(tokenToRevoke),
+        client.revokeToken(snapshotAccessToken),
         new Promise((_, reject) => setTimeout(() => reject(new Error('revoke timeout')), 3000))
       ]).catch((e) => {
         logger.debug('[Google Calendar] Token revocation skipped', { error: e.message });

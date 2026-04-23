@@ -435,6 +435,40 @@ describe('/api/google-tasks route', () => {
       expect(res.body.message).toMatch(/odstránených.*1 task listov/);
     });
 
+    // REGRESSION: pre-fix getTasksClient silently cleared accessToken on
+    // invalid_grant refresh failure, so the outer cleanup try/catch had no
+    // token left to work with and skipped cleanup + revoke entirely. Users'
+    // Google Tasks lists then survived disconnect and kept stacking on
+    // reconnect. This test locks in the fix: a disposable client is built
+    // from a snapshot of the tokens BEFORE the refresh side-effect path, so
+    // cleanup always fires even when the refresh round-trip fails.
+    it('regression: cleanup beží aj keď token refresh padne s invalid_grant', async () => {
+      const mockRefreshAccessToken = require('googleapis').google.auth.OAuth2.mock.results[0].value.refreshAccessToken;
+      mockRefreshAccessToken.mockRejectedValueOnce(Object.assign(new Error('invalid_grant'), { code: 400 }));
+      mockTasklistsList.mockResolvedValueOnce({
+        data: { items: [{ id: 'ghost-list', title: 'Prpl CRM — GT WS' }] }
+      });
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'expired-but-still-delete-ok',
+        refreshToken: 'revoked',
+        tokenExpiry: new Date(Date.now() - 3600000), // already expired
+        syncedTaskIds: new Map()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      // Refresh failed — but the stale token was still handed to tasklists.delete,
+      // and the cleanup logic proceeded. Ghost list got nuked.
+      const deletedIds = mockTasklistsDelete.mock.calls.map(c => c[0].tasklist);
+      expect(deletedIds).toContain('ghost-list');
+    });
+
     it('stále dokončí disconnect aj keď cleanup zlyhá', async () => {
       // If Google API is down during cleanup, user must still end up in a
       // disconnected state — otherwise they're stuck reconnecting forever.

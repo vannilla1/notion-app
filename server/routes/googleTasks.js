@@ -583,9 +583,39 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     // Best-effort — disconnect must succeed even if Google is flaky.
     let listsDeleted = 0;
     let tasksDeleted = 0;
-    if (user.googleTasks?.accessToken) {
+    // Snapshot tokens before we do anything that might mutate user state —
+    // previously we called getTasksClient() which, on invalid_grant refresh
+    // failures, quietly cleared accessToken/refreshToken in the DB. The outer
+    // cleanup try/catch then swallowed the throw, and the later `if (accessToken)`
+    // check for revoke saw null. Net result: cleanup skipped, revoke skipped,
+    // user's Google lists stayed forever. Build a disposable client locally
+    // without the refresh side-effects so cleanup always gets a shot.
+    const snapshotAccessToken = user.googleTasks?.accessToken;
+    const snapshotRefreshToken = user.googleTasks?.refreshToken;
+    const snapshotTokenExpiry = user.googleTasks?.tokenExpiry;
+
+    if (snapshotAccessToken) {
       try {
-        const tasksApi = await getTasksClient(user);
+        const client = createOAuth2Client();
+        client.setCredentials({
+          access_token: snapshotAccessToken,
+          refresh_token: snapshotRefreshToken,
+          expiry_date: snapshotTokenExpiry?.getTime()
+        });
+        // Try a one-shot refresh if the token looks stale. If this fails we
+        // continue with the stale token — Google will reject individual
+        // deletes with 401 which we catch per-call and log. Better than
+        // aborting cleanup entirely.
+        const needsRefresh = !snapshotTokenExpiry || Date.now() >= snapshotTokenExpiry.getTime() - 5 * 60 * 1000;
+        if (needsRefresh && snapshotRefreshToken) {
+          try {
+            const { credentials } = await client.refreshAccessToken();
+            client.setCredentials(credentials);
+          } catch (refreshErr) {
+            logger.warn('[Google Tasks] Disconnect: token refresh failed, trying with stale token', { error: refreshErr.message });
+          }
+        }
+        const tasksApi = google.tasks({ version: 'v1', auth: client });
 
         // Build the set of Google task IDs we know we synced. Used to hunt
         // down individual tasks that landed in lists we DON'T name-match
@@ -692,13 +722,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       }
     }
 
-    if (user.googleTasks?.accessToken) {
-      // Fire-and-forget with timeout so disconnect never blocks on Google being slow
+    // Use the snapshot — cleanup may have invalidated user.googleTasks in DB.
+    if (snapshotAccessToken) {
       const client = createOAuth2Client();
       if (client) {
-        const tokenToRevoke = user.googleTasks.accessToken;
         Promise.race([
-          client.revokeToken(tokenToRevoke).then(() =>
+          client.revokeToken(snapshotAccessToken).then(() =>
             logger.info('[Google Tasks] Token revoked', { userId: req.user.id })
           ),
           new Promise((_, reject) => setTimeout(() => reject(new Error('revoke timeout')), 3000))
