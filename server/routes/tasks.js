@@ -1125,7 +1125,16 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
       // Get assigned users info
       const assignedUsers = await populateAssignedUsers(assignedTo);
-      createdTasks.push({ ...newTask, contactId: contact._id.toString(), contactName: contact.name, source: 'contact', assignedUsers });
+      createdTasks.push({
+        ...newTask,
+        contactId: contact._id.toString(),
+        contactName: contact.name,
+        source: 'contact',
+        assignedUsers,
+        // workspaceId so autoSyncToGoogle below can route to the right
+        // per-workspace calendar/list.
+        workspaceId: req.workspaceId?.toString()
+      });
       updatedContacts.push(contact);
     }
 
@@ -1186,8 +1195,12 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
   }
 });
 
-// Helper function to sync all subtasks to Google when parent title changes
-const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
+// Helper function to sync all subtasks to Google when parent title changes.
+// workspaceId is REQUIRED — without it autoSyncTaskToCalendar/Tasks can't
+// resolve the per-workspace calendar/list and falls back to the legacy
+// shared calendar, which causes events to land in the wrong place AND the
+// user's other workspaces to see stray events from this one.
+const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName, workspaceId) => {
   if (!subtasks || subtasks.length === 0) return;
 
   for (const subtask of subtasks) {
@@ -1198,12 +1211,13 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName) => {
       dueDate: subtask.dueDate,
       completed: subtask.completed,
       priority: subtask.priority,
-      contactName: contactName
+      contactName: contactName,
+      workspaceId
     }, 'update');
 
     // Recursively sync nested subtasks
     if (subtask.subtasks && subtask.subtasks.length > 0) {
-      await syncSubtasksToGoogle(subtask.subtasks, parentTitle, contactName);
+      await syncSubtasksToGoogle(subtask.subtasks, parentTitle, contactName, workspaceId);
     }
   }
 };
@@ -1273,7 +1287,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact',
-              assignedUsers
+              assignedUsers,
+              // Contact's embedded tasks don't carry workspaceId themselves —
+              // inject it from the request so autoSyncTaskToCalendar knows which
+              // workspace calendar this event belongs to.
+              workspaceId: req.workspaceId?.toString()
             });
             io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
 
@@ -1287,7 +1305,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               const newTitle = title;
               const subtasks = contact.tasks[taskIndex].subtasks;
               logger.debug("Auto-sync: Parent task title changed", { originalTitle, newTitle, subtaskCount: (subtasks || []).length });
-              syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
+              syncSubtasksToGoogle(subtasks, newTitle, contact.name, req.workspaceId?.toString()).catch(err =>
                 logger.warn("Auto-sync error updating subtasks (contact)", { error: err.message })
               );
             }
@@ -1435,7 +1453,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const newTitle = title;
         const subtasks = task.subtasks;
         logger.debug("Auto-sync: Parent task title changed", { originalTitle, newTitle, subtaskCount: (subtasks || []).length });
-        syncSubtasksToGoogle(subtasks, newTitle, null).catch(err =>
+        syncSubtasksToGoogle(subtasks, newTitle, null, req.workspaceId?.toString()).catch(err =>
           logger.warn("Auto-sync error updating subtasks (global)", { error: err.message })
         );
       }
@@ -1515,7 +1533,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           contactId: contact._id.toString(),
           contactName: contact.name,
           source: 'contact',
-          assignedUsers
+          assignedUsers,
+          // See comment on earlier taskToPlainObject call — contact
+          // subtasks need workspaceId injected for auto-sync routing.
+          workspaceId: req.workspaceId?.toString()
         });
         io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskData);
 
@@ -1527,7 +1548,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           const newTitle = title;
           const subtasks = contact.tasks[taskIndex].subtasks;
           logger.debug('Auto-sync: Parent task title changed (fallback)', { originalCtaskTitle, newTitle, subtaskCount: (subtasks || []).length });
-          syncSubtasksToGoogle(subtasks, newTitle, contact.name).catch(err =>
+          syncSubtasksToGoogle(subtasks, newTitle, contact.name, req.workspaceId?.toString()).catch(err =>
             logger.warn('Auto-sync error updating subtasks (fallback)', { error: err.message })
           );
         }
@@ -1930,7 +1951,8 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
               dueDate: subtask.dueDate,
               completed: subtask.completed,
               priority: subtask.priority,
-              contactName: contact.name
+              contactName: contact.name,
+              workspaceId: req.workspaceId?.toString()
             }, 'create');
 
             // Send notification about new subtask
@@ -1966,7 +1988,8 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
           dueDate: subtask.dueDate,
           completed: subtask.completed,
           priority: subtask.priority,
-          contactName: null
+          contactName: null,
+          workspaceId: req.workspaceId?.toString()
         }, 'create');
 
         // Send notification about new subtask
@@ -2008,7 +2031,8 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
             dueDate: subtask.dueDate,
             completed: subtask.completed,
             priority: subtask.priority,
-            contactName: contact.name
+            contactName: contact.name,
+            workspaceId: req.workspaceId?.toString()
           }, 'create');
 
           // Send notification about new subtask
@@ -2087,7 +2111,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               dueDate: updated.dueDate,
               completed: updated.completed,
               priority: updated.priority,
-              contactName: contact.name
+              contactName: contact.name,
+              workspaceId: req.workspaceId?.toString()
             }, 'update');
 
             // Determine newly assigned users
@@ -2147,7 +2172,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           dueDate: updated.dueDate,
           completed: updated.completed,
           priority: updated.priority,
-          contactName: null
+          contactName: null,
+          workspaceId: req.workspaceId?.toString()
         }, 'update');
 
         // Determine newly assigned users
@@ -2211,7 +2237,8 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
             dueDate: updated.dueDate,
             completed: updated.completed,
             priority: updated.priority,
-            contactName: contact.name
+            contactName: contact.name,
+            workspaceId: req.workspaceId?.toString()
           }, 'update');
 
           // Determine newly assigned users

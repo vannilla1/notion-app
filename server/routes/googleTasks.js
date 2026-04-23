@@ -1942,15 +1942,24 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     logger.info('[Auto-sync Tasks] Starting sync', { taskId, action, title: taskData.title, completed: taskData.completed, hasDueDate: !!taskData.dueDate, workspaceId });
 
     try {
-    // Find users with Google Tasks enabled — filtered by workspace membership
+    // HARDENED FALLBACK — same rationale as in googleCalendar.js: missing
+    // workspaceId on create/update would silently fan out to every user's
+    // legacy task list, causing cross-workspace leaks. Skip instead. Only
+    // delete keeps the global fallback so orphan cleanup can still work.
     let users;
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
       users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true });
-    } else {
-      // Fallback: no workspace context (shouldn't happen, but safe)
+    } else if (action === 'delete') {
       users = await User.find({ 'googleTasks.enabled': true });
+    } else {
+      logger.warn('[Auto-sync Tasks] Missing workspaceId — skipping to avoid cross-workspace leak', {
+        taskId,
+        action,
+        title: taskData.title
+      });
+      return;
     }
 
     // Filter by assignedTo: if task is assigned, only sync for assigned users

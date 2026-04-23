@@ -2061,17 +2061,31 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
     }
 
     try {
-    // Determine workspace scope — only sync for members of the task's workspace
+    // Determine workspace scope — only sync for members of the task's workspace.
     const workspaceId = taskData.workspaceId?.toString();
-    // Find users with Google Calendar enabled — filtered by workspace membership
+
+    // HARDENED FALLBACK: if workspaceId is missing, we used to fan out to
+    // every user with googleCalendar.enabled across ALL workspaces. That
+    // caused events to leak between workspaces and created phantom
+    // duplicates (a subtask in workspace A ended up also syncing to user's
+    // workspace B legacy calendar). For `delete` we still need the fallback
+    // so an orphan cleanup can hit whatever user had the event mapped.
+    // For `create`/`update` we refuse to proceed — better to skip a sync
+    // than to corrupt another workspace's calendar.
     let users;
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
       users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true });
-    } else {
-      // Fallback: no workspace context
+    } else if (action === 'delete') {
       users = await User.find({ 'googleCalendar.enabled': true });
+    } else {
+      logger.warn('[Auto-sync Calendar] Missing workspaceId — skipping to avoid cross-workspace leak', {
+        taskId,
+        action,
+        title: taskData.title
+      });
+      return;
     }
 
     // Filter by assignedTo: if task is assigned, only sync for assigned users
