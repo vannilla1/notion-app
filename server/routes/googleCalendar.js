@@ -464,36 +464,57 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
           }
         }
 
-        // Pass 3: always scrub primary for our marker-tagged events. Even if
-        // user is on a dedicated calendar now, they might have old events
-        // from a time when sync hit primary (renamed primary bug). Safe —
-        // only deletes events with extendedProperties.private.source=prplcrm.
-        let pageToken;
-        do {
-          try {
-            const { data } = await calendar.events.list({
-              calendarId: 'primary',
-              privateExtendedProperty: 'source=prplcrm',
-              maxResults: 250,
-              pageToken,
-              showDeleted: false
-            });
-            for (const ev of (data.items || [])) {
-              try {
-                await calendar.events.delete({ calendarId: 'primary', eventId: ev.id });
-                eventsDeleted++;
-              } catch (e) {
-                if (e.code !== 404) {
-                  logger.debug('[Google Calendar] Disconnect: event delete failed', { eventId: ev.id, error: e.message });
+        // Pass 3: scrub source=prplcrm events from EVERY calendar the user
+        // has access to, not just primary. Events can end up in an unexpected
+        // calendar for all sorts of reasons: renamed primary, old sync that
+        // hit the wrong calendar, user manually dragged an event somewhere
+        // else. The source=prplcrm marker guarantees we only touch events
+        // we created; user's personal entries have no such marker and are
+        // invisible to this list() filter.
+        let calendarsToScan = [];
+        try {
+          const listResp = await calendar.calendarList.list({ maxResults: 250 });
+          calendarsToScan = (listResp.data.items || [])
+            .map(c => c.id)
+            .filter(id => id && !dedicatedIds.has(id)); // skip lists we already wholesale-deleted
+          // Ensure primary is always scanned even if it didn't appear in calendarList
+          if (!calendarsToScan.includes('primary')) calendarsToScan.push('primary');
+        } catch (listErr) {
+          logger.warn('[Google Calendar] Disconnect: calendarList scan failed, falling back to primary', { error: listErr.message });
+          calendarsToScan = ['primary'];
+        }
+
+        for (const scanCalId of calendarsToScan) {
+          let pageToken;
+          do {
+            try {
+              const { data } = await calendar.events.list({
+                calendarId: scanCalId,
+                privateExtendedProperty: 'source=prplcrm',
+                maxResults: 250,
+                pageToken,
+                showDeleted: false
+              });
+              for (const ev of (data.items || [])) {
+                try {
+                  await calendar.events.delete({ calendarId: scanCalId, eventId: ev.id });
+                  eventsDeleted++;
+                } catch (e) {
+                  if (e.code !== 404) {
+                    logger.debug('[Google Calendar] Disconnect: event delete failed', { calId: scanCalId, eventId: ev.id, error: e.message });
+                  }
                 }
               }
+              pageToken = data.nextPageToken;
+            } catch (listErr) {
+              // Calendar might not support events.list (e.g. read-only holiday calendars) — skip silently.
+              if (listErr.code !== 403 && listErr.code !== 404) {
+                logger.debug('[Google Calendar] Disconnect: event list failed', { calId: scanCalId, error: listErr.message });
+              }
+              break;
             }
-            pageToken = data.nextPageToken;
-          } catch (listErr) {
-            logger.warn('[Google Calendar] Disconnect: primary event list failed', { error: listErr.message });
-            break;
-          }
-        } while (pageToken);
+          } while (pageToken);
+        }
       } catch (cleanupErr) {
         // Don't block disconnect on cleanup failure — log and move on.
         logger.warn('[Google Calendar] Disconnect cleanup failed', { userId: req.user.id, error: cleanupErr.message });

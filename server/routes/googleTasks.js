@@ -582,39 +582,108 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     //
     // Best-effort — disconnect must succeed even if Google is flaky.
     let listsDeleted = 0;
+    let tasksDeleted = 0;
     if (user.googleTasks?.accessToken) {
       try {
         const tasksApi = await getTasksClient(user);
-        const listsToDelete = new Set();
-        if (user.googleTasks.taskListId) listsToDelete.add(user.googleTasks.taskListId);
-        if (user.googleTasks.workspaceTaskLists) {
-          for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
-            if (entry?.taskListId) listsToDelete.add(entry.taskListId);
+
+        // Build the set of Google task IDs we know we synced. Used to hunt
+        // down individual tasks that landed in lists we DON'T name-match
+        // (e.g. Google's default "My Tasks" list, or user's own personal
+        // list that an earlier sync mistakenly wrote into). Without this,
+        // "Odpojiť" leaves tasks behind and reconnect piles duplicates
+        // on top — exactly what the user just reported.
+        const ourGoogleTaskIds = new Set();
+        if (user.googleTasks.syncedTaskIds) {
+          for (const [, gId] of user.googleTasks.syncedTaskIds.entries()) {
+            if (gId) ourGoogleTaskIds.add(String(gId));
           }
         }
 
-        // Also scan Google for any Prpl CRM-named list we're not tracking
-        // (stragglers from previous app versions or manual-testing detritus).
-        // Same rationale as the calendar pass — avoid accumulating copies.
+        // Fetch every list the user has. We'll decide per-list: if the list
+        // is one we own (named Prpl CRM*) → delete whole list; otherwise →
+        // delete only the tasks matching ourGoogleTaskIds, leave user's
+        // own tasks alone.
+        let allLists = [];
         try {
           const listResp = await tasksApi.tasklists.list({ maxResults: 100 });
-          for (const item of (listResp.data.items || [])) {
-            const t = item.title || '';
-            if (t === 'Prpl CRM' || t.startsWith('Prpl CRM —') || t.startsWith('Prpl CRM -')) {
-              if (item.id) listsToDelete.add(item.id);
-            }
-          }
+          allLists = listResp.data.items || [];
         } catch (listErr) {
           logger.warn('[Google Tasks] Disconnect: tasklists scan failed', { error: listErr.message });
         }
 
-        for (const listId of listsToDelete) {
+        // Pre-populate with explicitly tracked lists so we still nuke them
+        // even if the list scan above failed.
+        const trackedListIds = new Set();
+        if (user.googleTasks.taskListId) trackedListIds.add(user.googleTasks.taskListId);
+        if (user.googleTasks.workspaceTaskLists) {
+          for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
+            if (entry?.taskListId) trackedListIds.add(entry.taskListId);
+          }
+        }
+
+        for (const list of allLists) {
+          const title = list.title || '';
+          const isOurNamedList =
+            title === 'Prpl CRM' ||
+            title.startsWith('Prpl CRM —') ||
+            title.startsWith('Prpl CRM -');
+
+          if (isOurNamedList || trackedListIds.has(list.id)) {
+            // Nuke the whole list — tasks inside cascade.
+            try {
+              await tasksApi.tasklists.delete({ tasklist: list.id });
+              listsDeleted++;
+              trackedListIds.delete(list.id);
+            } catch (e) {
+              if (e.code !== 404 && e.response?.status !== 404) {
+                logger.warn('[Google Tasks] Disconnect: list delete failed', { listId: list.id, error: e.message });
+              }
+            }
+          } else if (ourGoogleTaskIds.size > 0) {
+            // Not our list — but a task inside might be ours. Scan + delete
+            // tasks that match ourGoogleTaskIds. Never touches tasks the
+            // user added themselves.
+            let pageToken;
+            try {
+              do {
+                const tResp = await tasksApi.tasks.list({
+                  tasklist: list.id,
+                  maxResults: 100,
+                  showCompleted: true,
+                  showHidden: true,
+                  showDeleted: false,
+                  pageToken
+                });
+                for (const t of (tResp.data.items || [])) {
+                  if (t.id && ourGoogleTaskIds.has(t.id)) {
+                    try {
+                      await tasksApi.tasks.delete({ tasklist: list.id, task: t.id });
+                      tasksDeleted++;
+                    } catch (e) {
+                      if (e.code !== 404 && e.response?.status !== 404) {
+                        logger.debug('[Google Tasks] Disconnect: stray task delete failed', { listId: list.id, taskId: t.id, error: e.message });
+                      }
+                    }
+                  }
+                }
+                pageToken = tResp.data.nextPageToken;
+              } while (pageToken);
+            } catch (scanErr) {
+              logger.debug('[Google Tasks] Disconnect: stray task scan failed', { listId: list.id, error: scanErr.message });
+            }
+          }
+        }
+
+        // Deal with tracked lists we never saw in the scan (list itself was
+        // already deleted on Google's side, but mapping lingered).
+        for (const stillTracked of trackedListIds) {
           try {
-            await tasksApi.tasklists.delete({ tasklist: listId });
+            await tasksApi.tasklists.delete({ tasklist: stillTracked });
             listsDeleted++;
           } catch (e) {
             if (e.code !== 404 && e.response?.status !== 404) {
-              logger.warn('[Google Tasks] Disconnect: list delete failed', { listId, error: e.message });
+              logger.debug('[Google Tasks] Disconnect: tracked-but-missing delete skipped', { listId: stillTracked });
             }
           }
         }
@@ -653,9 +722,17 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     };
 
     await user.save();
-    logger.info('[Google Tasks] Disconnected', { userId: req.user.id, username: user.username, listsDeleted });
+    logger.info('[Google Tasks] Disconnected', {
+      userId: req.user.id,
+      username: user.username,
+      listsDeleted,
+      tasksDeleted
+    });
 
-    const cleanupSummary = listsDeleted > 0 ? ` (odstránených ${listsDeleted} task listov)` : '';
+    const parts = [];
+    if (listsDeleted > 0) parts.push(`${listsDeleted} task listov`);
+    if (tasksDeleted > 0) parts.push(`${tasksDeleted} úloh z iných listov`);
+    const cleanupSummary = parts.length ? ` (odstránených ${parts.join(', ')})` : '';
     res.json({ success: true, message: `Google Tasks bol odpojený${cleanupSummary}` });
   } catch (error) {
     logger.error('[Google Tasks] Disconnect error', { error: error.message, userId: req.user?.id });
