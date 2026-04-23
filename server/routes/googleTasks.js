@@ -7,6 +7,7 @@ const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
+const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -315,6 +316,103 @@ router.get('/callback', async (req, res) => {
   }
 });
 
+// ==================== PER-WORKSPACE TASK LIST RESOLUTION (PR2) ====================
+
+/**
+ * Resolve the Google Tasks taskListId to use for a (user, workspace) pair.
+ * Mirror of getOrCreateWorkspaceCalendar in googleCalendar.js — same rationale:
+ * each workspace gets its own Google Tasks list named "Prpl CRM — {workspace}"
+ * so multi-workspace users aren't forced to share one jumbled list.
+ *
+ * Fallbacks: mapping → lazy create → legacy single taskListId → null.
+ */
+async function getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi) {
+  if (!workspaceId) {
+    return user.googleTasks?.taskListId || null;
+  }
+
+  const wsKey = String(workspaceId);
+  const existing = user.googleTasks?.workspaceTaskLists?.get?.(wsKey);
+  if (existing?.taskListId) {
+    // Verify it still exists on Google's side — users do delete lists.
+    try {
+      await tasksApi.tasklists.get({ tasklist: existing.taskListId });
+      return existing.taskListId;
+    } catch (e) {
+      logger.warn('[Google Tasks] Cached task list disappeared, will recreate', { workspaceId, taskListId: existing.taskListId });
+      // fall through to create
+    }
+  }
+
+  let workspaceName = 'Workspace';
+  try {
+    const ws = await Workspace.findById(workspaceId).lean();
+    if (ws?.name) workspaceName = ws.name;
+  } catch (e) {
+    logger.debug('[Google Tasks] Workspace lookup failed, using fallback name', { workspaceId, error: e.message });
+  }
+
+  const title = `Prpl CRM — ${workspaceName}`;
+
+  let newTaskListId = null;
+  try {
+    // Does Google already have a list with this title? (re-connect case)
+    const listResp = await tasksApi.tasklists.list({ maxResults: 100 });
+    const existingOnGoogle = (listResp.data.items || []).find(l => l.title === title);
+    if (existingOnGoogle) {
+      newTaskListId = existingOnGoogle.id;
+      logger.info('[Google Tasks] Reusing existing Google-side task list', { workspaceId, taskListId: newTaskListId });
+    } else {
+      const created = await tasksApi.tasklists.insert({ resource: { title } });
+      newTaskListId = created.data.id;
+      logger.info('[Google Tasks] Created per-workspace task list', { workspaceId, taskListId: newTaskListId });
+    }
+  } catch (err) {
+    logger.warn('[Google Tasks] Per-workspace task list setup failed, falling back', {
+      userId: user._id?.toString(),
+      workspaceId,
+      error: err.message
+    });
+    return user.googleTasks?.taskListId || null;
+  }
+
+  if (!newTaskListId) {
+    return user.googleTasks?.taskListId || null;
+  }
+
+  try {
+    await User.findByIdAndUpdate(user._id, {
+      $set: {
+        [`googleTasks.workspaceTaskLists.${wsKey}`]: {
+          taskListId: newTaskListId,
+          createdAt: new Date()
+        }
+      }
+    });
+    if (!user.googleTasks.workspaceTaskLists) {
+      user.googleTasks.workspaceTaskLists = new Map();
+    }
+    user.googleTasks.workspaceTaskLists.set(wsKey, { taskListId: newTaskListId, createdAt: new Date() });
+  } catch (persistErr) {
+    logger.warn('[Google Tasks] Failed to persist workspaceTaskLists mapping', {
+      userId: user._id?.toString(),
+      workspaceId,
+      error: persistErr.message
+    });
+  }
+
+  return newTaskListId;
+}
+
+/**
+ * Resolve which task list a previously-synced task lives in. Mirror of
+ * getCalendarIdForSyncedTask in googleCalendar.js.
+ */
+function getTaskListIdForSyncedTask(user, taskId) {
+  const tl = user.googleTasks?.syncedTaskLists?.get?.(String(taskId));
+  return tl || user.googleTasks?.taskListId || null;
+}
+
 // Get connection status with quota info and pending tasks count
 router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
   try {
@@ -543,37 +641,18 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       });
     }
 
-    // Verify task list ID exists
-    if (!user.googleTasks.taskListId) {
-      logger.error('[Google Tasks] No task list configured', { userId: req.user.id });
-      return res.status(400).json({ message: 'Google Tasks task list nie je nakonfigurovaný. Skúste sa odpojiť a znova pripojiť.' });
-    }
-
     const tasksApi = await getTasksClient(user);
-
-    // Verify task list exists - if not, recreate it
-    try {
-      await tasksApi.tasklists.get({ tasklist: user.googleTasks.taskListId });
-    } catch (listError) {
-      logger.warn('[Google Tasks] Task list not found, recreating', { userId: req.user.id, error: listError.message });
-      // Task list doesn't exist, create a new one
-      try {
-        const newList = await tasksApi.tasklists.insert({
-          resource: { title: 'Prpl CRM' }
-        });
-        user.googleTasks.taskListId = newList.data.id;
-        user.googleTasks.syncedTaskIds = new Map(); // Reset synced tasks
-        user.googleTasks.syncedTaskHashes = new Map();
-        await user.save();
-        logger.info('[Google Tasks] Created new task list', { userId: req.user.id, taskListId: newList.data.id });
-      } catch (createError) {
-        logger.error('[Google Tasks] Failed to create task list', { userId: req.user.id, error: createError.message });
-        return res.status(500).json({ message: 'Nepodarilo sa vytvoriť task list v Google Tasks' });
-      }
-    }
 
     // Get all tasks for the workspace from which the sync was triggered
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
+
+    // PR2: resolve per-workspace task list (creates lazily the first time).
+    // The legacy `taskListId` is kept as fallback for users who pre-dated PR2.
+    const targetTaskListId = await getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi);
+    if (!targetTaskListId) {
+      logger.error('[Google Tasks] Unable to resolve task list', { userId: req.user.id, workspaceId });
+      return res.status(500).json({ message: 'Nepodarilo sa vytvoriť task list v Google Tasks' });
+    }
     const userId = req.user.id.toString(); // Convert ObjectId to string for comparison
 
     // Only sync tasks assigned to this user (or unassigned tasks)
@@ -779,10 +858,14 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         try {
           const taskData = createGoogleTaskData(task);
 
+          // PR2: /sync runs in the context of ONE workspace, so every task in
+          // this loop lands in the same per-workspace list. Cross-list moves
+          // (task reassigned to a different workspace) are handled by the
+          // auto-sync path, not here.
           if (isUpdate) {
             try {
               await tasksApi.tasks.patch({
-                tasklist: user.googleTasks.taskListId,
+                tasklist: targetTaskListId,
                 task: task.googleTaskId,
                 requestBody: taskData
               });
@@ -794,7 +877,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
               // If task doesn't exist in Google anymore, create it
               if (uCode === 404 || uCode === 400) {
                 const newTask = await tasksApi.tasks.insert({
-                  tasklist: user.googleTasks.taskListId,
+                  tasklist: targetTaskListId,
                   resource: taskData
                 });
                 return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'recreated' };
@@ -803,7 +886,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
             }
           } else {
             const newTask = await tasksApi.tasks.insert({
-              tasklist: user.googleTasks.taskListId,
+              tasklist: targetTaskListId,
               resource: taskData
             });
             return { success: true, taskId: task.id, googleTaskId: newTask.data.id, hash: task.hash, action: 'created' };
@@ -835,6 +918,12 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       if (result.success) {
         user.googleTasks.syncedTaskIds.set(result.taskId, result.googleTaskId);
         user.googleTasks.syncedTaskHashes.set(result.taskId, result.hash);
+        // PR2: record which list this task went into so deletes know where
+        // to look. In /sync context every task goes to targetTaskListId.
+        if (!user.googleTasks.syncedTaskLists) {
+          user.googleTasks.syncedTaskLists = new Map();
+        }
+        user.googleTasks.syncedTaskLists.set(result.taskId, targetTaskListId);
         successCount++;
         completedSinceLastSave++;
         consecutiveRateLimits = 0; // Reset on success
@@ -931,12 +1020,15 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
         }
       }
 
-      // Fetch all Google Tasks to check completion status
+      // Fetch all Google Tasks from the target (per-workspace) list to check
+      // completion status. PR2: /sync is scoped to one workspace, so reverse
+      // sync should only pull from that workspace's list — events from other
+      // workspaces' lists shouldn't leak here.
       let allGoogleTasks = [];
       let gPageToken = null;
       do {
         const gResponse = await tasksApi.tasks.list({
-          tasklist: user.googleTasks.taskListId,
+          tasklist: targetTaskListId,
           maxResults: 100,
           showCompleted: true,
           showHidden: true,
@@ -1140,9 +1232,13 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
       for (const [taskId, googleTaskId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
+          // PR2: delete from whichever list holds this task (per-workspace).
+          // Fall back to legacy single list for pre-PR2 mappings.
+          const cleanupListId = getTaskListIdForSyncedTask(user, taskId);
+          if (!cleanupListId) continue;
           try {
             await tasksApi.tasks.delete({
-              tasklist: user.googleTasks.taskListId,
+              tasklist: cleanupListId,
               task: googleTaskId
             });
             deleted++;
@@ -1152,6 +1248,9 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
               logger.warn('[Google Tasks] Failed to delete task', { taskId, googleTaskId, error: e.message });
               errors++;
             }
+          }
+          if (user.googleTasks.syncedTaskLists) {
+            user.googleTasks.syncedTaskLists.delete(taskId);
           }
           user.googleTasks.syncedTaskIds.delete(taskId);
         }
@@ -1191,34 +1290,41 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     }
 
     const tasksApi = await getTasksClient(user);
-    const oldTaskListId = user.googleTasks.taskListId;
 
-    logger.info('[Google Tasks] Nuke & recreate - deleting task list', { userId, oldTaskListId });
-
-    // Step 1: Delete the entire task list (removes ALL tasks instantly)
-    try {
-      await tasksApi.tasklists.delete({ tasklist: oldTaskListId });
-      logger.info('[Google Tasks] Task list deleted successfully', { userId, oldTaskListId });
-    } catch (deleteErr) {
-      // If task list doesn't exist (already deleted), that's OK
-      if (deleteErr.code !== 404 && deleteErr.response?.status !== 404) {
-        throw deleteErr;
+    // PR2: nuke ALL Prpl CRM task lists — the legacy single list AND every
+    // per-workspace list. User expects "delete everything", not "delete one
+    // workspace and leave the rest behind".
+    const listsToDelete = new Set();
+    if (user.googleTasks.taskListId) listsToDelete.add(user.googleTasks.taskListId);
+    if (user.googleTasks.workspaceTaskLists) {
+      for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
+        if (entry?.taskListId) listsToDelete.add(entry.taskListId);
       }
-      logger.info('[Google Tasks] Task list already deleted or not found', { userId });
     }
 
-    // Step 2: Create a new "Prpl CRM" task list
-    const newList = await tasksApi.tasklists.insert({
-      resource: { title: 'Prpl CRM' }
-    });
-    const newTaskListId = newList.data.id;
-    logger.info('[Google Tasks] New task list created', { userId, newTaskListId });
+    logger.info('[Google Tasks] Nuke & recreate - deleting task lists', { userId, count: listsToDelete.size });
 
-    // Step 3: Clear all sync data and update taskListId
-    user.googleTasks.taskListId = newTaskListId;
+    for (const listId of listsToDelete) {
+      try {
+        await tasksApi.tasklists.delete({ tasklist: listId });
+      } catch (deleteErr) {
+        if (deleteErr.code !== 404 && deleteErr.response?.status !== 404) {
+          logger.warn('[Google Tasks] Failed to delete a list during nuke', { listId, error: deleteErr.message });
+        }
+      }
+    }
+
+    // Step 2: Clear all sync state. We don't pre-create a new list here —
+    // the next sync will lazily create a per-workspace list on demand via
+    // getOrCreateWorkspaceTaskList, so empty state is correct.
+    user.googleTasks.taskListId = null;
+    user.googleTasks.workspaceTaskLists = new Map();
     user.googleTasks.syncedTaskIds = new Map();
+    user.googleTasks.syncedTaskLists = new Map();
     user.googleTasks.syncedTaskHashes = new Map();
     await user.save();
+
+    const newTaskListId = null;
 
     logger.info('[Google Tasks] Nuke & recreate completed', { userId, newTaskListId });
 
@@ -1384,28 +1490,44 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
     }
 
     const tasksApi = await getTasksClient(user);
-    const taskListId = user.googleTasks.taskListId;
 
-    // Get completed tasks from Google Tasks
-    let completedGoogleTasks = [];
-    let pageToken = null;
-
-    do {
-      const response = await tasksApi.tasks.list({
-        tasklist: taskListId,
-        maxResults: 100,
-        showCompleted: true,
-        showHidden: true,
-        pageToken
-      });
-
-      if (response.data.items) {
-        // Filter only completed tasks
-        const completed = response.data.items.filter(t => t.status === 'completed');
-        completedGoogleTasks = completedGoogleTasks.concat(completed);
+    // PR2: aggregate completed tasks across ALL lists we manage (legacy +
+    // per-workspace). User-facing behavior: "sync completed" means pull
+    // completion status from every Prpl CRM list, not just one.
+    const listsToScan = new Set();
+    if (user.googleTasks.taskListId) listsToScan.add(user.googleTasks.taskListId);
+    if (user.googleTasks.workspaceTaskLists) {
+      for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
+        if (entry?.taskListId) listsToScan.add(entry.taskListId);
       }
-      pageToken = response.data.nextPageToken;
-    } while (pageToken);
+    }
+
+    // Get completed tasks from all Prpl CRM task lists
+    let completedGoogleTasks = [];
+
+    for (const listId of listsToScan) {
+      let pageToken = null;
+      try {
+        do {
+          const response = await tasksApi.tasks.list({
+            tasklist: listId,
+            maxResults: 100,
+            showCompleted: true,
+            showHidden: true,
+            pageToken
+          });
+
+          if (response.data.items) {
+            // Filter only completed tasks
+            const completed = response.data.items.filter(t => t.status === 'completed');
+            completedGoogleTasks = completedGoogleTasks.concat(completed);
+          }
+          pageToken = response.data.nextPageToken;
+        } while (pageToken);
+      } catch (e) {
+        logger.warn('[Google Tasks] List scan failed during sync-completed', { listId, error: e.message });
+      }
+    }
 
     logger.debug('[Google Tasks] Found completed tasks in Google', {
       userId: req.user.id,
@@ -1707,22 +1829,36 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
         if (action === 'delete') {
           const googleTaskId = user.googleTasks.syncedTaskIds?.get(taskId);
           if (googleTaskId) {
-            try {
-              await retryWithBackoff(() => tasksApi.tasks.delete({
-                tasklist: user.googleTasks.taskListId,
-                task: googleTaskId
-              }));
-            } catch (e) {
-              if (e.code !== 404) {
-                logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
+            // Delete from whichever task list holds this task (PR2 multi-list).
+            const targetTaskListId = getTaskListIdForSyncedTask(user, taskId);
+            if (targetTaskListId) {
+              try {
+                await retryWithBackoff(() => tasksApi.tasks.delete({
+                  tasklist: targetTaskListId,
+                  task: googleTaskId
+                }));
+              } catch (e) {
+                if (e.code !== 404) {
+                  logger.warn('[Auto-sync Tasks] Delete failed', { userId: user._id, taskId, error: e.message });
+                }
               }
             }
-            // Atomic removal of mapping
+            // Atomic removal of mappings
             await User.findByIdAndUpdate(user._id, {
-              $unset: { [`googleTasks.syncedTaskIds.${taskId}`]: '' }
+              $unset: {
+                [`googleTasks.syncedTaskIds.${taskId}`]: '',
+                [`googleTasks.syncedTaskLists.${taskId}`]: ''
+              }
             });
           }
         } else {
+          // Resolve target list (creates lazily the first time).
+          const targetTaskListId = await getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi);
+          if (!targetTaskListId) {
+            logger.warn('[Auto-sync Tasks] No task list available, skipping', { userId: user._id, taskId });
+            continue;
+          }
+
           const googleTaskData = createGoogleTaskData({
             id: taskId,
             title: taskData.title,
@@ -1733,24 +1869,55 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
           });
 
           const existingGoogleId = user.googleTasks?.syncedTaskIds?.get(taskId);
+          const existingTaskListId = user.googleTasks?.syncedTaskLists?.get?.(taskId);
 
-          if (existingGoogleId) {
+          if (existingGoogleId && existingTaskListId && existingTaskListId !== targetTaskListId) {
+            // Task moved between lists (workspace switch, or migration from
+            // legacy single list) — delete stale, insert fresh.
+            try {
+              await retryWithBackoff(() => tasksApi.tasks.delete({
+                tasklist: existingTaskListId,
+                task: existingGoogleId
+              }));
+            } catch (e) {
+              if (e.code !== 404) logger.debug('[Auto-sync Tasks] Stale delete failed', { error: e.message });
+            }
+            const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
+              tasklist: targetTaskListId,
+              resource: googleTaskData
+            }));
+            await User.findByIdAndUpdate(user._id, {
+              $set: {
+                [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id,
+                [`googleTasks.syncedTaskLists.${taskId}`]: targetTaskListId
+              }
+            });
+          } else if (existingGoogleId) {
+            const patchListId = existingTaskListId || targetTaskListId;
             try {
               await retryWithBackoff(() => tasksApi.tasks.patch({
-                tasklist: user.googleTasks.taskListId,
+                tasklist: patchListId,
                 task: existingGoogleId,
                 requestBody: googleTaskData
               }));
+              // Backfill mapping for pre-PR2 entries
+              if (!existingTaskListId) {
+                await User.findByIdAndUpdate(user._id, {
+                  $set: { [`googleTasks.syncedTaskLists.${taskId}`]: patchListId }
+                });
+              }
             } catch (e) {
               if (e.code === 404) {
-                // Task was deleted from Google, create new one
+                // Task was deleted from Google — create new one in target list
                 const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-                  tasklist: user.googleTasks.taskListId,
+                  tasklist: targetTaskListId,
                   resource: googleTaskData
                 }));
-                // Atomic set of new mapping
                 await User.findByIdAndUpdate(user._id, {
-                  $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id }
+                  $set: {
+                    [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id,
+                    [`googleTasks.syncedTaskLists.${taskId}`]: targetTaskListId
+                  }
                 });
               } else {
                 throw e;
@@ -1758,12 +1925,14 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             }
           } else {
             const newTask = await retryWithBackoff(() => tasksApi.tasks.insert({
-              tasklist: user.googleTasks.taskListId,
+              tasklist: targetTaskListId,
               resource: googleTaskData
             }));
-            // Atomic set of new mapping
             await User.findByIdAndUpdate(user._id, {
-              $set: { [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id }
+              $set: {
+                [`googleTasks.syncedTaskIds.${taskId}`]: newTask.data.id,
+                [`googleTasks.syncedTaskLists.${taskId}`]: targetTaskListId
+              }
             });
           }
         }
@@ -1925,8 +2094,17 @@ const pollGoogleTasksChanges = async () => {
     for (const user of users) {
       try {
         const tasksApi = await getTasksClient(user);
-        const taskListId = user.googleTasks.taskListId;
-        if (!taskListId) continue;
+        // PR2: poll every list this user is synced to. Legacy single list +
+        // every per-workspace list. Without this, completions marked in a
+        // workspace-specific list would never propagate back to CRM.
+        const listsToPoll = new Set();
+        if (user.googleTasks.taskListId) listsToPoll.add(user.googleTasks.taskListId);
+        if (user.googleTasks.workspaceTaskLists) {
+          for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
+            if (entry?.taskListId) listsToPoll.add(entry.taskListId);
+          }
+        }
+        if (listsToPoll.size === 0) continue;
 
         // Build reverse map: googleTaskId → crmTaskId
         const reverseMap = new Map();
@@ -1937,29 +2115,34 @@ const pollGoogleTasksChanges = async () => {
         }
 
         let allGoogleTasks = [];
-        let pageToken = null;
+        for (const taskListId of listsToPoll) {
+          let pageToken = null;
+          try {
+            do {
+              const params = {
+                tasklist: taskListId,
+                maxResults: 100,
+                showCompleted: true,
+                showDeleted: true,
+                showHidden: true,
+                pageToken
+              };
 
-        do {
-          const params = {
-            tasklist: taskListId,
-            maxResults: 100,
-            showCompleted: true,
-            showDeleted: true,
-            showHidden: true,
-            pageToken
-          };
+              // Use updatedMin to only get recently changed tasks (last 2 minutes for 30s polling)
+              if (user.googleTasks.lastSyncAt) {
+                params.updatedMin = new Date(user.googleTasks.lastSyncAt.getTime() - 30000).toISOString();
+              }
 
-          // Use updatedMin to only get recently changed tasks (last 2 minutes for 30s polling)
-          if (user.googleTasks.lastSyncAt) {
-            params.updatedMin = new Date(user.googleTasks.lastSyncAt.getTime() - 30000).toISOString();
+              const response = await tasksApi.tasks.list(params);
+              if (response.data.items) {
+                allGoogleTasks = allGoogleTasks.concat(response.data.items);
+              }
+              pageToken = response.data.nextPageToken;
+            } while (pageToken);
+          } catch (e) {
+            logger.warn('[Google Tasks Poll] List query failed', { userId: user._id, taskListId, error: e.message });
           }
-
-          const response = await tasksApi.tasks.list(params);
-          if (response.data.items) {
-            allGoogleTasks = allGoogleTasks.concat(response.data.items);
-          }
-          pageToken = response.data.nextPageToken;
-        } while (pageToken);
+        }
 
         if (allGoogleTasks.length === 0) {
           // Update lastSyncAt even if no changes

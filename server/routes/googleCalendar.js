@@ -9,6 +9,7 @@ const User = require('../models/User');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
+const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -891,26 +892,67 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     logger.info('[Google Calendar] Syncing tasks', { userId: user._id, count: tasksToSync.length });
 
+    // Resolve per-workspace calendar once — all tasks in this /sync run share
+    // the same workspace, so we only need one lookup (and possibly one calendar
+    // creation). Avoids hammering Google's calendarList.list on every task.
+    const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
+
     for (const task of tasksToSync) {
       try {
         const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
+        const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(task.id);
         const eventData = createEventData(task);
 
-        if (existingEventId) {
-          // Update existing event
-          await calendar.events.update({
-            calendarId: user.googleCalendar.calendarId,
-            eventId: existingEventId,
-            resource: eventData
-          });
-          updated++;
-        } else {
-          // Create new event
+        if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
+          // Event migrated from another calendar (legacy or cross-workspace).
+          // Delete old, insert new — keeps per-workspace grouping honest.
+          try {
+            await calendar.events.delete({ calendarId: existingCalendarId, eventId: existingEventId });
+          } catch (e) {
+            if (e.code !== 404) logger.debug('[Google Calendar] Stale delete failed during /sync', { error: e.message });
+          }
           const event = await calendar.events.insert({
-            calendarId: user.googleCalendar.calendarId,
+            calendarId: targetCalendarId,
             resource: eventData
           });
           user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
+          user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
+          synced++;
+        } else if (existingEventId) {
+          // Update in place.
+          const updateCalendarId = existingCalendarId || targetCalendarId;
+          try {
+            await calendar.events.update({
+              calendarId: updateCalendarId,
+              eventId: existingEventId,
+              resource: eventData
+            });
+            if (!existingCalendarId) {
+              user.googleCalendar.syncedTaskCalendars.set(task.id, updateCalendarId);
+            }
+            updated++;
+          } catch (e) {
+            if (e.code === 404) {
+              // Event deleted on Google side — re-insert in target calendar.
+              const event = await calendar.events.insert({
+                calendarId: targetCalendarId,
+                resource: eventData
+              });
+              user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
+              user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
+              synced++;
+            } else {
+              throw e;
+            }
+          }
+        } else {
+          // First-time sync.
+          const event = await calendar.events.insert({
+            calendarId: targetCalendarId,
+            resource: eventData
+          });
+          user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
+          user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
           synced++;
         }
       } catch (error) {
@@ -1006,20 +1048,52 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
     };
 
     const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskData.id);
+    const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(taskData.id);
     const eventData = createEventData(taskData);
 
-    if (existingEventId) {
-      await calendar.events.update({
-        calendarId: user.googleCalendar.calendarId,
-        eventId: existingEventId,
-        resource: eventData
-      });
+    // Resolve per-workspace calendar (creates lazily the first time).
+    const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
+
+    if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
+      // Task changed workspaces — delete stale event, re-insert in new cal.
+      try {
+        await calendar.events.delete({ calendarId: existingCalendarId, eventId: existingEventId });
+      } catch (e) {
+        if (e.code !== 404) logger.debug('[Google Calendar] Stale delete failed (/sync-task)', { error: e.message });
+      }
+      const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+      user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
+      user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
+      await user.save();
+    } else if (existingEventId) {
+      const updateCalendarId = existingCalendarId || targetCalendarId;
+      try {
+        await calendar.events.update({
+          calendarId: updateCalendarId,
+          eventId: existingEventId,
+          resource: eventData
+        });
+        if (!existingCalendarId) {
+          user.googleCalendar.syncedTaskCalendars.set(taskData.id, updateCalendarId);
+          await user.save();
+        }
+      } catch (e) {
+        if (e.code === 404) {
+          const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+          user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
+          user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
+          await user.save();
+        } else {
+          throw e;
+        }
+      }
     } else {
       const event = await calendar.events.insert({
-        calendarId: user.googleCalendar.calendarId,
+        calendarId: targetCalendarId,
         resource: eventData
       });
       user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
+      user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
       await user.save();
     }
 
@@ -1048,10 +1122,14 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
     }
 
     const calendar = await getCalendarClient(user);
+    // Delete from the calendar that actually holds this event (PR2: may
+    // differ per-task). Legacy events without calendar mapping fall back to
+    // user.googleCalendar.calendarId via the helper.
+    const targetCalendarId = getCalendarIdForSyncedTask(user, taskId);
 
     try {
       await calendar.events.delete({
-        calendarId: user.googleCalendar.calendarId,
+        calendarId: targetCalendarId,
         eventId: eventId
       });
     } catch (e) {
@@ -1062,6 +1140,9 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
     }
 
     user.googleCalendar.syncedTaskIds.delete(taskId);
+    if (user.googleCalendar.syncedTaskCalendars) {
+      user.googleCalendar.syncedTaskCalendars.delete(taskId);
+    }
     await user.save();
 
     res.json({ success: true, message: 'Udalosť bola odstránená z kalendára' });
@@ -1116,10 +1197,13 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
       for (const [taskId, eventId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
-          // Task no longer exists, delete the calendar event
+          // Task no longer exists, delete the calendar event from whichever
+          // calendar it was synced to (PR2 per-workspace) — with fallback to
+          // legacy single calendar.
+          const targetCalendarId = getCalendarIdForSyncedTask(user, taskId);
           try {
             await calendar.events.delete({
-              calendarId: user.googleCalendar.calendarId,
+              calendarId: targetCalendarId,
               eventId: eventId
             });
             deleted++;
@@ -1130,6 +1214,9 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
             }
           }
           user.googleCalendar.syncedTaskIds.delete(taskId);
+          if (user.googleCalendar.syncedTaskCalendars) {
+            user.googleCalendar.syncedTaskCalendars.delete(taskId);
+          }
         }
       }
     }
@@ -1175,25 +1262,21 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
     }
     const calendar = await getCalendarClient(user);
-    const calendarId = user.googleCalendar.calendarId;
 
-    // List all events tagged as ours (paginate because user could have many)
-    let pageToken;
-    const ourEvents = [];
-    do {
-      const { data } = await calendar.events.list({
-        calendarId,
-        privateExtendedProperty: 'source=prplcrm',
-        maxResults: 250,
-        pageToken,
-        showDeleted: false,
-        // No timeMin — dedup must see past + future events
-      });
-      if (data.items) ourEvents.push(...data.items);
-      pageToken = data.nextPageToken;
-    } while (pageToken);
+    // PR2: dedup every calendar we've synced into. Collect:
+    //  - the legacy calendarId (pre-PR2 users with everything in one cal)
+    //  - every per-workspace calendar in workspaceCalendars
+    // Dedup works per-calendar; cross-calendar "duplicates" are intentional
+    // (same task in two workspaces = two events on purpose).
+    const calendarIds = new Set();
+    if (user.googleCalendar.calendarId) calendarIds.add(user.googleCalendar.calendarId);
+    if (user.googleCalendar.workspaceCalendars) {
+      for (const [, cal] of user.googleCalendar.workspaceCalendars.entries()) {
+        if (cal?.calendarId) calendarIds.add(cal.calendarId);
+      }
+    }
 
-    // Build reverse index eventId → taskId from syncedTaskIds
+    // Build reverse index eventId → taskId from syncedTaskIds (shared map).
     const eventIdToTaskId = new Map();
     if (user.googleCalendar.syncedTaskIds) {
       for (const [taskId, eventId] of user.googleCalendar.syncedTaskIds.entries()) {
@@ -1201,33 +1284,61 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
       }
     }
 
-    // Group by (summary|startDate) — duplicates will collide on this key
-    const groups = new Map();
-    for (const ev of ourEvents) {
-      const startKey = ev.start?.date || ev.start?.dateTime || '';
-      const key = `${ev.summary || ''}|${startKey}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(ev);
-    }
-
     let deleted = 0;
     let errors = 0;
+    let totalScanned = 0;
+    let totalGroups = 0;
 
-    for (const [, events] of groups) {
-      if (events.length <= 1) continue; // no duplicates
-      // Pick survivor: prefer one referenced in syncedTaskIds, else the newest
-      events.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
-      const mapped = events.find(e => eventIdToTaskId.has(e.id));
-      const survivor = mapped || events[0];
-      for (const ev of events) {
-        if (ev.id === survivor.id) continue;
-        try {
-          await calendar.events.delete({ calendarId, eventId: ev.id });
-          deleted++;
-        } catch (e) {
-          if (e.code !== 404) {
-            logger.warn('[Google Calendar] Dedup delete failed', { eventId: ev.id, error: e.message });
-            errors++;
+    for (const calendarId of calendarIds) {
+      // List all events tagged as ours in this calendar
+      let pageToken;
+      const ourEvents = [];
+      try {
+        do {
+          const { data } = await calendar.events.list({
+            calendarId,
+            privateExtendedProperty: 'source=prplcrm',
+            maxResults: 250,
+            pageToken,
+            showDeleted: false
+          });
+          if (data.items) ourEvents.push(...data.items);
+          pageToken = data.nextPageToken;
+        } while (pageToken);
+      } catch (e) {
+        // Calendar may have been deleted on Google side — skip it.
+        logger.warn('[Google Calendar] Dedup list failed for calendar', { calendarId, error: e.message });
+        errors++;
+        continue;
+      }
+      totalScanned += ourEvents.length;
+
+      // Group by (summary|startDate) — duplicates will collide on this key
+      const groups = new Map();
+      for (const ev of ourEvents) {
+        const startKey = ev.start?.date || ev.start?.dateTime || '';
+        const key = `${ev.summary || ''}|${startKey}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ev);
+      }
+      totalGroups += groups.size;
+
+      for (const [, events] of groups) {
+        if (events.length <= 1) continue; // no duplicates
+        // Pick survivor: prefer one referenced in syncedTaskIds, else the newest
+        events.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
+        const mapped = events.find(e => eventIdToTaskId.has(e.id));
+        const survivor = mapped || events[0];
+        for (const ev of events) {
+          if (ev.id === survivor.id) continue;
+          try {
+            await calendar.events.delete({ calendarId, eventId: ev.id });
+            deleted++;
+          } catch (e) {
+            if (e.code !== 404) {
+              logger.warn('[Google Calendar] Dedup delete failed', { eventId: ev.id, error: e.message });
+              errors++;
+            }
           }
         }
       }
@@ -1235,18 +1346,20 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
 
     logger.info('[Google Calendar] Dedup finished', {
       userId: user._id,
-      totalEvents: ourEvents.length,
-      groupsScanned: groups.size,
+      calendarsScanned: calendarIds.size,
+      totalEvents: totalScanned,
+      groupsScanned: totalGroups,
       deleted,
       errors
     });
 
     res.json({
       success: true,
-      message: `Odstránených ${deleted} duplicitných udalostí${errors ? ` (${errors} chýb)` : ''}.`,
+      message: `Odstránených ${deleted} duplicitných udalostí v ${calendarIds.size} kalendári/och${errors ? ` (${errors} chýb)` : ''}.`,
       deleted,
       errors,
-      scanned: ourEvents.length
+      scanned: totalScanned,
+      calendarsScanned: calendarIds.size
     });
   } catch (error) {
     logger.error('[Google Calendar] Dedup error', { error: error.message, userId: req.user?.id });
@@ -1480,6 +1593,142 @@ function createEventData(task) {
   };
 }
 
+// ==================== PER-WORKSPACE CALENDAR RESOLUTION (PR2) ====================
+
+/**
+ * Resolve the Google calendarId to use for a (user, workspace) pair.
+ *
+ * Creates a dedicated "Prpl CRM — {workspace name}" secondary calendar on
+ * Google the first time it's needed for a given workspace. Subsequent calls
+ * return the mapping stored in `user.googleCalendar.workspaceCalendars`.
+ *
+ * Why a calendar per workspace (and not per-user): a user with 3 workspaces
+ * would otherwise see 3 workspaces' events jumbled in one calendar with no
+ * way to tell them apart. Separate calendars give users native Google-side
+ * controls (toggle visibility, set distinct colors, hide a workspace
+ * temporarily) without us having to invent new UI.
+ *
+ * Fallbacks (in order of preference):
+ *  1. Mapping exists in workspaceCalendars → use it.
+ *  2. Create a new secondary calendar → store and use it.
+ *  3. Creation fails (e.g. missing calendar.app.created scope) → fall back
+ *     to user.googleCalendar.calendarId (pre-PR2 legacy single calendar).
+ *  4. Last-resort fallback → 'primary'.
+ *
+ * Concurrent calls for the same (user, workspace) are safe: worst case we
+ * create the calendar twice on Google, but only one mapping wins in the DB
+ * (atomic $set). The loser calendar becomes orphaned but has no events —
+ * user can delete it manually if bothered, or /cleanup later.
+ */
+async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
+  // No workspace context (shouldn't normally happen) → legacy calendar.
+  if (!workspaceId) {
+    return user.googleCalendar?.calendarId || 'primary';
+  }
+
+  const wsKey = String(workspaceId);
+  const existing = user.googleCalendar?.workspaceCalendars?.get?.(wsKey);
+  if (existing?.calendarId) {
+    return existing.calendarId;
+  }
+
+  // Need to create. Fetch workspace name for a human-readable calendar summary.
+  let workspaceName = 'Workspace';
+  try {
+    const ws = await Workspace.findById(workspaceId).lean();
+    if (ws?.name) workspaceName = ws.name;
+  } catch (e) {
+    logger.debug('[Google Calendar] Workspace lookup failed, using fallback name', { workspaceId, error: e.message });
+  }
+
+  const summary = `Prpl CRM — ${workspaceName}`;
+
+  let newCalendarId = null;
+  try {
+    // Does the user already have a calendar with this exact summary? (re-connect case)
+    const listResp = await calendarClient.calendarList.list({ maxResults: 250 });
+    const existingOnGoogle = (listResp.data.items || []).find(c => c.summary === summary);
+    if (existingOnGoogle) {
+      newCalendarId = existingOnGoogle.id;
+      logger.info('[Google Calendar] Reusing existing Google-side calendar', { workspaceId, calendarId: newCalendarId });
+    } else {
+      const created = await calendarClient.calendars.insert({
+        resource: {
+          summary,
+          description: `Synchronizované úlohy z Prpl CRM (${workspaceName}). Môžete tento kalendár kedykoľvek vymazať.`,
+          timeZone: 'Europe/Bratislava'
+        }
+      });
+      newCalendarId = created.data.id;
+      logger.info('[Google Calendar] Created per-workspace calendar', { workspaceId, calendarId: newCalendarId });
+
+      // Set a color so workspaces are visually distinct by default. User can
+      // override in Google Calendar UI; our patch only seeds the initial color.
+      try {
+        // Cycle through Google's 24 color IDs based on hashed workspaceId so
+        // each workspace gets a stable but distinct color.
+        const colorId = String((Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0)) % 24) + 1);
+        await calendarClient.calendarList.patch({
+          calendarId: newCalendarId,
+          resource: { colorId }
+        });
+      } catch (colorErr) {
+        logger.debug('[Google Calendar] Color patch failed (non-fatal)', { error: colorErr.message });
+      }
+    }
+  } catch (err) {
+    logger.warn('[Google Calendar] Per-workspace calendar setup failed, falling back', {
+      userId: user._id?.toString(),
+      workspaceId,
+      error: err.message,
+      code: err.code
+    });
+    // Fall back to legacy single calendar so sync still works.
+    return user.googleCalendar?.calendarId || 'primary';
+  }
+
+  if (!newCalendarId) {
+    return user.googleCalendar?.calendarId || 'primary';
+  }
+
+  // Persist mapping atomically. If two requests raced, the second $set wins,
+  // which is fine — the orphaned calendar on Google is harmless (no events).
+  try {
+    await User.findByIdAndUpdate(user._id, {
+      $set: {
+        [`googleCalendar.workspaceCalendars.${wsKey}`]: {
+          calendarId: newCalendarId,
+          createdAt: new Date()
+        }
+      }
+    });
+    // Update in-memory user so the same request doesn't re-create.
+    if (!user.googleCalendar.workspaceCalendars) {
+      user.googleCalendar.workspaceCalendars = new Map();
+    }
+    user.googleCalendar.workspaceCalendars.set(wsKey, { calendarId: newCalendarId, createdAt: new Date() });
+  } catch (persistErr) {
+    logger.warn('[Google Calendar] Failed to persist workspaceCalendars mapping', {
+      userId: user._id?.toString(),
+      workspaceId,
+      error: persistErr.message
+    });
+    // Non-fatal — the mapping will be re-attempted on next sync.
+  }
+
+  return newCalendarId;
+}
+
+/**
+ * Resolve which calendar a previously-synced event lives in. Used by
+ * delete/update paths that only have taskId in hand.
+ * Prefers syncedTaskCalendars (PR2). Falls back to legacy single calendarId.
+ */
+function getCalendarIdForSyncedTask(user, taskId) {
+  const calendarId = user.googleCalendar?.syncedTaskCalendars?.get?.(String(taskId));
+  return calendarId || user.googleCalendar?.calendarId || 'primary';
+}
+
 // ==================== AUTO-SYNC HELPER FUNCTIONS ====================
 
 // In-memory lock to prevent duplicate syncs for the same task.
@@ -1571,12 +1820,15 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
         });
 
         if (action === 'delete') {
-          // Delete event from calendar
+          // Delete event from calendar. Use the calendarId recorded at insert
+          // time (syncedTaskCalendars) so we hit the right calendar even if
+          // workspaceCalendars mapping evolved since.
           const eventId = user.googleCalendar.syncedTaskIds?.get(taskId);
           if (eventId) {
+            const targetCalendarId = getCalendarIdForSyncedTask(user, taskId);
             try {
               await calendar.events.delete({
-                calendarId: user.googleCalendar.calendarId,
+                calendarId: targetCalendarId,
                 eventId: eventId
               });
             } catch (e) {
@@ -1585,12 +1837,18 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 logger.warn('[Auto-sync Calendar] Event deletion failed', { error: e.message });
               }
             }
-            // Atomic removal of mapping
+            // Atomic removal of mappings
             await User.findByIdAndUpdate(user._id, {
-              $unset: { [`googleCalendar.syncedTaskIds.${taskId}`]: '' }
+              $unset: {
+                [`googleCalendar.syncedTaskIds.${taskId}`]: '',
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: ''
+              }
             });
           }
         } else {
+          // Resolve target calendar (create per-workspace if needed).
+          const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
+
           // Create or update event
           const eventData = createEventData({
             id: taskId,
@@ -1603,39 +1861,77 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
           });
 
           const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskId);
+          const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
 
-          if (existingEventId) {
-            // Update existing event
+          if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
+            // Event was previously synced to a different calendar (e.g. task
+            // moved between workspaces, or we migrated from legacy single
+            // calendar). Delete the stale event first so we don't leave an
+            // orphan behind in the old calendar.
+            try {
+              await calendar.events.delete({
+                calendarId: existingCalendarId,
+                eventId: existingEventId
+              });
+            } catch (e) {
+              if (e.code !== 404) {
+                logger.warn('[Auto-sync Calendar] Stale event cleanup failed', { error: e.message, existingCalendarId });
+              }
+            }
+            // Force re-insert in the new calendar.
+            const event = await calendar.events.insert({
+              calendarId: targetCalendarId,
+              resource: eventData
+            });
+            await User.findByIdAndUpdate(user._id, {
+              $set: {
+                [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+              }
+            });
+          } else if (existingEventId) {
+            // Update in the same calendar we synced to last time.
+            const updateCalendarId = existingCalendarId || targetCalendarId;
             try {
               await calendar.events.update({
-                calendarId: user.googleCalendar.calendarId,
+                calendarId: updateCalendarId,
                 eventId: existingEventId,
                 resource: eventData
               });
+              // Backfill calendar mapping if it was missing (pre-PR2 legacy).
+              if (!existingCalendarId) {
+                await User.findByIdAndUpdate(user._id, {
+                  $set: { [`googleCalendar.syncedTaskCalendars.${taskId}`]: updateCalendarId }
+                });
+              }
             } catch (e) {
-              // If event doesn't exist, create new one
+              // If event doesn't exist, create new one in target calendar
               if (e.code === 404) {
                 const event = await calendar.events.insert({
-                  calendarId: user.googleCalendar.calendarId,
+                  calendarId: targetCalendarId,
                   resource: eventData
                 });
-                // Atomic set of new mapping
                 await User.findByIdAndUpdate(user._id, {
-                  $set: { [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id }
+                  $set: {
+                    [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
+                    [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+                  }
                 });
               } else {
                 throw e;
               }
             }
           } else {
-            // Create new event
+            // First-time sync — create new event in workspace calendar.
             const event = await calendar.events.insert({
-              calendarId: user.googleCalendar.calendarId,
+              calendarId: targetCalendarId,
               resource: eventData
             });
-            // Atomic set of new mapping
             await User.findByIdAndUpdate(user._id, {
-              $set: { [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id }
+              $set: {
+                [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+              }
             });
           }
         }
