@@ -593,6 +593,21 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
           }
         }
 
+        // Also scan Google for any Prpl CRM-named list we're not tracking
+        // (stragglers from previous app versions or manual-testing detritus).
+        // Same rationale as the calendar pass — avoid accumulating copies.
+        try {
+          const listResp = await tasksApi.tasklists.list({ maxResults: 100 });
+          for (const item of (listResp.data.items || [])) {
+            const t = item.title || '';
+            if (t === 'Prpl CRM' || t.startsWith('Prpl CRM —') || t.startsWith('Prpl CRM -')) {
+              if (item.id) listsToDelete.add(item.id);
+            }
+          }
+        } catch (listErr) {
+          logger.warn('[Google Tasks] Disconnect: tasklists scan failed', { error: listErr.message });
+        }
+
         for (const listId of listsToDelete) {
           try {
             await tasksApi.tasklists.delete({ tasklist: listId });
