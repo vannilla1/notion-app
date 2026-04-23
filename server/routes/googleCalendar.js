@@ -1919,11 +1919,15 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
     }
   }
 
-  // Need to create. Fetch workspace name for a human-readable calendar summary.
+  // Need to create. Fetch workspace so we can use its real name AND its
+  // brand color on the calendar (user expectation: Google Calendar shows
+  // the same color as the workspace badge in the app).
   let workspaceName = 'Workspace';
+  let workspaceColor = null;
   try {
     const ws = await Workspace.findById(workspaceId).lean();
     if (ws?.name) workspaceName = ws.name;
+    if (ws?.color) workspaceColor = ws.color;
   } catch (e) {
     logger.debug('[Google Calendar] Workspace lookup failed, using fallback name', { workspaceId, error: e.message });
   }
@@ -1974,49 +1978,38 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
       throw e;
     }
 
-    // Set a color so workspaces are visually distinct. Non-fatal.
+    // Apply the workspace's own brand color directly via Google's
+    // colorRgbFormat=true path. This accepts any hex, bypassing the 24-color
+    // palette (which was picking mismatched shades like orange for a purple
+    // workspace). User expectation: calendar label in Google Calendar matches
+    // the workspace badge in Prpl CRM exactly.
     //
-    // Curated palette — picked to avoid meanings already used elsewhere in
-    // the app:
-    //   '11' (Tomato / red)   — high-priority events + in-app notification
-    //                           badges, would falsely read as "urgent"
-    //   '4'  (Flamingo)        — near-red, same confusion
-    //   '8'  (Graphite / gray) — used for low-priority events
-    //   '9'  (Blueberry / blue)— used for default events
-    //
-    // Everything else from Google's 24-color calendar palette is fair game.
-    // Hash the workspaceId so the same workspace gets a stable color across
-    // disconnect/reconnect cycles.
+    // Non-fatal: if the color patch fails, the calendar still exists with
+    // Google's default color assignment — sync keeps working.
     try {
-      const SAFE_COLOR_IDS = [
-        '1',  // Cocoa
-        '2',  // Flamingo-ish (actually Graphite in some palettes — verify)
-        '3',  // Tomato (will remove below) — kept out
-        '5',  // Banana
-        '6',  // Sage
-        '7',  // Peacock (teal)
-        '10', // Basil (dark green)
-        '12', // Blueberry variant
-        '13', // Lavender
-        '14', // Grape
-        '15', // Radicchio — dark red, removed below
-        '16', // Pumpkin (orange)
-        '17', // Cocoa dark
-        '18', // Wisteria
-        '19', // Graphite (safe medium gray)
-        '20', // Birch (brown)
-        '21', // Sage variant
-        '22', // Pistachio
-        '23'  // Eucalyptus
-      ].filter(id => !['3', '4', '8', '9', '11', '15'].includes(id));
-      const hash = Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0));
-      const colorId = SAFE_COLOR_IDS[hash % SAFE_COLOR_IDS.length];
+      const bg = (workspaceColor && /^#[0-9a-f]{6}$/i.test(workspaceColor))
+        ? workspaceColor.toLowerCase()
+        : '#6366f1'; // fallback to Prpl CRM indigo
+      // Pick black or white foreground based on background luminance — YIQ
+      // heuristic (standard for readable contrast on arbitrary bg colors).
+      const r = parseInt(bg.slice(1, 3), 16);
+      const g = parseInt(bg.slice(3, 5), 16);
+      const b = parseInt(bg.slice(5, 7), 16);
+      const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+      const fg = yiq >= 160 ? '#000000' : '#ffffff';
       await calendarClient.calendarList.patch({
         calendarId: newCalendarId,
-        resource: { colorId }
+        colorRgbFormat: true,
+        resource: {
+          backgroundColor: bg,
+          foregroundColor: fg
+        }
       });
     } catch (colorErr) {
-      logger.debug('[Google Calendar] Color patch failed (non-fatal)', { error: colorErr.message });
+      logger.debug('[Google Calendar] Color patch failed (non-fatal)', {
+        error: colorErr.message,
+        workspaceColor
+      });
     }
   }
 
