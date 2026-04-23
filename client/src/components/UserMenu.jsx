@@ -7,7 +7,22 @@ import PushNotificationToggle from './PushNotificationToggle';
 import { isMobileDevice } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
-import { setStoredWorkspaceId } from '../utils/workspaceStorage';
+import { setStoredWorkspaceId, getStoredWorkspaceId } from '../utils/workspaceStorage';
+
+// Auth + per-request workspace intent header. Every backend endpoint that
+// uses `requireWorkspace` middleware picks up X-Workspace-Id; without it the
+// server falls back to user.currentWorkspaceId from DB, which on multi-device
+// accounts is the LAST workspace the user clicked — not necessarily where
+// they are now. Sync buttons in this menu were hitting that fallback and
+// syncing the wrong workspace's tasks.
+const authHeaders = () => {
+  const token = getStoredToken();
+  const wsId = getStoredWorkspaceId();
+  const h = {};
+  if (token) h.Authorization = `Bearer ${token}`;
+  if (wsId) h['X-Workspace-Id'] = wsId;
+  return h;
+};
 import { getWorkspaceRoleLabel } from '../utils/constants';
 
 const translateErrorMessage = (message) => {
@@ -164,7 +179,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setErrors({});
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/auth/profile`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setProfile(response.data);
       setFormData({
@@ -250,7 +265,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/tasks/calendar/feed/status`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setCalendarFeed({
         enabled: response.data.enabled,
@@ -267,7 +282,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/generate`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setCalendarFeed({
         enabled: true,
@@ -286,7 +301,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       await axios.post(`${API_URL}/tasks/calendar/feed/disable`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setCalendarFeed({
         enabled: false,
@@ -308,7 +323,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/regenerate`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setCalendarFeed({
         enabled: true,
@@ -334,7 +349,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/status`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setGoogleCalendar({
         connected: response.data.connected,
@@ -355,7 +370,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       // Belt-and-suspenders flag — if the URL redirect query param doesn't reach
       // us (iOS/Android WebView quirks), this flag still triggers the toast once
@@ -376,7 +391,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       await axios.post(`${API_URL}/google-calendar/disconnect`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setGoogleCalendar({
         connected: false,
@@ -399,7 +414,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-calendar/sync`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
@@ -422,7 +437,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-calendar/migrate-to-per-workspace`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
@@ -440,7 +455,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/migrate-to-per-workspace`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setMessage(response.data.message);
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -462,7 +477,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-calendar/deduplicate`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setMessage(response.data.message);
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
@@ -479,7 +494,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/status`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(),
         timeout: 15000
       });
       setGoogleTasks({
@@ -507,7 +522,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       try { sessionStorage.setItem('pending_google_connect', 'tasks'); } catch { /* ignore */ }
       window.location.href = response.data.authUrl;
@@ -525,7 +540,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
       const token = getStoredToken();
       await axios.post(`${API_URL}/google-tasks/disconnect`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setGoogleTasks({
         connected: false,
@@ -548,7 +563,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
       try {
         await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders(),
           timeout: 30000 // 30 second timeout
         });
       } catch {
@@ -556,7 +571,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       }
 
       const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(),
         timeout: 660000 // 5.5 min timeout (server has 5 min limit + buffer)
       });
       setGoogleTasksMessage(response.data.message);
@@ -583,12 +598,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const token = getStoredToken();
 
       await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(),
         timeout: 10000
       });
 
       const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(),
         timeout: 660000
       });
       setGoogleTasksMessage(response.data.message);
@@ -614,7 +629,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasksMessage('');
       const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
@@ -648,7 +663,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setMessage('');
       const token = getStoredToken();
       const response = await axios.put(`${API_URL}/auth/profile`, formData, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setProfile(response.data);
       if (onUserUpdate) {
@@ -680,7 +695,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
       }, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setMessage('Heslo bolo úspešne zmenené');
       setPasswordData({
@@ -748,7 +763,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       const token = getStoredToken();
       await axios.delete(`${API_URL}/auth/avatar`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders()
       });
       setProfile(prev => ({ ...prev, avatar: null }));
       setMessage('Avatar bol odstránený');
