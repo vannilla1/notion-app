@@ -2127,8 +2127,13 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       return;
     }
 
-    // Acquire lock to prevent duplicate syncs (create+auto-sync race)
-    const lockKey = `calsync-${taskId}-${action}`;
+    // Acquire lock to prevent duplicate syncs. Key intentionally does NOT
+    // include the action — a 'create' in flight concurrent with 'update'
+    // would otherwise both insert, because the 'update' branch reads
+    // syncedTaskIds.get(taskId) which is still empty until 'create' finishes
+    // its findByIdAndUpdate round-trip. One taskId = one in-flight sync at a
+    // time, across every action.
+    const lockKey = `calsync-${taskId}`;
     if (!acquireCalendarLock(lockKey)) {
       logger.debug('[Auto-sync Calendar] Skipping - sync already in progress', { taskId, action });
       return;

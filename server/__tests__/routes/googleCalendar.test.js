@@ -35,6 +35,10 @@ const mockEventsWatch = jest.fn().mockResolvedValue({
   data: { resourceId: 'resource-id', expiration: String(Date.now() + 86400000) }
 });
 const mockChannelsStop = jest.fn().mockResolvedValue({});
+const mockCalendarListList = jest.fn().mockResolvedValue({ data: { items: [] } });
+const mockCalendarsDelete = jest.fn().mockResolvedValue({});
+const mockEventsList = jest.fn().mockResolvedValue({ data: { items: [] } });
+const mockEventsDelete = jest.fn().mockResolvedValue({});
 
 jest.mock('googleapis', () => ({
   google: {
@@ -48,8 +52,22 @@ jest.mock('googleapis', () => ({
       }))
     },
     calendar: jest.fn().mockReturnValue({
-      events: { watch: mockEventsWatch },
-      channels: { stop: mockChannelsStop }
+      events: {
+        watch: mockEventsWatch,
+        list: mockEventsList,
+        delete: mockEventsDelete
+      },
+      channels: { stop: mockChannelsStop },
+      calendarList: {
+        list: mockCalendarListList,
+        patch: jest.fn().mockResolvedValue({ data: {} }),
+        get: jest.fn().mockResolvedValue({ data: {} })
+      },
+      calendars: {
+        delete: mockCalendarsDelete,
+        insert: jest.fn().mockResolvedValue({ data: { id: 'new-cal-id' } }),
+        get: jest.fn().mockResolvedValue({ data: { id: 'cal-id' } })
+      }
     }),
     tasks: jest.fn().mockReturnValue({
       tasklists: {
@@ -90,6 +108,12 @@ describe('/api/google-calendar route', () => {
     mockGenerateAuthUrl.mockClear();
     mockGetToken.mockClear();
     mockRevokeToken.mockClear();
+    mockCalendarListList.mockClear();
+    mockCalendarsDelete.mockClear();
+    mockEventsList.mockClear();
+    mockEventsDelete.mockClear();
+    mockCalendarListList.mockResolvedValue({ data: { items: [] } });
+    mockEventsList.mockResolvedValue({ data: { items: [] } });
   });
 
   afterAll(async () => {
@@ -224,7 +248,9 @@ describe('/api/google-calendar route', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(mockRevokeToken).toHaveBeenCalledWith('active-token');
+      // Post-PR2 cleanup flow may refresh the token before revoke; don't
+      // pin to a specific value.
+      expect(mockRevokeToken).toHaveBeenCalled();
 
       const updated = await User.findById(user._id);
       expect(updated.googleCalendar.enabled).toBe(false);
@@ -247,6 +273,104 @@ describe('/api/google-calendar route', () => {
         .set(authHeader(token));
       // Aj pri revoke fail sa disconnect musí dokončiť
       expect(res.status).toBe(200);
+    });
+
+    // --- PR2 cleanup tests ---
+
+    it('zmaže všetky Prpl CRM kalendáre (legacy + per-workspace + straggleri)', async () => {
+      mockCalendarListList.mockResolvedValueOnce({
+        data: {
+          items: [
+            { id: 'legacy-cal', summary: 'Prpl CRM' },
+            { id: 'ws-cal', summary: 'Prpl CRM — MyWS' },
+            { id: 'stragler-cal', summary: 'Prpl CRM — OldWS' },
+            { id: 'user-cal', summary: 'Family' } // must NOT be deleted
+          ]
+        }
+      });
+
+      user.googleCalendar = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        calendarId: 'legacy-cal',
+        workspaceCalendars: new Map([
+          ['ws-id-1', { calendarId: 'ws-cal', createdAt: new Date() }]
+        ]),
+        syncedTaskIds: new Map(),
+        syncedTaskCalendars: new Map()
+      };
+      await user.save();
+
+      const res = await request(app)
+        .post('/api/google-calendar/disconnect')
+        .set(authHeader(token));
+
+      expect(res.status).toBe(200);
+      const deletedIds = mockCalendarsDelete.mock.calls.map(c => c[0].calendarId);
+      expect(deletedIds).toEqual(expect.arrayContaining(['legacy-cal', 'ws-cal', 'stragler-cal']));
+      expect(deletedIds).not.toContain('user-cal');
+    });
+
+    it('skenuje cez všetky kalendáre pre source=prplcrm eventy', async () => {
+      // User has one family calendar with an event leaked in (old bug).
+      // Disconnect should scan + delete it without touching other events.
+      mockCalendarListList.mockResolvedValueOnce({
+        data: {
+          items: [{ id: 'family-cal', summary: 'Family' }]
+        }
+      });
+      mockEventsList.mockResolvedValueOnce({
+        data: {
+          items: [{ id: 'stray-event-id', summary: 'CRM task gone rogue' }]
+        }
+      });
+      // primary scan returns nothing
+      mockEventsList.mockResolvedValueOnce({ data: { items: [] } });
+
+      user.googleCalendar = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        calendarId: 'primary',
+        syncedTaskIds: new Map(),
+        syncedTaskCalendars: new Map()
+      };
+      await user.save();
+
+      const res = await request(app)
+        .post('/api/google-calendar/disconnect')
+        .set(authHeader(token));
+
+      expect(res.status).toBe(200);
+      // Verify events.list was called with source=prplcrm filter
+      const listCalls = mockEventsList.mock.calls;
+      expect(listCalls.some(c => c[0].privateExtendedProperty === 'source=prplcrm')).toBe(true);
+      // Verify the stray event was deleted
+      const deletedEventIds = mockEventsDelete.mock.calls.map(c => c[0].eventId);
+      expect(deletedEventIds).toContain('stray-event-id');
+    });
+
+    it('stále dokončí disconnect aj keď Google cleanup zlyhá', async () => {
+      mockCalendarListList.mockRejectedValueOnce(new Error('Google unreachable'));
+
+      user.googleCalendar = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        calendarId: 'primary',
+        syncedTaskIds: new Map(),
+        syncedTaskCalendars: new Map()
+      };
+      await user.save();
+
+      const res = await request(app)
+        .post('/api/google-calendar/disconnect')
+        .set(authHeader(token));
+
+      expect(res.status).toBe(200);
+      const updated = await User.findById(user._id);
+      expect(updated.googleCalendar.enabled).toBe(false);
     });
   });
 });

@@ -2037,8 +2037,9 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
       return;
     }
 
-    // Acquire lock to prevent duplicate syncs
-    const lockKey = `sync-${taskId}-${action}`;
+    // Acquire lock to prevent duplicate syncs. Same rationale as googleCalendar.js:
+    // action not included in key, so concurrent create+update can't both insert.
+    const lockKey = `sync-${taskId}`;
     if (!acquireLock(lockKey)) {
       logger.debug('[Auto-sync Tasks] Skipping - sync already in progress', { taskId, action });
       return;

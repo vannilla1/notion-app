@@ -36,6 +36,9 @@ const mockTasklistsList = jest.fn().mockResolvedValue({
 const mockTasklistsInsert = jest.fn().mockResolvedValue({
   data: { id: 'new-list-id', title: 'Prpl CRM' }
 });
+const mockTasklistsDelete = jest.fn().mockResolvedValue({});
+const mockTasksList = jest.fn().mockResolvedValue({ data: { items: [] } });
+const mockTasksDelete = jest.fn().mockResolvedValue({});
 
 jest.mock('googleapis', () => ({
   google: {
@@ -53,13 +56,15 @@ jest.mock('googleapis', () => ({
     tasks: jest.fn().mockReturnValue({
       tasklists: {
         list: mockTasklistsList,
-        insert: mockTasklistsInsert
+        insert: mockTasklistsInsert,
+        delete: mockTasklistsDelete,
+        get: jest.fn().mockResolvedValue({ data: { id: 'list-id' } })
       },
       tasks: {
-        list: jest.fn().mockResolvedValue({ data: { items: [] } }),
+        list: mockTasksList,
         insert: jest.fn().mockResolvedValue({ data: { id: 'new-task-id' } }),
         update: jest.fn().mockResolvedValue({ data: {} }),
-        delete: jest.fn().mockResolvedValue({}),
+        delete: mockTasksDelete,
         patch: jest.fn().mockResolvedValue({ data: {} })
       }
     }),
@@ -103,6 +108,12 @@ describe('/api/google-tasks route', () => {
     mockRevokeToken.mockClear();
     mockTasklistsList.mockClear();
     mockTasklistsInsert.mockClear();
+    mockTasklistsDelete.mockClear();
+    mockTasksList.mockClear();
+    mockTasksDelete.mockClear();
+    // Restore default mock implementations (tests may override via mockResolvedValueOnce)
+    mockTasklistsList.mockResolvedValue({ data: { items: [{ id: 'existing-list', title: 'Prpl CRM' }] } });
+    mockTasksList.mockResolvedValue({ data: { items: [] } });
   });
 
   afterAll(async () => {
@@ -289,7 +300,10 @@ describe('/api/google-tasks route', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(mockRevokeToken).toHaveBeenCalledWith('active-token');
+      // Post-PR2 cleanup flow calls getTasksClient() first, which may refresh
+      // the token before we hand it off to revokeToken. Just assert revoke
+      // was invoked — the specific token value is an implementation detail.
+      expect(mockRevokeToken).toHaveBeenCalled();
 
       const updated = await User.findById(ctx.user._id);
       expect(updated.googleTasks.enabled).toBe(false);
@@ -315,6 +329,133 @@ describe('/api/google-tasks route', () => {
 
       const updated = await User.findById(ctx.user._id);
       expect(updated.googleTasks.enabled).toBe(false);
+    });
+
+    // --- PR2 cleanup tests — verify exhaustive list/task cleanup on disconnect ---
+
+    it('zmaže všetky Prpl CRM zoznamy (legacy + per-workspace)', async () => {
+      // Scenario: user had legacy single list + per-workspace list from PR2.
+      // Both should be deleted via tasklists.delete on disconnect.
+      mockTasklistsList.mockResolvedValueOnce({
+        data: {
+          items: [
+            { id: 'legacy-list-id', title: 'Prpl CRM' },
+            { id: 'ws-list-id', title: 'Prpl CRM — GT WS' },
+            { id: 'user-list-id', title: 'My Tasks' } // should NOT be deleted
+          ]
+        }
+      });
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        taskListId: 'legacy-list-id',
+        workspaceTaskLists: new Map([
+          [ctx.workspace._id.toString(), { taskListId: 'ws-list-id', createdAt: new Date() }]
+        ]),
+        syncedTaskIds: new Map(),
+        syncedTaskLists: new Map()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      // Prpl CRM-named lists should both be deleted; user's personal list untouched.
+      const deletedIds = mockTasklistsDelete.mock.calls.map(c => c[0].tasklist);
+      expect(deletedIds).toEqual(expect.arrayContaining(['legacy-list-id', 'ws-list-id']));
+      expect(deletedIds).not.toContain('user-list-id');
+    });
+
+    it('zmaže naše osirotené úlohy aj z user-owned zoznamov (scan podľa syncedTaskIds)', async () => {
+      // Scenario: a stale task from an earlier sync somehow ended up in the
+      // user's default "My Tasks" list (wrong-workspace bug before PR2).
+      // Disconnect should hunt it down and delete it WITHOUT touching the
+      // user's own tasks in the same list.
+      mockTasklistsList.mockResolvedValueOnce({
+        data: {
+          items: [
+            { id: 'user-list-id', title: 'My Tasks' }
+          ]
+        }
+      });
+      mockTasksList.mockResolvedValueOnce({
+        data: {
+          items: [
+            { id: 'our-stray-google-id', title: 'CRM task gone rogue' },
+            { id: 'user-own-task-id', title: 'User private task' }
+          ]
+        }
+      });
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        taskListId: null,
+        syncedTaskIds: new Map([['crm-task-id', 'our-stray-google-id']]),
+        syncedTaskLists: new Map()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      // Exactly our orphan task should be deleted; user's own task untouched.
+      const deletedTasks = mockTasksDelete.mock.calls.map(c => c[0]);
+      expect(deletedTasks).toEqual([{ tasklist: 'user-list-id', task: 'our-stray-google-id' }]);
+      // User's personal list never gets deleted wholesale.
+      const deletedLists = mockTasklistsDelete.mock.calls.map(c => c[0].tasklist);
+      expect(deletedLists).not.toContain('user-list-id');
+    });
+
+    it('správa hovorí o počte zmazaných zoznamov + úloh', async () => {
+      mockTasklistsList.mockResolvedValueOnce({
+        data: { items: [{ id: 'prpl-list', title: 'Prpl CRM — GT WS' }] }
+      });
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        syncedTaskIds: new Map()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toMatch(/odstránených.*1 task listov/);
+    });
+
+    it('stále dokončí disconnect aj keď cleanup zlyhá', async () => {
+      // If Google API is down during cleanup, user must still end up in a
+      // disconnected state — otherwise they're stuck reconnecting forever.
+      mockTasklistsList.mockRejectedValueOnce(new Error('Google is down'));
+
+      ctx.user.googleTasks = {
+        enabled: true,
+        accessToken: 'active',
+        refreshToken: 'refresh',
+        syncedTaskIds: new Map()
+      };
+      await ctx.user.save();
+
+      const res = await request(app)
+        .post('/api/google-tasks/disconnect')
+        .set(authHeader(ctx.token));
+
+      expect(res.status).toBe(200);
+      const updated = await User.findById(ctx.user._id);
+      expect(updated.googleTasks.enabled).toBe(false);
+      expect(updated.googleTasks.accessToken).toBeNull();
     });
   });
 
