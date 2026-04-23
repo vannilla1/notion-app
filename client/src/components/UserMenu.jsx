@@ -412,6 +412,46 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  // PR3: migrate existing synced events from the legacy single calendar into
+  // per-workspace calendars. One-shot operation; idempotent on re-run. Shown
+  // to all users because even those who connected after PR2 may still have
+  // some legacy events (if they sync'd once with the pre-PR2 code).
+  const handleMigrateCalendar = async () => {
+    if (!confirm('Rozdeliť existujúce udalosti do samostatných kalendárov podľa workspaceov? Staré udalosti sa presunú do nových "Prpl CRM — {workspace}" kalendárov.')) return;
+    try {
+      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
+      const token = getStoredToken();
+      const response = await axios.post(`${API_URL}/google-calendar/migrate-to-per-workspace`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleCalendarStatus();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri migrácii';
+      setErrors({ general: translateErrorMessage(errorMsg) });
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  const handleMigrateTasks = async () => {
+    if (!confirm('Rozdeliť existujúce úlohy do samostatných task listov podľa workspaceov?')) return;
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      const token = getStoredToken();
+      const response = await axios.post(`${API_URL}/google-tasks/migrate-to-per-workspace`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleTasksStatus();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri migrácii';
+      setErrors({ general: translateErrorMessage(errorMsg) });
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
   // Dedup: find and remove duplicate Prpl CRM events that were created before the
   // sync lock fix (PR1). Safe — only touches events tagged with source=prplcrm,
   // never personal calendar entries. Surfaced as a user-visible button because
@@ -1206,6 +1246,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </button>
                       <button
                         className="btn btn-secondary"
+                        onClick={handleMigrateCalendar}
+                        disabled={googleCalendar.syncing}
+                        title="Rozdelí udalosti z pôvodného spoločného kalendára do samostatných kalendárov podľa workspacov"
+                      >
+                        🔀 Rozdeliť podľa workspaceov
+                      </button>
+                      <button
+                        className="btn btn-secondary"
                         onClick={handleDeduplicateCalendar}
                         disabled={googleCalendar.syncing}
                         title="Odstráni duplicitné udalosti, ktoré vznikli pred opravou v apríli 2026"
@@ -1315,6 +1363,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         disabled={googleTasks.syncing}
                       >
                         {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleMigrateTasks}
+                        disabled={googleTasks.syncing}
+                        title="Rozdelí úlohy z pôvodného spoločného listu do samostatných listov podľa workspacov"
+                      >
+                        🔀 Rozdeliť podľa workspaceov
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks} disabled={googleTasks.syncing}>
                         Odpojiť

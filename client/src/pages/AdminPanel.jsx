@@ -1311,7 +1311,7 @@ function SyncTab({ filter, onFilterChange }) {
                     <span>{formatDate(d.calendar.connectedAt)}</span>
                   </div>
                   <div className="sa-sync-detail">
-                    <span>Synchronizovaných:</span>
+                    <span>Synchronizovaných celkom:</span>
                     <span>{d.calendar.syncedCount} udalostí</span>
                   </div>
                   <div className="sa-sync-detail">
@@ -1326,6 +1326,26 @@ function SyncTab({ filter, onFilterChange }) {
                       <span>{formatDate(d.calendar.watchExpiry)}</span>
                     </div>
                   )}
+                  {/* PR2: per-workspace breakdown */}
+                  {d.calendar.workspaces && d.calendar.workspaces.length > 0 && (
+                    <div style={{ marginTop: '8px', borderTop: '1px solid var(--sa-border, #e5e7eb)', paddingTop: '8px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: 'var(--sa-muted, #6b7280)' }}>
+                        Workspace kalendáre ({d.calendar.workspaces.length})
+                      </div>
+                      {d.calendar.workspaces.map(ws => (
+                        <div key={ws.workspaceId} className="sa-sync-detail" style={{ fontSize: '12px' }}>
+                          <span title={ws.calendarId}>📁 {ws.workspaceName}</span>
+                          <span>{ws.syncedCount} udalostí</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {d.calendar.unattributedCount > 0 && (
+                    <div className="sa-sync-detail" style={{ marginTop: '4px', color: '#d97706' }}>
+                      <span>⚠️ Nemigrovaných:</span>
+                      <span>{d.calendar.unattributedCount} udalostí (v pôvodnom kalendári)</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1337,7 +1357,7 @@ function SyncTab({ filter, onFilterChange }) {
                     <span>{formatDate(d.tasks.connectedAt)}</span>
                   </div>
                   <div className="sa-sync-detail">
-                    <span>Synchronizovaných:</span>
+                    <span>Synchronizovaných celkom:</span>
                     <span>{d.tasks.syncedCount} úloh</span>
                   </div>
                   <div className="sa-sync-detail">
@@ -1348,6 +1368,25 @@ function SyncTab({ filter, onFilterChange }) {
                     <span>Kvóta dnes:</span>
                     <span>{d.tasks.quotaUsedToday}/100</span>
                   </div>
+                  {d.tasks.workspaces && d.tasks.workspaces.length > 0 && (
+                    <div style={{ marginTop: '8px', borderTop: '1px solid var(--sa-border, #e5e7eb)', paddingTop: '8px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: 'var(--sa-muted, #6b7280)' }}>
+                        Workspace task listy ({d.tasks.workspaces.length})
+                      </div>
+                      {d.tasks.workspaces.map(ws => (
+                        <div key={ws.workspaceId} className="sa-sync-detail" style={{ fontSize: '12px' }}>
+                          <span title={ws.taskListId}>📋 {ws.workspaceName}</span>
+                          <span>{ws.syncedCount} úloh</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {d.tasks.unattributedCount > 0 && (
+                    <div className="sa-sync-detail" style={{ marginTop: '4px', color: '#d97706' }}>
+                      <span>⚠️ Nemigrovaných:</span>
+                      <span>{d.tasks.unattributedCount} úloh (v pôvodnom liste)</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

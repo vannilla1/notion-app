@@ -1368,6 +1368,186 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
 });
 
 /**
+ * MIGRATE — move existing events from the legacy single calendar into new
+ * per-workspace calendars.
+ *
+ * Before PR2, every user had one shared calendar (usually `primary` or an
+ * early "Prpl CRM" calendar). PR2 introduced per-workspace calendars, but
+ * new events only land in them after the user syncs each workspace. Old
+ * events stay behind in the legacy calendar, so users see a mess: half
+ * the events split by workspace, half stuck in the old pile.
+ *
+ * This endpoint fixes it in one shot:
+ *   1. Walk syncedTaskIds (the canonical mapping).
+ *   2. For each (taskId, eventId) without a per-task calendar recorded:
+ *      a. Look up the Task → get workspaceId.
+ *      b. Resolve / create the per-workspace calendar via the standard helper.
+ *      c. Insert a fresh event there with the same data.
+ *      d. Delete the original event from the legacy calendar.
+ *      e. Update mappings (syncedTaskIds.eventId, syncedTaskCalendars).
+ *   3. Skip tasks already bound to a calendar (post-PR2 or previously migrated).
+ *
+ * Failure handling: per-task failures are logged and counted; the run keeps
+ * going. Migration is idempotent — re-running completes any tasks that
+ * failed the first time.
+ */
+router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    if (!user.googleCalendar?.enabled) {
+      return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
+    }
+
+    const calendar = await getCalendarClient(user);
+    const legacyCalendarId = user.googleCalendar.calendarId || 'primary';
+
+    const syncedTaskIds = user.googleCalendar.syncedTaskIds
+      ? Array.from(user.googleCalendar.syncedTaskIds.entries())
+      : [];
+
+    let migrated = 0;
+    let skipped = 0;
+    let errors = 0;
+    let orphans = 0; // events whose task no longer exists
+
+    for (const [taskId, eventId] of syncedTaskIds) {
+      // Already bound to a calendar → skip (post-PR2 or previously migrated).
+      const existingCal = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+      if (existingCal) { skipped++; continue; }
+
+      try {
+        // Resolve task → workspaceId. Global task first, then contact-scoped tasks.
+        let workspaceId = null;
+        if (mongoose.Types.ObjectId.isValid(taskId)) {
+          const t = await Task.findById(taskId, 'workspaceId').lean();
+          if (t?.workspaceId) workspaceId = t.workspaceId.toString();
+        }
+        if (!workspaceId) {
+          // Contact subtask — search across contacts (bounded by membership).
+          const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+          const wsIds = memberships.map(m => m.workspaceId);
+          const contact = await Contact.findOne({ workspaceId: { $in: wsIds }, 'tasks.id': taskId }, 'workspaceId').lean();
+          if (contact?.workspaceId) workspaceId = contact.workspaceId.toString();
+        }
+
+        if (!workspaceId) {
+          orphans++;
+          // Task is gone — delete the dangling event and remove the mapping.
+          try {
+            await calendar.events.delete({ calendarId: legacyCalendarId, eventId });
+          } catch (e) {
+            if (e.code !== 404) logger.debug('[Migrate] Orphan delete failed', { error: e.message });
+          }
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleCalendar.syncedTaskIds.${taskId}`]: '',
+              [`googleCalendar.syncedTaskCalendars.${taskId}`]: ''
+            }
+          });
+          continue;
+        }
+
+        const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
+        if (!targetCalendarId || targetCalendarId === legacyCalendarId) {
+          // Helper returned the same calendar (creation failed, falling back
+          // to legacy). No point moving — just record the binding so we
+          // don't try to migrate this again on next run.
+          await User.findByIdAndUpdate(user._id, {
+            $set: { [`googleCalendar.syncedTaskCalendars.${taskId}`]: legacyCalendarId }
+          });
+          skipped++;
+          continue;
+        }
+
+        // Fetch the original event so we can re-create it verbatim in the
+        // new calendar (keeps title/date/description/color intact).
+        let originalEvent = null;
+        try {
+          const { data } = await calendar.events.get({ calendarId: legacyCalendarId, eventId });
+          originalEvent = data;
+        } catch (e) {
+          if (e.code !== 404) throw e;
+          // Event disappeared on Google side — just clean up mapping.
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleCalendar.syncedTaskIds.${taskId}`]: '',
+              [`googleCalendar.syncedTaskCalendars.${taskId}`]: ''
+            }
+          });
+          orphans++;
+          continue;
+        }
+
+        // Strip read-only fields before insert (Google rejects them).
+        const copyBody = {
+          summary: originalEvent.summary,
+          description: originalEvent.description,
+          start: originalEvent.start,
+          end: originalEvent.end,
+          colorId: originalEvent.colorId,
+          transparency: originalEvent.transparency,
+          status: originalEvent.status,
+          extendedProperties: originalEvent.extendedProperties || {
+            private: { ...EVENT_MARKER, taskId: String(taskId) }
+          }
+        };
+        // Ensure our marker is present on migrated events (legacy ones may lack it)
+        if (!copyBody.extendedProperties.private) copyBody.extendedProperties.private = {};
+        copyBody.extendedProperties.private.source = 'prplcrm';
+        copyBody.extendedProperties.private.taskId = String(taskId);
+
+        const inserted = await calendar.events.insert({
+          calendarId: targetCalendarId,
+          resource: copyBody
+        });
+
+        // Delete from legacy location.
+        try {
+          await calendar.events.delete({ calendarId: legacyCalendarId, eventId });
+        } catch (e) {
+          if (e.code !== 404) logger.warn('[Migrate] Legacy delete failed', { taskId, error: e.message });
+        }
+
+        // Update mappings.
+        await User.findByIdAndUpdate(user._id, {
+          $set: {
+            [`googleCalendar.syncedTaskIds.${taskId}`]: inserted.data.id,
+            [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+          }
+        });
+        migrated++;
+      } catch (taskErr) {
+        errors++;
+        logger.warn('[Migrate] Per-task migration failed', { taskId, error: taskErr.message });
+      }
+    }
+
+    logger.info('[Google Calendar] Migration finished', {
+      userId: user._id.toString(),
+      migrated,
+      skipped,
+      orphans,
+      errors,
+      total: syncedTaskIds.length
+    });
+
+    res.json({
+      success: true,
+      message: `Rozdelené: ${migrated} udalostí presunutých do workspace kalendárov, ${skipped} už bolo správne, ${orphans} osirotené odstránené, ${errors} chýb.`,
+      migrated,
+      skipped,
+      orphans,
+      errors,
+      total: syncedTaskIds.length
+    });
+  } catch (error) {
+    logger.error('[Google Calendar] Migration error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+  }
+});
+
+/**
  * DELETE ALL — remove every Prpl CRM event from the user's Google Calendar.
  *
  * Two code paths depending on how the user is connected:

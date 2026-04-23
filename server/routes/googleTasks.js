@@ -1160,6 +1160,135 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+/**
+ * MIGRATE — move existing tasks from the legacy single list into new
+ * per-workspace lists. Mirror of /migrate-to-per-workspace in googleCalendar.js.
+ * Idempotent: re-running picks up anything that failed the first time.
+ */
+router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    if (!user.googleTasks?.enabled) {
+      return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    const tasksApi = await getTasksClient(user);
+    const legacyListId = user.googleTasks.taskListId;
+    if (!legacyListId) {
+      return res.json({ success: true, message: 'Nie je čo migrovať — žiadny legacy task list.', migrated: 0 });
+    }
+
+    const syncedTaskIds = user.googleTasks.syncedTaskIds
+      ? Array.from(user.googleTasks.syncedTaskIds.entries())
+      : [];
+
+    let migrated = 0;
+    let skipped = 0;
+    let errors = 0;
+    let orphans = 0;
+
+    for (const [taskId, googleTaskId] of syncedTaskIds) {
+      const existingList = user.googleTasks.syncedTaskLists?.get?.(taskId);
+      if (existingList) { skipped++; continue; }
+
+      try {
+        // Resolve task → workspaceId
+        let workspaceId = null;
+        if (mongoose.Types.ObjectId.isValid(taskId)) {
+          const t = await Task.findById(taskId, 'workspaceId').lean();
+          if (t?.workspaceId) workspaceId = t.workspaceId.toString();
+        }
+        if (!workspaceId) {
+          const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+          const wsIds = memberships.map(m => m.workspaceId);
+          const contact = await Contact.findOne({ workspaceId: { $in: wsIds }, 'tasks.id': taskId }, 'workspaceId').lean();
+          if (contact?.workspaceId) workspaceId = contact.workspaceId.toString();
+        }
+
+        if (!workspaceId) {
+          orphans++;
+          try { await tasksApi.tasks.delete({ tasklist: legacyListId, task: googleTaskId }); }
+          catch (e) { if (e.code !== 404) logger.debug('[Migrate Tasks] Orphan delete failed', { error: e.message }); }
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleTasks.syncedTaskIds.${taskId}`]: '',
+              [`googleTasks.syncedTaskLists.${taskId}`]: ''
+            }
+          });
+          continue;
+        }
+
+        const targetListId = await getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi);
+        if (!targetListId || targetListId === legacyListId) {
+          await User.findByIdAndUpdate(user._id, {
+            $set: { [`googleTasks.syncedTaskLists.${taskId}`]: legacyListId }
+          });
+          skipped++;
+          continue;
+        }
+
+        // Fetch original task to preserve title/notes/due date.
+        let original = null;
+        try {
+          const { data } = await tasksApi.tasks.get({ tasklist: legacyListId, task: googleTaskId });
+          original = data;
+        } catch (e) {
+          if (e.code !== 404) throw e;
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleTasks.syncedTaskIds.${taskId}`]: '',
+              [`googleTasks.syncedTaskLists.${taskId}`]: ''
+            }
+          });
+          orphans++;
+          continue;
+        }
+
+        const copyBody = {
+          title: original.title,
+          notes: original.notes,
+          due: original.due,
+          status: original.status
+        };
+
+        const inserted = await tasksApi.tasks.insert({
+          tasklist: targetListId,
+          resource: copyBody
+        });
+
+        try { await tasksApi.tasks.delete({ tasklist: legacyListId, task: googleTaskId }); }
+        catch (e) { if (e.code !== 404) logger.warn('[Migrate Tasks] Legacy delete failed', { taskId, error: e.message }); }
+
+        await User.findByIdAndUpdate(user._id, {
+          $set: {
+            [`googleTasks.syncedTaskIds.${taskId}`]: inserted.data.id,
+            [`googleTasks.syncedTaskLists.${taskId}`]: targetListId
+          }
+        });
+        migrated++;
+      } catch (taskErr) {
+        errors++;
+        logger.warn('[Migrate Tasks] Per-task migration failed', { taskId, error: taskErr.message });
+      }
+    }
+
+    logger.info('[Google Tasks] Migration finished', {
+      userId: user._id.toString(),
+      migrated, skipped, orphans, errors, total: syncedTaskIds.length
+    });
+
+    res.json({
+      success: true,
+      message: `Rozdelené: ${migrated} úloh presunutých do workspace listov, ${skipped} už bolo správne, ${orphans} osirotené odstránené, ${errors} chýb.`,
+      migrated, skipped, orphans, errors, total: syncedTaskIds.length
+    });
+  } catch (error) {
+    logger.error('[Google Tasks] Migration error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+  }
+});
+
 // Reset sync state - clears all tracking maps to force full re-sync
 router.post('/reset-sync', authenticateToken, async (req, res) => {
   try {

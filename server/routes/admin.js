@@ -543,7 +543,8 @@ router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
 // ─── SYNC DIAGNOSTICS ───────────────────────────────────────────
 router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    // Get all users with Google integrations enabled
+    // Get all users with Google integrations enabled, including the PR2
+    // per-workspace maps so the admin UI can show the workspace breakdown.
     const usersWithSync = await User.find(
       {
         $or: [
@@ -551,8 +552,41 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
           { 'googleTasks.enabled': true }
         ]
       },
-      'username email googleCalendar.enabled googleCalendar.connectedAt googleCalendar.syncedTaskIds googleCalendar.watchExpiry googleTasks.enabled googleTasks.connectedAt googleTasks.syncedTaskIds googleTasks.lastSyncAt googleTasks.quotaUsedToday googleTasks.quotaResetDate'
+      'username email googleCalendar googleTasks'
     ).lean();
+
+    // Pre-load workspace names so we don't issue N+1 lookups in the map.
+    const wsIdSet = new Set();
+    for (const u of usersWithSync) {
+      const wsMap = u.googleCalendar?.workspaceCalendars || {};
+      for (const k of Object.keys(wsMap)) wsIdSet.add(k);
+      const tsMap = u.googleTasks?.workspaceTaskLists || {};
+      for (const k of Object.keys(tsMap)) wsIdSet.add(k);
+    }
+    const Workspace = require('../models/Workspace');
+    const workspaces = wsIdSet.size
+      ? await Workspace.find({ _id: { $in: Array.from(wsIdSet) } }, 'name').lean()
+      : [];
+    const workspaceNameById = new Map(workspaces.map(w => [w._id.toString(), w.name]));
+
+    // Count synced entries per workspace by walking the {task → calendar/list}
+    // reverse indexes. syncedTaskCalendars / syncedTaskLists live on the user doc.
+    const countByCalendarId = (user) => {
+      const stc = user.googleCalendar?.syncedTaskCalendars || {};
+      const counts = new Map();
+      for (const calId of Object.values(stc)) {
+        counts.set(calId, (counts.get(calId) || 0) + 1);
+      }
+      return counts;
+    };
+    const countByTaskListId = (user) => {
+      const stl = user.googleTasks?.syncedTaskLists || {};
+      const counts = new Map();
+      for (const listId of Object.values(stl)) {
+        counts.set(listId, (counts.get(listId) || 0) + 1);
+      }
+      return counts;
+    };
 
     const diagnostics = usersWithSync.map(u => {
       const calSyncedCount = u.googleCalendar?.syncedTaskIds
@@ -561,6 +595,45 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
       const tasksSyncedCount = u.googleTasks?.syncedTaskIds
         ? Object.keys(u.googleTasks.syncedTaskIds).length
         : 0;
+
+      // Build per-workspace breakdown for Calendar
+      const calendarWorkspaces = [];
+      const calCounts = countByCalendarId(u);
+      const wsCal = u.googleCalendar?.workspaceCalendars || {};
+      for (const [wsId, entry] of Object.entries(wsCal)) {
+        calendarWorkspaces.push({
+          workspaceId: wsId,
+          workspaceName: workspaceNameById.get(wsId) || '(neznámy)',
+          calendarId: entry?.calendarId,
+          createdAt: entry?.createdAt,
+          syncedCount: calCounts.get(entry?.calendarId) || 0
+        });
+      }
+      // Legacy leftovers — events still bound to the old single calendar
+      const legacyCalendarId = u.googleCalendar?.calendarId;
+      const legacyCalCount = legacyCalendarId ? (calCounts.get(legacyCalendarId) || 0) : 0;
+      // syncedTaskIds minus everything attributed to workspace calendars =
+      // unattributed (pre-PR2 events). Show so admin sees what still needs migration.
+      const attributed = Array.from(calCounts.values()).reduce((a, b) => a + b, 0);
+      const unattributedCal = Math.max(0, calSyncedCount - attributed);
+
+      // Same for Tasks
+      const tasksWorkspaces = [];
+      const tsCounts = countByTaskListId(u);
+      const wsTs = u.googleTasks?.workspaceTaskLists || {};
+      for (const [wsId, entry] of Object.entries(wsTs)) {
+        tasksWorkspaces.push({
+          workspaceId: wsId,
+          workspaceName: workspaceNameById.get(wsId) || '(neznámy)',
+          taskListId: entry?.taskListId,
+          createdAt: entry?.createdAt,
+          syncedCount: tsCounts.get(entry?.taskListId) || 0
+        });
+      }
+      const legacyTaskListId = u.googleTasks?.taskListId;
+      const legacyTasksCount = legacyTaskListId ? (tsCounts.get(legacyTaskListId) || 0) : 0;
+      const attributedTs = Array.from(tsCounts.values()).reduce((a, b) => a + b, 0);
+      const unattributedTs = Math.max(0, tasksSyncedCount - attributedTs);
 
       return {
         id: u._id,
@@ -571,7 +644,12 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
           connectedAt: u.googleCalendar.connectedAt,
           syncedCount: calSyncedCount,
           watchExpiry: u.googleCalendar.watchExpiry,
-          watchActive: u.googleCalendar.watchExpiry ? new Date(u.googleCalendar.watchExpiry) > new Date() : false
+          watchActive: u.googleCalendar.watchExpiry ? new Date(u.googleCalendar.watchExpiry) > new Date() : false,
+          // PR2: per-workspace breakdown
+          workspaces: calendarWorkspaces,
+          legacyCalendarId,
+          legacyCount: legacyCalCount,
+          unattributedCount: unattributedCal
         } : { enabled: false },
         tasks: u.googleTasks?.enabled ? {
           enabled: true,
@@ -579,7 +657,12 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
           syncedCount: tasksSyncedCount,
           lastSyncAt: u.googleTasks.lastSyncAt,
           quotaUsedToday: u.googleTasks.quotaUsedToday || 0,
-          quotaResetDate: u.googleTasks.quotaResetDate
+          quotaResetDate: u.googleTasks.quotaResetDate,
+          // PR2: per-workspace breakdown
+          workspaces: tasksWorkspaces,
+          legacyTaskListId,
+          legacyCount: legacyTasksCount,
+          unattributedCount: unattributedTs
         } : { enabled: false }
       };
     });
