@@ -412,9 +412,27 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  // Note: orphan cleanup and bulk delete are handled by the user directly in Google Calendar
-  // (for dedicated-calendar users) or implicitly on reconnect. We intentionally don't expose
-  // destructive buttons in the app UI to keep the flow simple for non-technical users.
+  // Dedup: find and remove duplicate Prpl CRM events that were created before the
+  // sync lock fix (PR1). Safe — only touches events tagged with source=prplcrm,
+  // never personal calendar entries. Surfaced as a user-visible button because
+  // some accounts already accumulated duplicates before the fix shipped.
+  const handleDeduplicateCalendar = async () => {
+    if (!confirm('Odstrániť duplicitné udalosti z Google kalendára? Akcia sa nedá vrátiť späť.')) return;
+    try {
+      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
+      const token = getStoredToken();
+      const response = await axios.post(`${API_URL}/google-calendar/deduplicate`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage(response.data.message);
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+      await fetchGoogleCalendarStatus();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri deduplikácii';
+      setErrors({ general: translateErrorMessage(errorMsg) });
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
 
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
@@ -1185,6 +1203,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         disabled={googleCalendar.syncing}
                       >
                         {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať teraz'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleDeduplicateCalendar}
+                        disabled={googleCalendar.syncing}
+                        title="Odstráni duplicitné udalosti, ktoré vznikli pred opravou v apríli 2026"
+                      >
+                        🧹 Odstrániť duplikáty
                       </button>
                       <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar} disabled={googleCalendar.syncing}>
                         Odpojiť

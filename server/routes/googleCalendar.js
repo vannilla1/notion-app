@@ -819,6 +819,14 @@ const ensureCalendarWatches = async () => {
 
 // Sync all tasks to Google Calendar
 router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
+  // Per-(user, workspace) lock prevents double-click duplicates and overlapping
+  // manual syncs. If a sync is already running for this scope, short-circuit with
+  // 409 instead of racing with Google Calendar inserts.
+  const workspaceId = req.workspaceId || req.user?.workspaceId;
+  const fullSyncLockKey = `fullsync-${req.user.id}-${workspaceId || 'none'}`;
+  if (!acquireCalendarLock(fullSyncLockKey)) {
+    return res.status(409).json({ message: 'Synchronizácia už prebieha, počkaj pár sekúnd.' });
+  }
   try {
     const user = await User.findById(req.user.id);
 
@@ -829,7 +837,6 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     const calendar = await getCalendarClient(user);
 
     // Get tasks for the workspace from which the sync was triggered
-    const workspaceId = req.workspaceId || user.currentWorkspaceId;
     const globalTasks = workspaceId ? await Task.find({ workspaceId }) : [];
     const contacts = workspaceId ? await Contact.find({ workspaceId }) : [];
 
@@ -931,13 +938,22 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   } catch (error) {
     logger.error('[Google Calendar] Sync error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+  } finally {
+    releaseCalendarLock(fullSyncLockKey);
   }
 });
 
 // Sync single task to Google Calendar
 router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
+  const { taskId } = req.params;
+  // Per-task lock — same rationale as autoSyncTaskToCalendar: prevents two
+  // concurrent requests from both inserting the same event (no mapping yet,
+  // both create, duplicate lands).
+  const singleSyncLockKey = `single-${req.user.id}-${taskId}`;
+  if (!acquireCalendarLock(singleSyncLockKey)) {
+    return res.status(409).json({ message: 'Synchronizácia tejto úlohy už prebieha.' });
+  }
   try {
-    const { taskId } = req.params;
     const user = await User.findById(req.user.id);
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
@@ -1011,6 +1027,8 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
   } catch (error) {
     logger.error('[Google Calendar] Single task sync error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+  } finally {
+    releaseCalendarLock(singleSyncLockKey);
   }
 });
 
@@ -1128,6 +1146,111 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
   } catch (error) {
     logger.error('[Google Calendar] Cleanup error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+  }
+});
+
+/**
+ * DEDUPLICATE — remove duplicate Prpl CRM events in the user's calendar.
+ *
+ * Background: before the sync lock (PR1) was added, race conditions between
+ * manual /sync and auto-sync on task create could write the same event twice.
+ * This endpoint cleans up that legacy mess.
+ *
+ * Strategy (conservative — only touches Prpl CRM events):
+ *  1. List every event with extendedProperties.private.source=prplcrm (our marker).
+ *  2. Group by a "signature" — summary + start.date (or start.dateTime) — because
+ *     older events (pre-PR1) don't have taskId in extendedProperties, so that's
+ *     the only way to group them.
+ *  3. Within a group, keep the event whose ID matches syncedTaskIds[taskId] first;
+ *     if nothing matches, keep the newest (created last). Delete the rest.
+ *
+ * Safe because: only Prpl CRM-tagged events are in scope; primary calendar's
+ * personal events (weddings, birthdays) do not have our marker, so they are
+ * never even listed.
+ */
+router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user.googleCalendar?.enabled) {
+      return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
+    }
+    const calendar = await getCalendarClient(user);
+    const calendarId = user.googleCalendar.calendarId;
+
+    // List all events tagged as ours (paginate because user could have many)
+    let pageToken;
+    const ourEvents = [];
+    do {
+      const { data } = await calendar.events.list({
+        calendarId,
+        privateExtendedProperty: 'source=prplcrm',
+        maxResults: 250,
+        pageToken,
+        showDeleted: false,
+        // No timeMin — dedup must see past + future events
+      });
+      if (data.items) ourEvents.push(...data.items);
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+
+    // Build reverse index eventId → taskId from syncedTaskIds
+    const eventIdToTaskId = new Map();
+    if (user.googleCalendar.syncedTaskIds) {
+      for (const [taskId, eventId] of user.googleCalendar.syncedTaskIds.entries()) {
+        eventIdToTaskId.set(eventId, taskId);
+      }
+    }
+
+    // Group by (summary|startDate) — duplicates will collide on this key
+    const groups = new Map();
+    for (const ev of ourEvents) {
+      const startKey = ev.start?.date || ev.start?.dateTime || '';
+      const key = `${ev.summary || ''}|${startKey}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(ev);
+    }
+
+    let deleted = 0;
+    let errors = 0;
+
+    for (const [, events] of groups) {
+      if (events.length <= 1) continue; // no duplicates
+      // Pick survivor: prefer one referenced in syncedTaskIds, else the newest
+      events.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
+      const mapped = events.find(e => eventIdToTaskId.has(e.id));
+      const survivor = mapped || events[0];
+      for (const ev of events) {
+        if (ev.id === survivor.id) continue;
+        try {
+          await calendar.events.delete({ calendarId, eventId: ev.id });
+          deleted++;
+        } catch (e) {
+          if (e.code !== 404) {
+            logger.warn('[Google Calendar] Dedup delete failed', { eventId: ev.id, error: e.message });
+            errors++;
+          }
+        }
+      }
+    }
+
+    logger.info('[Google Calendar] Dedup finished', {
+      userId: user._id,
+      totalEvents: ourEvents.length,
+      groupsScanned: groups.size,
+      deleted,
+      errors
+    });
+
+    res.json({
+      success: true,
+      message: `Odstránených ${deleted} duplicitných udalostí${errors ? ` (${errors} chýb)` : ''}.`,
+      deleted,
+      errors,
+      scanned: ourEvents.length
+    });
+  } catch (error) {
+    logger.error('[Google Calendar] Dedup error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri deduplikácii: ' + error.message });
   }
 });
 
@@ -1349,12 +1472,39 @@ function createEventData(task) {
     colorId: colorId,
     transparency: 'transparent', // Don't block time
     status: task.completed ? 'cancelled' : 'confirmed',
-    // Marker so we can find our events later (bulk delete in primary calendar use-case)
-    extendedProperties: { private: { ...EVENT_MARKER } }
+    // Marker so we can find our events later (bulk delete in primary calendar use-case).
+    // taskId is stored too — lets us reconcile duplicates by grouping via Google Calendar's
+    // `privateExtendedProperty=taskId=...` search parameter without having to trust the
+    // per-user syncedTaskIds map (which can get out of sync with reality).
+    extendedProperties: { private: { ...EVENT_MARKER, taskId: task.id ? String(task.id) : '' } }
   };
 }
 
 // ==================== AUTO-SYNC HELPER FUNCTIONS ====================
+
+// In-memory lock to prevent duplicate syncs for the same task.
+// Parallel triggers (manual /sync + auto-sync on create) wrote the same event twice
+// into Google Calendar, because Google's insert is not idempotent for events with
+// the same extendedProperties.private.taskId — it cheerfully creates duplicates.
+// Mirror of Google Tasks lock (googleTasks.js); keep behavior identical so both
+// sync paths converge on the same concurrency model.
+const calendarSyncLocks = new Map();
+const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — matches /sync worst-case wall time
+
+const acquireCalendarLock = (key) => {
+  const now = Date.now();
+  const existing = calendarSyncLocks.get(key);
+  if (existing && now - existing > CALENDAR_LOCK_TIMEOUT) {
+    calendarSyncLocks.delete(key); // stale — release
+  }
+  if (calendarSyncLocks.has(key)) return false;
+  calendarSyncLocks.set(key, now);
+  return true;
+};
+
+const releaseCalendarLock = (key) => {
+  calendarSyncLocks.delete(key);
+};
 
 /**
  * Automatically sync a task to Google Calendar for all users who have Google Calendar connected
@@ -1381,6 +1531,14 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
       return;
     }
 
+    // Acquire lock to prevent duplicate syncs (create+auto-sync race)
+    const lockKey = `calsync-${taskId}-${action}`;
+    if (!acquireCalendarLock(lockKey)) {
+      logger.debug('[Auto-sync Calendar] Skipping - sync already in progress', { taskId, action });
+      return;
+    }
+
+    try {
     // Determine workspace scope — only sync for members of the task's workspace
     const workspaceId = taskData.workspaceId?.toString();
     // Find users with Google Calendar enabled — filtered by workspace membership
@@ -1489,6 +1647,9 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
           logger.error('[Auto-sync Calendar] Error syncing for user', { userId: user._id, error: error.message });
         }
       }
+    }
+    } finally {
+      releaseCalendarLock(lockKey);
     }
   } catch (error) {
     logger.error('[Auto-sync Calendar] Error in autoSyncTaskToCalendar', { error: error.message });
