@@ -46,6 +46,61 @@ const autoDeleteContactFromGoogle = async (taskId) => {
   ]);
 };
 
+/**
+ * When a whole contact gets deleted, every task (and every nested subtask)
+ * stored inside it must also vanish from Google. Collect every ID first,
+ * then fan out parallel deletes. Previously only top-level contact task
+ * deletes cleaned up Google — deleting the contact itself left dozens of
+ * orphan events pointing to a kontakt that no longer exists.
+ */
+const collectAllTaskIdsFromContact = (contact) => {
+  const ids = [];
+  const walk = (subtasks) => {
+    if (!Array.isArray(subtasks)) return;
+    for (const sub of subtasks) {
+      if (sub?.id) ids.push(String(sub.id));
+      if (Array.isArray(sub?.subtasks) && sub.subtasks.length > 0) walk(sub.subtasks);
+    }
+  };
+  if (Array.isArray(contact?.tasks)) {
+    for (const t of contact.tasks) {
+      if (t?.id) ids.push(String(t.id));
+      walk(t.subtasks);
+    }
+  }
+  return ids;
+};
+
+const autoDeleteAllTasksOfContactFromGoogle = (contact) => {
+  const ids = collectAllTaskIdsFromContact(contact);
+  for (const id of ids) {
+    autoDeleteContactFromGoogle(id).catch(() => {});
+  }
+};
+
+/**
+ * Same idea as in tasks.js — cascade delete a whole task subtree (task + all
+ * nested subtasks). Used when a single contact task (with nested subtasks)
+ * or a subtask tree is removed.
+ */
+const autoDeleteTaskTreeFromGoogle = (task) => {
+  if (!task) return;
+  const ids = [];
+  const rootId = task.id || (task._id && task._id.toString());
+  if (rootId) ids.push(String(rootId));
+  const walk = (subtasks) => {
+    if (!Array.isArray(subtasks)) return;
+    for (const sub of subtasks) {
+      if (sub?.id) ids.push(String(sub.id));
+      if (Array.isArray(sub?.subtasks) && sub.subtasks.length > 0) walk(sub.subtasks);
+    }
+  };
+  walk(task.subtasks);
+  for (const id of ids) {
+    autoDeleteContactFromGoogle(id).catch(() => {});
+  }
+};
+
 const router = express.Router();
 
 // Auto-invalidate contacts cache after any mutation (POST/PUT/DELETE)
@@ -371,6 +426,11 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Store contact data for notification before deletion
     const contactData = { _id: contact._id, name: contact.name };
 
+    // Cascade cleanup to Google BEFORE removing the contact from Mongo.
+    // If we deleted first, autoSync would have no workspace context to look
+    // up (task is gone) and the events would orphan forever in Google.
+    autoDeleteAllTasksOfContactFromGoogle(contact);
+
     // Cascade: zmaž aj prílohy v ContactFile kolekcii. Bez tohto zostanú
     // orphaned Base64 payloady v DB (MB per file) aj po zmazaní kontaktu —
     // hromadí sa to tichu v tle a bloatuje Mongo storage. ContactFile má
@@ -538,7 +598,8 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    const deletedTaskId = contact.tasks[taskIndex].id;
+    // Snapshot before splice so we can walk the subtask tree for cleanup.
+    const deletedTask = contact.tasks[taskIndex];
     contact.tasks.splice(taskIndex, 1);
     contact.markModified('tasks');
     await contact.save();
@@ -546,8 +607,8 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
-    // Auto-delete from Google
-    autoDeleteContactFromGoogle(deletedTaskId);
+    // Auto-delete from Google (cascades to nested subtasks so nothing orphans).
+    autoDeleteTaskTreeFromGoogle(deletedTask);
 
     res.json({ message: 'Task deleted' });
   } catch (error) {
@@ -740,7 +801,9 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
-    const deletedSubtaskId = found.subtask.id;
+    // Snapshot the subtask (with any nested sub-subtasks) before splicing
+    // so we can cascade the Google cleanup properly.
+    const deletedSubtask = found.subtask;
     found.parent.splice(found.index, 1);
 
     contact.markModified('tasks');
@@ -749,8 +812,8 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
-    // Auto-delete subtask from Google
-    autoDeleteContactFromGoogle(deletedSubtaskId);
+    // Cascades to nested sub-subtasks so no orphan events remain.
+    autoDeleteTaskTreeFromGoogle(deletedSubtask);
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {

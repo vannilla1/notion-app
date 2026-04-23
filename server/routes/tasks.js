@@ -61,6 +61,47 @@ const autoDeleteFromGoogle = async (taskId) => {
   ]);
 };
 
+/**
+ * Collect every ID in a task tree — the task itself plus every nested
+ * subtask at any depth. Needed because deleting a task or contact without
+ * cascading Google cleanup for its subtasks leaves orphan events in the
+ * user's Google Calendar with no way to remove them short of a manual
+ * /cleanup sweep.
+ *
+ * Accepts both Mongoose documents (where _id is the id) and plain contact
+ * task objects (where the id is stored in `.id`).
+ */
+const collectAllTaskIds = (task) => {
+  if (!task) return [];
+  const ids = [];
+  const rootId = (task._id && task._id.toString()) || task.id;
+  if (rootId) ids.push(String(rootId));
+  const walk = (subtasks) => {
+    if (!Array.isArray(subtasks)) return;
+    for (const sub of subtasks) {
+      const subId = sub?.id || (sub?._id && sub._id.toString());
+      if (subId) ids.push(String(subId));
+      if (Array.isArray(sub?.subtasks) && sub.subtasks.length > 0) walk(sub.subtasks);
+    }
+  };
+  walk(task.subtasks);
+  return ids;
+};
+
+/**
+ * Fire-and-forget cascade delete from Google for a whole task subtree.
+ * Each ID fans out through both Calendar and Tasks delete paths in parallel.
+ * Errors are swallowed inside autoDeleteFromGoogle already — this wrapper
+ * just sequences the tree walk.
+ */
+const autoDeleteTaskTreeFromGoogle = (task) => {
+  const ids = collectAllTaskIds(task);
+  for (const id of ids) {
+    // Fire-and-forget so HTTP response isn't held up by Google latency.
+    autoDeleteFromGoogle(id).catch(() => {});
+  }
+};
+
 // Helper function to convert contact to plain object with deep copy of nested subtasks
 const contactToPlainObject = (contact) => {
   const obj = contact.toObject ? contact.toObject() : contact;
@@ -1561,8 +1602,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
           io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
-          // Auto-delete from Google Calendar
-          autoDeleteFromGoogle(req.params.id);
+          // Auto-delete from Google (cascades to every nested subtask too).
+          autoDeleteTaskTreeFromGoogle(deletedTask);
 
           // Send notification about deleted task
           await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -1597,8 +1638,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     if (task) {
       io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'global' });
 
-      // Auto-delete from Google Calendar
-      autoDeleteFromGoogle(req.params.id);
+      // Auto-delete from Google (cascades through subtasks so nothing orphans).
+      autoDeleteTaskTreeFromGoogle(task);
 
       // Send notification about deleted task
       await notificationService.notifyTaskChange('task.deleted', task, req.user, [], req.workspaceId);
@@ -1636,8 +1677,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
         io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'contact' });
 
-        // Auto-delete from Google Calendar
-        autoDeleteFromGoogle(req.params.id);
+        // Auto-delete from Google (cascades through subtasks so nothing orphans).
+        autoDeleteTaskTreeFromGoogle(deletedTask);
 
         // Send notification about deleted task
         await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -2286,7 +2327,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
             await sendDeleteNotifications(deletedSubtask, parentTask);
 
             // Auto-delete subtask from Google
-            autoDeleteFromGoogle(req.params.subtaskId);
+            // Cascades through any nested sub-subtasks so they vanish from Google too.
+            autoDeleteTaskTreeFromGoogle(deletedSubtask);
 
             return res.json({ message: 'Subtask deleted' });
           }
@@ -2307,8 +2349,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
         // Send notifications for deleted subtask and all nested subtasks
         await sendDeleteNotifications(deletedSubtask, task);
 
-        // Auto-delete subtask from Google
-        autoDeleteFromGoogle(req.params.subtaskId);
+        // Cascades through any nested sub-subtasks so they vanish from Google too.
+        autoDeleteTaskTreeFromGoogle(deletedSubtask);
 
         return res.json({ message: 'Subtask deleted' });
       }
@@ -2341,8 +2383,8 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
           // Send notifications for deleted subtask and all nested subtasks
           await sendDeleteNotifications(deletedSubtask, parentTask);
 
-          // Auto-delete subtask from Google
-          autoDeleteFromGoogle(req.params.subtaskId);
+          // Cascades through any nested sub-subtasks so they vanish from Google too.
+          autoDeleteTaskTreeFromGoogle(deletedSubtask);
 
           return res.json({ message: 'Subtask deleted' });
         }
