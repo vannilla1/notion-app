@@ -436,7 +436,90 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
-    // Revoke token if possible (fire-and-forget with 3s timeout so disconnect never blocks)
+    // --- Cleanup BEFORE revoking token (token must still be valid here) ---
+    //
+    // User expectation: after "Odpojiť", no trace of Prpl CRM should remain
+    // in their Google Calendar. Leaving stale events looks broken and
+    // creates clutter when they re-connect and a second set of events syncs
+    // on top.
+    //
+    // Two paths:
+    //  1. Dedicated per-workspace / "Prpl CRM" secondary calendars
+    //     → delete the whole calendar via calendars.delete(). Instant, clean,
+    //     everything inside goes with it.
+    //  2. Legacy fallback = primary calendar
+    //     → primary can't be deleted; instead list events with our marker
+    //     (extendedProperties.private.source=prplcrm) and batch delete them.
+    //
+    // Best-effort: if Google returns errors, we log and still proceed with
+    // disconnect — user should not be stuck in a half-connected state just
+    // because Google is flaky.
+    let eventsDeleted = 0;
+    let calendarsDeleted = 0;
+    if (user.googleCalendar?.accessToken) {
+      try {
+        const calendar = await getCalendarClient(user);
+
+        // Collect every calendar we manage for this user.
+        const dedicatedIds = new Set();
+        if (user.googleCalendar.workspaceCalendars) {
+          for (const [, entry] of user.googleCalendar.workspaceCalendars.entries()) {
+            if (entry?.calendarId) dedicatedIds.add(entry.calendarId);
+          }
+        }
+        // Legacy calendarId is dedicated iff it's not 'primary'.
+        const legacyCalId = user.googleCalendar.calendarId;
+        const legacyIsDedicated = legacyCalId && legacyCalId !== 'primary';
+        if (legacyIsDedicated) dedicatedIds.add(legacyCalId);
+
+        // Delete dedicated calendars wholesale.
+        for (const calId of dedicatedIds) {
+          try {
+            await calendar.calendars.delete({ calendarId: calId });
+            calendarsDeleted++;
+          } catch (e) {
+            if (e.code !== 404) {
+              logger.warn('[Google Calendar] Disconnect: calendar delete failed', { calId, error: e.message });
+            }
+          }
+        }
+
+        // If we were using primary as legacy fallback, scrub individual events.
+        if (!legacyIsDedicated && legacyCalId === 'primary') {
+          let pageToken;
+          do {
+            try {
+              const { data } = await calendar.events.list({
+                calendarId: 'primary',
+                privateExtendedProperty: 'source=prplcrm',
+                maxResults: 250,
+                pageToken,
+                showDeleted: false
+              });
+              for (const ev of (data.items || [])) {
+                try {
+                  await calendar.events.delete({ calendarId: 'primary', eventId: ev.id });
+                  eventsDeleted++;
+                } catch (e) {
+                  if (e.code !== 404) {
+                    logger.debug('[Google Calendar] Disconnect: event delete failed', { eventId: ev.id, error: e.message });
+                  }
+                }
+              }
+              pageToken = data.nextPageToken;
+            } catch (listErr) {
+              logger.warn('[Google Calendar] Disconnect: primary event list failed', { error: listErr.message });
+              break;
+            }
+          } while (pageToken);
+        }
+      } catch (cleanupErr) {
+        // Don't block disconnect on cleanup failure — log and move on.
+        logger.warn('[Google Calendar] Disconnect cleanup failed', { userId: req.user.id, error: cleanupErr.message });
+      }
+    }
+
+    // Revoke token (fire-and-forget) — now that we've finished using it.
     if (user.googleCalendar?.accessToken) {
       const client = createOAuth2Client();
       const tokenToRevoke = user.googleCalendar.accessToken;
@@ -460,9 +543,11 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       refreshToken: null,
       tokenExpiry: null,
       calendarId: 'primary',
+      workspaceCalendars: new Map(),
       enabled: false,
       connectedAt: null,
       syncedTaskIds: new Map(),
+      syncedTaskCalendars: new Map(),
       watchChannelId: null,
       watchResourceId: null,
       watchExpiry: null,
@@ -470,9 +555,17 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
     };
 
     await user.save();
-    logger.info('[Google Calendar] Disconnected', { userId: req.user.id, username: user.username });
+    logger.info('[Google Calendar] Disconnected', {
+      userId: req.user.id,
+      username: user.username,
+      calendarsDeleted,
+      eventsDeleted
+    });
 
-    res.json({ success: true, message: 'Google Calendar bol odpojený' });
+    const cleanupSummary = calendarsDeleted + eventsDeleted > 0
+      ? ` (odstránených ${calendarsDeleted} kalendárov, ${eventsDeleted} udalostí)`
+      : '';
+    res.json({ success: true, message: `Google Calendar bol odpojený${cleanupSummary}` });
   } catch (error) {
     logger.error('[Google Calendar] Disconnect error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri odpájaní' });

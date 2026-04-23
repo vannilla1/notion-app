@@ -559,6 +559,40 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
+    // --- Cleanup BEFORE revoking token ---
+    //
+    // User expectation on "Odpojiť": every Prpl CRM task list should vanish
+    // from Google Tasks. Each list's tasks go with it (Google cascade), so
+    // one delete per list is enough.
+    //
+    // Best-effort — disconnect must succeed even if Google is flaky.
+    let listsDeleted = 0;
+    if (user.googleTasks?.accessToken) {
+      try {
+        const tasksApi = await getTasksClient(user);
+        const listsToDelete = new Set();
+        if (user.googleTasks.taskListId) listsToDelete.add(user.googleTasks.taskListId);
+        if (user.googleTasks.workspaceTaskLists) {
+          for (const [, entry] of user.googleTasks.workspaceTaskLists.entries()) {
+            if (entry?.taskListId) listsToDelete.add(entry.taskListId);
+          }
+        }
+
+        for (const listId of listsToDelete) {
+          try {
+            await tasksApi.tasklists.delete({ tasklist: listId });
+            listsDeleted++;
+          } catch (e) {
+            if (e.code !== 404 && e.response?.status !== 404) {
+              logger.warn('[Google Tasks] Disconnect: list delete failed', { listId, error: e.message });
+            }
+          }
+        }
+      } catch (cleanupErr) {
+        logger.warn('[Google Tasks] Disconnect cleanup failed', { userId: req.user.id, error: cleanupErr.message });
+      }
+    }
+
     if (user.googleTasks?.accessToken) {
       // Fire-and-forget with timeout so disconnect never blocks on Google being slow
       const client = createOAuth2Client();
@@ -580,15 +614,19 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       refreshToken: null,
       tokenExpiry: null,
       taskListId: null,
+      workspaceTaskLists: new Map(),
       enabled: false,
       connectedAt: null,
-      syncedTaskIds: new Map()
+      syncedTaskIds: new Map(),
+      syncedTaskLists: new Map(),
+      syncedTaskHashes: new Map()
     };
 
     await user.save();
-    logger.info('[Google Tasks] Disconnected', { userId: req.user.id, username: user.username });
+    logger.info('[Google Tasks] Disconnected', { userId: req.user.id, username: user.username, listsDeleted });
 
-    res.json({ success: true, message: 'Google Tasks bol odpojený' });
+    const cleanupSummary = listsDeleted > 0 ? ` (odstránených ${listsDeleted} task listov)` : '';
+    res.json({ success: true, message: `Google Tasks bol odpojený${cleanupSummary}` });
   } catch (error) {
     logger.error('[Google Tasks] Disconnect error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri odpájaní' });
