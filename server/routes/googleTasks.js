@@ -355,29 +355,44 @@ async function getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi) {
   const title = `Prpl CRM — ${workspaceName}`;
 
   let newTaskListId = null;
-  try {
-    // Does Google already have a list with this title? (re-connect case)
-    const listResp = await tasksApi.tasklists.list({ maxResults: 100 });
-    const existingOnGoogle = (listResp.data.items || []).find(l => l.title === title);
-    if (existingOnGoogle) {
-      newTaskListId = existingOnGoogle.id;
-      logger.info('[Google Tasks] Reusing existing Google-side task list', { workspaceId, taskListId: newTaskListId });
-    } else {
+  // Same reasoning as googleCalendar.js: propagate errors instead of silently
+  // falling back to the legacy taskListId. Silent fallback was dumping
+  // per-workspace tasks into whichever list the user originally connected
+  // (named whatever they named it), which explains the "tasks from another
+  // workspace keep appearing" bug.
+  const listResp = await tasksApi.tasklists.list({ maxResults: 100 });
+  const existingOnGoogle = (listResp.data.items || []).find(l => l.title === title);
+  if (existingOnGoogle) {
+    newTaskListId = existingOnGoogle.id;
+    logger.info('[Google Tasks] Reusing existing Google-side task list', { workspaceId, taskListId: newTaskListId });
+  } else {
+    try {
       const created = await tasksApi.tasklists.insert({ resource: { title } });
       newTaskListId = created.data.id;
       logger.info('[Google Tasks] Created per-workspace task list', { workspaceId, taskListId: newTaskListId });
+    } catch (insertErr) {
+      logger.error('[Google Tasks] tasklists.insert failed', {
+        userId: user._id?.toString(),
+        workspaceId,
+        title,
+        code: insertErr.code,
+        message: insertErr.message,
+        errors: insertErr.errors,
+        response: insertErr.response?.data
+      });
+      const e = new Error(
+        insertErr.code === 403
+          ? 'Google Tasks nedovolil vytvoriť nový task list. Skúste odpojiť a znova prepojiť Google účet.'
+          : `Nepodarilo sa vytvoriť task list v Google: ${insertErr.message}`
+      );
+      e.cause = insertErr;
+      e.status = insertErr.code || 500;
+      throw e;
     }
-  } catch (err) {
-    logger.warn('[Google Tasks] Per-workspace task list setup failed, falling back', {
-      userId: user._id?.toString(),
-      workspaceId,
-      error: err.message
-    });
-    return user.googleTasks?.taskListId || null;
   }
 
   if (!newTaskListId) {
-    return user.googleTasks?.taskListId || null;
+    throw new Error('Neznáma chyba pri vytváraní workspace task listu');
   }
 
   try {

@@ -37,15 +37,29 @@ const createOAuth2Client = () => new google.auth.OAuth2(
 );
 
 // Scopes required for Google Calendar.
-// - calendar.events: read/write events on user's calendars (kept — existing users have this)
-// - calendar.app.created: allows our app to create its own secondary calendars ("Prpl CRM")
-//   and manage them. This is the minimal "non-sensitive" scope for creating calendars,
-//   so we don't need to re-verify the OAuth consent screen for a broader scope.
-// Existing users who only have calendar.events will keep working — we just fall back to
-// primary calendar if calendar creation fails.
+//
+// PR2+ per-workspace model needs the app to actually create secondary calendars
+// ("Prpl CRM — {workspace}"). `calendar.app.created` is the intended minimal
+// scope for this, BUT in practice it's unreliable across accounts:
+//   - Unverified OAuth clients can't use it consistently
+//   - Some Workspace-domain accounts block it by admin policy
+//   - calendarList.list() can't see app-created calendars without the reader scope
+// The result: calendars.insert() succeeds silently-nowhere or throws, and we
+// fell back to writing into the user's primary calendar (which for some users
+// has been renamed in Google UI — hence the "everything goes into
+// Elektrické autá Michalovce" bug report).
+//
+// Switch to full `calendar` scope. It's "sensitive" per Google's classification
+// so OAuth consent page will warn users, but it's the standard scope Google
+// themselves recommend for apps that manage multiple calendars, and it removes
+// all of the edge-case failures above.
+//
+// Kept `calendar.events` for backwards compat with tokens issued before this
+// change — Google's OAuth returns the UNION of previously-granted scopes, so
+// old users keep working even if they don't re-consent.
 const SCOPES = [
-  'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/calendar.app.created'
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/calendar.events'
 ];
 
 // Marker attached to every event we create — lets us find OUR events in primary calendar
@@ -1895,6 +1909,7 @@ function createEventData(task) {
  */
 async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
   // No workspace context (shouldn't normally happen) → legacy calendar.
+  // Delete paths still need this so orphan cleanup can function.
   if (!workspaceId) {
     return user.googleCalendar?.calendarId || 'primary';
   }
@@ -1902,7 +1917,27 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
   const wsKey = String(workspaceId);
   const existing = user.googleCalendar?.workspaceCalendars?.get?.(wsKey);
   if (existing?.calendarId) {
-    return existing.calendarId;
+    // Trust-but-verify: ensure the calendar still exists on Google's side.
+    // If user manually deleted it, we need to re-create rather than write
+    // into a dead ID (which would fail every sync afterwards).
+    try {
+      // calendars.get verifies the calendar resource itself still exists.
+      // calendarList.get could 404 even when the calendar is fine (user
+      // unsubscribed from their own list) — that would trigger false
+      // recreations.
+      await calendarClient.calendars.get({ calendarId: existing.calendarId });
+      return existing.calendarId;
+    } catch (e) {
+      if (e.code === 404 || e.code === 410) {
+        logger.warn('[Google Calendar] Cached workspace calendar vanished, will recreate', {
+          workspaceId,
+          staleCalendarId: existing.calendarId
+        });
+        // Fall through to re-create below.
+      } else {
+        throw e;
+      }
+    }
   }
 
   // Need to create. Fetch workspace name for a human-readable calendar summary.
@@ -1917,14 +1952,19 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
   const summary = `Prpl CRM — ${workspaceName}`;
 
   let newCalendarId = null;
-  try {
-    // Does the user already have a calendar with this exact summary? (re-connect case)
-    const listResp = await calendarClient.calendarList.list({ maxResults: 250 });
-    const existingOnGoogle = (listResp.data.items || []).find(c => c.summary === summary);
-    if (existingOnGoogle) {
-      newCalendarId = existingOnGoogle.id;
-      logger.info('[Google Calendar] Reusing existing Google-side calendar', { workspaceId, calendarId: newCalendarId });
-    } else {
+  // Intentionally NO try/catch wrapping the list+insert below. Previously
+  // we swallowed failures and silently returned user.googleCalendar.calendarId,
+  // which for users whose primary calendar is renamed ("Elektrické autá
+  // Michalovce") meant every workspace's events got dumped into their
+  // personal calendar invisibly. Now errors propagate to /sync and the
+  // user sees a real message instead of wondering why nothing appears.
+  const listResp = await calendarClient.calendarList.list({ maxResults: 250 });
+  const existingOnGoogle = (listResp.data.items || []).find(c => c.summary === summary);
+  if (existingOnGoogle) {
+    newCalendarId = existingOnGoogle.id;
+    logger.info('[Google Calendar] Reusing existing Google-side calendar', { workspaceId, calendarId: newCalendarId });
+  } else {
+    try {
       const created = await calendarClient.calendars.insert({
         resource: {
           summary,
@@ -1934,34 +1974,41 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
       });
       newCalendarId = created.data.id;
       logger.info('[Google Calendar] Created per-workspace calendar', { workspaceId, calendarId: newCalendarId });
-
-      // Set a color so workspaces are visually distinct by default. User can
-      // override in Google Calendar UI; our patch only seeds the initial color.
-      try {
-        // Cycle through Google's 24 color IDs based on hashed workspaceId so
-        // each workspace gets a stable but distinct color.
-        const colorId = String((Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0)) % 24) + 1);
-        await calendarClient.calendarList.patch({
-          calendarId: newCalendarId,
-          resource: { colorId }
-        });
-      } catch (colorErr) {
-        logger.debug('[Google Calendar] Color patch failed (non-fatal)', { error: colorErr.message });
-      }
+    } catch (insertErr) {
+      logger.error('[Google Calendar] calendars.insert failed', {
+        userId: user._id?.toString(),
+        workspaceId,
+        summary,
+        code: insertErr.code,
+        message: insertErr.message,
+        errors: insertErr.errors,
+        response: insertErr.response?.data
+      });
+      // Re-throw with a user-actionable message (Slovak, shown in the toast).
+      const e = new Error(
+        insertErr.code === 403
+          ? 'Google Calendar nedovolil vytvoriť nový kalendár. Pravdepodobne treba odpojiť a znova prepojiť Google účet s novým povolením.'
+          : `Nepodarilo sa vytvoriť kalendár v Google: ${insertErr.message}`
+      );
+      e.cause = insertErr;
+      e.status = insertErr.code || 500;
+      throw e;
     }
-  } catch (err) {
-    logger.warn('[Google Calendar] Per-workspace calendar setup failed, falling back', {
-      userId: user._id?.toString(),
-      workspaceId,
-      error: err.message,
-      code: err.code
-    });
-    // Fall back to legacy single calendar so sync still works.
-    return user.googleCalendar?.calendarId || 'primary';
+
+    // Set a color so workspaces are visually distinct. Non-fatal.
+    try {
+      const colorId = String((Math.abs(Array.from(wsKey).reduce((a, c) => a + c.charCodeAt(0), 0)) % 24) + 1);
+      await calendarClient.calendarList.patch({
+        calendarId: newCalendarId,
+        resource: { colorId }
+      });
+    } catch (colorErr) {
+      logger.debug('[Google Calendar] Color patch failed (non-fatal)', { error: colorErr.message });
+    }
   }
 
   if (!newCalendarId) {
-    return user.googleCalendar?.calendarId || 'primary';
+    throw new Error('Neznáma chyba pri vytváraní workspace kalendára');
   }
 
   // Persist mapping atomically. If two requests raced, the second $set wins,
