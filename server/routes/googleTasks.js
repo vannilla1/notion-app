@@ -54,9 +54,11 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // Daily quota limit - Google Tasks API allows 50,000 queries per day
 const DAILY_QUOTA_LIMIT = 50000;
 
-// Create a simple hash of task data to detect changes
-const createTaskHash = (task) => {
-  const data = `${task.title}|${task.dueDate}|${task.completed}|${task.notes || ''}|${task.contact || ''}`;
+// Create a simple hash of task data to detect changes. workspaceName is
+// included because the title we send to Google includes a [Workspace] prefix
+// — if the workspace renames, the hash must change so we re-sync.
+const createTaskHash = (task, workspaceName) => {
+  const data = `${task.title}|${task.dueDate}|${task.completed}|${task.notes || ''}|${task.contact || ''}|${workspaceName || ''}`;
   // Simple hash function
   let hash = 0;
   for (let i = 0; i < data.length; i++) {
@@ -65,6 +67,28 @@ const createTaskHash = (task) => {
     hash = hash & hash; // Convert to 32bit integer
   }
   return hash.toString(16);
+};
+
+// Lightweight workspace-name cache for the duration of a single request.
+// Sync loops call this for every task; without the cache we'd hit Mongo once
+// per task. Scoped per call, not global, so stale names can't persist across
+// requests if a workspace is renamed.
+const makeWorkspaceNameResolver = () => {
+  const cache = new Map();
+  return async (workspaceId) => {
+    if (!workspaceId) return null;
+    const key = String(workspaceId);
+    if (cache.has(key)) return cache.get(key);
+    try {
+      const ws = await Workspace.findById(workspaceId, 'name').lean();
+      const name = ws?.name || null;
+      cache.set(key, name);
+      return name;
+    } catch (e) {
+      cache.set(key, null);
+      return null;
+    }
+  };
 };
 
 // Check and reset daily quota if needed
@@ -827,6 +851,10 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       logger.error('[Google Tasks] Unable to resolve task list', { userId: req.user.id, workspaceId });
       return res.status(500).json({ message: 'Nepodarilo sa vytvoriť task list v Google Tasks' });
     }
+    // Resolve workspace name once for the whole /sync run so every task in
+    // this workspace gets a consistent `[WorkspaceName] ` title prefix.
+    const resolveWsName = makeWorkspaceNameResolver();
+    const workspaceNameForSync = await resolveWsName(workspaceId);
     const userId = req.user.id.toString(); // Convert ObjectId to string for comparison
 
     // Only sync tasks assigned to this user (or unassigned tasks)
@@ -932,7 +960,8 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       }
 
       const existingGoogleTaskId = user.googleTasks.syncedTaskIds?.get(task.id);
-      const currentHash = createTaskHash(task);
+      // Include workspace name in hash so workspace renames trigger re-sync.
+      const currentHash = createTaskHash(task, workspaceNameForSync);
       const storedHash = user.googleTasks.syncedTaskHashes?.get(task.id);
 
       // Validate that existingGoogleTaskId is a non-empty string
@@ -1030,7 +1059,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const taskData = createGoogleTaskData(task);
+          const taskData = createGoogleTaskData(task, workspaceNameForSync);
 
           // PR2: /sync runs in the context of ONE workspace, so every task in
           // this loop lands in the same per-workspace list. Cross-list moves
@@ -1983,9 +2012,30 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
   }
 }
 
-function createGoogleTaskData(task) {
+/**
+ * Build Google Tasks payload for a CRM task.
+ *
+ * `workspaceName` is optional but STRONGLY recommended when available. Google
+ * Calendar aggregates every task list into a single "Úlohy" sidebar item and
+ * strips the list name — users with multi-workspace setups had no way to tell
+ * which workspace each task belonged to. Prefixing the title with
+ * `[WorkspaceName] ` restores that context without needing any changes to
+ * Google's UI. Events don't need this — per-workspace calendars already carry
+ * their own color in Google Calendar.
+ *
+ * Re-sync safety: prefix is only added if the title doesn't already start
+ * with `[WorkspaceName] `. Re-syncing the same task 10 times won't nest
+ * brackets 10 deep.
+ */
+function createGoogleTaskData(task, workspaceName) {
   // Google Tasks title limit is 1024 chars
   let title = (task.title || '').substring(0, 1024);
+  if (workspaceName) {
+    const prefix = `[${String(workspaceName).slice(0, 40)}] `;
+    if (!title.startsWith(prefix)) {
+      title = (prefix + title).substring(0, 1024);
+    }
+  }
   let notes = (task.notes || '').substring(0, 8192);
   if (task.contact) {
     notes += notes ? '\n\n' : '';
@@ -2171,6 +2221,13 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             logger.warn('[Auto-sync Tasks] No task list available, skipping', { userId: user._id, taskId });
             continue;
           }
+          // Resolve workspace name for title prefix. Cheap (one lookup per
+          // auto-sync invocation, then discarded — no cache across requests).
+          let wsName = null;
+          try {
+            const ws = await Workspace.findById(workspaceId, 'name').lean();
+            wsName = ws?.name || null;
+          } catch (e) { /* non-fatal */ }
 
           const googleTaskData = createGoogleTaskData({
             id: taskId,
@@ -2179,7 +2236,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             dueDate: taskData.dueDate,
             completed: taskData.completed,
             contact: taskData.contactName || taskData.contact || null
-          });
+          }, wsName);
 
           const existingGoogleId = user.googleTasks?.syncedTaskIds?.get(taskId);
           const existingTaskListId = user.googleTasks?.syncedTaskLists?.get?.(taskId);
@@ -2544,3 +2601,5 @@ module.exports.autoSyncTaskToGoogleTasks = autoSyncTaskToGoogleTasks;
 module.exports.autoDeleteTaskFromGoogleTasks = autoDeleteTaskFromGoogleTasks;
 module.exports.startGoogleTasksPolling = startGoogleTasksPolling;
 module.exports.stopGoogleTasksPolling = stopGoogleTasksPolling;
+// Exported for unit tests — keeps the workspace-prefix contract under coverage.
+module.exports._createGoogleTaskData = createGoogleTaskData;

@@ -1,3 +1,13 @@
+// Set OAuth env vars BEFORE any require() touches googleTasks.js — the module
+// reads them at load time and caches. If left to beforeAll, jest's describe-
+// body evaluation (e.g. the `_createGoogleTaskData` unit-test block below)
+// can trigger the require first and snapshot undefined → createOAuth2Client
+// returns null forever for the whole test suite.
+process.env.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'test-client-id';
+process.env.GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'test-client-secret';
+process.env.GOOGLE_TASKS_REDIRECT_URI = process.env.GOOGLE_TASKS_REDIRECT_URI || 'http://localhost:3001/api/google-tasks/callback';
+process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
+
 const { createTestApp, createUserWithWorkspace, authHeader } = require('../helpers/testApp');
 const request = require('supertest');
 const mongoose = require('mongoose');
@@ -490,6 +500,39 @@ describe('/api/google-tasks route', () => {
       const updated = await User.findById(ctx.user._id);
       expect(updated.googleTasks.enabled).toBe(false);
       expect(updated.googleTasks.accessToken).toBeNull();
+    });
+  });
+
+  describe('createGoogleTaskData (workspace prefix)', () => {
+    // Unit test the exported title-prefix behavior directly. Google Calendar
+    // aggregates every Prpl CRM task list into one "Úlohy" sidebar view, so
+    // without a [Workspace] prefix in the title users with 2+ workspaces
+    // can't tell which task belongs where. These tests lock the contract.
+    const { _createGoogleTaskData } = require('../../routes/googleTasks');
+
+    it('pridá [Workspace] prefix do titulu', () => {
+      const result = _createGoogleTaskData({ title: 'Zavolať klienta' }, 'Perun Electromobility');
+      expect(result.title).toBe('[Perun Electromobility] Zavolať klienta');
+    });
+
+    it('nepridá prefix druhýkrát (re-sync idempotencia)', () => {
+      const result = _createGoogleTaskData(
+        { title: '[Perun Electromobility] Zavolať klienta' },
+        'Perun Electromobility'
+      );
+      expect(result.title).toBe('[Perun Electromobility] Zavolať klienta');
+    });
+
+    it('bez workspaceName nechá title nedotknutý', () => {
+      const result = _createGoogleTaskData({ title: 'Bez prefixu' });
+      expect(result.title).toBe('Bez prefixu');
+    });
+
+    it('orezáva dlhý workspaceName na 40 znakov v prefixe', () => {
+      const veryLong = 'Veľmi dlhý názov workspacu ktorý má ďaleko viac ako 40 znakov'; // > 40
+      const result = _createGoogleTaskData({ title: 'Tá úloha' }, veryLong);
+      const prefix = result.title.match(/^\[([^\]]+)\]/)[1];
+      expect(prefix.length).toBeLessThanOrEqual(40);
     });
   });
 
