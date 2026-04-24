@@ -428,7 +428,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     );
   };
 
-  const handleToggleCalendarWorkspace = async (workspaceId, enabled) => {
+  const handleToggleCalendarWorkspace = async (workspaceId, enabled, workspaceName) => {
+    // Odpojenie workspace = server vymaže všetky Prpl CRM udalosti z Google kalendára
+    // pre daný workspace. Je to deštruktívna akcia, preto vyžadujeme potvrdenie.
+    if (!enabled) {
+      const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
+      const ok = window.confirm(
+        `Naozaj chcete vypnúť synchronizáciu kalendára pre ${label}?\n\n` +
+        `Všetky udalosti z tohto workspace budú odstránené z vášho Google Calendara.\n` +
+        `Údaje v Prpl CRM zostanú zachované.`
+      );
+      if (!ok) return;
+    }
     try {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
       const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
@@ -441,7 +452,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  const handleToggleTasksWorkspace = async (workspaceId, enabled) => {
+  const handleToggleTasksWorkspace = async (workspaceId, enabled, workspaceName) => {
+    if (!enabled) {
+      const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
+      const ok = window.confirm(
+        `Naozaj chcete vypnúť synchronizáciu úloh pre ${label}?\n\n` +
+        `Všetky úlohy z tohto workspace budú odstránené z vašich Google Tasks (a z „Úlohy" v Google Calendari).\n` +
+        `Údaje v Prpl CRM zostanú zachované.`
+      );
+      if (!ok) return;
+    }
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
@@ -1246,7 +1266,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                                 type="checkbox"
                                 checked={enabled}
                                 disabled={googleCalendar.syncing}
-                                onChange={(e) => handleToggleCalendarWorkspace(wsId, e.target.checked)}
+                                onChange={(e) => handleToggleCalendarWorkspace(wsId, e.target.checked, ws.name)}
                               />
                               <span>{ws.name}</span>
                             </label>
@@ -1415,7 +1435,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                                 type="checkbox"
                                 checked={enabled}
                                 disabled={googleTasks.syncing}
-                                onChange={(e) => handleToggleTasksWorkspace(wsId, e.target.checked)}
+                                onChange={(e) => handleToggleTasksWorkspace(wsId, e.target.checked, ws.name)}
                               />
                               <span>{ws.name}</span>
                             </label>
