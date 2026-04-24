@@ -1217,10 +1217,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
-              {/* Stručný návod — viditeľný open-by-default pri prvom otvorení.
+              {/* Stručný návod — zbalený by-default, rozbalí sa na kliknutie.
                   <details> drží vlastný state, netreba React useState. */}
               <details
-                open
                 style={{
                   marginBottom: '16px',
                   padding: '12px 14px',
