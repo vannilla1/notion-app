@@ -2180,16 +2180,25 @@ function createEventData(task) {
   // exact hour in the user's timeline.
   let startObj, endObj;
   if (task.dueTime && /^\d{2}:\d{2}$/.test(task.dueTime)) {
+    // Pure string construction — no Date parsing to avoid server-TZ surprises.
+    // RFC3339 without offset + explicit timeZone field is accepted by Google
+    // Calendar API (lets Google handle DST/BST for Europe/Bratislava).
     const [hh, mm] = task.dueTime.split(':').map(Number);
-    const dateStr = dueDate.toISOString().split('T')[0];
-    const startDT = new Date(`${dateStr}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
-    const endDT = new Date(startDT.getTime() + 60 * 60 * 1000); // +1h
-    const toLocalISO = (d) => {
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-    };
-    startObj = { dateTime: toLocalISO(startDT), timeZone: 'Europe/Bratislava' };
-    endObj = { dateTime: toLocalISO(endDT), timeZone: 'Europe/Bratislava' };
+    const pad = (n) => String(n).padStart(2, '0');
+    const startDateTime = `${startDate}T${pad(hh)}:${pad(mm)}:00`;
+    // +1h end; if rolls past midnight, roll date forward.
+    let endHh = hh + 1;
+    let endDateStr = startDate;
+    if (endHh >= 24) {
+      endHh -= 24;
+      const d = new Date(startDate + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      endDateStr = d.toISOString().split('T')[0];
+    }
+    const endDateTime = `${endDateStr}T${pad(endHh)}:${pad(mm)}:00`;
+    startObj = { dateTime: startDateTime, timeZone: 'Europe/Bratislava' };
+    endObj = { dateTime: endDateTime, timeZone: 'Europe/Bratislava' };
+    logger.debug('[Google Calendar] Timed event', { taskId: task.id, startDateTime, endDateTime });
   } else {
     startObj = { date: startDate, timeZone: 'Europe/Bratislava' };
     endObj = { date: endDate, timeZone: 'Europe/Bratislava' };
