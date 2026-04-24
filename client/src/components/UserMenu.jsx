@@ -1212,37 +1212,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
-                    {googleCalendar.isDedicatedCalendar ? (
-                      <div style={{
-                        marginTop: '10px',
-                        padding: '10px 12px',
-                        background: '#EEF2FF',
-                        border: '1px solid #C7D2FE',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        color: '#3730A3',
-                        lineHeight: '1.5'
-                      }}>
-                        ℹ️ Úlohy sa synchronizujú do samostatného kalendára <strong>„Prpl CRM"</strong> vo vašom Google Calendari.
-                        Ak už tieto úlohy v kalendári nechcete, otvorte <strong>Google Calendar</strong> → Nastavenia → Kalendáre →
-                        „Prpl CRM" → <strong>Odstrániť kalendár</strong>. Všetky úlohy zmiznú naraz.
-                      </div>
-                    ) : (
-                      <div style={{
-                        marginTop: '10px',
-                        padding: '10px 12px',
-                        background: '#FEF3C7',
-                        border: '1px solid #FDE68A',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        color: '#92400E',
-                        lineHeight: '1.5'
-                      }}>
-                        ℹ️ Vaše úlohy sa synchronizujú do hlavného Google Calendara. Ak chcete, aby sa synchronizovali
-                        do samostatného kalendára <strong>„Prpl CRM"</strong> (ktorý môžete jedným klikom vymazať v Google Calendari),
-                        kliknite na <strong>Odpojiť</strong> a potom znova na <strong>Pripojiť Google Calendar</strong>.
-                      </div>
-                    )}
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '10px 12px',
+                      background: '#EEF2FF',
+                      border: '1px solid #C7D2FE',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      color: '#3730A3',
+                      lineHeight: '1.5'
+                    }}>
+                      ℹ️ Pre každý workspace vzniká v Google Calendari samostatný kalendár <strong>„Prpl CRM — názov workspace"</strong> s vlastnou farbou. Kliknutím <strong>Odpojiť</strong> sa zmažú všetky Prpl CRM kalendáre aj udalosti naraz.
+                    </div>
 
                     {Array.isArray(workspaces) && workspaces.length > 0 && (
                       <div style={{
@@ -1410,9 +1391,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       color: '#3730A3',
                       lineHeight: '1.5'
                     }}>
-                      ℹ️ Projekty sa synchronizujú do samostatného zoznamu <strong>„Prpl CRM"</strong> v Google Tasks.
-                      Ak už tieto projekty nechcete, otvorte <strong>Google Tasks</strong>, vľavo kliknite na
-                      zoznam „Prpl CRM" → tri bodky → <strong>Odstrániť zoznam</strong>. Všetky projekty zmiznú naraz.
+                      ℹ️ Pre každý workspace vzniká v Google Tasks samostatný zoznam <strong>„Prpl CRM — názov workspace"</strong>. Úlohy sa zobrazia aj v Google Calendar cez „Úlohy" v bočnom paneli. Kliknutím <strong>Odpojiť</strong> sa zmažú všetky Prpl CRM zoznamy aj úlohy naraz.
                     </div>
 
                     {Array.isArray(workspaces) && workspaces.length > 0 && (
