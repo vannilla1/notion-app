@@ -445,17 +445,33 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       );
       if (!ok) return;
     }
+    // Optimisticky update lokálny state (checkbox reaguje okamžite bez čakania
+    // na server) + neukazuj success banner po každom kliknutí — banner meniaci
+    // výšku spôsoboval scroll jump pri rýchlom zaškrtávaní viacerých workspaces.
+    // Server volanie beží v pozadí; refetch statusu je odložený na onClose
+    // modalu (alebo ho vyvolá "Synchronizovať" tlačidlo).
+    setGoogleCalendar(prev => {
+      const current = (prev.syncDisabledWorkspaces || []).map(String);
+      const wsKey = String(workspaceId);
+      const next = enabled
+        ? current.filter(id => id !== wsKey)
+        : [...current, wsKey];
+      return { ...prev, syncDisabledWorkspaces: next };
+    });
     try {
-      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
-      setGoogleCalendarMessage(res.data.message);
-      setGoogleCalendarMessageType('success');
-      await fetchGoogleCalendarStatus();
+      await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
     } catch (e) {
+      // Rollback optimistic state + surface error
+      setGoogleCalendar(prev => {
+        const current = (prev.syncDisabledWorkspaces || []).map(String);
+        const wsKey = String(workspaceId);
+        const reverted = enabled
+          ? [...current, wsKey]
+          : current.filter(id => id !== wsKey);
+        return { ...prev, syncDisabledWorkspaces: reverted };
+      });
       setGoogleCalendarMessage(translateErrorMessage(e.response?.data?.message || e.message));
       setGoogleCalendarMessageType('error');
-    } finally {
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
   };
 
@@ -469,17 +485,30 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       );
       if (!ok) return;
     }
+    // Viď komentár v handleToggleCalendarWorkspace — optimistic update
+    // zabraňuje scroll jumpu spôsobenému re-renderom pending counteru
+    // a pridávaniu success bannerov po každom kliknutí.
+    setGoogleTasks(prev => {
+      const current = (prev.syncDisabledWorkspaces || []).map(String);
+      const wsKey = String(workspaceId);
+      const next = enabled
+        ? current.filter(id => id !== wsKey)
+        : [...current, wsKey];
+      return { ...prev, syncDisabledWorkspaces: next };
+    });
     try {
-      setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
-      setGoogleTasksMessage(res.data.message);
-      setGoogleTasksMessageType('success');
-      await fetchGoogleTasksStatus();
+      await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
     } catch (e) {
+      setGoogleTasks(prev => {
+        const current = (prev.syncDisabledWorkspaces || []).map(String);
+        const wsKey = String(workspaceId);
+        const reverted = enabled
+          ? [...current, wsKey]
+          : current.filter(id => id !== wsKey);
+        return { ...prev, syncDisabledWorkspaces: reverted };
+      });
       setGoogleTasksMessage(translateErrorMessage(e.response?.data?.message || e.message));
       setGoogleTasksMessageType('error');
-    } finally {
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
 
