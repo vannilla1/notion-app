@@ -66,6 +66,28 @@ const SCOPES = [
 // later (for bulk cleanup) without needing to remember individual event IDs.
 const EVENT_MARKER = { source: 'prplcrm' };
 
+// Content hash of an event payload — used to short-circuit events.update when
+// nothing changed since last sync. Mirrors createTaskHash in googleTasks.js.
+// Includes targetCalendarId so a workspace move (calendar change) forces
+// re-insert. djb2-style 32-bit hash — no crypto needed, just change detection.
+const createEventHash = (task, targetCalendarId) => {
+  const data = [
+    task.title || '',
+    task.description || '',
+    task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
+    task.completed ? '1' : '0',
+    task.priority || '',
+    task.contact || '',
+    targetCalendarId || ''
+  ].join('|');
+  let hash = 0;
+  for (let i = 0; i < data.length; i++) {
+    hash = ((hash << 5) - hash) + data.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return hash.toString(16);
+};
+
 /**
  * Compute a deterministic HMAC token for a watch channel.
  * Used as x-goog-channel-token so we can verify webhook POSTs really came from Google.
@@ -1104,6 +1126,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     let synced = 0;
     let updated = 0;
+    let unchanged = 0;
     let errors = 0;
 
     logger.info('[Google Calendar] Syncing tasks', { userId: user._id, count: tasksToSync.length });
@@ -1113,15 +1136,22 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     // creation). Avoids hammering Google's calendarList.list on every task.
     const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
 
+    // Ensure hash map exists (user documents from before this feature won't have it).
+    if (!user.googleCalendar.syncedEventHashes) {
+      user.googleCalendar.syncedEventHashes = new Map();
+    }
+
     for (const task of tasksToSync) {
       try {
         const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
         const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(task.id);
-        const eventData = createEventData(task);
+        const currentHash = createEventHash(task, targetCalendarId);
+        const storedHash = user.googleCalendar.syncedEventHashes?.get?.(task.id);
 
         if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
           // Event migrated from another calendar (legacy or cross-workspace).
           // Delete old, insert new — keeps per-workspace grouping honest.
+          const eventData = createEventData(task);
           try {
             await calendar.events.delete({ calendarId: existingCalendarId, eventId: existingEventId });
           } catch (e) {
@@ -1133,9 +1163,19 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
           });
           user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
           user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
+          user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
           synced++;
         } else if (existingEventId) {
-          // Update in place.
+          // Fast path: hash matches → event hasn't changed since last sync.
+          // Skip events.update entirely (the expensive Google round-trip that
+          // was making 2-event syncs take ~2s). This is the same optimization
+          // that makes Google Tasks /sync fast — see googleTasks.js:1056-1068.
+          if (storedHash && storedHash === currentHash) {
+            unchanged++;
+            continue;
+          }
+          // Content changed — do the update.
+          const eventData = createEventData(task);
           const updateCalendarId = existingCalendarId || targetCalendarId;
           try {
             await calendar.events.update({
@@ -1146,6 +1186,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
             if (!existingCalendarId) {
               user.googleCalendar.syncedTaskCalendars.set(task.id, updateCalendarId);
             }
+            user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
             updated++;
           } catch (e) {
             if (e.code === 404) {
@@ -1156,6 +1197,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
               });
               user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
               user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
+              user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
               synced++;
             } else {
               throw e;
@@ -1163,12 +1205,14 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
           }
         } else {
           // First-time sync.
+          const eventData = createEventData(task);
           const event = await calendar.events.insert({
             calendarId: targetCalendarId,
             resource: eventData
           });
           user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
           user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
+          user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
           synced++;
         }
       } catch (error) {
@@ -1184,13 +1228,30 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     user.googleCalendar.lastSyncAt = new Date();
     await user.save();
 
-    logger.info('[Google Calendar] Sync finished', { userId: user._id, synced, updated, errors });
+    logger.info('[Google Calendar] Sync finished', { userId: user._id, synced, updated, unchanged, errors });
+
+    // Build a human-friendly Slovak message (reuses the phrasing from Tasks
+    // for consistency — "Všetky udalosti sú aktuálne" when nothing changed).
+    let message;
+    if (synced === 0 && updated === 0 && errors === 0) {
+      message = unchanged > 0
+        ? `Všetky udalosti sú aktuálne (${unchanged} synchronizovaných)`
+        : 'Žiadne udalosti na synchronizáciu';
+    } else {
+      const parts = [];
+      if (synced > 0) parts.push(`${synced} nových`);
+      if (updated > 0) parts.push(`${updated} aktualizovaných`);
+      if (unchanged > 0) parts.push(`${unchanged} bez zmeny`);
+      if (errors > 0) parts.push(`${errors} chýb`);
+      message = `Synchronizované: ${parts.join(', ')}`;
+    }
 
     res.json({
       success: true,
-      message: `Synchronizované: ${synced} nových, ${updated} aktualizovaných, ${errors} chýb`,
+      message,
       synced,
       updated,
+      unchanged,
       errors
     });
   } catch (error) {
@@ -1269,6 +1330,13 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
 
     // Resolve per-workspace calendar (creates lazily the first time).
     const targetCalendarId = await getOrCreateWorkspaceCalendar(user, workspaceId, calendar);
+    // Keep hash in sync with whatever we push to Google — otherwise the
+    // next bulk /sync would needlessly events.update even though content
+    // matches. See createEventHash rationale in the bulk /sync handler.
+    if (!user.googleCalendar.syncedEventHashes) {
+      user.googleCalendar.syncedEventHashes = new Map();
+    }
+    const currentHash = createEventHash(taskData, targetCalendarId);
 
     if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
       // Task changed workspaces — delete stale event, re-insert in new cal.
@@ -1280,6 +1348,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
       const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
       user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
       user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
+      user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
       await user.save();
     } else if (existingEventId) {
       const updateCalendarId = existingCalendarId || targetCalendarId;
@@ -1291,13 +1360,15 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
         });
         if (!existingCalendarId) {
           user.googleCalendar.syncedTaskCalendars.set(taskData.id, updateCalendarId);
-          await user.save();
         }
+        user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
+        await user.save();
       } catch (e) {
         if (e.code === 404) {
           const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
           user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
           user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
+          user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
           await user.save();
         } else {
           throw e;
@@ -1310,6 +1381,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
       });
       user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
       user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
+      user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
       await user.save();
     }
 
@@ -2340,7 +2412,8 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             await User.findByIdAndUpdate(user._id, {
               $unset: {
                 [`googleCalendar.syncedTaskIds.${taskId}`]: '',
-                [`googleCalendar.syncedTaskCalendars.${taskId}`]: ''
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: '',
+                [`googleCalendar.syncedEventHashes.${taskId}`]: ''
               }
             });
           }
@@ -2361,6 +2434,17 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
 
           const existingEventId = user.googleCalendar.syncedTaskIds?.get(taskId);
           const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+          // Pre-compute hash; we write it alongside every successful Google
+          // mutation so the bulk /sync can skip this event next time around.
+          const currentHash = createEventHash({
+            id: taskId,
+            title: taskData.title,
+            description: taskData.description || '',
+            dueDate: taskData.dueDate,
+            completed: taskData.completed,
+            priority: taskData.priority,
+            contact: taskData.contactName || taskData.contact || null
+          }, targetCalendarId);
 
           if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
             // Event was previously synced to a different calendar (e.g. task
@@ -2385,7 +2469,8 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             await User.findByIdAndUpdate(user._id, {
               $set: {
                 [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
-                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId,
+                [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
               }
             });
           } else if (existingEventId) {
@@ -2398,11 +2483,13 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 resource: eventData
               });
               // Backfill calendar mapping if it was missing (pre-PR2 legacy).
+              const setOps = {
+                [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
+              };
               if (!existingCalendarId) {
-                await User.findByIdAndUpdate(user._id, {
-                  $set: { [`googleCalendar.syncedTaskCalendars.${taskId}`]: updateCalendarId }
-                });
+                setOps[`googleCalendar.syncedTaskCalendars.${taskId}`] = updateCalendarId;
               }
+              await User.findByIdAndUpdate(user._id, { $set: setOps });
             } catch (e) {
               // If event doesn't exist, create new one in target calendar
               if (e.code === 404) {
@@ -2413,7 +2500,8 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 await User.findByIdAndUpdate(user._id, {
                   $set: {
                     [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
-                    [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+                    [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId,
+                    [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
                   }
                 });
               } else {
@@ -2429,7 +2517,8 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             await User.findByIdAndUpdate(user._id, {
               $set: {
                 [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
-                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId
+                [`googleCalendar.syncedTaskCalendars.${taskId}`]: targetCalendarId,
+                [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
               }
             });
           }

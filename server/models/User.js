@@ -137,6 +137,10 @@ const userSchema = new mongoose.Schema({
     // would have to re-fetch the Task document just to resolve workspaceId →
     // calendarId — and by then the task is often already gone.
     syncedTaskCalendars: { type: Map, of: String, default: () => new Map() }, // taskId -> calendarId
+    // Hash of last-synced event data per taskId — same pattern as googleTasks
+    // below. Lets /sync short-circuit events.update when the event hasn't
+    // changed, matching the speed of the Tasks sync for large workspaces.
+    syncedEventHashes: { type: Map, of: String, default: () => new Map() }, // taskId -> content hash
     // Per-workspace opt-OUT (blacklist). Each entry is a workspaceId (string)
     // for which sync is explicitly disabled. Default empty = every workspace
     // the user is a member of syncs automatically.
