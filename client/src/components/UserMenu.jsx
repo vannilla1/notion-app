@@ -390,7 +390,19 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleDisconnectGoogleCalendar = async () => {
-    if (!confirm('Naozaj chcete odpojiť Google Calendar? Všetky synchronizačné dáta budú vymazané.')) {
+    // Explicitný destruction warning — odpojenie zmaže VŠETKO čo appka
+    // vytvorila v Google Calendari (všetky "Prpl CRM — {workspace}" kalendáre
+    // + ich eventy naprieč všetkými workspaces). User musí vedieť čo klikne,
+    // aby sa predišlo náhodným kliknutiam.
+    if (!confirm(
+      'Naozaj chcete odpojiť Google Calendar?\n\n' +
+      'Zmaže sa:\n' +
+      '• Pripojenie vášho Google účtu\n' +
+      '• Všetky kalendáre „Prpl CRM — názov workspace" z Google Calendara\n' +
+      '• Všetky udalosti, ktoré do nich appka synchronizovala\n\n' +
+      'Dáta v Prpl CRM (úlohy, termíny) zostanú zachované a synchronizáciu ' +
+      'môžete kedykoľvek obnoviť kliknutím na „Pripojiť Google Calendar".'
+    )) {
       return;
     }
     try {
@@ -663,7 +675,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleDisconnectGoogleTasks = async () => {
-    if (!confirm('Naozaj chcete odpojiť Google Tasks? Všetky synchronizačné dáta budú vymazané.')) {
+    // Viď komentár v handleDisconnectGoogleCalendar — rovnaký princíp,
+    // len pre Google Tasks zoznamy.
+    if (!confirm(
+      'Naozaj chcete odpojiť Google Tasks?\n\n' +
+      'Zmaže sa:\n' +
+      '• Pripojenie vášho Google účtu\n' +
+      '• Všetky zoznamy „Prpl CRM — názov workspace" z Google Tasks\n' +
+      '• Všetky úlohy, ktoré do nich appka synchronizovala (aj v sekcii ' +
+      '„Úlohy" v Google Calendari)\n\n' +
+      'Dáta v Prpl CRM zostanú zachované a synchronizáciu môžete kedykoľvek ' +
+      'obnoviť kliknutím na „Pripojiť Google Tasks".'
+    )) {
       return;
     }
     try {
