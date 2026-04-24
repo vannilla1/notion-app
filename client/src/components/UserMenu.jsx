@@ -116,6 +116,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [message, setMessage] = useState('');
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
   const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
+  // Scoped per-section message states — prevents Calendar/Tasks errors from
+  // leaking into the other section's UI (was: shared errors.general appearing
+  // only under Calendar card, confusing users when Tasks failed).
+  const [googleCalendarMessage, setGoogleCalendarMessage] = useState('');
+  const [googleCalendarMessageType, setGoogleCalendarMessageType] = useState('success');
   const [avatarTimestamp, setAvatarTimestamp] = useState(() => user?.avatarTimestamp || 1);
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -443,10 +448,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleCalendar(prev => ({ ...prev, syncing: true }));
       const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
-      setMessage(res.data.message);
+      setGoogleCalendarMessage(res.data.message);
+      setGoogleCalendarMessageType('success');
       await fetchGoogleCalendarStatus();
     } catch (e) {
-      setErrors({ general: translateErrorMessage(e.response?.data?.message || e.message) });
+      setGoogleCalendarMessage(translateErrorMessage(e.response?.data?.message || e.message));
+      setGoogleCalendarMessageType('error');
     } finally {
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
     }
@@ -465,10 +472,12 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
-      setMessage(res.data.message);
+      setGoogleTasksMessage(res.data.message);
+      setGoogleTasksMessageType('success');
       await fetchGoogleTasksStatus();
     } catch (e) {
-      setErrors({ general: translateErrorMessage(e.response?.data?.message || e.message) });
+      setGoogleTasksMessage(translateErrorMessage(e.response?.data?.message || e.message));
+      setGoogleTasksMessageType('error');
     } finally {
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
@@ -481,7 +490,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   //
   // Sequential (not parallel) because concurrent /sync calls from the same
   // user would trip Google OAuth token refresh races and hit rate limits.
-  const syncEnabledWorkspaces = async ({ api, kind, statusSetter, state }) => {
+  //
+  // Results route to per-section message state (calendar vs tasks) — not the
+  // shared errors.general, which was leaking Tasks failures into the Calendar
+  // card visually.
+  const syncEnabledWorkspaces = async ({ api, kind, statusSetter, state, msgSetter, typeSetter }) => {
     const wsList = Array.isArray(workspaces) ? workspaces : [];
     const disabled = (state?.syncDisabledWorkspaces || []).map(String);
     const enabledWs = wsList.filter(w => {
@@ -489,42 +502,84 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       return id && !disabled.includes(id);
     });
     if (enabledWs.length === 0) {
-      setErrors({ general: `${kind}: žiadny zapnutý workspace na synchronizáciu.` });
+      msgSetter(`${kind}: žiadny zapnutý workspace na synchronizáciu.`);
+      typeSetter('error');
       return;
     }
     statusSetter(prev => ({ ...prev, syncing: true }));
+    msgSetter('');
     const token = getStoredToken();
     const succeeded = [];
-    const failed = [];
-    for (const ws of enabledWs) {
+    const failed = []; // { name, reason }
+    // Explicit long timeout — a 400-task /sync can legitimately take 3+ min
+    // with rate-limit backoffs. Default browser fetch has no timeout, but
+    // some middleboxes (proxies, Render internal) cut at ~5 min. Explicit
+    // axios timeout makes the failure mode clear if we ever hit it.
+    const AXIOS_TIMEOUT = 12 * 60 * 1000; // 12 minutes per workspace
+    const INTER_SYNC_DELAY = 2000; // 2s between sequential /sync calls — lets Google quota window breathe
+
+    for (let i = 0; i < enabledWs.length; i++) {
+      const ws = enabledWs[i];
       const wsId = ws.id || ws._id;
       try {
         await axios.post(`${API_URL}/${api}/sync`, {}, {
           headers: {
             Authorization: token ? `Bearer ${token}` : undefined,
             'X-Workspace-Id': wsId
-          }
+          },
+          timeout: AXIOS_TIMEOUT
         });
         succeeded.push(ws.name || wsId);
       } catch (e) {
-        failed.push(ws.name || wsId);
+        // Capture the REAL error for this workspace — previously we threw
+        // away the server message and just showed names, so users couldn't
+        // see WHY a workspace failed (quota? auth? timeout?).
+        const serverMsg = e.response?.data?.message || e.code || e.message || 'neznáma chyba';
+        failed.push({ name: ws.name || wsId, reason: serverMsg });
+      }
+      // Small pause before next workspace so we don't burst Google's quota
+      // window. Skip after the last iteration to avoid pointless wait.
+      if (i < enabledWs.length - 1) {
+        await new Promise(r => setTimeout(r, INTER_SYNC_DELAY));
       }
     }
+
     statusSetter(prev => ({ ...prev, syncing: false }));
+
     if (failed.length === 0) {
-      setMessage(`${kind}: synchronizovaných ${succeeded.length} workspace${succeeded.length === 1 ? '' : 'ov'}.`);
+      msgSetter(`${kind}: synchronizovaných ${succeeded.length} workspace${succeeded.length === 1 ? '' : 'ov'}.`);
+      typeSetter('success');
     } else {
-      setErrors({ general: `${kind}: ${succeeded.length} OK, ${failed.length} zlyhalo (${failed.join(', ')}).` });
+      // Show workspace names AND why they failed (truncated per item to keep
+      // the toast readable). Users can then decide: retry, disable that ws,
+      // or reconnect if it's an auth problem.
+      const detail = failed
+        .map(f => `${f.name}: ${String(f.reason).slice(0, 120)}`)
+        .join(' | ');
+      msgSetter(`${kind}: ${succeeded.length} OK, ${failed.length} zlyhalo. ${detail}`);
+      typeSetter('error');
     }
   };
 
   const handleSyncCalendar = () =>
-    syncEnabledWorkspaces({ api: 'google-calendar', kind: 'Google Calendar', statusSetter: setGoogleCalendar, state: googleCalendar })
-      .then(() => fetchGoogleCalendarStatus());
+    syncEnabledWorkspaces({
+      api: 'google-calendar',
+      kind: 'Google Calendar',
+      statusSetter: setGoogleCalendar,
+      state: googleCalendar,
+      msgSetter: setGoogleCalendarMessage,
+      typeSetter: setGoogleCalendarMessageType
+    }).then(() => fetchGoogleCalendarStatus());
 
   const handleSyncTasks = () =>
-    syncEnabledWorkspaces({ api: 'google-tasks', kind: 'Google Tasks', statusSetter: setGoogleTasks, state: googleTasks })
-      .then(() => fetchGoogleTasksStatus());
+    syncEnabledWorkspaces({
+      api: 'google-tasks',
+      kind: 'Google Tasks',
+      statusSetter: setGoogleTasks,
+      state: googleTasks,
+      msgSetter: setGoogleTasksMessage,
+      typeSetter: setGoogleTasksMessageType
+    }).then(() => fetchGoogleTasksStatus());
 
   // Note: legacy handlers handleMigrateCalendar / handleMigrateTasks /
   // handleDeduplicateCalendar were removed — they addressed migration from
@@ -1361,14 +1416,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </button>
                     </div>
 
-                    {message && (
-                      <div className="form-success" style={{ marginTop: '12px' }}>
-                        {message}
-                      </div>
-                    )}
-                    {errors.general && (
-                      <div className="form-error" style={{ marginTop: '12px' }}>
-                        {errors.general}
+                    {googleCalendarMessage && (
+                      <div className="form-success" style={{
+                        marginTop: '12px',
+                        ...(googleCalendarMessageType === 'error' ? {
+                          background: '#FEE2E2',
+                          color: '#DC2626'
+                        } : {})
+                      }}>
+                        {googleCalendarMessage}
                       </div>
                     )}
                   </div>
