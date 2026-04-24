@@ -69,12 +69,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
   const { currentWorkspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
-  // Collapse "Pokročilé nastavenia" in Google Calendar/Tasks settings by default.
-  // The buttons inside (manual sync, dedup, legacy migration) are only useful
-  // in edge cases — keeping them out of sight reduces visual noise for the
-  // 95% of users who only need auto-sync + per-workspace toggles.
-  const [showCalendarAdvanced, setShowCalendarAdvanced] = useState(false);
-  const [showTasksAdvanced, setShowTasksAdvanced] = useState(false);
   const [showMobileWorkspaces, setShowMobileWorkspaces] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
@@ -416,23 +410,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  const handleSyncGoogleCalendar = async () => {
-    try {
-      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const token = getStoredToken();
-      const response = await axios.post(`${API_URL}/google-calendar/sync`, {}, {
-        headers: authHeaders()
-      });
-      setMessage(response.data.message);
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-      // Refresh to get updated pending counts + lastSyncAt
-      await fetchGoogleCalendarStatus();
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
-      setErrors({ general: translateErrorMessage(errorMsg) });
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-    }
-  };
+  // Removed single-workspace handleSyncGoogleCalendar — the new unified
+  // handleSyncCalendar iterates every enabled workspace (respects checkbox
+  // state), so the current-workspace-only variant is no longer needed.
 
   // Per-workspace sync toggle — lets the user explicitly enable/disable sync
   // for a specific workspace independently of the global Calendar/Tasks
@@ -526,67 +506,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     syncEnabledWorkspaces({ api: 'google-tasks', kind: 'Google Tasks', statusSetter: setGoogleTasks, state: googleTasks })
       .then(() => fetchGoogleTasksStatus());
 
-  // PR3: migrate existing synced events from the legacy single calendar into
-  // per-workspace calendars. One-shot operation; idempotent on re-run. Shown
-  // to all users because even those who connected after PR2 may still have
-  // some legacy events (if they sync'd once with the pre-PR2 code).
-  const handleMigrateCalendar = async () => {
-    if (!confirm('Rozdeliť existujúce udalosti do samostatných kalendárov podľa workspaceov? Staré udalosti sa presunú do nových "Prpl CRM — {workspace}" kalendárov.')) return;
-    try {
-      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const token = getStoredToken();
-      const response = await axios.post(`${API_URL}/google-calendar/migrate-to-per-workspace`, {}, {
-        headers: authHeaders()
-      });
-      setMessage(response.data.message);
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-      await fetchGoogleCalendarStatus();
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri migrácii';
-      setErrors({ general: translateErrorMessage(errorMsg) });
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-    }
-  };
-
-  const handleMigrateTasks = async () => {
-    if (!confirm('Rozdeliť existujúce úlohy do samostatných task listov podľa workspaceov?')) return;
-    try {
-      setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      const token = getStoredToken();
-      const response = await axios.post(`${API_URL}/google-tasks/migrate-to-per-workspace`, {}, {
-        headers: authHeaders()
-      });
-      setMessage(response.data.message);
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      await fetchGoogleTasksStatus();
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri migrácii';
-      setErrors({ general: translateErrorMessage(errorMsg) });
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
-    }
-  };
-
-  // Dedup: find and remove duplicate Prpl CRM events that were created before the
-  // sync lock fix (PR1). Safe — only touches events tagged with source=prplcrm,
-  // never personal calendar entries. Surfaced as a user-visible button because
-  // some accounts already accumulated duplicates before the fix shipped.
-  const handleDeduplicateCalendar = async () => {
-    if (!confirm('Odstrániť duplicitné udalosti z Google kalendára? Akcia sa nedá vrátiť späť.')) return;
-    try {
-      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
-      const token = getStoredToken();
-      const response = await axios.post(`${API_URL}/google-calendar/deduplicate`, {}, {
-        headers: authHeaders()
-      });
-      setMessage(response.data.message);
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-      await fetchGoogleCalendarStatus();
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message || 'Chyba pri deduplikácii';
-      setErrors({ general: translateErrorMessage(errorMsg) });
-      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
-    }
-  };
+  // Note: legacy handlers handleMigrateCalendar / handleMigrateTasks /
+  // handleDeduplicateCalendar were removed — they addressed migration from
+  // pre-PR2 state and historical duplicates from pre-lock races. Users who
+  // hit either edge case can now just disconnect + reconnect; the disconnect
+  // cleanup (bd41c95 + 1cbcaf8 + 4607c55) scrubs every Prpl CRM-named
+  // calendar/list + source=prplcrm-marked event across the user's entire
+  // Google account. No separate button needed.
 
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
@@ -655,41 +581,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  const handleSyncGoogleTasks = async () => {
-    try {
-      setGoogleTasks(prev => ({ ...prev, syncing: true }));
-      setGoogleTasksMessage('');
-      const token = getStoredToken();
-
-      try {
-        await axios.post(`${API_URL}/google-tasks/sync-completed`, {}, {
-          headers: authHeaders(),
-          timeout: 30000 // 30 second timeout
-        });
-      } catch {
-        // Sync completed from Google skipped
-      }
-
-      const response = await axios.post(`${API_URL}/google-tasks/sync`, {}, {
-        headers: authHeaders(),
-        timeout: 660000 // 5.5 min timeout (server has 5 min limit + buffer)
-      });
-      setGoogleTasksMessage(response.data.message);
-      setGoogleTasksMessageType('success');
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
-      await fetchGoogleTasksStatus();
-    } catch (error) {
-      let errorMsg;
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        errorMsg = 'Synchronizácia trvala príliš dlho. Skúste to znova.';
-      } else {
-        errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
-      }
-      setGoogleTasksMessage(translateErrorMessage(errorMsg));
-      setGoogleTasksMessageType('error');
-      setGoogleTasks(prev => ({ ...prev, syncing: false }));
-    }
-  };
+  // Removed single-workspace handleSyncGoogleTasks — same rationale as
+  // handleSyncGoogleCalendar above.
 
   const handleResetAndSyncGoogleTasks = async () => {
     try {
@@ -1384,64 +1277,49 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
-                    {/* Pokročilé nastavenia — zbalené by default. Manuálny sync
-                        je potrebný iba v edge cases (napr. po znovu-zapnutí
-                        workspace, premenovaní workspace, alebo na legacy
-                        migráciu). Sync beží automaticky pri každej zmene úlohy. */}
-                    <div style={{ marginTop: '12px' }}>
+                    {/* Jednoduchá kompaktná akcia — auto-sync + per-workspace
+                        checkboxy pokrývajú 99% prípadov. Manuálne Synchronizovať
+                        je ponechané iba ako safety net (znovu-zapnutie
+                        workspace, premenovanie, Google hiccup). */}
+                    <div style={{
+                      marginTop: '12px',
+                      display: 'flex',
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}>
                       <button
                         type="button"
-                        onClick={() => setShowCalendarAdvanced(v => !v)}
+                        onClick={handleSyncCalendar}
+                        disabled={googleCalendar.syncing}
+                        title="Manuálne spustí synchronizáciu pre zaškrtnuté workspace (bežne netreba — sync beží automaticky)"
                         style={{
-                          background: 'transparent',
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          backgroundColor: '#6366F1',
+                          color: 'white',
                           border: 'none',
-                          color: '#6B7280',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          padding: '4px 0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
+                          borderRadius: '6px',
+                          cursor: googleCalendar.syncing ? 'not-allowed' : 'pointer',
+                          opacity: googleCalendar.syncing ? 0.6 : 1
                         }}
                       >
-                        <span>{showCalendarAdvanced ? '▾' : '▸'}</span>
-                        <span>Pokročilé nastavenia</span>
+                        {googleCalendar.syncing ? '⏳ Synchronizujem…' : '🔄 Synchronizovať'}
                       </button>
-                      {showCalendarAdvanced && (
-                        <div className="calendar-actions" style={{ marginTop: '8px', padding: '10px', backgroundColor: '#F9FAFB', borderRadius: '6px', border: '1px solid #E5E7EB' }}>
-                          <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '8px' }}>
-                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy. Tlačítko „Synchronizovať" spustí manuálnu synchronizáciu všetkých zapnutých workspaceov naraz.
-                          </div>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleSyncCalendar}
-                            disabled={googleCalendar.syncing}
-                            title="Spustí synchronizáciu pre každý zaškrtnutý workspace"
-                          >
-                            {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleMigrateCalendar}
-                            disabled={googleCalendar.syncing}
-                            title="Rozdelí udalosti z pôvodného spoločného kalendára do samostatných kalendárov podľa workspacov"
-                          >
-                            🔀 Rozdeliť podľa workspaceov
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleDeduplicateCalendar}
-                            disabled={googleCalendar.syncing}
-                            title="Odstráni duplicitné udalosti, ktoré vznikli pred opravou v apríli 2026"
-                          >
-                            🧹 Odstrániť duplikáty
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="calendar-actions" style={{ marginTop: '12px' }}>
-                      <button className="btn btn-danger" onClick={handleDisconnectGoogleCalendar} disabled={googleCalendar.syncing}>
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGoogleCalendar}
+                        disabled={googleCalendar.syncing}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          backgroundColor: '#EF4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: googleCalendar.syncing ? 'not-allowed' : 'pointer',
+                          opacity: googleCalendar.syncing ? 0.6 : 1
+                        }}
+                      >
                         Odpojiť
                       </button>
                     </div>
@@ -1570,52 +1448,45 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
-                    <div style={{ marginTop: '12px' }}>
+                    <div style={{
+                      marginTop: '12px',
+                      display: 'flex',
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}>
                       <button
                         type="button"
-                        onClick={() => setShowTasksAdvanced(v => !v)}
+                        onClick={handleSyncTasks}
+                        disabled={googleTasks.syncing}
+                        title="Manuálne spustí synchronizáciu pre zaškrtnuté workspace (bežne netreba — sync beží automaticky)"
                         style={{
-                          background: 'transparent',
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          backgroundColor: '#6366F1',
+                          color: 'white',
                           border: 'none',
-                          color: '#6B7280',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          padding: '4px 0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
+                          borderRadius: '6px',
+                          cursor: googleTasks.syncing ? 'not-allowed' : 'pointer',
+                          opacity: googleTasks.syncing ? 0.6 : 1
                         }}
                       >
-                        <span>{showTasksAdvanced ? '▾' : '▸'}</span>
-                        <span>Pokročilé nastavenia</span>
+                        {googleTasks.syncing ? '⏳ Synchronizujem…' : '🔄 Synchronizovať'}
                       </button>
-                      {showTasksAdvanced && (
-                        <div className="calendar-actions" style={{ marginTop: '8px', padding: '10px', backgroundColor: '#F9FAFB', borderRadius: '6px', border: '1px solid #E5E7EB' }}>
-                          <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '8px' }}>
-                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy. Tlačítko „Synchronizovať" spustí manuálnu synchronizáciu všetkých zapnutých workspaceov naraz.
-                          </div>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleSyncTasks}
-                            disabled={googleTasks.syncing}
-                            title="Spustí synchronizáciu pre každý zaškrtnutý workspace"
-                          >
-                            {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleMigrateTasks}
-                            disabled={googleTasks.syncing}
-                            title="Rozdelí úlohy z pôvodného spoločného listu do samostatných listov podľa workspacov"
-                          >
-                            🔀 Rozdeliť podľa workspaceov
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="calendar-actions" style={{ marginTop: '12px' }}>
-                      <button className="btn btn-danger" onClick={handleDisconnectGoogleTasks} disabled={googleTasks.syncing}>
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGoogleTasks}
+                        disabled={googleTasks.syncing}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          backgroundColor: '#EF4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: googleTasks.syncing ? 'not-allowed' : 'pointer',
+                          opacity: googleTasks.syncing ? 0.6 : 1
+                        }}
+                      >
                         Odpojiť
                       </button>
                     </div>
