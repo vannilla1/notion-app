@@ -1128,6 +1128,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     let updated = 0;
     let unchanged = 0;
     let errors = 0;
+    let rateLimitCount = 0;
 
     logger.info('[Google Calendar] Syncing tasks', { userId: user._id, count: tasksToSync.length });
 
@@ -1141,92 +1142,182 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       user.googleCalendar.syncedEventHashes = new Map();
     }
 
-    for (const task of tasksToSync) {
-      try {
-        const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
-        const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(task.id);
-        const currentHash = createEventHash(task, targetCalendarId);
-        const storedHash = user.googleCalendar.syncedEventHashes?.get?.(task.id);
+    // ===== Batched processing with rate-limit retry (mirrors googleTasks.js) =====
+    //
+    // Motivation: previous plain for-loop would blast Google Calendar API with
+    // ~10 QPS. Google's per-user quota for Calendar is 500 queries / 100s
+    // (5 QPS sustained). At ~440 events the loop would hit 429/403 after ~50
+    // successes and then silently drop 50+ events to the "errors" counter with
+    // no retry. Tasks has this exact pattern and syncs 100% cleanly — port it.
+    //
+    // Batching also gives us periodic `user.save()` so a mid-sync crash doesn't
+    // lose the events already synced (would have to redo them next time).
+    const BATCH_SIZE = 40;
+    const BATCH_DELAY = 3000;       // ms pause between batches
+    const INTRA_DELAY = 150;        // ms pause between individual events (~6 QPS, under 5 QPS rate limit amortized by batch gap)
+    const MAX_RETRIES = 5;          // exponential backoff: 3s, 6s, 12s, 24s, 48s
+    const SYNC_TIMEOUT = 9 * 60 * 1000; // 9 min (Render request timeout is 10 min; leave headroom for save)
+    const syncStartTime = Date.now();
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
-          // Event migrated from another calendar (legacy or cross-workspace).
-          // Delete old, insert new — keeps per-workspace grouping honest.
+    // Process one event with automatic retry on 429/403.
+    const processEvent = async (task) => {
+      const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
+      const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(task.id);
+      const currentHash = createEventHash(task, targetCalendarId);
+      const storedHash = user.googleCalendar.syncedEventHashes?.get?.(task.id);
+
+      // Fast path — content unchanged, skip Google entirely.
+      if (existingEventId && existingCalendarId === targetCalendarId && storedHash && storedHash === currentHash) {
+        return { status: 'unchanged', taskId: task.id };
+      }
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
           const eventData = createEventData(task);
-          try {
-            await calendar.events.delete({ calendarId: existingCalendarId, eventId: existingEventId });
-          } catch (e) {
-            if (e.code !== 404) logger.debug('[Google Calendar] Stale delete failed during /sync', { error: e.message });
-          }
-          const event = await calendar.events.insert({
-            calendarId: targetCalendarId,
-            resource: eventData
-          });
-          user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
-          user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
-          user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
-          synced++;
-        } else if (existingEventId) {
-          // Fast path: hash matches → event hasn't changed since last sync.
-          // Skip events.update entirely (the expensive Google round-trip that
-          // was making 2-event syncs take ~2s). This is the same optimization
-          // that makes Google Tasks /sync fast — see googleTasks.js:1056-1068.
-          if (storedHash && storedHash === currentHash) {
-            unchanged++;
-            continue;
-          }
-          // Content changed — do the update.
-          const eventData = createEventData(task);
-          const updateCalendarId = existingCalendarId || targetCalendarId;
-          try {
-            await calendar.events.update({
-              calendarId: updateCalendarId,
-              eventId: existingEventId,
-              resource: eventData
-            });
-            if (!existingCalendarId) {
-              user.googleCalendar.syncedTaskCalendars.set(task.id, updateCalendarId);
+
+          if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
+            // Workspace change — delete from old, insert into new.
+            try {
+              await calendar.events.delete({ calendarId: existingCalendarId, eventId: existingEventId });
+            } catch (e) {
+              if (e.code !== 404) logger.debug('[Google Calendar] Stale delete failed during /sync', { error: e.message });
             }
-            user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
-            updated++;
-          } catch (e) {
-            if (e.code === 404) {
-              // Event deleted on Google side — re-insert in target calendar.
-              const event = await calendar.events.insert({
-                calendarId: targetCalendarId,
-                resource: eventData
-              });
-              user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
-              user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
-              user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
-              synced++;
-            } else {
+            const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+            return { status: 'synced', taskId: task.id, eventId: event.data.id, calendarId: targetCalendarId, hash: currentHash };
+          }
+
+          if (existingEventId) {
+            const updateCalendarId = existingCalendarId || targetCalendarId;
+            try {
+              await calendar.events.update({ calendarId: updateCalendarId, eventId: existingEventId, resource: eventData });
+              return { status: 'updated', taskId: task.id, calendarId: updateCalendarId, hash: currentHash, backfillCalendarId: !existingCalendarId };
+            } catch (e) {
+              const code = e.code || e.response?.status;
+              // Rate limit — bubble up to outer try/catch to trigger retry.
+              if (code === 429 || code === 403) throw e;
+              if (code === 404) {
+                // Event disappeared on Google side — re-insert.
+                const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+                return { status: 'synced', taskId: task.id, eventId: event.data.id, calendarId: targetCalendarId, hash: currentHash };
+              }
               throw e;
             }
           }
-        } else {
+
           // First-time sync.
-          const eventData = createEventData(task);
-          const event = await calendar.events.insert({
-            calendarId: targetCalendarId,
-            resource: eventData
-          });
-          user.googleCalendar.syncedTaskIds.set(task.id, event.data.id);
-          user.googleCalendar.syncedTaskCalendars.set(task.id, targetCalendarId);
-          user.googleCalendar.syncedEventHashes.set(task.id, currentHash);
-          synced++;
+          const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+          return { status: 'synced', taskId: task.id, eventId: event.data.id, calendarId: targetCalendarId, hash: currentHash };
+        } catch (error) {
+          const code = error.code || error.response?.status;
+          if ((code === 429 || code === 403) && attempt < MAX_RETRIES) {
+            // Aggressive exponential backoff: 3s, 6s, 12s, 24s, 48s
+            const delay = Math.pow(2, attempt) * 3000;
+            logger.debug('[Google Calendar] Rate limited, waiting', { taskId: task.id, attempt: attempt + 1, delay });
+            await sleep(delay);
+            continue;
+          }
+          if (code === 429 || code === 403) {
+            return { status: 'rate_limit_error', taskId: task.id, message: error.message };
+          }
+          logger.warn('[Google Calendar] Task sync error', { userId: user._id, taskId: task.id, error: error.message });
+          return { status: 'error', taskId: task.id, message: error.message };
         }
-      } catch (error) {
-        logger.warn('[Google Calendar] Task sync error', {
-          userId: user._id,
-          taskId: task.id,
-          error: error.message
+      }
+    };
+
+    // Apply a single result to the in-memory user document.
+    const applyResult = (r) => {
+      if (!r) return;
+      switch (r.status) {
+        case 'unchanged':
+          unchanged++;
+          break;
+        case 'synced':
+          user.googleCalendar.syncedTaskIds.set(r.taskId, r.eventId);
+          user.googleCalendar.syncedTaskCalendars.set(r.taskId, r.calendarId);
+          user.googleCalendar.syncedEventHashes.set(r.taskId, r.hash);
+          synced++;
+          break;
+        case 'updated':
+          if (r.backfillCalendarId) user.googleCalendar.syncedTaskCalendars.set(r.taskId, r.calendarId);
+          user.googleCalendar.syncedEventHashes.set(r.taskId, r.hash);
+          updated++;
+          break;
+        case 'rate_limit_error':
+          rateLimitCount++;
+          errors++;
+          break;
+        case 'error':
+        default:
+          errors++;
+          break;
+      }
+    };
+
+    // Pre-split: skip fast-path (unchanged) items without a Google round-trip,
+    // only batch the ones that actually need the network. Uses the same hash
+    // check as processEvent, but lets us know batch sizing upfront.
+    const toProcess = [];
+    for (const task of tasksToSync) {
+      const existingEventId = user.googleCalendar.syncedTaskIds?.get(task.id);
+      const existingCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(task.id);
+      const currentHash = createEventHash(task, targetCalendarId);
+      const storedHash = user.googleCalendar.syncedEventHashes?.get?.(task.id);
+      if (existingEventId && existingCalendarId === targetCalendarId && storedHash && storedHash === currentHash) {
+        unchanged++;
+      } else {
+        toProcess.push(task);
+      }
+    }
+
+    logger.info('[Google Calendar] Batch plan', { userId: user._id, total: tasksToSync.length, unchanged, toProcess: toProcess.length });
+
+    for (let batchStart = 0; batchStart < toProcess.length; batchStart += BATCH_SIZE) {
+      if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+        logger.warn('[Google Calendar] Sync timeout reached', { processed: batchStart, total: toProcess.length });
+        errors += toProcess.length - batchStart; // count the rest as errors so UI shows accurate state
+        break;
+      }
+
+      const batch = toProcess.slice(batchStart, batchStart + BATCH_SIZE);
+
+      for (const task of batch) {
+        if (Date.now() - syncStartTime > SYNC_TIMEOUT) {
+          errors++;
+          continue;
+        }
+        const result = await processEvent(task);
+        applyResult(result);
+        await sleep(INTRA_DELAY);
+      }
+
+      // Periodic save so a crash mid-sync doesn't lose progress. Tasks does
+      // this too — without it, a 3-min sync that dies at 90% loses everything.
+      try {
+        await user.save();
+      } catch (saveErr) {
+        logger.warn('[Google Calendar] Interim save failed', { error: saveErr.message });
+      }
+
+      if (batchStart + BATCH_SIZE < toProcess.length) {
+        logger.info('[Google Calendar] Batch complete, pausing', {
+          processed: Math.min(batchStart + BATCH_SIZE, toProcess.length),
+          total: toProcess.length,
+          synced,
+          updated,
+          errors
         });
-        errors++;
+        await sleep(BATCH_DELAY);
       }
     }
 
     user.googleCalendar.lastSyncAt = new Date();
     await user.save();
+
+    if (rateLimitCount > 0) {
+      logger.warn('[Google Calendar] Rate-limited hits during sync', { userId: user._id, rateLimitCount });
+    }
 
     logger.info('[Google Calendar] Sync finished', { userId: user._id, synced, updated, unchanged, errors });
 
