@@ -360,6 +360,19 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 });
 
 // Update contact
+// Status change na 'cancelled' alebo 'completed' = deal sa neuskutočnil /
+// je zavretý, takže aj všetky otvorené úlohy a podúlohy pod kontaktom, ktoré
+// boli zosynchronizované do Google Calendara a Google Tasks, už nemajú v
+// používateľovom kalendári čo hľadať — inak tam visia ako ghost-eventy,
+// stále pending, a používateľ ich musí manuálne odklikávať vo dvoch
+// aplikáciach zvlášť.
+//
+// Rovnaký cascade helper ako pri hard-delete — walk cez tasks[].subtasks[]
+// → autoDeleteContactFromGoogle per id → paralelné calendar.events.delete +
+// tasks.tasks.delete. Používateľovo mapping (syncedTaskIds) je user-scoped,
+// takže cleanup funguje aj bez toho, aby sa Contact dokument mazal.
+const TERMINAL_STATUSES = new Set(['cancelled', 'completed']);
+
 router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
@@ -372,6 +385,23 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
     }
 
+    // Načítame pôvodný kontakt PRED updatom — potrebujeme:
+    //   1. starý status na detekciu prechodu → terminal,
+    //   2. celý strom tasks/subtasks, ktorý po update-e stále existuje
+    //      (status change nemaže tasks) a z ktorého vyčítame ids pre cascade
+    //      Google cleanup. Keby sme si strom neuložili pred update-om, boli
+    //      by sme závislí od toho, že `findOneAndUpdate` ho vráti — čo síce
+    //      vracia (new: true), ale čistejšie je oddeliť read a write.
+    const previousContact = await Contact.findOne(
+      { _id: req.params.id, workspaceId: req.workspaceId }
+    );
+
+    if (!previousContact) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const previousStatus = previousContact.status;
+
     const contact = await Contact.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.workspaceId },
       {
@@ -382,6 +412,22 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    // Detekcia prechodu na terminálny status (zrušený / dokončený).
+    // Spustíme cascade iba pri ZMENE statusu — ak už bol kontakt dlhodobo
+    // 'cancelled' a user len edituje poznámku, nepúšťame opäť delete cez
+    // Google API (mapping by aj tak bol prázdny, ale ušetríme kopec zbytočných
+    // 404-tok a log šumu).
+    const becameTerminal = status
+      && TERMINAL_STATUSES.has(status)
+      && !TERMINAL_STATUSES.has(previousStatus);
+
+    if (becameTerminal) {
+      // Fire-and-forget — response nečakáme na Google, aby UI nebolo blokované
+      // niekoľkými sekundami kým paralelné events.delete / tasks.delete
+      // dobehnú. Chyby sú zalogované vnútri helperu.
+      autoDeleteAllTasksOfContactFromGoogle(previousContact);
     }
 
     const io = req.app.get('io');
