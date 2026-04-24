@@ -474,26 +474,30 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  // Sync every workspace the user is a member of, one after the other.
-  // Rationale: per-workspace sync means manually clicking "Synchronizovať"
-  // inside each workspace one by one — tedious when the user has 3+
-  // workspaces or wants to retroactively apply a new feature (like the
-  // [Workspace] task prefix) to all existing tasks. This wraps it in one
-  // click: builds the list from WorkspaceContext, POSTs /sync per workspace
-  // with a temporary X-Workspace-Id header, tallies the result.
+  // Force-sync every workspace the user has ENABLED for sync (respects the
+  // per-workspace checkboxes). Handles the "I just enabled a workspace, push
+  // its existing tasks to Google now" use case — auto-sync only fires on task
+  // changes, not retroactively.
   //
-  // Done sequentially, not in parallel, because each /sync may refresh the
-  // same user's OAuth token and hit Google rate limits. Sequential is safer.
-  const syncAllWorkspaces = async ({ api, kind, statusSetter }) => {
+  // Sequential (not parallel) because concurrent /sync calls from the same
+  // user would trip Google OAuth token refresh races and hit rate limits.
+  const syncEnabledWorkspaces = async ({ api, kind, statusSetter, state }) => {
     const wsList = Array.isArray(workspaces) ? workspaces : [];
-    if (wsList.length === 0) return;
+    const disabled = (state?.syncDisabledWorkspaces || []).map(String);
+    const enabledWs = wsList.filter(w => {
+      const id = String(w.id || w._id || '');
+      return id && !disabled.includes(id);
+    });
+    if (enabledWs.length === 0) {
+      setErrors({ general: `${kind}: žiadny zapnutý workspace na synchronizáciu.` });
+      return;
+    }
     statusSetter(prev => ({ ...prev, syncing: true }));
     const token = getStoredToken();
     const succeeded = [];
     const failed = [];
-    for (const ws of wsList) {
+    for (const ws of enabledWs) {
       const wsId = ws.id || ws._id;
-      if (!wsId) continue;
       try {
         await axios.post(`${API_URL}/${api}/sync`, {}, {
           headers: {
@@ -508,18 +512,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     statusSetter(prev => ({ ...prev, syncing: false }));
     if (failed.length === 0) {
-      setMessage(`Synchronizovaných všetkých ${succeeded.length} workspaceov pre ${kind}.`);
+      setMessage(`${kind}: synchronizovaných ${succeeded.length} workspace${succeeded.length === 1 ? '' : 'ov'}.`);
     } else {
       setErrors({ general: `${kind}: ${succeeded.length} OK, ${failed.length} zlyhalo (${failed.join(', ')}).` });
     }
   };
 
-  const handleSyncAllCalendarWorkspaces = () =>
-    syncAllWorkspaces({ api: 'google-calendar', kind: 'Google Calendar', statusSetter: setGoogleCalendar })
+  const handleSyncCalendar = () =>
+    syncEnabledWorkspaces({ api: 'google-calendar', kind: 'Google Calendar', statusSetter: setGoogleCalendar, state: googleCalendar })
       .then(() => fetchGoogleCalendarStatus());
 
-  const handleSyncAllTasksWorkspaces = () =>
-    syncAllWorkspaces({ api: 'google-tasks', kind: 'Google Tasks', statusSetter: setGoogleTasks })
+  const handleSyncTasks = () =>
+    syncEnabledWorkspaces({ api: 'google-tasks', kind: 'Google Tasks', statusSetter: setGoogleTasks, state: googleTasks })
       .then(() => fetchGoogleTasksStatus());
 
   // PR3: migrate existing synced events from the legacy single calendar into
@@ -1406,22 +1410,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       {showCalendarAdvanced && (
                         <div className="calendar-actions" style={{ marginTop: '8px', padding: '10px', backgroundColor: '#F9FAFB', borderRadius: '6px', border: '1px solid #E5E7EB' }}>
                           <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '8px' }}>
-                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy.
+                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy. Tlačítko „Synchronizovať" spustí manuálnu synchronizáciu všetkých zapnutých workspaceov naraz.
                           </div>
                           <button
                             className="btn btn-secondary"
-                            onClick={handleSyncGoogleCalendar}
+                            onClick={handleSyncCalendar}
                             disabled={googleCalendar.syncing}
+                            title="Spustí synchronizáciu pre každý zaškrtnutý workspace"
                           >
-                            {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať tento workspace'}
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleSyncAllCalendarWorkspaces}
-                            disabled={googleCalendar.syncing || (workspaces?.length ?? 0) <= 1}
-                            title="Spustí synchronizáciu pre všetky tvoje workspace naraz"
-                          >
-                            {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať všetky'}
+                            {googleCalendar.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
                           </button>
                           <button
                             className="btn btn-secondary"
@@ -1595,22 +1592,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       {showTasksAdvanced && (
                         <div className="calendar-actions" style={{ marginTop: '8px', padding: '10px', backgroundColor: '#F9FAFB', borderRadius: '6px', border: '1px solid #E5E7EB' }}>
                           <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '8px' }}>
-                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy.
+                            ℹ️ Tieto akcie v bežnom používaní nepotrebuješ — sync prebieha automaticky pri každej zmene úlohy. Tlačítko „Synchronizovať" spustí manuálnu synchronizáciu všetkých zapnutých workspaceov naraz.
                           </div>
                           <button
                             className="btn btn-secondary"
-                            onClick={handleSyncGoogleTasks}
+                            onClick={handleSyncTasks}
                             disabled={googleTasks.syncing}
+                            title="Spustí synchronizáciu pre každý zaškrtnutý workspace"
                           >
-                            {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať tento workspace'}
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleSyncAllTasksWorkspaces}
-                            disabled={googleTasks.syncing || (workspaces?.length ?? 0) <= 1}
-                            title="Spustí synchronizáciu pre všetky tvoje workspace naraz"
-                          >
-                            {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať všetky'}
+                            {googleTasks.syncing ? '⏳ Synchronizujem...' : '🔄 Synchronizovať'}
                           </button>
                           <button
                             className="btn btn-secondary"
