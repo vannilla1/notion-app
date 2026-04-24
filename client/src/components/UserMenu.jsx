@@ -604,6 +604,142 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  // Master "Označiť všetky" toggle — prepne naraz všetky workspace-y. Volá
+  // existujúce single-workspace handlery sekvenčne (paralelné /workspace-sync-toggle
+  // volania by trafili Google OAuth refresh race + rate limit pri masovom
+  // cleanupe). Pri odškrtnutí sa confirm ukáže JEDENKRÁT za všetky synchronizované
+  // workspace-y dokopy — nie N-krát individuálne.
+  const handleToggleAllCalendarWorkspaces = async (checkAll) => {
+    const wsList = Array.isArray(workspaces) ? workspaces : [];
+    if (wsList.length === 0) return;
+    const disabledSet = new Set((googleCalendar.syncDisabledWorkspaces || []).map(String));
+    const syncedSet = new Set((googleCalendar.syncedWorkspaces || []).map(String));
+
+    if (checkAll) {
+      // Zapnúť všetky aktuálne vypnuté — žiaden confirm netreba.
+      const toEnable = wsList.filter(w => disabledSet.has(String(w.id || w._id)));
+      for (const w of toEnable) {
+        await handleToggleCalendarWorkspace(String(w.id || w._id), true, w.name);
+      }
+    } else {
+      // Vypnúť všetky zapnuté. Spočítaj koľko z nich reálne má v Google dáta
+      // a ukáž JEDEN agregovaný confirm (len ak aspoň jeden z nich sa skutočne
+      // bude čistiť — inak ticho prepneme bez otravovania).
+      const toDisable = wsList.filter(w => !disabledSet.has(String(w.id || w._id)));
+      const withSyncedData = toDisable.filter(w => syncedSet.has(String(w.id || w._id)));
+      if (withSyncedData.length > 0) {
+        const ok = window.confirm(
+          `Naozaj chcete vypnúť synchronizáciu kalendára pre všetky workspace-y?\n\n` +
+          `Zo synchronizovaných ${withSyncedData.length} workspace-ov budú udalosti odstránené ` +
+          `z vášho Google Calendara.\nÚdaje v Prpl CRM zostanú zachované.`
+        );
+        if (!ok) return;
+      }
+      // Single-workspace handler bežne pýta vlastný confirm — ten by sa N-krát
+      // zopakoval. Obídeme ho tým, že zavoláme priamo API + optimistic update
+      // (kopírujeme minimum potrebného zo single handleru).
+      for (const w of toDisable) {
+        const wsId = String(w.id || w._id);
+        const hadSynced = syncedSet.has(wsId);
+        setGoogleCalendar(prev => {
+          const current = (prev.syncDisabledWorkspaces || []).map(String);
+          return current.includes(wsId)
+            ? prev
+            : { ...prev, syncDisabledWorkspaces: [...current, wsId] };
+        });
+        if (hadSynced) setCalendarWsStatus(prev => ({ ...prev, [wsId]: 'busy' }));
+        try {
+          const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId: wsId, enabled: false });
+          const cleaned = res?.data?.eventsCleanedUp || 0;
+          if (hadSynced) {
+            setCalendarWsStatus(prev => ({
+              ...prev,
+              [wsId]: cleaned > 0 ? `done-off-${cleaned}` : 'done-off'
+            }));
+            setTimeout(() => {
+              setCalendarWsStatus(prev => {
+                const copy = { ...prev };
+                delete copy[wsId];
+                return copy;
+              });
+            }, 4000);
+          }
+        } catch (e) {
+          setGoogleCalendar(prev => {
+            const current = (prev.syncDisabledWorkspaces || []).map(String);
+            return { ...prev, syncDisabledWorkspaces: current.filter(id => id !== wsId) };
+          });
+          setCalendarWsStatus(prev => ({ ...prev, [wsId]: 'error' }));
+          setGoogleCalendarMessage(translateErrorMessage(e.response?.data?.message || e.message));
+          setGoogleCalendarMessageType('error');
+        }
+      }
+      fetchGoogleCalendarStatus();
+    }
+  };
+
+  const handleToggleAllTasksWorkspaces = async (checkAll) => {
+    const wsList = Array.isArray(workspaces) ? workspaces : [];
+    if (wsList.length === 0) return;
+    const disabledSet = new Set((googleTasks.syncDisabledWorkspaces || []).map(String));
+    const syncedSet = new Set((googleTasks.syncedWorkspaces || []).map(String));
+
+    if (checkAll) {
+      const toEnable = wsList.filter(w => disabledSet.has(String(w.id || w._id)));
+      for (const w of toEnable) {
+        await handleToggleTasksWorkspace(String(w.id || w._id), true, w.name);
+      }
+    } else {
+      const toDisable = wsList.filter(w => !disabledSet.has(String(w.id || w._id)));
+      const withSyncedData = toDisable.filter(w => syncedSet.has(String(w.id || w._id)));
+      if (withSyncedData.length > 0) {
+        const ok = window.confirm(
+          `Naozaj chcete vypnúť synchronizáciu úloh pre všetky workspace-y?\n\n` +
+          `Zo synchronizovaných ${withSyncedData.length} workspace-ov budú úlohy odstránené ` +
+          `z vašich Google Tasks.\nÚdaje v Prpl CRM zostanú zachované.`
+        );
+        if (!ok) return;
+      }
+      for (const w of toDisable) {
+        const wsId = String(w.id || w._id);
+        const hadSynced = syncedSet.has(wsId);
+        setGoogleTasks(prev => {
+          const current = (prev.syncDisabledWorkspaces || []).map(String);
+          return current.includes(wsId)
+            ? prev
+            : { ...prev, syncDisabledWorkspaces: [...current, wsId] };
+        });
+        if (hadSynced) setTasksWsStatus(prev => ({ ...prev, [wsId]: 'busy' }));
+        try {
+          const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId: wsId, enabled: false });
+          const cleaned = res?.data?.tasksCleanedUp || 0;
+          if (hadSynced) {
+            setTasksWsStatus(prev => ({
+              ...prev,
+              [wsId]: cleaned > 0 ? `done-off-${cleaned}` : 'done-off'
+            }));
+            setTimeout(() => {
+              setTasksWsStatus(prev => {
+                const copy = { ...prev };
+                delete copy[wsId];
+                return copy;
+              });
+            }, 4000);
+          }
+        } catch (e) {
+          setGoogleTasks(prev => {
+            const current = (prev.syncDisabledWorkspaces || []).map(String);
+            return { ...prev, syncDisabledWorkspaces: current.filter(id => id !== wsId) };
+          });
+          setTasksWsStatus(prev => ({ ...prev, [wsId]: 'error' }));
+          setGoogleTasksMessage(translateErrorMessage(e.response?.data?.message || e.message));
+          setGoogleTasksMessageType('error');
+        }
+      }
+      fetchGoogleTasksStatus();
+    }
+  };
+
   // Force-sync every workspace the user has ENABLED for sync (respects the
   // per-workspace checkboxes). Handles the "I just enabled a workspace, push
   // its existing tasks to Google now" use case — auto-sync only fires on task
@@ -1486,6 +1622,32 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#374151' }}>
                           Synchronizované workspace:
                         </div>
+                        {/* Master checkbox — užitočný keď user má veľa
+                            workspace-ov. "checked" len keď sú všetky zapnuté,
+                            `indeterminate` keď je zapnutá iba časť (tri-state
+                            reaguje jasnejšie než obyčajný binary checkbox). */}
+                        {workspaces.length > 1 && (() => {
+                          const disabled = (googleCalendar.syncDisabledWorkspaces || []).map(String);
+                          const totalCount = workspaces.length;
+                          const enabledCount = workspaces.filter(w => !disabled.includes(String(w.id || w._id))).length;
+                          const allChecked = enabledCount === totalCount;
+                          const noneChecked = enabledCount === 0;
+                          return (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', marginBottom: '6px', borderBottom: '1px dashed #E5E7EB', paddingBottom: '6px', fontSize: '13px', fontWeight: 600, color: '#4B5563', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={allChecked}
+                                ref={el => { if (el) el.indeterminate = !allChecked && !noneChecked; }}
+                                disabled={googleCalendar.syncing}
+                                onChange={(e) => handleToggleAllCalendarWorkspaces(e.target.checked)}
+                              />
+                              <span style={{ flex: 1 }}>Označiť všetky</span>
+                              <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: 400 }}>
+                                {enabledCount} / {totalCount}
+                              </span>
+                            </label>
+                          );
+                        })()}
                         {workspaces.map(ws => {
                           const wsId = String(ws.id || ws._id);
                           const disabled = (googleCalendar.syncDisabledWorkspaces || []).map(String);
@@ -1669,6 +1831,29 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#374151' }}>
                           Synchronizované workspace:
                         </div>
+                        {/* Master checkbox — viď komentár v Calendar sekcii. */}
+                        {workspaces.length > 1 && (() => {
+                          const disabled = (googleTasks.syncDisabledWorkspaces || []).map(String);
+                          const totalCount = workspaces.length;
+                          const enabledCount = workspaces.filter(w => !disabled.includes(String(w.id || w._id))).length;
+                          const allChecked = enabledCount === totalCount;
+                          const noneChecked = enabledCount === 0;
+                          return (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', marginBottom: '6px', borderBottom: '1px dashed #E5E7EB', paddingBottom: '6px', fontSize: '13px', fontWeight: 600, color: '#4B5563', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={allChecked}
+                                ref={el => { if (el) el.indeterminate = !allChecked && !noneChecked; }}
+                                disabled={googleTasks.syncing}
+                                onChange={(e) => handleToggleAllTasksWorkspaces(e.target.checked)}
+                              />
+                              <span style={{ flex: 1 }}>Označiť všetky</span>
+                              <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: 400 }}>
+                                {enabledCount} / {totalCount}
+                              </span>
+                            </label>
+                          );
+                        })()}
                         {workspaces.map(ws => {
                           const wsId = String(ws.id || ws._id);
                           const disabled = (googleTasks.syncDisabledWorkspaces || []).map(String);
