@@ -104,6 +104,15 @@ function AppContent() {
 
   const [unreadCounts, setUnreadCounts] = useState({ crm: 0, tasks: 0, messages: 0 });
 
+  // Admin panel má vlastnú session cez AdminLogin + adminApi — s regulárnym
+  // user účtom nemá nič spoločné. Keď je user prihlásený cez oba entry pointy
+  // (regulárny AuthContext + admin session), bez tejto gating podmienky by
+  // NotificationToast, PushPermissionBanner aj socket listener pokračovali
+  // v behu nad regulárnou identitou aj na admin-route → admin by na /admin
+  // videl popup notifikácie z úplne iného účtu. Ľahšie je zakázať notifikačnú
+  // UI vrstvu pre celý `/admin*` namespace.
+  const isAdminRoute = location.pathname.startsWith('/admin');
+
   const fetchUnreadCounts = useCallback(async () => {
     try {
       const res = await api.get('/api/notifications/unread-by-section');
@@ -112,8 +121,8 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) fetchUnreadCounts();
-  }, [isAuthenticated, fetchUnreadCounts]);
+    if (isAuthenticated && !isAdminRoute) fetchUnreadCounts();
+  }, [isAuthenticated, isAdminRoute, fetchUnreadCounts]);
 
   // Periodic poll — mirrors NotificationBell's 30s interval so that BottomNav
   // section badges stay in sync with the bell. Previously section counts
@@ -121,21 +130,21 @@ function AppContent() {
   // dropped (iOS backgrounded WKWebView, socket reconnect, race) the
   // BottomNav badge drifted higher than the bell and never self-corrected.
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || isAdminRoute) return;
     const interval = setInterval(fetchUnreadCounts, 30000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, fetchUnreadCounts]);
+  }, [isAuthenticated, isAdminRoute, fetchUnreadCounts]);
 
   // Refresh section counts when any component marks notifications as read
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || isAdminRoute) return;
     const handler = () => fetchUnreadCounts();
     window.addEventListener('notifications-updated', handler);
     return () => window.removeEventListener('notifications-updated', handler);
-  }, [isAuthenticated, fetchUnreadCounts]);
+  }, [isAuthenticated, isAdminRoute, fetchUnreadCounts]);
 
   useEffect(() => {
-    if (!socket || !isConnected || !isAuthenticated) return;
+    if (!socket || !isConnected || !isAuthenticated || isAdminRoute) return;
     const handleNotification = (notification) => {
       const section = typeToSection(notification.type);
       if (section) {
@@ -149,7 +158,7 @@ function AppContent() {
     };
     socket.on('notification', handleNotification);
     return () => socket.off('notification', handleNotification);
-  }, [socket, isConnected, isAuthenticated]);
+  }, [socket, isConnected, isAuthenticated, isAdminRoute]);
 
   // NOTE: previously we auto-marked every notification in a section as read
   // the moment the user tapped that section in the bottom nav — that's a lie
@@ -159,10 +168,13 @@ function AppContent() {
   // components) or taps a notification in the bell dropdown.
 
   useEffect(() => {
-    if (isAuthenticated) {
+    // initializePush na `/admin*` nepúšťame — admin login neznamená že má
+    // user aj regulárny push subscription, a keby sme ho teraz zaregistrovali,
+    // admin by začal dostávať system notifikácie z pôvodného user účtu.
+    if (isAuthenticated && !isAdminRoute) {
       initializePush().catch(() => {});
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isAdminRoute]);
 
   // Modal scroll-lock: prevent body scroll behind open modals (iOS-safe).
   // Uses a local `isLocked` flag (not the body class) as source of truth, so
@@ -370,12 +382,17 @@ function AppContent() {
     <>
       {/* In iOS native app, APNs system banners already show notifications —
           mounting NotificationToast would duplicate every notification.
-          Web/Android (no APNs) still get the in-app toast. */}
-      {isAuthenticated && !isIosNativeApp() && <NotificationToast />}
+          Web/Android (no APNs) still get the in-app toast.
+          Na `/admin*` toast nikdy — admin má vlastnú session a notifikácie
+          z regulárneho AuthContextu tam nepatria. */}
+      {isAuthenticated && !isIosNativeApp() && !isAdminRoute && <NotificationToast />}
       {/* Android/PWA first-run push permission banner. Skip v iOS native app —
-          APNs tam rieši permission cez systémovú Swift vrstvu (UNUserNotificationCenter). */}
-      {isAuthenticated && !isIosNativeApp() && <PushPermissionBanner />}
-      {isAuthenticated && <BottomNav unreadCounts={unreadCounts} />}
+          APNs tam rieši permission cez systémovú Swift vrstvu (UNUserNotificationCenter).
+          Na `/admin*` banner tiež nie — viď komentár pri NotificationToast. */}
+      {isAuthenticated && !isIosNativeApp() && !isAdminRoute && <PushPermissionBanner />}
+      {/* BottomNav je user-app navigácia — admin panel má vlastný tab-bar, takže
+          na `/admin*` by bol BottomNav vizuálne rušivý aj zavádzajúci. */}
+      {isAuthenticated && !isAdminRoute && <BottomNav unreadCounts={unreadCounts} />}
       <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
