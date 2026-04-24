@@ -1376,6 +1376,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     <li><strong>Vyberte workspace</strong> — zaškrtnite tie, ktoré sa majú synchronizovať. Pre každý vzniká vlastný kalendár <em>„Prpl CRM — názov workspace"</em> s farbou workspace.</li>
                     <li><strong>Kliknite „Synchronizovať"</strong> — nahrá všetky existujúce úlohy a udalosti zo zaškrtnutých workspaces do Googlu. Ďalšie zmeny idú automaticky v reálnom čase.</li>
                   </ol>
+                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #DDD6FE' }}>
+                    <strong>Čo robia checkboxy pri workspace-och:</strong>
+                    <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                      <li><strong>Zaškrtnutie</strong> — workspace sa zapne na synchronizáciu. Nové zmeny (nová úloha, zmena dátumu) sa budú posielať do Google automaticky v reálnom čase. Existujúce úlohy, ktoré v Google ešte nie sú, pošlite jednorazovo cez tlačidlo „Synchronizovať".</li>
+                      <li><strong>Odškrtnutie</strong> — všetky udalosti/úlohy daného workspace sa <strong>okamžite zmažú z Google</strong> (Calendar aj Tasks). Dáta v Prpl CRM zostávajú zachované.</li>
+                    </ul>
+                  </div>
                   <div style={{ marginTop: '8px', padding: '8px 10px', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', color: '#92400E' }}>
                     ⚠️ <strong>Pozor:</strong> Odškrtnutie workspace alebo „Odpojiť" <strong>vymaže príslušné udalosti/úlohy z Google</strong>. Dáta v Prpl CRM zostávajú zachované.
                   </div>
@@ -1511,10 +1518,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                             </label>
                           );
                         })}
-                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px', lineHeight: 1.5 }}>
-                          <strong>Odškrtnutím</strong> sa udalosti daného workspace okamžite zmažú z Google Calendara.<br/>
-                          <strong>Zaškrtnutím</strong> sa workspace znova zapne — nové zmeny sa budú synchronizovať automaticky. Existujúce úlohy pošlite do Google cez tlačidlo „Synchronizovať".
-                        </div>
                       </div>
                     )}
 
@@ -1695,10 +1698,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                             </label>
                           );
                         })}
-                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px', lineHeight: 1.5 }}>
-                          <strong>Odškrtnutím</strong> sa úlohy daného workspace okamžite zmažú z Google Tasks.<br/>
-                          <strong>Zaškrtnutím</strong> sa workspace znova zapne — nové zmeny sa budú synchronizovať automaticky. Existujúce úlohy pošlite do Google cez tlačidlo „Synchronizovať".
-                        </div>
                       </div>
                     )}
 
