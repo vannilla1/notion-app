@@ -1162,6 +1162,42 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
 
             <div className="modal-body">
+              {/* Stručný návod — viditeľný open-by-default pri prvom otvorení.
+                  <details> drží vlastný state, netreba React useState. */}
+              <details
+                open
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px 14px',
+                  background: '#F5F3FF',
+                  border: '1px solid #DDD6FE',
+                  borderRadius: '8px'
+                }}
+              >
+                <summary style={{
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  color: '#5B21B6',
+                  userSelect: 'none'
+                }}>
+                  📖 Ako to funguje (návod)
+                </summary>
+                <div style={{ marginTop: '10px', fontSize: '13px', color: '#4C1D95', lineHeight: '1.6' }}>
+                  <ol style={{ margin: '0 0 8px 18px', padding: 0 }}>
+                    <li><strong>Pripojte Google účet</strong> — kliknite „Pripojiť Google Calendar" alebo „Pripojiť Google Tasks".</li>
+                    <li><strong>Vyberte workspace</strong> — zaškrtnite tie, ktoré sa majú synchronizovať. Pre každý vzniká vlastný kalendár <em>„Prpl CRM — názov workspace"</em> s farbou workspace.</li>
+                    <li><strong>Kliknite „Synchronizovať"</strong> — nahrá všetky existujúce úlohy a udalosti zo zaškrtnutých workspaces do Googlu. Ďalšie zmeny idú automaticky v reálnom čase.</li>
+                  </ol>
+                  <div style={{ marginTop: '8px', padding: '8px 10px', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', color: '#92400E' }}>
+                    ⚠️ <strong>Pozor:</strong> Odškrtnutie workspace alebo „Odpojiť" <strong>vymaže príslušné udalosti/úlohy z Google</strong>. Dáta v Prpl CRM zostávajú zachované.
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#6D28D9' }}>
+                    💡 Google Tasks sa v Google Calendari zobrazia pod spoločnou položkou „Úlohy" — každá úloha má prefix <code>[Workspace]</code> v názve, aby ste vedeli, z ktorého workspace pochádza.
+                  </div>
+                </div>
+              </details>
+
               {/* Web Push toggle — desktop-only.
                   Hidden on all mobile (iOS native → APNs, Android native → FCM,
                   iOS Safari → no Web Push outside PWA, Android Chrome → native app
