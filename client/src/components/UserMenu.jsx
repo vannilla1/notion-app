@@ -117,7 +117,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   // badge vedľa checkboxu. Pridané po tom, čo sme kvôli scroll-jumpu zrušili
   // success banner po každom kliknutí: bez tohoto indikátora user nevedel či
   // unsync prebehol, a falošne si myslel že musí kliknúť "Synchronizovať".
-  // Shape: { [workspaceId]: 'busy' | 'done-off' | 'done-on' | 'error' }.
+  // Shape: { [workspaceId]: 'busy' | 'done-off' | 'done-off-N' | 'error' }.
+  // Ukazuje sa LEN pri reálnom disconnect-cleanupe (vypnutie už synchronizovaného
+  // workspacu). Zapnutie a vypnutie prázdneho workspacu sú no-op → bez badge.
   const [calendarWsStatus, setCalendarWsStatus] = useState({});
   const [tasksWsStatus, setTasksWsStatus] = useState({});
   const [message, setMessage] = useState('');
@@ -477,6 +479,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     // Server volanie beží v pozadí; refetch statusu je odložený na onClose
     // modalu (alebo ho vyvolá "Synchronizovať" tlačidlo).
     const wsKey = String(workspaceId);
+    // Badge ukazujeme LEN pri reálnom disconnect-cleanupe (disable + workspace
+    // mal v Google niečo zosynchronizované). V ostatných prípadoch (zapnutie,
+    // alebo vypnutie nikdy-nesynchronizovaného) je akcia vizuálne no-op —
+    // užívateľ badge nepotrebuje. Iba error badge sa ukáže vždy.
+    const syncedCal = (googleCalendar.syncedWorkspaces || []).map(String);
+    const wasSynced = syncedCal.includes(wsKey);
+    const showBadge = !enabled && wasSynced;
     setGoogleCalendar(prev => {
       const current = (prev.syncDisabledWorkspaces || []).map(String);
       const next = enabled
@@ -484,14 +493,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         : [...current, wsKey];
       return { ...prev, syncDisabledWorkspaces: next };
     });
-    setCalendarWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
+    if (showBadge) {
+      setCalendarWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
+    }
     try {
       const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
       const cleaned = res?.data?.eventsCleanedUp || 0;
-      setCalendarWsStatus(prev => ({
-        ...prev,
-        [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
-      }));
+      if (showBadge) {
+        setCalendarWsStatus(prev => ({
+          ...prev,
+          [wsKey]: cleaned > 0 ? `done-off-${cleaned}` : 'done-off'
+        }));
+      }
       // Refetch status → horný riadok "N / M úloh čaká na synchronizáciu" sa
       // prepočíta hneď po zmene checkboxu. Predtým sa aktualizoval iba po
       // kliknutí na "Synchronizovať", čo bolo mätúce (user odznačil workspace,
@@ -499,13 +512,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       fetchGoogleCalendarStatus();
       // Auto-clear badge po pár sekundách — user videl potvrdenie, ďalej už
       // prekáža. Fixed-width placeholder sa nezmrští, takže žiaden scroll jump.
-      setTimeout(() => {
-        setCalendarWsStatus(prev => {
-          const copy = { ...prev };
-          delete copy[wsKey];
-          return copy;
-        });
-      }, 4000);
+      if (showBadge) {
+        setTimeout(() => {
+          setCalendarWsStatus(prev => {
+            const copy = { ...prev };
+            delete copy[wsKey];
+            return copy;
+          });
+        }, 4000);
+      }
     } catch (e) {
       // Rollback optimistic state + surface error
       setGoogleCalendar(prev => {
@@ -541,6 +556,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     // zabraňuje scroll jumpu spôsobenému re-renderom pending counteru
     // a pridávaniu success bannerov po každom kliknutí.
     const wsKey = String(workspaceId);
+    const syncedTasks = (googleTasks.syncedWorkspaces || []).map(String);
+    const wasSyncedT = syncedTasks.includes(wsKey);
+    const showBadgeT = !enabled && wasSyncedT;
     setGoogleTasks(prev => {
       const current = (prev.syncDisabledWorkspaces || []).map(String);
       const next = enabled
@@ -548,24 +566,30 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         : [...current, wsKey];
       return { ...prev, syncDisabledWorkspaces: next };
     });
-    setTasksWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
+    if (showBadgeT) {
+      setTasksWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
+    }
     try {
       const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
       const cleaned = res?.data?.tasksCleanedUp || res?.data?.eventsCleanedUp || 0;
-      setTasksWsStatus(prev => ({
-        ...prev,
-        [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
-      }));
+      if (showBadgeT) {
+        setTasksWsStatus(prev => ({
+          ...prev,
+          [wsKey]: cleaned > 0 ? `done-off-${cleaned}` : 'done-off'
+        }));
+      }
       // Refetch status → prepočíta pending counter v hornom riadku, aby user
       // hneď videl koľko úloh teraz čaká na synchronizáciu.
       fetchGoogleTasksStatus();
-      setTimeout(() => {
-        setTasksWsStatus(prev => {
-          const copy = { ...prev };
-          delete copy[wsKey];
-          return copy;
-        });
-      }, 4000);
+      if (showBadgeT) {
+        setTimeout(() => {
+          setTasksWsStatus(prev => {
+            const copy = { ...prev };
+            delete copy[wsKey];
+            return copy;
+          });
+        }, 4000);
+      }
     } catch (e) {
       setGoogleTasks(prev => {
         const current = (prev.syncDisabledWorkspaces || []).map(String);
@@ -1463,7 +1487,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           let badge = '';
                           let badgeColor = '#6B7280';
                           if (status === 'busy') { badge = '⏳ pracujem…'; badgeColor = '#6366F1'; }
-                          else if (status === 'done-on') { badge = '✓ zapnuté'; badgeColor = '#10B981'; }
                           else if (status === 'done-off') { badge = '✓ vypnuté a vyčistené'; badgeColor = '#10B981'; }
                           else if (typeof status === 'string' && status.startsWith('done-off-')) {
                             const n = status.slice('done-off-'.length);
@@ -1651,7 +1674,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           let badge = '';
                           let badgeColor = '#6B7280';
                           if (status === 'busy') { badge = '⏳ pracujem…'; badgeColor = '#6366F1'; }
-                          else if (status === 'done-on') { badge = '✓ zapnuté'; badgeColor = '#10B981'; }
                           else if (status === 'done-off') { badge = '✓ vypnuté a vyčistené'; badgeColor = '#10B981'; }
                           else if (typeof status === 'string' && status.startsWith('done-off-')) {
                             const n = status.slice('done-off-'.length);
