@@ -473,20 +473,30 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
     let syncedCount = 0;
 
     if (user.googleTasks?.enabled) {
-      const workspaceId = req.workspaceId || user.currentWorkspaceId;
+      // Mirror of googleCalendar.js /status: aggregate pending-sync count
+      // across every workspace the user is a member of AND hasn't disabled.
+      // Gives the counter a meaning that tracks the checkbox state instead
+      // of silently scoping to whatever workspace the tab happens to be on.
       const userId = req.user.id.toString();
+      const disabledWs = new Set((user.googleTasks.syncDisabledWorkspaces || []).map(String));
+
+      const memberships = await WorkspaceMember.find({ userId }, 'workspaceId').lean();
+      const enabledWorkspaceIds = memberships
+        .map(m => m.workspaceId)
+        .filter(wsId => wsId && !disabledWs.has(String(wsId)));
+
       const isUserTask = (task) => {
         const assignedTo = task.assignedTo || [];
         if (assignedTo.length === 0) return true;
         return assignedTo.some(id => id && id.toString() === userId);
       };
 
-      const globalTasks = workspaceId ? await Task.find(
-        { workspaceId, completed: { $ne: true } },
+      const globalTasks = enabledWorkspaceIds.length ? await Task.find(
+        { workspaceId: { $in: enabledWorkspaceIds }, completed: { $ne: true } },
         { _id: 1, subtasks: 1, assignedTo: 1, dueDate: 1 }
       ).lean() : [];
-      const contacts = workspaceId ? await Contact.find(
-        { workspaceId },
+      const contacts = enabledWorkspaceIds.length ? await Contact.find(
+        { workspaceId: { $in: enabledWorkspaceIds } },
         { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1, 'tasks.dueDate': 1 }
       ).lean() : [];
 

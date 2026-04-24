@@ -319,13 +319,21 @@ router.get('/status', authenticateToken, async (req, res) => {
     let syncedCount = 0;
 
     if (user.googleCalendar?.enabled) {
-      // Read workspace id from header (client-authoritative) or fall back to user default.
-      const headerWs = req.headers['x-workspace-id'];
-      const workspaceId = (headerWs && typeof headerWs === 'string' && mongoose.Types.ObjectId.isValid(headerWs))
-        ? headerWs
-        : user.currentWorkspaceId;
+      // Pending-sync counter aggregates across EVERY workspace the user is a
+      // member of AND hasn't disabled in syncDisabledWorkspaces. Previously
+      // scoped to the current workspace only, which was confusing — the
+      // checkboxes let user pick multiple workspaces to sync, so the badge
+      // should reflect the same scope (otherwise toggling another workspace
+      // on/off didn't update the number).
       const userId = req.user.id.toString();
       const syncedMap = user.googleCalendar.syncedTaskIds;
+      const disabledWs = new Set((user.googleCalendar.syncDisabledWorkspaces || []).map(String));
+
+      // All workspaces where the user is a member.
+      const memberships = await WorkspaceMember.find({ userId }, 'workspaceId').lean();
+      const enabledWorkspaceIds = memberships
+        .map(m => m.workspaceId)
+        .filter(wsId => wsId && !disabledWs.has(String(wsId)));
 
       const isUserTask = (task) => {
         const assignedTo = task.assignedTo || [];
@@ -333,12 +341,12 @@ router.get('/status', authenticateToken, async (req, res) => {
         return assignedTo.some(id => id && id.toString() === userId);
       };
 
-      const globalTasks = workspaceId ? await Task.find(
-        { workspaceId, completed: { $ne: true } },
+      const globalTasks = enabledWorkspaceIds.length ? await Task.find(
+        { workspaceId: { $in: enabledWorkspaceIds }, completed: { $ne: true } },
         { _id: 1, subtasks: 1, assignedTo: 1, dueDate: 1 }
       ).lean() : [];
-      const contacts = workspaceId ? await Contact.find(
-        { workspaceId },
+      const contacts = enabledWorkspaceIds.length ? await Contact.find(
+        { workspaceId: { $in: enabledWorkspaceIds } },
         { 'tasks.id': 1, 'tasks.completed': 1, 'tasks.subtasks': 1, 'tasks.assignedTo': 1, 'tasks.dueDate': 1 }
       ).lean() : [];
 
