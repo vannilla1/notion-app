@@ -350,9 +350,12 @@ function CRM() {
     return '';
   };
 
-  // Get all tasks for a contact (only embedded tasks)
+  // Get all tasks for a contact — both embedded and global Task docs that
+  // reference this contact via contactIds. Pre fix: counter ignoroval global
+  // projekty priradené cez contactIds, takže "Zobraziť projekty (N)" ukazovalo
+  // 0 aj keď reálne existovali projekty priradené k tomuto kontaktu.
   const getContactTasks = (contact) => {
-    return (contact.tasks || []).map(t => ({
+    const embedded = (contact.tasks || []).map(t => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -364,6 +367,25 @@ function CRM() {
       source: 'contact',
       contactId: contact.id
     }));
+
+    const contactIdStr = String(contact.id);
+    const globalForContact = (globalTasks || []).filter(t => {
+      const ids = (t.contactIds || []).map(id => String(id));
+      return ids.includes(contactIdStr);
+    }).map(t => ({
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      completed: t.completed,
+      priority: t.priority,
+      dueDate: t.dueDate,
+      subtasks: t.subtasks || [],
+      notes: t.notes,
+      source: 'global',
+      contactId: contact.id
+    }));
+
+    return [...embedded, ...globalForContact];
   };
 
   useEffect(() => {
