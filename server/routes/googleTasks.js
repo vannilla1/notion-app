@@ -58,7 +58,7 @@ const DAILY_QUOTA_LIMIT = 50000;
 // included because the title we send to Google includes a [Workspace] prefix
 // — if the workspace renames, the hash must change so we re-sync.
 const createTaskHash = (task, workspaceName) => {
-  const data = `${task.title}|${task.dueDate}|${task.completed}|${task.notes || ''}|${task.contact || ''}|${workspaceName || ''}`;
+  const data = `${task.title}|${task.dueDate}|${task.dueTime || ''}|${task.completed}|${task.notes || ''}|${task.contact || ''}|${workspaceName || ''}`;
   // Simple hash function
   let hash = 0;
   for (let i = 0; i < data.length; i++) {
@@ -2128,6 +2128,12 @@ function createGoogleTaskData(task, workspaceName) {
     }
   }
   let notes = (task.notes || '').substring(0, 8192);
+  // Google Tasks API ignores time-of-day in `due`, so surface the time to the
+  // user via notes. This way even though Google's UI only shows the date, user
+  // can still see "⏰ 14:30" when opening the task.
+  if (task.dueTime && /^\d{2}:\d{2}$/.test(task.dueTime)) {
+    notes = `⏰ ${task.dueTime}${notes ? '\n\n' + notes : ''}`;
+  }
   if (task.contact) {
     notes += notes ? '\n\n' : '';
     notes += `Kontakt: ${task.contact}`;

@@ -15,6 +15,11 @@ const subtaskSchema = new mongoose.Schema({
   title: String,
   completed: { type: Boolean, default: false },
   dueDate: String,
+  // Optional time-of-day for the dueDate, format "HH:MM" (24h). Empty/null =
+  // all-day. Google Calendar: dueTime present → timed event (start.dateTime +
+  // 1h duration). Google Tasks API ignores time, takže sa len odzrkadlí do
+  // task.notes pre user-side readability.
+  dueTime: { type: String, default: '' },
   notes: { type: String, default: '' },
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
@@ -68,6 +73,8 @@ const taskSchema = new mongoose.Schema({
     default: 'medium'
   },
   dueDate: String,
+  // Voliteľný čas "HH:MM" — viď komentár v subtaskSchema.
+  dueTime: { type: String, default: '' },
   subtasks: { type: [subtaskSchema], default: [] },
   files: { type: [fileSchema], default: [] },
   createdBy: String,

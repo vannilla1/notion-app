@@ -16,6 +16,8 @@ const subtaskSchema = new mongoose.Schema({
   title: String,
   completed: { type: Boolean, default: false },
   dueDate: String,
+  // Voliteľný čas "HH:MM" — viď Task.js pre semantiku.
+  dueTime: { type: String, default: '' },
   notes: { type: String, default: '' },
   priority: { type: String, default: null },
   subtasks: { type: Array, default: [] },
@@ -35,6 +37,7 @@ const taskSchema = new mongoose.Schema({
   completed: { type: Boolean, default: false },
   priority: { type: String, default: 'medium' },
   dueDate: String,
+  dueTime: { type: String, default: '' },
   assignedTo: { type: [String], default: [] }, // Array of User IDs
   subtasks: { type: [subtaskSchema], default: [] },
   files: { type: [fileSchema], default: [] }, // Task file attachments

@@ -1020,7 +1020,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, contactId, contactIds, subtasks, assignedTo, reminder } = req.body;
+    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo, reminder } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -1050,6 +1050,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         title: title.trim(),
         description: description || '',
         dueDate: dueDate || null,
+        dueTime: dueDate ? (dueTime || '') : '',
         priority: priority || 'medium',
         completed: false,
         contactIds: [],
@@ -1132,6 +1133,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         completed: false,
         priority: priority || 'medium',
         dueDate: dueDate || null,
+        dueTime: dueDate ? (dueTime || '') : '',
         assignedTo: assignedTo || [],
         subtasks: cloneSubtasksWithNewIds(subtasks),
         createdAt: new Date().toISOString(),
@@ -1250,7 +1252,7 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName, workspac
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed, contactId, contactIds, source, assignedTo, reminder } = req.body;
+    const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo, reminder } = req.body;
     const io = req.app.get('io');
 
     // If source is 'contact', update in contacts
@@ -1294,6 +1296,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               title: title !== undefined ? title : task.title,
               description: description !== undefined ? description : task.description,
               dueDate: dueDate !== undefined ? dueDate : task.dueDate,
+              dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (task.dueTime || ''),
               priority: priority !== undefined ? priority : task.priority,
               completed: completed !== undefined ? completed : task.completed,
               assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
@@ -1424,6 +1427,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       task.description = description !== undefined ? description : task.description;
       const oldDueDate = task.dueDate;
       task.dueDate = dueDate !== undefined ? dueDate : task.dueDate;
+      if (dueTime !== undefined) {
+        task.dueTime = (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) || '';
+      } else if (dueDate !== undefined && !dueDate) {
+        task.dueTime = '';
+      }
       task.priority = priority !== undefined ? priority : task.priority;
       task.completed = completed !== undefined ? completed : task.completed;
       task.contactIds = finalContactIds;
@@ -1542,6 +1550,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           title: title !== undefined ? title : ctask.title,
           description: description !== undefined ? description : ctask.description,
           dueDate: dueDate !== undefined ? dueDate : ctask.dueDate,
+          dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (ctask.dueTime || ''),
           priority: priority !== undefined ? priority : ctask.priority,
           completed: completed !== undefined ? completed : ctask.completed,
           assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
@@ -1904,7 +1913,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, notes, priority, assignedTo } = req.body;
+    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -1917,6 +1926,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       title: title.trim(),
       completed: false,
       dueDate: dueDate || null,
+      dueTime: dueDate ? (dueTime || '') : '',
       notes: notes || '',
       priority: priority || null,
       subtasks: [],
@@ -1974,6 +1984,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
               title: `${subtask.title} (${contact.tasks[taskIndex].title})`,
               description: subtask.notes || '',
               dueDate: subtask.dueDate,
+              dueTime: subtask.dueTime,
               completed: subtask.completed,
               priority: subtask.priority,
               contactName: contact.name,
@@ -2011,6 +2022,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
           title: `${subtask.title} (${task.title})`,
           description: subtask.notes || '',
           dueDate: subtask.dueDate,
+          dueTime: subtask.dueTime,
           completed: subtask.completed,
           priority: subtask.priority,
           contactName: null,
@@ -2083,7 +2095,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, completed, source, dueDate, notes, assignedTo } = req.body;
+    const { title, completed, source, dueDate, dueTime, notes, assignedTo } = req.body;
     const io = req.app.get('io');
 
     // Returns { updated, originalAssignedTo } for assignment notification logic
@@ -2097,6 +2109,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           title: title !== undefined ? title : found.subtask.title,
           completed: completed !== undefined ? completed : found.subtask.completed,
           dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
+          dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || ''),
           notes: notes !== undefined ? notes : found.subtask.notes,
           priority: found.subtask.priority, // Preserve priority
           assignedTo: assignedTo !== undefined ? assignedTo : (found.subtask.assignedTo || []),
@@ -2134,6 +2147,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               title: `${updated.title} (${contact.tasks[taskIndex].title})`,
               description: updated.notes || '',
               dueDate: updated.dueDate,
+              dueTime: updated.dueTime,
               completed: updated.completed,
               priority: updated.priority,
               contactName: contact.name,
@@ -2195,6 +2209,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           title: `${updated.title} (${task.title})`,
           description: updated.notes || '',
           dueDate: updated.dueDate,
+          dueTime: updated.dueTime,
           completed: updated.completed,
           priority: updated.priority,
           contactName: null,

@@ -517,7 +517,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 // Add task to contact
 router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, assignedTo } = req.body;
+    const { title, description, dueDate, dueTime, priority, assignedTo } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
@@ -535,6 +535,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
       title: title.trim(),
       description: description || '',
       dueDate: dueDate || null,
+      dueTime: dueDate ? (dueTime || '') : '',
       priority: priority || 'medium',
       completed: false,
       assignedTo: assignedTo || [],
@@ -556,6 +557,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
       title: task.title,
       description: task.description,
       dueDate: task.dueDate,
+      dueTime: task.dueTime,
       completed: task.completed,
       assignedTo: task.assignedTo,
       workspaceId: req.workspaceId?.toString(),
@@ -571,7 +573,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
 // Update task
 router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, description, dueDate, priority, completed, assignedTo } = req.body;
+    const { title, description, dueDate, dueTime, priority, completed, assignedTo } = req.body;
 
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
@@ -594,6 +596,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       title: title !== undefined ? title : task.title,
       description: description !== undefined ? description : task.description,
       dueDate: dueDate !== undefined ? dueDate : task.dueDate,
+      dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (task.dueTime || ''),
       priority: priority !== undefined ? priority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
       assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
@@ -615,6 +618,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       title: updatedTask.title,
       description: updatedTask.description,
       dueDate: updatedTask.dueDate,
+      dueTime: updatedTask.dueTime,
       completed: updatedTask.completed,
       assignedTo: updatedTask.assignedTo,
       workspaceId: req.workspaceId?.toString(),
@@ -666,7 +670,7 @@ router.delete('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, 
 // Add subtask to task
 router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, parentSubtaskId, dueDate, notes, priority } = req.body;
+    const { title, parentSubtaskId, dueDate, dueTime, notes, priority } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
@@ -704,6 +708,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       title: title.trim(),
       completed: false,
       dueDate: dueDate || null,
+      dueTime: dueDate ? (dueTime || '') : '',
       notes: notes || '',
       priority: priority || null,
       subtasks: [],
@@ -747,6 +752,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       title: `${subtask.title} (${task.title})`,
       description: subtask.notes,
       dueDate: subtask.dueDate,
+      dueTime: subtask.dueTime,
       completed: subtask.completed,
       assignedTo: task.assignedTo || [],
       workspaceId: req.workspaceId?.toString(),
@@ -762,7 +768,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
 // Update subtask
 router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, completed, dueDate, notes } = req.body;
+    const { title, completed, dueDate, dueTime, notes } = req.body;
 
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
@@ -791,6 +797,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       title: title !== undefined ? title : found.subtask.title,
       completed: completed !== undefined ? completed : found.subtask.completed,
       dueDate: dueDate !== undefined ? dueDate : found.subtask.dueDate,
+      dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || ''),
       notes: notes !== undefined ? notes : found.subtask.notes,
       priority: found.subtask.priority, // Preserve priority
       subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
@@ -811,6 +818,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       title: `${updatedSubtask.title} (${task.title})`,
       description: updatedSubtask.notes,
       dueDate: updatedSubtask.dueDate,
+      dueTime: updatedSubtask.dueTime,
       completed: updatedSubtask.completed,
       assignedTo: task.assignedTo || [],
       workspaceId: req.workspaceId?.toString(),

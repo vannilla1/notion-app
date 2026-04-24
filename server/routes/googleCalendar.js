@@ -874,6 +874,12 @@ const processCalendarChanges = async (user) => {
       // Determine what changed
       const isDeleted = event.status === 'cancelled';
       const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
+      // Extract HH:MM from dateTime if present (timed event); all-day event has no time
+      let newDueTime = '';
+      if (event.start?.dateTime) {
+        const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
+        if (m) newDueTime = m[1];
+      }
       // Strip the completion prefix "✓ " from event title to get clean title
       let newTitle = (event.summary || '').replace(/^✓\s*/, '').trim();
 
@@ -908,11 +914,26 @@ const processCalendarChanges = async (user) => {
       if (newDueDate && newDueDate !== taskDueDate) {
         if (contact && taskIndex !== -1) {
           contact.tasks[taskIndex].dueDate = new Date(newDueDate);
+          contact.tasks[taskIndex].dueTime = newDueTime;
           contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
           changed = true;
         } else if (task._id) {
           task.dueDate = new Date(newDueDate);
+          task.dueTime = newDueTime;
           task.modifiedAt = new Date().toISOString();
+          changed = true;
+        }
+      } else if (newDueDate) {
+        // Same date but time may have changed
+        const currentTime = (contact && taskIndex !== -1 ? contact.tasks[taskIndex].dueTime : task.dueTime) || '';
+        if (newDueTime !== currentTime) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].dueTime = newDueTime;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+          } else if (task._id) {
+            task.dueTime = newDueTime;
+            task.modifiedAt = new Date().toISOString();
+          }
           changed = true;
         }
       }
@@ -2149,17 +2170,31 @@ function createEventData(task) {
                   task.priority === 'low' ? '8' :   // Gray
                   '9'; // Blue (medium/default)
 
+  // If dueTime (HH:MM) is present, create a timed event with 1h default duration
+  // instead of an all-day event. This lets Google Calendar show the task at the
+  // exact hour in the user's timeline.
+  let startObj, endObj;
+  if (task.dueTime && /^\d{2}:\d{2}$/.test(task.dueTime)) {
+    const [hh, mm] = task.dueTime.split(':').map(Number);
+    const dateStr = dueDate.toISOString().split('T')[0];
+    const startDT = new Date(`${dateStr}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
+    const endDT = new Date(startDT.getTime() + 60 * 60 * 1000); // +1h
+    const toLocalISO = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+    };
+    startObj = { dateTime: toLocalISO(startDT), timeZone: 'Europe/Bratislava' };
+    endObj = { dateTime: toLocalISO(endDT), timeZone: 'Europe/Bratislava' };
+  } else {
+    startObj = { date: startDate, timeZone: 'Europe/Bratislava' };
+    endObj = { date: endDate, timeZone: 'Europe/Bratislava' };
+  }
+
   return {
     summary: (task.completed ? '✓ ' : '') + title,
     description: description,
-    start: {
-      date: startDate,
-      timeZone: 'Europe/Bratislava'
-    },
-    end: {
-      date: endDate,
-      timeZone: 'Europe/Bratislava'
-    },
+    start: startObj,
+    end: endObj,
     colorId: colorId,
     transparency: 'transparent', // Don't block time
     status: task.completed ? 'cancelled' : 'confirmed',

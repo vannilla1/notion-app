@@ -118,6 +118,7 @@ function CRM() {
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
+  const [subtaskDueTimes, setSubtaskDueTimes] = useState({});
   const [subtaskNotes, setSubtaskNotes] = useState({});
   const [showSubtaskDateInput, setShowSubtaskDateInput] = useState({});
   const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
@@ -125,6 +126,7 @@ function CRM() {
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
   const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
+  const [editSubtaskDueTime, setEditSubtaskDueTime] = useState('');
   const [expandedTasks, setExpandedTasks] = useState({});
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
   const [showNotesFor, setShowNotesFor] = useState(null);
@@ -890,6 +892,7 @@ function CRM() {
     const inputKey = parentSubtaskId || (task.contactId ? `${task.contactId}-${task.id}` : task.id);
     const subtaskTitle = subtaskInputs[inputKey] || '';
     const subtaskDueDate = subtaskDueDates[inputKey] || null;
+    const subtaskDueTime = subtaskDueTimes[inputKey] || '';
     const subtaskNote = subtaskNotes[inputKey] || '';
     if (!subtaskTitle.trim()) return;
 
@@ -899,6 +902,7 @@ function CRM() {
         await api.post(`/api/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           dueDate: subtaskDueDate,
+          dueTime: subtaskDueDate ? subtaskDueTime : '',
           notes: subtaskNote,
           source: 'global',
           parentSubtaskId: parentSubtaskId
@@ -912,6 +916,7 @@ function CRM() {
         await api.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
           title: subtaskTitle,
           dueDate: subtaskDueDate,
+          dueTime: subtaskDueDate ? subtaskDueTime : '',
           notes: subtaskNote,
           parentSubtaskId: parentSubtaskId
         });
@@ -919,6 +924,7 @@ function CRM() {
       }
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskDueTimes(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
       setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
     } catch (error) {
@@ -978,6 +984,7 @@ function CRM() {
     setEditSubtaskTitle(subtask.title);
     setEditSubtaskNotes(subtask.notes || '');
     setEditSubtaskDueDate(subtask.dueDate || '');
+    setEditSubtaskDueTime(subtask.dueTime || '');
   };
 
   const saveSubtask = async (task, subtask) => {
@@ -989,6 +996,7 @@ function CRM() {
           title: editSubtaskTitle,
           notes: editSubtaskNotes,
           dueDate: editSubtaskDueDate || null,
+          dueTime: editSubtaskDueDate ? editSubtaskDueTime : '',
           source: 'global'
         });
         await fetchGlobalTasks();
@@ -1000,7 +1008,8 @@ function CRM() {
         await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
           title: editSubtaskTitle,
           notes: editSubtaskNotes,
-          dueDate: editSubtaskDueDate || null
+          dueDate: editSubtaskDueDate || null,
+          dueTime: editSubtaskDueDate ? editSubtaskDueTime : ''
         });
         await fetchContacts();
       }
@@ -1008,6 +1017,7 @@ function CRM() {
       setEditSubtaskTitle('');
       setEditSubtaskNotes('');
       setEditSubtaskDueDate('');
+      setEditSubtaskDueTime('');
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
     }
@@ -1087,13 +1097,26 @@ function CRM() {
                     placeholder="Názov úlohy"
                   />
                 </div>
-                <div className="subtask-edit-row">
+                <div className="subtask-edit-row" style={{ display: 'flex', gap: '6px' }}>
                   <input
                     type="date"
                     value={editSubtaskDueDate}
-                    onChange={(e) => setEditSubtaskDueDate(e.target.value)}
+                    onChange={(e) => {
+                      setEditSubtaskDueDate(e.target.value);
+                      if (!e.target.value) setEditSubtaskDueTime('');
+                    }}
                     className="form-input form-input-sm task-date-input"
                     title="Termín úlohy"
+                    style={{ flex: 2 }}
+                  />
+                  <input
+                    type="time"
+                    value={editSubtaskDueTime}
+                    onChange={(e) => setEditSubtaskDueTime(e.target.value)}
+                    disabled={!editSubtaskDueDate}
+                    className="form-input form-input-sm"
+                    title="Čas (voliteľné)"
+                    style={{ flex: 1 }}
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -1213,13 +1236,28 @@ function CRM() {
                 </button>
               </form>
               {showSubtaskDateInput[subtask.id] && (
-                <input
-                  type="date"
-                  value={subtaskDueDates[subtask.id] || ''}
-                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  className="form-input form-input-sm"
-                  autoFocus
-                />
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="date"
+                    value={subtaskDueDates[subtask.id] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
+                      if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
+                    }}
+                    className="form-input form-input-sm"
+                    style={{ flex: 2 }}
+                    autoFocus
+                  />
+                  <input
+                    type="time"
+                    value={subtaskDueTimes[subtask.id] || ''}
+                    onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                    disabled={!subtaskDueDates[subtask.id]}
+                    className="form-input form-input-sm"
+                    style={{ flex: 1 }}
+                  />
+                </div>
               )}
               {showSubtaskNotesInput[subtask.id] && (
                 <textarea

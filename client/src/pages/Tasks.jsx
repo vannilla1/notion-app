@@ -432,6 +432,8 @@ function Tasks() {
     title: '',
     description: '',
     dueDate: '',
+    // Voliteľný čas ("HH:MM"). Empty = celodenná.
+    dueTime: '',
     priority: 'medium',
     contactIds: [],
     assignedTo: [],
@@ -445,6 +447,9 @@ function Tasks() {
   // Subtask states
   const [subtaskInputs, setSubtaskInputs] = useState({});
   const [subtaskDueDates, setSubtaskDueDates] = useState({});
+  // Paralelný state k subtaskDueDates — key = subtask/parent ID, value = "HH:MM".
+  // Oddelený aby sa neviazal na existujúce dueDate logic (prázdne = celodenná).
+  const [subtaskDueTimes, setSubtaskDueTimes] = useState({});
   const [subtaskNotes, setSubtaskNotes] = useState({});
   const [subtaskAssignedTo, setSubtaskAssignedTo] = useState({});
   const [showSubtaskDateInput, setShowSubtaskDateInput] = useState({});
@@ -454,6 +459,7 @@ function Tasks() {
   const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
   const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
   const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
+  const [editSubtaskDueTime, setEditSubtaskDueTime] = useState('');
   const [editSubtaskAssignedTo, setEditSubtaskAssignedTo] = useState([]);
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
@@ -1251,6 +1257,7 @@ function Tasks() {
       title: task.title,
       description: task.description || '',
       dueDate: task.dueDate || '',
+      dueTime: task.dueTime || '',
       priority: task.priority || 'medium',
       contactIds: taskContactIds,
       assignedTo: task.assignedTo || [],
@@ -1283,6 +1290,7 @@ function Tasks() {
     const inputKey = parentSubtaskId || task.id;
     const subtaskTitle = subtaskInputs[inputKey] || '';
     const subtaskDueDate = subtaskDueDates[inputKey] || null;
+    const subtaskDueTime = subtaskDueTimes[inputKey] || '';
     const subtaskNote = subtaskNotes[inputKey] || '';
     const subtaskAssigned = subtaskAssignedTo[inputKey] || [];
     if (!subtaskTitle.trim()) return;
@@ -1291,6 +1299,7 @@ function Tasks() {
       await api.post(`/api/tasks/${task.id}/subtasks`, {
         title: subtaskTitle,
         dueDate: subtaskDueDate,
+        dueTime: subtaskDueDate ? subtaskDueTime : '',
         notes: subtaskNote,
         assignedTo: subtaskAssigned,
         source: task.source,
@@ -1298,6 +1307,7 @@ function Tasks() {
       });
       setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
+      setSubtaskDueTimes(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
       setSubtaskAssignedTo(prev => ({ ...prev, [inputKey]: [] }));
       setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
@@ -1338,6 +1348,7 @@ function Tasks() {
     setEditSubtaskTitle(subtask.title);
     setEditSubtaskNotes(subtask.notes || '');
     setEditSubtaskDueDate(subtask.dueDate || '');
+    setEditSubtaskDueTime(subtask.dueTime || '');
     setEditSubtaskAssignedTo(subtask.assignedTo || []);
   };
 
@@ -1348,6 +1359,7 @@ function Tasks() {
         title: editSubtaskTitle,
         notes: editSubtaskNotes,
         dueDate: editSubtaskDueDate || null,
+        dueTime: editSubtaskDueDate ? editSubtaskDueTime : '',
         assignedTo: editSubtaskAssignedTo,
         source: task.source
       });
@@ -1355,6 +1367,7 @@ function Tasks() {
       setEditSubtaskTitle('');
       setEditSubtaskNotes('');
       setEditSubtaskDueDate('');
+      setEditSubtaskDueTime('');
       setEditSubtaskAssignedTo([]);
       await fetchTasks();
     } catch (error) {
@@ -1545,13 +1558,26 @@ function Tasks() {
                     placeholder="Názov úlohy"
                   />
                 </div>
-                <div className="subtask-edit-row">
+                <div className="subtask-edit-row" style={{ display: 'flex', gap: '6px' }}>
                   <input
                     type="date"
                     value={editSubtaskDueDate}
-                    onChange={(e) => setEditSubtaskDueDate(e.target.value)}
+                    onChange={(e) => {
+                      setEditSubtaskDueDate(e.target.value);
+                      if (!e.target.value) setEditSubtaskDueTime('');
+                    }}
                     className="form-input form-input-sm task-date-input"
                     title="Termín úlohy"
+                    style={{ flex: 2 }}
+                  />
+                  <input
+                    type="time"
+                    value={editSubtaskDueTime}
+                    onChange={(e) => setEditSubtaskDueTime(e.target.value)}
+                    disabled={!editSubtaskDueDate}
+                    className="form-input form-input-sm"
+                    title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
+                    style={{ flex: 1 }}
                   />
                 </div>
                 <div className="subtask-edit-row">
@@ -1745,6 +1771,11 @@ function Tasks() {
                       delete newDates[subtask.id];
                       return newDates;
                     });
+                    setSubtaskDueTimes(prev => {
+                      const newTimes = { ...prev };
+                      delete newTimes[subtask.id];
+                      return newTimes;
+                    });
                     setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: false }));
                     setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
                     setShowSubtaskAssignInput(prev => ({ ...prev, [subtask.id]: false }));
@@ -1755,13 +1786,28 @@ function Tasks() {
                 </button>
               </form>
               {showSubtaskDateInput[subtask.id] && (
-                <input
-                  type="date"
-                  value={subtaskDueDates[subtask.id] || ''}
-                  onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  className="form-input form-input-sm"
-                  autoFocus
-                />
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="date"
+                    value={subtaskDueDates[subtask.id] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
+                      if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
+                    }}
+                    className="form-input form-input-sm"
+                    style={{ flex: 2 }}
+                    autoFocus
+                  />
+                  <input
+                    type="time"
+                    value={subtaskDueTimes[subtask.id] || ''}
+                    onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                    disabled={!subtaskDueDates[subtask.id]}
+                    className="form-input form-input-sm"
+                    style={{ flex: 1 }}
+                  />
+                </div>
               )}
               {showSubtaskNotesInput[subtask.id] && (
                 <textarea
@@ -2375,12 +2421,31 @@ function Tasks() {
                   </div>
                   <div className="form-group">
                     <label>Termín</label>
-                    <input
-                      type="date"
-                      value={newTaskForm.dueDate}
-                      onChange={(e) => setNewTaskForm({ ...newTaskForm, dueDate: e.target.value, reminder: e.target.value ? newTaskForm.reminder : '' })}
-                      className="form-input"
-                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="date"
+                        value={newTaskForm.dueDate}
+                        onChange={(e) => setNewTaskForm({
+                          ...newTaskForm,
+                          dueDate: e.target.value,
+                          // Bez dátumu čas stráca význam — zmaž aj dueTime.
+                          dueTime: e.target.value ? newTaskForm.dueTime : '',
+                          reminder: e.target.value ? newTaskForm.reminder : ''
+                        })}
+                        className="form-input"
+                        style={{ flex: 2 }}
+                      />
+                      <input
+                        type="time"
+                        value={newTaskForm.dueTime || ''}
+                        onChange={(e) => setNewTaskForm({ ...newTaskForm, dueTime: e.target.value })}
+                        disabled={!newTaskForm.dueDate}
+                        className="form-input"
+                        style={{ flex: 1 }}
+                        placeholder="—"
+                        title={newTaskForm.dueDate ? 'Voliteľný čas (HH:MM). Prázdne = celodenná úloha.' : 'Najskôr nastavte dátum'}
+                      />
+                    </div>
                   </div>
                   {newTaskForm.dueDate && (
                     <div className="form-group">
@@ -2644,8 +2709,16 @@ function Tasks() {
                               <input
                                 type="date"
                                 value={editForm.dueDate}
-                                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value, reminder: e.target.value ? editForm.reminder : '' })}
+                                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value, reminder: e.target.value ? editForm.reminder : '', dueTime: e.target.value ? editForm.dueTime : '' })}
                                 className="form-input"
+                              />
+                              <input
+                                type="time"
+                                value={editForm.dueTime || ''}
+                                onChange={(e) => setEditForm({ ...editForm, dueTime: e.target.value })}
+                                disabled={!editForm.dueDate}
+                                className="form-input"
+                                title="Čas (voliteľné)"
                               />
                               <select
                                 value={editForm.priority}
@@ -2899,13 +2972,28 @@ function Tasks() {
                                   <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                                 </form>
                                 {showSubtaskDateInput[task.id] && (
-                                  <input
-                                    type="date"
-                                    value={subtaskDueDates[task.id] || ''}
-                                    onChange={(e) => setSubtaskDueDates(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    className="form-input form-input-sm"
-                                    autoFocus
-                                  />
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <input
+                                      type="date"
+                                      value={subtaskDueDates[task.id] || ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setSubtaskDueDates(prev => ({ ...prev, [task.id]: val }));
+                                        if (!val) setSubtaskDueTimes(prev => ({ ...prev, [task.id]: '' }));
+                                      }}
+                                      className="form-input form-input-sm"
+                                      style={{ flex: 2 }}
+                                      autoFocus
+                                    />
+                                    <input
+                                      type="time"
+                                      value={subtaskDueTimes[task.id] || ''}
+                                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                      disabled={!subtaskDueDates[task.id]}
+                                      className="form-input form-input-sm"
+                                      style={{ flex: 1 }}
+                                    />
+                                  </div>
                                 )}
                                 {showSubtaskNotesInput[task.id] && (
                                   <textarea
