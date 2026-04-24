@@ -179,24 +179,41 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     if (cached) return res.json(cached);
 
     // Run both queries in parallel (saves 1-3s on Atlas M0)
+    //
+    // Historický filter na `contactIds: { $size: 0 }` tu spôsoboval, že
+    // standalone Task s priradeným kontaktom (vytvorený najskôr ako global a
+    // potom editáciou priradený ku kontaktu cez PUT) zmizol z UI úplne — v
+    // DB existoval, ale GET ho odfiltroval lebo nespĺňal "global = bez
+    // kontaktov" podmienku, a zároveň nebol embedded v Contact.tasks[], takže
+    // sa nenatiahol ani cez druhú vetvu. User to vnímal ako "projekt sa po
+    // priradení kontaktu vymazal". Filter odstránený — vraciame všetky Task
+    // dokumenty v workspace a nižšie doplníme contactIds/contactNames do
+    // enrichment-u. Duplicity s embedded taskami nemôžu vzniknúť, lebo POST
+    // /tasks vytvára BUĎ global BUĎ embedded, nikdy oboje.
     const [globalTasks, contacts] = await Promise.all([
-      Task.find({
-        workspaceId: req.workspaceId,
-        $or: [
-          { contactIds: { $exists: false } },
-          { contactIds: { $size: 0 } },
-          { contactIds: null }
-        ],
-        $and: [
-          { $or: [{ contactId: { $exists: false } }, { contactId: null }, { contactId: '' }] }
-        ]
-      }).maxTimeMS(30000).lean(),
+      Task.find({ workspaceId: req.workspaceId }).maxTimeMS(30000).lean(),
 
       Contact.find(
         { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
         EXCLUDE_FILE_DATA
       ).lean()
     ]);
+
+    // Získanie priradených kontaktov pre global tasky naraz (batch query) —
+    // treba ich pre enrichment contactNames/contactName. Nameto N+1 query po
+    // jednom tasku to je jeden In-query nad všetkými unikátnymi contact IDs.
+    const allGlobalContactIds = new Set();
+    globalTasks.forEach(t => (t.contactIds || []).forEach(id => {
+      if (id) allGlobalContactIds.add(String(id));
+    }));
+    const relatedContacts = allGlobalContactIds.size > 0
+      ? await Contact.find(
+          { _id: { $in: Array.from(allGlobalContactIds) }, workspaceId: req.workspaceId },
+          { name: 1 }
+        ).lean()
+      : [];
+    const contactNameById = {};
+    relatedContacts.forEach(c => { contactNameById[c._id.toString()] = c.name; });
 
     // Get all unique assigned user IDs for batch query
     const allAssignedIds = new Set();
@@ -215,16 +232,24 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       };
     });
 
-    // Enrich global tasks (these should have no contacts)
+    // Enrich global tasks — doplníme contactIds + contactNames pre každý task
+    // (môže mať 0..N priradených kontaktov). Frontend `contactFilter` na Tasks
+    // stránke funguje na základe `contactIds.includes(filter)` — keď tu
+    // vrátime `contactIds: []` pre tasky s reálnymi kontaktmi, filter by ich
+    // nepustil cez sito ani po oprave GET endpointu.
     const enrichedGlobalTasks = globalTasks.map(task => {
       const taskId = task._id.toString();
       const assignedUsersList = (task.assignedTo || []).map(id => usersMap[id.toString()]).filter(Boolean);
+      const taskContactIds = (task.contactIds || []).map(id => String(id)).filter(Boolean);
+      const taskContactNames = taskContactIds
+        .map(id => contactNameById[id])
+        .filter(Boolean);
       return {
         ...task,
         id: taskId,
-        contactIds: [],
-        contactNames: [],
-        contactName: null,
+        contactIds: taskContactIds,
+        contactNames: taskContactNames,
+        contactName: taskContactNames.join(', ') || null,
         source: 'global',
         assignedTo: (task.assignedTo || []).map(id => id.toString()),
         assignedUsers: assignedUsersList
