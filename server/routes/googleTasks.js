@@ -984,6 +984,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
             title: task.title,
             notes: task.description || '',
             dueDate: task.dueDate,
+            dueTime: task.dueTime || '',
             completed: task.completed,
             contact: null,
             modifiedAt: task.modifiedAt || task.updatedAt
@@ -1005,6 +1006,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
                 title: task.title,
                 notes: task.description || '',
                 dueDate: task.dueDate,
+                dueTime: task.dueTime || '',
                 completed: task.completed,
                 contact: contact.name,
                 modifiedAt: task.modifiedAt
@@ -2093,6 +2095,7 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
         title: `${subtask.title} (${parentTitle})`,
         notes: subtask.notes || '',
         dueDate: subtask.dueDate,
+        dueTime: subtask.dueTime || '',
         completed: subtask.completed,
         contact: contactName
       });
@@ -2341,6 +2344,7 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
             title: taskData.title,
             notes: taskData.description || taskData.notes || '',
             dueDate: taskData.dueDate,
+            dueTime: taskData.dueTime || '',
             completed: taskData.completed,
             contact: taskData.contactName || taskData.contact || null
           }, wsName);

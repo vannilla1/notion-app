@@ -1148,6 +1148,7 @@ function CRM() {
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
                     📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                    {subtask.dueTime && ` ⏰ ${subtask.dueTime}`}
                   </span>
                 )}
                 {hasChildren && (

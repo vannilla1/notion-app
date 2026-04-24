@@ -1634,6 +1634,7 @@ function Tasks() {
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
                     {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                    {subtask.dueTime && ` ⏰ ${subtask.dueTime}`}
                   </span>
                 )}
                 {hasChildren && (
@@ -2812,6 +2813,7 @@ function Tasks() {
                               {task.dueDate && (
                                 <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
                                   {getDueDateClass(task.dueDate, task.completed) === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
+                                  {task.dueTime && ` ⏰ ${task.dueTime}`}
                                   {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
                                 </span>
                               )}

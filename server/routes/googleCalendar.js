@@ -75,6 +75,7 @@ const createEventHash = (task, targetCalendarId) => {
     task.title || '',
     task.description || '',
     task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
+    task.dueTime || '',
     task.completed ? '1' : '0',
     task.priority || '',
     task.contact || '',
@@ -1123,6 +1124,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
           title: task.title,
           description: task.description || '',
           dueDate: task.dueDate,
+          dueTime: task.dueTime || '',
           completed: task.completed,
           priority: task.priority,
           contact: null
@@ -1142,6 +1144,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
               title: task.title,
               description: task.description || '',
               dueDate: task.dueDate,
+              dueTime: task.dueTime || '',
               completed: task.completed,
               priority: task.priority,
               contact: contact.name
@@ -1438,6 +1441,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
       title: task.title,
       description: task.description || '',
       dueDate: task.dueDate,
+      dueTime: task.dueTime || '',
       completed: task.completed,
       priority: task.priority,
       contact: contactName
@@ -2101,6 +2105,7 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
         title: `${subtask.title} (${parentTitle})`,
         description: subtask.notes || '',
         dueDate: subtask.dueDate,
+        dueTime: subtask.dueTime || '',
         completed: subtask.completed,
         priority: null,
         contact: contactName
@@ -2560,6 +2565,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             title: taskData.title,
             description: taskData.description || '',
             dueDate: taskData.dueDate,
+            dueTime: taskData.dueTime || '',
             completed: taskData.completed,
             priority: taskData.priority,
             contact: taskData.contactName || taskData.contact || null
@@ -2574,6 +2580,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             title: taskData.title,
             description: taskData.description || '',
             dueDate: taskData.dueDate,
+            dueTime: taskData.dueTime || '',
             completed: taskData.completed,
             priority: taskData.priority,
             contact: taskData.contactName || taskData.contact || null
