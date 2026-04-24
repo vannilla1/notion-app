@@ -137,6 +137,13 @@ const userSchema = new mongoose.Schema({
     // would have to re-fetch the Task document just to resolve workspaceId →
     // calendarId — and by then the task is often already gone.
     syncedTaskCalendars: { type: Map, of: String, default: () => new Map() }, // taskId -> calendarId
+    // Per-workspace opt-OUT (blacklist). Each entry is a workspaceId (string)
+    // for which sync is explicitly disabled. Default empty = every workspace
+    // the user is a member of syncs automatically.
+    // Blacklist > whitelist: new workspaces the user joins later auto-sync
+    // without requiring an extra "enable" click. Users who want tight control
+    // add entries here.
+    syncDisabledWorkspaces: { type: [String], default: [] },
     // Watch channel for push notifications (Google → CRM)
     watchChannelId: { type: String, default: null },
     watchResourceId: { type: String, default: null },
@@ -165,6 +172,8 @@ const userSchema = new mongoose.Schema({
     // Which Google task list holds a given synced task. Mirrors
     // syncedTaskCalendars on the Calendar side — see comment there.
     syncedTaskLists: { type: Map, of: String, default: () => new Map() }, // crmTaskId -> taskListId
+    // Per-workspace opt-OUT — same shape + semantics as googleCalendar.
+    syncDisabledWorkspaces: { type: [String], default: [] },
     // Track sync metadata for incremental sync
     syncedTaskHashes: { type: Map, of: String, default: new Map() }, // crmTaskId -> hash of task data
     lastSyncAt: { type: Date, default: null },

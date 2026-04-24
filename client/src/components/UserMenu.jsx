@@ -358,7 +358,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false,
         syncing: false,
         pendingTasks: response.data.pendingTasks || null,
-        isDedicatedCalendar: !!response.data.isDedicatedCalendar
+        isDedicatedCalendar: !!response.data.isDedicatedCalendar,
+        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || []
       });
     } catch {
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
@@ -424,6 +425,46 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const errorMsg = error.response?.data?.message || error.message || 'Chyba pri synchronizácii';
       setErrors({ general: translateErrorMessage(errorMsg) });
       setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  // Per-workspace sync toggle — lets the user explicitly enable/disable sync
+  // for a specific workspace independently of the global Calendar/Tasks
+  // connection. Blacklist model: default is all-on, disabled ones stored in
+  // googleCalendar.syncDisabledWorkspaces / googleTasks.syncDisabledWorkspaces
+  // on the server. Toggling off triggers server-side cleanup (deletes the
+  // per-workspace calendar or list + any synced tasks pointing to it).
+  const toggleWorkspaceSync = async ({ api, workspaceId, enabled }) => {
+    const token = getStoredToken();
+    return axios.post(`${API_URL}/${api}/workspace-sync-toggle`,
+      { workspaceId, enabled },
+      { headers: { Authorization: token ? `Bearer ${token}` : undefined } }
+    );
+  };
+
+  const handleToggleCalendarWorkspace = async (workspaceId, enabled) => {
+    try {
+      setGoogleCalendar(prev => ({ ...prev, syncing: true }));
+      const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
+      setMessage(res.data.message);
+      await fetchGoogleCalendarStatus();
+    } catch (e) {
+      setErrors({ general: translateErrorMessage(e.response?.data?.message || e.message) });
+    } finally {
+      setGoogleCalendar(prev => ({ ...prev, syncing: false }));
+    }
+  };
+
+  const handleToggleTasksWorkspace = async (workspaceId, enabled) => {
+    try {
+      setGoogleTasks(prev => ({ ...prev, syncing: true }));
+      const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
+      setMessage(res.data.message);
+      await fetchGoogleTasksStatus();
+    } catch (e) {
+      setErrors({ general: translateErrorMessage(e.response?.data?.message || e.message) });
+    } finally {
+      setGoogleTasks(prev => ({ ...prev, syncing: false }));
     }
   };
 
@@ -552,7 +593,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         loading: false,
         syncing: false,
         pendingTasks: response.data.pendingTasks || null,
-        quota: response.data.quota || null
+        quota: response.data.quota || null,
+        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || []
       });
     } catch (error) {
       const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
@@ -1299,6 +1341,39 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       </div>
                     )}
 
+                    {Array.isArray(workspaces) && workspaces.length > 0 && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px 12px',
+                        backgroundColor: '#F9FAFB',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '6px'
+                      }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#374151' }}>
+                          Synchronizované workspace:
+                        </div>
+                        {workspaces.map(ws => {
+                          const wsId = String(ws.id || ws._id);
+                          const disabled = (googleCalendar.syncDisabledWorkspaces || []).map(String);
+                          const enabled = !disabled.includes(wsId);
+                          return (
+                            <label key={wsId} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', fontSize: '13px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                disabled={googleCalendar.syncing}
+                                onChange={(e) => handleToggleCalendarWorkspace(wsId, e.target.checked)}
+                              />
+                              <span>{ws.name}</span>
+                            </label>
+                          );
+                        })}
+                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px' }}>
+                          Vypnuté workspace sa nebudú synchronizovať. Existujúce udalosti v Google sa automaticky zmažú.
+                        </div>
+                      </div>
+                    )}
+
                     <div className="calendar-actions" style={{ marginTop: '12px' }}>
                       <button
                         className="btn btn-primary"
@@ -1426,6 +1501,39 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                       Ak už tieto projekty nechcete, otvorte <strong>Google Tasks</strong>, vľavo kliknite na
                       zoznam „Prpl CRM" → tri bodky → <strong>Odstrániť zoznam</strong>. Všetky projekty zmiznú naraz.
                     </div>
+
+                    {Array.isArray(workspaces) && workspaces.length > 0 && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px 12px',
+                        backgroundColor: '#F9FAFB',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '6px'
+                      }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#374151' }}>
+                          Synchronizované workspace:
+                        </div>
+                        {workspaces.map(ws => {
+                          const wsId = String(ws.id || ws._id);
+                          const disabled = (googleTasks.syncDisabledWorkspaces || []).map(String);
+                          const enabled = !disabled.includes(wsId);
+                          return (
+                            <label key={wsId} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', fontSize: '13px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                disabled={googleTasks.syncing}
+                                onChange={(e) => handleToggleTasksWorkspace(wsId, e.target.checked)}
+                              />
+                              <span>{ws.name}</span>
+                            </label>
+                          );
+                        })}
+                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px' }}>
+                          Vypnuté workspace sa nebudú synchronizovať. Existujúce úlohy v Google sa automaticky zmažú.
+                        </div>
+                      </div>
+                    )}
 
                     <div className="calendar-actions" style={{ marginTop: '12px' }}>
                       <button

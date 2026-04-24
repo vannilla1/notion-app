@@ -540,6 +540,7 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
       connected: (user.googleTasks?.enabled && !!user.googleTasks?.accessToken) || false,
       connectedAt: user.googleTasks?.connectedAt || null,
       lastSyncAt: user.googleTasks?.lastSyncAt || null,
+      syncDisabledWorkspaces: user.googleTasks?.syncDisabledWorkspaces || [],
       pendingTasks: {
         total: totalTasks,
         synced: syncedCount,
@@ -556,6 +557,81 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
   } catch (error) {
     logger.error('[Google Tasks] Error getting status', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
+  }
+});
+
+/**
+ * Toggle sync for a specific workspace (mirror of googleCalendar.js toggle).
+ * Body: { workspaceId: string, enabled: boolean }
+ */
+router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
+  try {
+    const { workspaceId, enabled } = req.body || {};
+    if (!workspaceId || typeof enabled !== 'boolean') {
+      return res.status(400).json({ message: 'Vyžaduje workspaceId a enabled (boolean)' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+      return res.status(400).json({ message: 'Neplatné workspaceId' });
+    }
+    const membership = await WorkspaceMember.findOne({ userId: req.user.id, workspaceId });
+    if (!membership) {
+      return res.status(403).json({ message: 'Nie ste členom tohto workspace' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    if (!user.googleTasks?.enabled) {
+      return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
+    }
+
+    const wsKey = String(workspaceId);
+    const currentlyDisabled = (user.googleTasks.syncDisabledWorkspaces || []).map(String);
+
+    if (enabled) {
+      user.googleTasks.syncDisabledWorkspaces = currentlyDisabled.filter(id => id !== wsKey);
+      await user.save();
+      return res.json({ success: true, message: 'Synchronizácia workspace zapnutá' });
+    }
+
+    // DISABLE: add to blacklist + delete the workspace's task list on Google.
+    if (!currentlyDisabled.includes(wsKey)) {
+      user.googleTasks.syncDisabledWorkspaces = [...currentlyDisabled, wsKey];
+    }
+
+    let tasksCleanedUp = 0;
+    const mapping = user.googleTasks.workspaceTaskLists?.get?.(wsKey);
+    const targetListId = mapping?.taskListId;
+    if (targetListId) {
+      try {
+        const tasksApi = await getTasksClient(user);
+        await tasksApi.tasklists.delete({ tasklist: targetListId });
+      } catch (e) {
+        if (e.code !== 404 && e.response?.status !== 404) {
+          logger.warn('[Google Tasks] Workspace disable: list delete failed', { workspaceId, error: e.message });
+        }
+      }
+      user.googleTasks.workspaceTaskLists.delete(wsKey);
+      if (user.googleTasks.syncedTaskLists) {
+        for (const [taskId, listId] of user.googleTasks.syncedTaskLists.entries()) {
+          if (listId === targetListId) {
+            user.googleTasks.syncedTaskLists.delete(taskId);
+            user.googleTasks.syncedTaskIds?.delete(taskId);
+            user.googleTasks.syncedTaskHashes?.delete(taskId);
+            tasksCleanedUp++;
+          }
+        }
+      }
+    }
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `Synchronizácia workspace vypnutá${tasksCleanedUp ? ` (odstránených ${tasksCleanedUp} úloh)` : ''}`,
+      tasksCleanedUp
+    });
+  } catch (error) {
+    logger.error('[Google Tasks] Workspace toggle error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
   }
 });
 
@@ -2147,6 +2223,16 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
         title: taskData.title
       });
       return;
+    }
+
+    // Per-workspace opt-out (mirror of googleCalendar.js). Skip users who
+    // disabled sync for this specific workspace.
+    if (workspaceId && action !== 'delete') {
+      users = users.filter(u => {
+        const disabled = u.googleTasks?.syncDisabledWorkspaces || [];
+        return !disabled.includes(String(workspaceId));
+      });
+      if (users.length === 0) return;
     }
 
     // Filter by assignedTo: if task is assigned, only sync for assigned users

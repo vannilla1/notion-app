@@ -383,6 +383,9 @@ router.get('/status', authenticateToken, async (req, res) => {
       connectedAt: user.googleCalendar?.connectedAt || null,
       lastSyncAt: user.googleCalendar?.lastSyncAt || null,
       isDedicatedCalendar: calId !== 'primary',
+      // Per-workspace sync state. Client uses this to render workspace
+      // checkboxes and show which are ON/OFF.
+      syncDisabledWorkspaces: user.googleCalendar?.syncDisabledWorkspaces || [],
       pendingTasks: {
         total: totalTasks,
         synced: syncedCount,
@@ -392,6 +395,93 @@ router.get('/status', authenticateToken, async (req, res) => {
   } catch (error) {
     logger.error('[Google Calendar] Error getting status', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri získavaní stavu' });
+  }
+});
+
+/**
+ * Toggle sync for a specific workspace.
+ *
+ * Body: { workspaceId: string, enabled: boolean }
+ *   enabled=true  → remove workspaceId from syncDisabledWorkspaces
+ *   enabled=false → add workspaceId to syncDisabledWorkspaces + cleanup that
+ *                   workspace's calendar from Google (delete calendar +
+ *                   wipe syncedTaskIds entries that pointed there)
+ *
+ * Security: only allows toggling workspaces the user is actually a member of.
+ * Without this check a compromised client could disable sync for other users.
+ */
+router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
+  try {
+    const { workspaceId, enabled } = req.body || {};
+    if (!workspaceId || typeof enabled !== 'boolean') {
+      return res.status(400).json({ message: 'Vyžaduje workspaceId a enabled (boolean)' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+      return res.status(400).json({ message: 'Neplatné workspaceId' });
+    }
+    // Confirm user is a member — prevents tampering with workspaces they don't own.
+    const membership = await WorkspaceMember.findOne({ userId: req.user.id, workspaceId });
+    if (!membership) {
+      return res.status(403).json({ message: 'Nie ste členom tohto workspace' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    if (!user.googleCalendar?.enabled) {
+      return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
+    }
+
+    const wsKey = String(workspaceId);
+    const currentlyDisabled = (user.googleCalendar.syncDisabledWorkspaces || []).map(String);
+
+    if (enabled) {
+      // Remove from blacklist → workspace starts syncing again on next task change.
+      user.googleCalendar.syncDisabledWorkspaces = currentlyDisabled.filter(id => id !== wsKey);
+      await user.save();
+      return res.json({ success: true, message: 'Synchronizácia workspace zapnutá' });
+    }
+
+    // DISABLE: add to blacklist + clean up Google-side artifacts so nothing
+    // stale remains in the user's calendar.
+    if (!currentlyDisabled.includes(wsKey)) {
+      user.googleCalendar.syncDisabledWorkspaces = [...currentlyDisabled, wsKey];
+    }
+
+    // Delete the workspace's calendar on Google (cascades all events).
+    let eventsCleanedUp = 0;
+    const mapping = user.googleCalendar.workspaceCalendars?.get?.(wsKey);
+    const targetCalendarId = mapping?.calendarId;
+    if (targetCalendarId) {
+      try {
+        const calendar = await getCalendarClient(user);
+        await calendar.calendars.delete({ calendarId: targetCalendarId });
+      } catch (e) {
+        if (e.code !== 404) {
+          logger.warn('[Google Calendar] Workspace disable: calendar delete failed', { workspaceId, error: e.message });
+        }
+      }
+      // Remove mapping + any syncedTaskIds that pointed to the deleted cal
+      user.googleCalendar.workspaceCalendars.delete(wsKey);
+      if (user.googleCalendar.syncedTaskCalendars) {
+        for (const [taskId, calId] of user.googleCalendar.syncedTaskCalendars.entries()) {
+          if (calId === targetCalendarId) {
+            user.googleCalendar.syncedTaskCalendars.delete(taskId);
+            user.googleCalendar.syncedTaskIds?.delete(taskId);
+            eventsCleanedUp++;
+          }
+        }
+      }
+    }
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `Synchronizácia workspace vypnutá${eventsCleanedUp ? ` (odstránených ${eventsCleanedUp} udalostí)` : ''}`,
+      eventsCleanedUp
+    });
+  } catch (error) {
+    logger.error('[Google Calendar] Workspace toggle error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
   }
 });
 
@@ -2188,6 +2278,18 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
         title: taskData.title
       });
       return;
+    }
+
+    // Per-workspace opt-out: users can disable sync for specific workspaces
+    // in their settings (stored in googleCalendar.syncDisabledWorkspaces).
+    // Skip those users for create/update — keep delete fallthrough so stale
+    // events can always be cleaned up regardless of current toggle state.
+    if (workspaceId && action !== 'delete') {
+      users = users.filter(u => {
+        const disabled = u.googleCalendar?.syncDisabledWorkspaces || [];
+        return !disabled.includes(String(workspaceId));
+      });
+      if (users.length === 0) return;
     }
 
     // Filter by assignedTo: if task is assigned, only sync for assigned users
