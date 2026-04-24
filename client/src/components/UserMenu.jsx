@@ -113,6 +113,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     quota: null
   });
   const [errors, setErrors] = useState({});
+  // Per-workspace toggle status (busy/done/error) — rendered ako fixed-width
+  // badge vedľa checkboxu. Pridané po tom, čo sme kvôli scroll-jumpu zrušili
+  // success banner po každom kliknutí: bez tohoto indikátora user nevedel či
+  // unsync prebehol, a falošne si myslel že musí kliknúť "Synchronizovať".
+  // Shape: { [workspaceId]: 'busy' | 'done-off' | 'done-on' | 'error' }.
+  const [calendarWsStatus, setCalendarWsStatus] = useState({});
+  const [tasksWsStatus, setTasksWsStatus] = useState({});
   const [message, setMessage] = useState('');
   const [googleTasksMessage, setGoogleTasksMessage] = useState('');
   const [googleTasksMessageType, setGoogleTasksMessageType] = useState('success'); // 'success' or 'error'
@@ -462,26 +469,41 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     // výšku spôsoboval scroll jump pri rýchlom zaškrtávaní viacerých workspaces.
     // Server volanie beží v pozadí; refetch statusu je odložený na onClose
     // modalu (alebo ho vyvolá "Synchronizovať" tlačidlo).
+    const wsKey = String(workspaceId);
     setGoogleCalendar(prev => {
       const current = (prev.syncDisabledWorkspaces || []).map(String);
-      const wsKey = String(workspaceId);
       const next = enabled
         ? current.filter(id => id !== wsKey)
         : [...current, wsKey];
       return { ...prev, syncDisabledWorkspaces: next };
     });
+    setCalendarWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
     try {
-      await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
+      const res = await toggleWorkspaceSync({ api: 'google-calendar', workspaceId, enabled });
+      const cleaned = res?.data?.eventsCleanedUp || 0;
+      setCalendarWsStatus(prev => ({
+        ...prev,
+        [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
+      }));
+      // Auto-clear badge po pár sekundách — user videl potvrdenie, ďalej už
+      // prekáža. Fixed-width placeholder sa nezmrští, takže žiaden scroll jump.
+      setTimeout(() => {
+        setCalendarWsStatus(prev => {
+          const copy = { ...prev };
+          delete copy[wsKey];
+          return copy;
+        });
+      }, 4000);
     } catch (e) {
       // Rollback optimistic state + surface error
       setGoogleCalendar(prev => {
         const current = (prev.syncDisabledWorkspaces || []).map(String);
-        const wsKey = String(workspaceId);
         const reverted = enabled
           ? [...current, wsKey]
           : current.filter(id => id !== wsKey);
         return { ...prev, syncDisabledWorkspaces: reverted };
       });
+      setCalendarWsStatus(prev => ({ ...prev, [wsKey]: 'error' }));
       setGoogleCalendarMessage(translateErrorMessage(e.response?.data?.message || e.message));
       setGoogleCalendarMessageType('error');
     }
@@ -500,25 +522,38 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     // Viď komentár v handleToggleCalendarWorkspace — optimistic update
     // zabraňuje scroll jumpu spôsobenému re-renderom pending counteru
     // a pridávaniu success bannerov po každom kliknutí.
+    const wsKey = String(workspaceId);
     setGoogleTasks(prev => {
       const current = (prev.syncDisabledWorkspaces || []).map(String);
-      const wsKey = String(workspaceId);
       const next = enabled
         ? current.filter(id => id !== wsKey)
         : [...current, wsKey];
       return { ...prev, syncDisabledWorkspaces: next };
     });
+    setTasksWsStatus(prev => ({ ...prev, [wsKey]: 'busy' }));
     try {
-      await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
+      const res = await toggleWorkspaceSync({ api: 'google-tasks', workspaceId, enabled });
+      const cleaned = res?.data?.tasksCleanedUp || res?.data?.eventsCleanedUp || 0;
+      setTasksWsStatus(prev => ({
+        ...prev,
+        [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
+      }));
+      setTimeout(() => {
+        setTasksWsStatus(prev => {
+          const copy = { ...prev };
+          delete copy[wsKey];
+          return copy;
+        });
+      }, 4000);
     } catch (e) {
       setGoogleTasks(prev => {
         const current = (prev.syncDisabledWorkspaces || []).map(String);
-        const wsKey = String(workspaceId);
         const reverted = enabled
           ? [...current, wsKey]
           : current.filter(id => id !== wsKey);
         return { ...prev, syncDisabledWorkspaces: reverted };
       });
+      setTasksWsStatus(prev => ({ ...prev, [wsKey]: 'error' }));
       setGoogleTasksMessage(translateErrorMessage(e.response?.data?.message || e.message));
       setGoogleTasksMessageType('error');
     }
@@ -1402,6 +1437,17 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           const wsId = String(ws.id || ws._id);
                           const disabled = (googleCalendar.syncDisabledWorkspaces || []).map(String);
                           const enabled = !disabled.includes(wsId);
+                          const status = calendarWsStatus[wsId];
+                          let badge = '';
+                          let badgeColor = '#6B7280';
+                          if (status === 'busy') { badge = '⏳ pracujem…'; badgeColor = '#6366F1'; }
+                          else if (status === 'done-on') { badge = '✓ zapnuté'; badgeColor = '#10B981'; }
+                          else if (status === 'done-off') { badge = '✓ vypnuté a vyčistené'; badgeColor = '#10B981'; }
+                          else if (typeof status === 'string' && status.startsWith('done-off-')) {
+                            const n = status.slice('done-off-'.length);
+                            badge = `✓ zmazaných ${n}`;
+                            badgeColor = '#10B981';
+                          } else if (status === 'error') { badge = '⚠ chyba'; badgeColor = '#DC2626'; }
                           return (
                             <label key={wsId} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', fontSize: '13px', cursor: 'pointer' }}>
                               <input
@@ -1410,12 +1456,19 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                                 disabled={googleCalendar.syncing}
                                 onChange={(e) => handleToggleCalendarWorkspace(wsId, e.target.checked, ws.name)}
                               />
-                              <span>{ws.name}</span>
+                              <span style={{ flex: 1 }}>{ws.name}</span>
+                              {/* Fixed-width status badge — reserved space, so
+                                  appearing/disappearing text nespôsobí layout shift
+                                  (to bol pôvodný scroll-jump bug). */}
+                              <span style={{ minWidth: '150px', textAlign: 'right', fontSize: '11px', color: badgeColor, fontWeight: 500 }}>
+                                {badge}
+                              </span>
                             </label>
                           );
                         })}
-                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px' }}>
-                          Vypnuté workspace sa nebudú synchronizovať. Existujúce udalosti v Google sa automaticky zmažú.
+                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px', lineHeight: 1.5 }}>
+                          <strong>Odškrtnutím</strong> sa udalosti daného workspace okamžite zmažú z Google Calendara.<br/>
+                          <strong>Zaškrtnutím</strong> sa workspace znova zapne — nové zmeny sa budú synchronizovať automaticky. Existujúce úlohy pošlite do Google cez tlačidlo „Synchronizovať".
                         </div>
                       </div>
                     )}
@@ -1572,6 +1625,17 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           const wsId = String(ws.id || ws._id);
                           const disabled = (googleTasks.syncDisabledWorkspaces || []).map(String);
                           const enabled = !disabled.includes(wsId);
+                          const status = tasksWsStatus[wsId];
+                          let badge = '';
+                          let badgeColor = '#6B7280';
+                          if (status === 'busy') { badge = '⏳ pracujem…'; badgeColor = '#6366F1'; }
+                          else if (status === 'done-on') { badge = '✓ zapnuté'; badgeColor = '#10B981'; }
+                          else if (status === 'done-off') { badge = '✓ vypnuté a vyčistené'; badgeColor = '#10B981'; }
+                          else if (typeof status === 'string' && status.startsWith('done-off-')) {
+                            const n = status.slice('done-off-'.length);
+                            badge = `✓ zmazaných ${n}`;
+                            badgeColor = '#10B981';
+                          } else if (status === 'error') { badge = '⚠ chyba'; badgeColor = '#DC2626'; }
                           return (
                             <label key={wsId} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', fontSize: '13px', cursor: 'pointer' }}>
                               <input
@@ -1580,12 +1644,16 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                                 disabled={googleTasks.syncing}
                                 onChange={(e) => handleToggleTasksWorkspace(wsId, e.target.checked, ws.name)}
                               />
-                              <span>{ws.name}</span>
+                              <span style={{ flex: 1 }}>{ws.name}</span>
+                              <span style={{ minWidth: '150px', textAlign: 'right', fontSize: '11px', color: badgeColor, fontWeight: 500 }}>
+                                {badge}
+                              </span>
                             </label>
                           );
                         })}
-                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px' }}>
-                          Vypnuté workspace sa nebudú synchronizovať. Existujúce úlohy v Google sa automaticky zmažú.
+                        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '6px', lineHeight: 1.5 }}>
+                          <strong>Odškrtnutím</strong> sa úlohy daného workspace okamžite zmažú z Google Tasks.<br/>
+                          <strong>Zaškrtnutím</strong> sa workspace znova zapne — nové zmeny sa budú synchronizovať automaticky. Existujúce úlohy pošlite do Google cez tlačidlo „Synchronizovať".
                         </div>
                       </div>
                     )}
