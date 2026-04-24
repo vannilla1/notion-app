@@ -416,6 +416,13 @@ router.get('/status', authenticateToken, async (req, res) => {
       // Per-workspace sync state. Client uses this to render workspace
       // checkboxes and show which are ON/OFF.
       syncDisabledWorkspaces: user.googleCalendar?.syncDisabledWorkspaces || [],
+      // Workspace IDs, ktoré reálne majú na Google vlastný kalendár (= už sa
+      // niečo synchronizovalo). Client ich používa na rozhodnutie, či ukázať
+      // destruktívny confirm pri odškrtnutí: keď tam workspace nie je, nie je
+      // čo zmazať, takže confirm je zbytočný.
+      syncedWorkspaces: user.googleCalendar?.workspaceCalendars
+        ? Array.from(user.googleCalendar.workspaceCalendars.keys())
+        : [],
       pendingTasks: {
         total: totalTasks,
         synced: syncedCount,

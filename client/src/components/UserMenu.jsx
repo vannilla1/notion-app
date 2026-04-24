@@ -371,7 +371,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         syncing: false,
         pendingTasks: response.data.pendingTasks || null,
         isDedicatedCalendar: !!response.data.isDedicatedCalendar,
-        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || []
+        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || [],
+        syncedWorkspaces: response.data.syncedWorkspaces || []
       });
     } catch {
       setGoogleCalendar(prev => ({ ...prev, loading: false }));
@@ -454,15 +455,21 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
   const handleToggleCalendarWorkspace = async (workspaceId, enabled, workspaceName) => {
     // Odpojenie workspace = server vymaže všetky Prpl CRM udalosti z Google kalendára
-    // pre daný workspace. Je to deštruktívna akcia, preto vyžadujeme potvrdenie.
+    // pre daný workspace. Je to deštruktívna akcia, preto vyžadujeme potvrdenie —
+    // ALE len ak tento workspace reálne niečo v Google má (`syncedWorkspaces`).
+    // Inak je to no-op a confirm by bol mätúci ("naozaj zmazať?" → niet čo zmazať).
     if (!enabled) {
-      const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
-      const ok = window.confirm(
-        `Naozaj chcete vypnúť synchronizáciu kalendára pre ${label}?\n\n` +
-        `Všetky udalosti z tohto workspace budú odstránené z vášho Google Calendara.\n` +
-        `Údaje v Prpl CRM zostanú zachované.`
-      );
-      if (!ok) return;
+      const synced = (googleCalendar.syncedWorkspaces || []).map(String);
+      const hasSyncedData = synced.includes(String(workspaceId));
+      if (hasSyncedData) {
+        const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
+        const ok = window.confirm(
+          `Naozaj chcete vypnúť synchronizáciu kalendára pre ${label}?\n\n` +
+          `Všetky udalosti z tohto workspace budú odstránené z vášho Google Calendara.\n` +
+          `Údaje v Prpl CRM zostanú zachované.`
+        );
+        if (!ok) return;
+      }
     }
     // Optimisticky update lokálny state (checkbox reaguje okamžite bez čakania
     // na server) + neukazuj success banner po každom kliknutí — banner meniaci
@@ -485,6 +492,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         ...prev,
         [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
       }));
+      // Refetch status → horný riadok "N / M úloh čaká na synchronizáciu" sa
+      // prepočíta hneď po zmene checkboxu. Predtým sa aktualizoval iba po
+      // kliknutí na "Synchronizovať", čo bolo mätúce (user odznačil workspace,
+      // čísla sa nehli → neveril tomu).
+      fetchGoogleCalendarStatus();
       // Auto-clear badge po pár sekundách — user videl potvrdenie, ďalej už
       // prekáža. Fixed-width placeholder sa nezmrští, takže žiaden scroll jump.
       setTimeout(() => {
@@ -510,14 +522,20 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleToggleTasksWorkspace = async (workspaceId, enabled, workspaceName) => {
+    // Rovnaká logika ako v handleToggleCalendarWorkspace — skip confirm ak
+    // workspace v Google Tasks reálne žiadny task list nemá.
     if (!enabled) {
-      const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
-      const ok = window.confirm(
-        `Naozaj chcete vypnúť synchronizáciu úloh pre ${label}?\n\n` +
-        `Všetky úlohy z tohto workspace budú odstránené z vašich Google Tasks (a z „Úlohy" v Google Calendari).\n` +
-        `Údaje v Prpl CRM zostanú zachované.`
-      );
-      if (!ok) return;
+      const synced = (googleTasks.syncedWorkspaces || []).map(String);
+      const hasSyncedData = synced.includes(String(workspaceId));
+      if (hasSyncedData) {
+        const label = workspaceName ? `„${workspaceName}"` : 'tento workspace';
+        const ok = window.confirm(
+          `Naozaj chcete vypnúť synchronizáciu úloh pre ${label}?\n\n` +
+          `Všetky úlohy z tohto workspace budú odstránené z vašich Google Tasks (a z „Úlohy" v Google Calendari).\n` +
+          `Údaje v Prpl CRM zostanú zachované.`
+        );
+        if (!ok) return;
+      }
     }
     // Viď komentár v handleToggleCalendarWorkspace — optimistic update
     // zabraňuje scroll jumpu spôsobenému re-renderom pending counteru
@@ -538,6 +556,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         ...prev,
         [wsKey]: enabled ? 'done-on' : (cleaned > 0 ? `done-off-${cleaned}` : 'done-off')
       }));
+      // Refetch status → prepočíta pending counter v hornom riadku, aby user
+      // hneď videl koľko úloh teraz čaká na synchronizáciu.
+      fetchGoogleTasksStatus();
       setTimeout(() => {
         setTasksWsStatus(prev => {
           const copy = { ...prev };
@@ -681,7 +702,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         syncing: false,
         pendingTasks: response.data.pendingTasks || null,
         quota: response.data.quota || null,
-        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || []
+        syncDisabledWorkspaces: response.data.syncDisabledWorkspaces || [],
+        syncedWorkspaces: response.data.syncedWorkspaces || []
       });
     } catch (error) {
       const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');

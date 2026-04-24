@@ -551,6 +551,11 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
       connectedAt: user.googleTasks?.connectedAt || null,
       lastSyncAt: user.googleTasks?.lastSyncAt || null,
       syncDisabledWorkspaces: user.googleTasks?.syncDisabledWorkspaces || [],
+      // Workspace IDs s vlastným Google task listom — viď komentár v
+      // googleCalendar.js /status pre dôvod.
+      syncedWorkspaces: user.googleTasks?.workspaceTaskLists
+        ? Array.from(user.googleTasks.workspaceTaskLists.keys())
+        : [],
       pendingTasks: {
         total: totalTasks,
         synced: syncedCount,
