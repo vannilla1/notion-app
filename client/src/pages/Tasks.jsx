@@ -30,7 +30,7 @@ const tasksHelpTips = [
   {
     icon: '📝',
     title: 'Ako pridať úlohy do projektu',
-    description: 'Kliknite na projekt — rozbalí sa. Dole uvidíte pole "Nová úloha". Napíšte názov úlohy a stlačte Enter. Úloha sa pridá do projektu. Každá úloha môže mať aj podúlohy — kliknite na úlohu, zobrazí sa pole "Nová podúloha". K úlohám môžete pridať termín, poznámku a priradiť zodpovedného člena tímu.'
+    description: 'Kliknite na projekt — rozbalí sa. Dole uvidíte tlačidlo "+ Pridať úlohu" — klikom sa otvorí formulár. Zadajte názov a priamo v ňom môžete pridať aj termín s časom (📅), poznámku (📝) a priradiť kolegu (👤) — každá z týchto možností sa rozbalí pod ikonkou. Uložíte tlačidlom "Uložiť" alebo Enter, "Zrušiť" formulár zavrie. Každá úloha môže mať aj podúlohy — kliknite na úlohu a otvorí sa pole "Nová podúloha" s rovnakými možnosťami.'
   },
   {
     icon: '✅',
@@ -39,8 +39,8 @@ const tasksHelpTips = [
   },
   {
     icon: '📅',
-    title: 'Ako nastaviť termín a prioritu',
-    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Vďaka tomu na prvý pohľad vidíte, čo je urgentné.'
+    title: 'Ako nastaviť termín, čas a prioritu',
+    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a voliteľne aj presný čas (HH:MM) — pole pre čas sa odomkne hneď ako vyplníte dátum. Vyberte prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Vďaka tomu na prvý pohľad vidíte, čo je urgentné. Rovnako môžete nastaviť termín aj čas pre úlohy a podúlohy.'
   },
   {
     icon: '🔔',
@@ -80,7 +80,7 @@ const tasksHelpTips = [
   {
     icon: '📆',
     title: 'Ako prepojiť s Google kalendárom',
-    description: 'Kliknite na ikonu profilu vpravo hore, potom na "Synchronizácia kalendára". Prepojte svoj Google účet — vaše projekty s termínmi sa automaticky zobrazia v Google Calendar a úlohy v Google Tasks. Synchronizácia funguje obojsmerne: zmeny v Google sa prejavia aj v aplikácii.'
+    description: 'Kliknite na ikonu profilu vpravo hore, potom na "Synchronizácia kalendára". Prepojte svoj Google účet — vaše projekty s termínmi sa automaticky zobrazia v Google Calendar a úlohy v Google Tasks. Synchronizácia funguje obojsmerne: zmeny v Google sa prejavia aj v aplikácii. Ak ste pri projekte/úlohe zadali aj čas, v Google Calendar sa zobrazí ako udalosť s konkrétnym časom; v Google Tasks (panel Úlohy) sa čas zobrazí v poznámke pri úlohe — Google Tasks API totiž samostatný čas nepodporuje.'
   },
   {
     icon: '📨',

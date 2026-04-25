@@ -38,7 +38,7 @@ const crmHelpTips = [
   {
     icon: '✅',
     title: 'Ako pracovať s úlohami',
-    description: 'V projekte kliknite na pole "Nová úloha" a napíšte jej názov. Úlohu dokončíte kliknutím na krúžok vedľa nej (zaškrtne sa). Každá úloha môže mať podúlohy — kliknite na úlohu a potom na "+ Nová podúloha". Keď dokončíte hlavný projekt (kliknutím na jeho checkbox), automaticky sa dokončia všetky jeho úlohy.'
+    description: 'V projekte kliknite na "+ Pridať úlohu" — otvorí sa formulár, kde zadáte názov a voliteľne aj termín s časom (📅), poznámku (📝) a priradíte kolegu (👤). Každá z týchto možností sa rozbalí pod ikonkou hneď v rovnakom formulári. Úlohu dokončíte kliknutím na krúžok vedľa nej. Každá úloha môže mať aj podúlohy s rovnakými možnosťami. Keď dokončíte hlavný projekt (kliknutím na jeho checkbox), automaticky sa dokončia všetky jeho úlohy.'
   },
   {
     icon: '📎',
@@ -62,8 +62,8 @@ const crmHelpTips = [
   },
   {
     icon: '🔔',
-    title: 'Ako nastaviť pripomienku termínu',
-    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia. Pod dátumom sa zobrazí možnosť "Pripomenúť" — vyberte si, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón.'
+    title: 'Ako nastaviť termín, čas a pripomienku',
+    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a voliteľne aj presný čas (HH:MM) — pole pre čas sa odomkne hneď ako vyplníte dátum. Pod dátumom je možnosť "Pripomenúť" — vyberte si, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón. Termín s časom sa pri prepojení s Google synchronizuje ako udalosť v Google Calendar.'
   },
   {
     icon: '📨',
