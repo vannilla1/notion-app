@@ -1741,6 +1741,30 @@ function Tasks() {
                 >
                   📅
                 </button>
+                {showSubtaskDateInput[subtask.id] && (
+                  <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="date"
+                      value={subtaskDueDates[subtask.id] || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
+                        if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
+                      }}
+                      className="form-input form-input-sm"
+                      style={{ flex: 2 }}
+                      autoFocus
+                    />
+                    <input
+                      type="time"
+                      value={subtaskDueTimes[subtask.id] || ''}
+                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                      disabled={!subtaskDueDates[subtask.id]}
+                      className="form-input form-input-sm"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                )}
                 <button
                   type="button"
                   className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
@@ -1749,6 +1773,15 @@ function Tasks() {
                 >
                   📝
                 </button>
+                {showSubtaskNotesInput[subtask.id] && (
+                  <textarea
+                    value={subtaskNotes[subtask.id] || ''}
+                    onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                    placeholder="Poznámka k úlohe..."
+                    className="form-input form-input-sm subtask-notes-input add-subtask-expansion"
+                    rows={2}
+                  />
+                )}
                 <button
                   type="button"
                   className={`btn btn-secondary btn-sm ${showSubtaskAssignInput[subtask.id] ? 'active' : ''}`}
@@ -1757,6 +1790,29 @@ function Tasks() {
                 >
                   👤
                 </button>
+                {showSubtaskAssignInput[subtask.id] && (
+                  <div className="subtask-assign-users-form add-subtask-expansion">
+                    {users.map(u => (
+                      <label key={u.id} className="subtask-user-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={(subtaskAssignedTo[subtask.id] || []).includes(u.id)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSubtaskAssignedTo(prev => ({
+                              ...prev,
+                              [subtask.id]: checked
+                                ? [...(prev[subtask.id] || []), u.id]
+                                : (prev[subtask.id] || []).filter(id => id !== u.id)
+                            }));
+                          }}
+                        />
+                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                        <span>{u.username}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                 <button
                   type="button"
@@ -2955,6 +3011,30 @@ function Tasks() {
                                   >
                                     📅
                                   </button>
+                                  {showSubtaskDateInput[task.id] && (
+                                    <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
+                                      <input
+                                        type="date"
+                                        value={subtaskDueDates[task.id] || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setSubtaskDueDates(prev => ({ ...prev, [task.id]: val }));
+                                          if (!val) setSubtaskDueTimes(prev => ({ ...prev, [task.id]: '' }));
+                                        }}
+                                        className="form-input form-input-sm"
+                                        style={{ flex: 2 }}
+                                        autoFocus
+                                      />
+                                      <input
+                                        type="time"
+                                        value={subtaskDueTimes[task.id] || ''}
+                                        onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                        disabled={!subtaskDueDates[task.id]}
+                                        className="form-input form-input-sm"
+                                        style={{ flex: 1 }}
+                                      />
+                                    </div>
+                                  )}
                                   <button
                                     type="button"
                                     className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[task.id] ? 'active' : ''}`}
@@ -2963,6 +3043,15 @@ function Tasks() {
                                   >
                                     📝
                                   </button>
+                                  {showSubtaskNotesInput[task.id] && (
+                                    <textarea
+                                      value={subtaskNotes[task.id] || ''}
+                                      onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                      placeholder="Poznámka k úlohe..."
+                                      className="form-input form-input-sm subtask-notes-input add-subtask-expansion"
+                                      rows={2}
+                                    />
+                                  )}
                                   <button
                                     type="button"
                                     className={`btn btn-secondary btn-sm ${showSubtaskAssignInput[task.id] ? 'active' : ''}`}
@@ -2971,64 +3060,31 @@ function Tasks() {
                                   >
                                     👤
                                   </button>
+                                  {showSubtaskAssignInput[task.id] && (
+                                    <div className="subtask-assign-users-form add-subtask-expansion">
+                                      {users.map(u => (
+                                        <label key={u.id} className="subtask-user-checkbox">
+                                          <input
+                                            type="checkbox"
+                                            checked={(subtaskAssignedTo[task.id] || []).includes(u.id)}
+                                            onChange={(e) => {
+                                              const checked = e.target.checked;
+                                              setSubtaskAssignedTo(prev => ({
+                                                ...prev,
+                                                [task.id]: checked
+                                                  ? [...(prev[task.id] || []), u.id]
+                                                  : (prev[task.id] || []).filter(id => id !== u.id)
+                                              }));
+                                            }}
+                                          />
+                                          <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                                          <span>{u.username}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
                                   <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                                 </form>
-                                {showSubtaskDateInput[task.id] && (
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <input
-                                      type="date"
-                                      value={subtaskDueDates[task.id] || ''}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setSubtaskDueDates(prev => ({ ...prev, [task.id]: val }));
-                                        if (!val) setSubtaskDueTimes(prev => ({ ...prev, [task.id]: '' }));
-                                      }}
-                                      className="form-input form-input-sm"
-                                      style={{ flex: 2 }}
-                                      autoFocus
-                                    />
-                                    <input
-                                      type="time"
-                                      value={subtaskDueTimes[task.id] || ''}
-                                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                      disabled={!subtaskDueDates[task.id]}
-                                      className="form-input form-input-sm"
-                                      style={{ flex: 1 }}
-                                    />
-                                  </div>
-                                )}
-                                {showSubtaskNotesInput[task.id] && (
-                                  <textarea
-                                    value={subtaskNotes[task.id] || ''}
-                                    onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [task.id]: e.target.value }))}
-                                    placeholder="Poznámka k úlohe..."
-                                    className="form-input form-input-sm subtask-notes-input"
-                                    rows={2}
-                                  />
-                                )}
-                                {showSubtaskAssignInput[task.id] && (
-                                  <div className="subtask-assign-users-form">
-                                    {users.map(u => (
-                                      <label key={u.id} className="subtask-user-checkbox">
-                                        <input
-                                          type="checkbox"
-                                          checked={(subtaskAssignedTo[task.id] || []).includes(u.id)}
-                                          onChange={(e) => {
-                                            const checked = e.target.checked;
-                                            setSubtaskAssignedTo(prev => ({
-                                              ...prev,
-                                              [task.id]: checked
-                                                ? [...(prev[task.id] || []), u.id]
-                                                : (prev[task.id] || []).filter(id => id !== u.id)
-                                            }));
-                                          }}
-                                        />
-                                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
-                                        <span>{u.username}</span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                )}
                               </div>
                             )}
                           </div>

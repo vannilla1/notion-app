@@ -2003,9 +2003,18 @@ body {
 
 .add-subtask-form {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* Forces conditional date/notes/assignee blocks to break to a new line
+   directly under the trigger button instead of stacking after Save. */
+.add-subtask-expansion {
+  flex-basis: 100%;
+  width: 100%;
+  margin: 0;
 }
 
 .add-subtask-form .form-input {

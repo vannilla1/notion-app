@@ -1211,6 +1211,30 @@ function CRM() {
                 >
                   📅
                 </button>
+                {showSubtaskDateInput[subtask.id] && (
+                  <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="date"
+                      value={subtaskDueDates[subtask.id] || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
+                        if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
+                      }}
+                      className="form-input form-input-sm"
+                      style={{ flex: 2 }}
+                      autoFocus
+                    />
+                    <input
+                      type="time"
+                      value={subtaskDueTimes[subtask.id] || ''}
+                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                      disabled={!subtaskDueDates[subtask.id]}
+                      className="form-input form-input-sm"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                )}
                 <button
                   type="button"
                   className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
@@ -1219,6 +1243,15 @@ function CRM() {
                 >
                   📝
                 </button>
+                {showSubtaskNotesInput[subtask.id] && (
+                  <textarea
+                    value={subtaskNotes[subtask.id] || ''}
+                    onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                    placeholder="Poznámka k úlohe..."
+                    className="form-input form-input-sm subtask-notes-input add-subtask-expansion"
+                    rows={2}
+                  />
+                )}
                 <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
                 <button
                   type="button"
@@ -1236,39 +1269,6 @@ function CRM() {
                   Zrušiť
                 </button>
               </form>
-              {showSubtaskDateInput[subtask.id] && (
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="date"
-                    value={subtaskDueDates[subtask.id] || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
-                      if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
-                    }}
-                    className="form-input form-input-sm"
-                    style={{ flex: 2 }}
-                    autoFocus
-                  />
-                  <input
-                    type="time"
-                    value={subtaskDueTimes[subtask.id] || ''}
-                    onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                    disabled={!subtaskDueDates[subtask.id]}
-                    className="form-input form-input-sm"
-                    style={{ flex: 1 }}
-                  />
-                </div>
-              )}
-              {showSubtaskNotesInput[subtask.id] && (
-                <textarea
-                  value={subtaskNotes[subtask.id] || ''}
-                  onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Poznámka k úlohe..."
-                  className="form-input form-input-sm subtask-notes-input"
-                  rows={2}
-                />
-              )}
             </div>
           )}
         </div>
