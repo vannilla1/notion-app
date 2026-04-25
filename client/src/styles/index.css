@@ -8835,8 +8835,26 @@ body.ios-app {
     top: 56px;
     left: 8px;
     right: 8px;
+    /* Anchor bottom edge above the bottom nav bar (≈70px tab + safe-area)
+       so the "Zobraziť ďalšie" button at the end of the list is always
+       visible and tappable. Drop max-height so panel fills the gap. */
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     width: auto;
-    max-height: calc(100vh - 120px);
+    max-height: none;
+  }
+}
+
+/* Make the "Zobraziť ďalšie" button comfortably tappable on touch devices
+   and keep it stuck to the bottom of the scrollable list so it never gets
+   covered by floating UI (help bubble, bottom nav). */
+@media (max-width: 768px) {
+  .notif-load-more {
+    padding: 16px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--bg-secondary);
+    position: sticky;
+    bottom: 0;
   }
 }
 
