@@ -881,8 +881,12 @@ const processCalendarChanges = async (user) => {
         const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
         if (m) newDueTime = m[1];
       }
-      // Strip the completion prefix "✓ " from event title to get clean title
-      let newTitle = (event.summary || '').replace(/^✓\s*/, '').trim();
+      // Strip completion prefix "✓ " AND workspace prefix "[Workspace] " that we add
+      // on outbound Google Tasks sync — otherwise the bracket prefix leaks into CRM.
+      let newTitle = (event.summary || '')
+        .replace(/^✓\s*/, '')
+        .replace(/^\[[^\]]{1,40}\]\s*/, '')
+        .trim();
 
       // Find the CRM task — scoped to user's workspaces
       let task = await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } });

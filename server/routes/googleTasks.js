@@ -2445,7 +2445,9 @@ let pollingIo = null; // Socket.IO instance for emitting updates
  */
 const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   const isCompleted = googleTask.status === 'completed';
-  const googleTitle = (googleTask.title || '').trim();
+  // Strip workspace prefix "[Workspace] " that we add on outbound sync,
+  // otherwise the bracketed prefix leaks back into CRM titles on inbound updates.
+  const googleTitle = (googleTask.title || '').replace(/^\[[^\]]{1,40}\]\s*/, '').trim();
   // Google Tasks due is RFC3339 date string like "2026-03-28T00:00:00.000Z"
   const googleDue = googleTask.due ? googleTask.due.split('T')[0] : null;
   const isDeleted = googleTask.deleted === true;
