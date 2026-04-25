@@ -1218,7 +1218,7 @@ body {
 .contact-checkbox {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
   padding: 6px 10px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -6074,8 +6074,8 @@ body.ios-app {
 .user-checkbox {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: 14px;
+  padding: 6px 10px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: var(--transition);
@@ -6965,8 +6965,8 @@ body.ios-app {
 .subtask-user-checkbox {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 8px;
+  gap: 14px;
+  padding: 4px 10px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   font-size: 12px;
@@ -7434,7 +7434,8 @@ body.ios-app {
 
   .contact-checkbox {
     font-size: 12px;
-    padding: 6px 8px;
+    padding: 6px 10px;
+    gap: 14px;
   }
 
   /* User assignment select */
@@ -7444,7 +7445,8 @@ body.ios-app {
 
   .user-checkbox {
     font-size: 12px;
-    padding: 6px 8px;
+    padding: 6px 10px;
+    gap: 14px;
   }
 }
 
@@ -8859,7 +8861,7 @@ body.ios-app {
     padding: 8px 12px !important;
     font-size: 14px !important;
     border-radius: 8px !important;
-    gap: 10px !important;
+    gap: 14px !important;
   }
 
   .tasks-page .task-edit-form .contact-checkbox input[type="checkbox"] {
@@ -8877,10 +8879,10 @@ body.ios-app {
   }
 
   .tasks-page .task-edit-form .user-checkbox {
-    padding: 10px 12px !important;
+    padding: 8px 12px !important;
     font-size: 14px !important;
     border-radius: 8px !important;
-    gap: 12px !important;
+    gap: 14px !important;
   }
 
   .tasks-page .task-edit-form .user-checkbox input[type="checkbox"] {
