@@ -6076,13 +6076,17 @@ body.ios-app {
   align-items: center;
   gap: 14px;
   padding: 6px 10px;
-  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  transition: var(--transition);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 13px;
 }
 
 .user-checkbox:hover {
-  background: var(--bg-hover);
+  border-color: var(--accent-color);
+  background: var(--accent-light);
 }
 
 .user-checkbox input[type="checkbox"] {
