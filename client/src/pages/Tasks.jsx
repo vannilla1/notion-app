@@ -2993,7 +2993,16 @@ function Tasks() {
                               {renderSubtasks(task, task.subtasks, 0)}
                             </div>
 
-                            {!task.completed && (
+                            {!task.completed && subtaskInputs[task.id] === undefined && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm add-subtask-trigger"
+                                onClick={() => setSubtaskInputs(prev => ({ ...prev, [task.id]: '' }))}
+                              >
+                                + Pridať úlohu
+                              </button>
+                            )}
+                            {!task.completed && subtaskInputs[task.id] !== undefined && (
                               <div className="add-subtask-wrapper">
                                 <form onSubmit={(e) => addSubtask(e, task)} className="add-subtask-form">
                                   <input
@@ -3002,6 +3011,7 @@ function Tasks() {
                                     onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
                                     placeholder="Nová úloha..."
                                     className="form-input form-input-sm"
+                                    autoFocus
                                   />
                                   <button
                                     type="button"
@@ -3084,6 +3094,26 @@ function Tasks() {
                                     </div>
                                   )}
                                   <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => {
+                                      setSubtaskInputs(prev => {
+                                        const next = { ...prev };
+                                        delete next[task.id];
+                                        return next;
+                                      });
+                                      setSubtaskDueDates(prev => ({ ...prev, [task.id]: '' }));
+                                      setSubtaskDueTimes(prev => ({ ...prev, [task.id]: '' }));
+                                      setSubtaskNotes(prev => ({ ...prev, [task.id]: '' }));
+                                      setSubtaskAssignedTo(prev => ({ ...prev, [task.id]: [] }));
+                                      setShowSubtaskDateInput(prev => ({ ...prev, [task.id]: false }));
+                                      setShowSubtaskNotesInput(prev => ({ ...prev, [task.id]: false }));
+                                      setShowSubtaskAssignInput(prev => ({ ...prev, [task.id]: false }));
+                                    }}
+                                  >
+                                    Zrušiť
+                                  </button>
                                 </form>
                               </div>
                             )}

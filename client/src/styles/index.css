@@ -2017,6 +2017,24 @@ body {
   margin: 0;
 }
 
+/* "+ Pridať úlohu" trigger shown until the user opens the inline form. */
+.add-subtask-trigger {
+  margin-top: 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-style: dashed !important;
+  font-weight: 500;
+  color: var(--accent-color);
+}
+
+.add-subtask-trigger:hover {
+  background: var(--accent-light);
+  border-color: var(--accent-color) !important;
+}
+
 .add-subtask-form .form-input {
   flex: 1;
 }
