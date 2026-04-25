@@ -6074,7 +6074,7 @@ body.ios-app {
 .user-checkbox {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 6px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -6965,7 +6965,7 @@ body.ios-app {
 .subtask-user-checkbox {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   padding: 4px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
