@@ -9579,6 +9579,17 @@ body.ios-app {
   margin-right: -4px;
 }
 
+/* On phones the absolute-positioned checkbox sits in the top-left of the
+   card, so a stuck :hover state would overlap the drag handle dots inside
+   the checkbox. Hide the drag handle on touch screens — reordering is
+   already awkward on mobile and the user can do it on desktop instead. */
+@media (max-width: 768px) {
+  .drag-handle,
+  .subtask-drag-handle {
+    display: none !important;
+  }
+}
+
 /* ==================== Workspace Members Page ==================== */
 
 .workspace-members-content {
