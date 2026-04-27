@@ -550,4 +550,273 @@ describe('NotificationService', () => {
       expect(mockIo.to).toHaveBeenCalledWith(`user-${testUser1._id}`);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Notification categorization — tests added after the direct/general
+  // split was introduced. Covers classifier output, per-recipient
+  // categorization for completion events, history trim, and the
+  // workspace.memberAdded helper.
+  // ─────────────────────────────────────────────────────────────────────
+  describe('Categorization (direct vs general)', () => {
+    it('classifyByType returns "direct" for assignment + message types', () => {
+      expect(notificationService.classifyByType('task.assigned')).toBe('direct');
+      expect(notificationService.classifyByType('subtask.assigned')).toBe('direct');
+      expect(notificationService.classifyByType('message.created')).toBe('direct');
+      expect(notificationService.classifyByType('message.commented')).toBe('direct');
+      expect(notificationService.classifyByType('message.comment.reacted')).toBe('direct');
+    });
+
+    it('classifyByType returns "general" for everything else', () => {
+      expect(notificationService.classifyByType('task.created')).toBe('general');
+      expect(notificationService.classifyByType('task.updated')).toBe('general');
+      expect(notificationService.classifyByType('task.completed')).toBe('general');
+      expect(notificationService.classifyByType('task.dueDate')).toBe('general');
+      expect(notificationService.classifyByType('contact.created')).toBe('general');
+      expect(notificationService.classifyByType('workspace.memberAdded')).toBe('general');
+      expect(notificationService.classifyByType('unknown.event.type')).toBe('general');
+    });
+
+    it('createNotification persists the resolved category (auto-classify)', async () => {
+      const n = await notificationService.createNotification({
+        userId: testUser1._id,
+        workspaceId: testWorkspaceId,
+        type: 'task.assigned',
+        title: 'Auto-classify'
+      });
+      expect(n.category).toBe('direct');
+
+      const m = await notificationService.createNotification({
+        userId: testUser1._id,
+        workspaceId: testWorkspaceId,
+        type: 'task.created',
+        title: 'Auto-classify general'
+      });
+      expect(m.category).toBe('general');
+    });
+
+    it('createNotification respects explicit category override', async () => {
+      // task.completed is general by default, but per-recipient logic in
+      // notifyTaskChange overrides to direct when recipient is the assignee.
+      const n = await notificationService.createNotification({
+        userId: testUser1._id,
+        workspaceId: testWorkspaceId,
+        type: 'task.completed',
+        title: 'Per-recipient direct',
+        category: 'direct'
+      });
+      expect(n.category).toBe('direct');
+    });
+
+    it('notifyTaskChange marks task.completed as DIRECT for assignees only', async () => {
+      const task = {
+        _id: new mongoose.Types.ObjectId(),
+        title: 'Done by colleague',
+        assignedTo: [testUser2._id],
+        contactName: ''
+      };
+      const actor = { _id: testUser1._id, username: 'actor' };
+
+      await notificationService.notifyTaskChange(
+        'task.completed',
+        task,
+        actor,
+        [],
+        testWorkspaceId
+      );
+
+      const notifs = await Notification.find({
+        workspaceId: testWorkspaceId,
+        type: 'task.completed'
+      }).lean();
+
+      // testUser2 (assignee) should get direct, testUser3 (non-assignee) general,
+      // testUser1 (actor) excluded.
+      const byUser = Object.fromEntries(notifs.map(n => [n.userId.toString(), n.category]));
+      expect(byUser[testUser2._id.toString()]).toBe('direct');
+      expect(byUser[testUser3._id.toString()]).toBe('general');
+      expect(byUser[testUser1._id.toString()]).toBeUndefined(); // actor skipped
+    });
+
+    it('non-completion task events stay general for everyone', async () => {
+      const task = {
+        _id: new mongoose.Types.ObjectId(),
+        title: 'Edited task',
+        assignedTo: [testUser2._id],
+        contactName: ''
+      };
+      const actor = { _id: testUser1._id, username: 'actor' };
+
+      await notificationService.notifyTaskChange(
+        'task.updated',
+        task,
+        actor,
+        [],
+        testWorkspaceId
+      );
+
+      const notifs = await Notification.find({
+        workspaceId: testWorkspaceId,
+        type: 'task.updated'
+      }).lean();
+
+      // All recipients (including assignee) should get general for routine updates.
+      for (const n of notifs) {
+        expect(n.category).toBe('general');
+      }
+    });
+  });
+
+  describe('History trim (HISTORY_LIMIT_PER_USER = 150)', () => {
+    it('keeps only the 150 newest notifications per user', async () => {
+      // Create 152 notifications for testUser1, with monotonically increasing createdAt.
+      // We bypass createNotification so we can set createdAt deterministically.
+      const base = Date.now() - 1000 * 60 * 60; // 1h ago
+      const docs = [];
+      for (let i = 0; i < 152; i++) {
+        docs.push({
+          userId: testUser1._id,
+          workspaceId: testWorkspaceId,
+          type: 'task.created',
+          title: `Notif ${i}`,
+          category: 'general',
+          createdAt: new Date(base + i * 1000) // each 1s newer
+        });
+      }
+      await Notification.insertMany(docs);
+
+      // Trigger trim manually (in production it runs in setImmediate after each insert).
+      await notificationService.trimUserHistory(testUser1._id);
+
+      const remaining = await Notification.find({ userId: testUser1._id })
+        .sort({ createdAt: 1 })
+        .lean();
+
+      expect(remaining.length).toBe(150);
+      // The oldest 2 (Notif 0 and Notif 1) should be deleted.
+      expect(remaining[0].title).toBe('Notif 2');
+      expect(remaining[remaining.length - 1].title).toBe('Notif 151');
+    });
+
+    it('is a no-op when count <= 150', async () => {
+      const docs = [];
+      for (let i = 0; i < 50; i++) {
+        docs.push({
+          userId: testUser1._id,
+          workspaceId: testWorkspaceId,
+          type: 'task.created',
+          title: `Few ${i}`,
+          category: 'general'
+        });
+      }
+      await Notification.insertMany(docs);
+
+      await notificationService.trimUserHistory(testUser1._id);
+
+      const remaining = await Notification.countDocuments({ userId: testUser1._id });
+      expect(remaining).toBe(50);
+    });
+  });
+
+  describe('notifyWorkspaceMemberAdded', () => {
+    it('notifies all existing members except the new member', async () => {
+      const newMember = { _id: testUser2._id, username: 'newcomer' };
+      const workspace = { _id: testWorkspaceId, name: 'Shared' };
+      const actor = { _id: testUser1._id, username: 'inviter' };
+
+      await notificationService.notifyWorkspaceMemberAdded({
+        workspace,
+        newMember,
+        actor
+      });
+
+      const notifs = await Notification.find({
+        workspaceId: testWorkspaceId,
+        type: 'workspace.memberAdded'
+      }).lean();
+
+      const recipientIds = notifs.map(n => n.userId.toString()).sort();
+      const expectedIds = [testUser1._id.toString(), testUser3._id.toString()].sort();
+      expect(recipientIds).toEqual(expectedIds);
+      // newMember himself MUST NOT receive the notif.
+      expect(recipientIds).not.toContain(testUser2._id.toString());
+    });
+
+    it('uses category "general" so push is gated by pushNewMember preference', async () => {
+      const newMember = { _id: testUser2._id, username: 'newcomer' };
+      const workspace = { _id: testWorkspaceId, name: 'Shared' };
+
+      await notificationService.notifyWorkspaceMemberAdded({
+        workspace,
+        newMember,
+        actor: newMember
+      });
+
+      const notif = await Notification.findOne({
+        workspaceId: testWorkspaceId,
+        type: 'workspace.memberAdded'
+      }).lean();
+      expect(notif.category).toBe('general');
+    });
+
+    it('returns [] gracefully when workspace or newMember is missing', async () => {
+      expect(await notificationService.notifyWorkspaceMemberAdded({
+        workspace: null,
+        newMember: { _id: testUser1._id }
+      })).toEqual([]);
+
+      expect(await notificationService.notifyWorkspaceMemberAdded({
+        workspace: { _id: testWorkspaceId },
+        newMember: null
+      })).toEqual([]);
+    });
+  });
+
+  describe('Assignment helpers always emit DIRECT category', () => {
+    it('notifyTaskAssignment uses direct', async () => {
+      const task = {
+        _id: new mongoose.Types.ObjectId(),
+        title: 'New task',
+        contactName: ''
+      };
+      const actor = { _id: testUser1._id, username: 'manager' };
+
+      await notificationService.notifyTaskAssignment(
+        task,
+        [testUser2._id, testUser3._id],
+        actor,
+        testWorkspaceId
+      );
+
+      const notifs = await Notification.find({
+        workspaceId: testWorkspaceId,
+        type: 'task.assigned'
+      }).lean();
+
+      expect(notifs.length).toBe(2);
+      for (const n of notifs) {
+        expect(n.category).toBe('direct');
+      }
+    });
+
+    it('notifySubtaskAssignment uses direct', async () => {
+      const parent = { _id: new mongoose.Types.ObjectId(), title: 'Parent task' };
+      const subtask = { id: 'sub-1', title: 'Subtask 1' };
+      const actor = { _id: testUser1._id, username: 'manager' };
+
+      await notificationService.notifySubtaskAssignment(
+        subtask,
+        parent,
+        [testUser2._id],
+        actor,
+        testWorkspaceId
+      );
+
+      const notif = await Notification.findOne({
+        workspaceId: testWorkspaceId,
+        type: 'subtask.assigned'
+      }).lean();
+
+      expect(notif.category).toBe('direct');
+    });
+  });
 });

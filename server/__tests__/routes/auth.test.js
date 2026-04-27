@@ -448,4 +448,111 @@ describe('/api/auth route', () => {
       expect(ownerInResponse.role).toBe('owner');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Notification preferences endpoints — covers GET/PUT contracts
+  // including type-strictness (only booleans accepted) and default merge.
+  // ─────────────────────────────────────────────────────────────────────
+  describe('GET/PUT /api/auth/notification-preferences', () => {
+    let user, token;
+
+    beforeEach(async () => {
+      user = await User.create({
+        username: 'prefsuser',
+        email: 'prefs@test.com',
+        password: 'hashed'
+      });
+      token = jwt.sign({ id: user._id.toString() }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    });
+
+    it('GET vráti všetky 4 toggles s defaultmi false pre nového usera', async () => {
+      const res = await request(app)
+        .get('/api/auth/notification-preferences')
+        .set(authHeader(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        pushTeamActivity: false,
+        pushDeadlines: false,
+        pushOverdue: false,
+        pushNewMember: false
+      });
+    });
+
+    it('GET 401 bez tokenu', async () => {
+      const res = await request(app).get('/api/auth/notification-preferences');
+      expect(res.status).toBe(401);
+    });
+
+    it('PUT zmení iba uvedený toggle, ostatné ostávajú default', async () => {
+      const res = await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({ pushDeadlines: true });
+
+      expect(res.status).toBe(200);
+      expect(res.body.pushDeadlines).toBe(true);
+      expect(res.body.pushTeamActivity).toBe(false);
+      expect(res.body.pushOverdue).toBe(false);
+      expect(res.body.pushNewMember).toBe(false);
+
+      // Persisted to DB
+      const fresh = await User.findById(user._id);
+      expect(fresh.notificationPreferences.pushDeadlines).toBe(true);
+    });
+
+    it('PUT ignoruje neplatné kľúče (whitelist)', async () => {
+      const res = await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({ pushDeadlines: true, unknownKey: true, isAdmin: true });
+
+      expect(res.status).toBe(200);
+      expect(res.body.pushDeadlines).toBe(true);
+      expect(res.body).not.toHaveProperty('unknownKey');
+      expect(res.body).not.toHaveProperty('isAdmin');
+
+      const fresh = await User.findById(user._id);
+      expect(fresh.notificationPreferences.unknownKey).toBeUndefined();
+      // Critical: PUT MUST NOT escalate role / set arbitrary fields
+      expect(fresh.role).not.toBe('admin');
+    });
+
+    it('PUT odmietne non-boolean hodnoty (strict typing)', async () => {
+      // String "true" — ignored, no valid keys → 400
+      const res = await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({ pushDeadlines: 'true', pushTeamActivity: 1 });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('PUT 400 ak body je úplne prázdne / neplatné', async () => {
+      const res = await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({});
+
+      expect(res.status).toBe(400);
+    });
+
+    it('PUT zachová predošlé hodnoty (partial update)', async () => {
+      // First set both
+      await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({ pushDeadlines: true, pushTeamActivity: true });
+
+      // Then update only one — the other must persist
+      const res = await request(app)
+        .put('/api/auth/notification-preferences')
+        .set(authHeader(token))
+        .send({ pushDeadlines: false });
+
+      expect(res.status).toBe(200);
+      expect(res.body.pushDeadlines).toBe(false);
+      expect(res.body.pushTeamActivity).toBe(true); // preserved
+    });
+  });
 });
