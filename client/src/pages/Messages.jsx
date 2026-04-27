@@ -893,10 +893,12 @@ function Messages() {
                   {users.filter(u => String(u.id) !== String(user?.id)).map(u => (
                     <label key={u.id} className="user-checkbox">
                       <input
-                        type="radio"
-                        name="msg-recipient"
+                        type="checkbox"
                         checked={String(form.toUserId) === String(u.id)}
-                        onChange={() => setForm(f => ({ ...f, toUserId: u.id }))}
+                        onChange={(e) => setForm(f => ({
+                          ...f,
+                          toUserId: e.target.checked ? u.id : ''
+                        }))}
                       />
                       <span
                         className="user-avatar-small"
