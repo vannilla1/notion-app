@@ -404,6 +404,11 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
   );
 }
 
+// Helper: keď user nastaví ČAS pred dátumom, dátum auto-doplní na dnešok.
+// Vďaka tomu je TimeInput vždy klikateľný (nie disabled) a UX je prirodzený —
+// "začnem s časom 14:00" → automaticky pridá dnešný dátum + tento čas.
+const todayISODate = () => new Date().toISOString().split('T')[0];
+
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
@@ -1581,8 +1586,10 @@ function Tasks() {
                   />
                   <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={setEditSubtaskDueTime}
-                    disabled={!editSubtaskDueDate}
+                    onChange={(val) => {
+                      setEditSubtaskDueTime(val);
+                      if (val && !editSubtaskDueDate) setEditSubtaskDueDate(todayISODate());
+                    }}
                     className="form-input-sm"
                     title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
                     style={{ flex: 1 }}
@@ -1772,8 +1779,12 @@ function Tasks() {
                     />
                     <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
-                      disabled={!subtaskDueDates[subtask.id]}
+                      onChange={(val) => {
+                        setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
+                        if (val && !subtaskDueDates[subtask.id]) {
+                          setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
+                        }
+                      }}
                       className="form-input-sm"
                       style={{ flex: 1 }}
                     />
@@ -1870,8 +1881,12 @@ function Tasks() {
                   />
                   <TimeInput
                     value={subtaskDueTimes[subtask.id] || ''}
-                    onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
-                    disabled={!subtaskDueDates[subtask.id]}
+                    onChange={(val) => {
+                      setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
+                      if (val && !subtaskDueDates[subtask.id]) {
+                        setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
+                      }
+                    }}
                     className="form-input-sm"
                     style={{ flex: 1 }}
                   />
@@ -2503,11 +2518,14 @@ function Tasks() {
                       />
                       <TimeInput
                         value={newTaskForm.dueTime || ''}
-                        onChange={(val) => setNewTaskForm({ ...newTaskForm, dueTime: val })}
-                        disabled={!newTaskForm.dueDate}
+                        onChange={(val) => setNewTaskForm({
+                          ...newTaskForm,
+                          dueTime: val,
+                          // Ak user nastaví čas pred dátumom, dátum auto-doplníme.
+                          dueDate: !newTaskForm.dueDate && val ? todayISODate() : newTaskForm.dueDate
+                        })}
                         style={{ flex: 1 }}
-                        placeholder="—"
-                        title={newTaskForm.dueDate ? 'Voliteľný čas (HH:MM). Prázdne = celodenná úloha.' : 'Najskôr nastavte dátum'}
+                        title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
                       />
                     </div>
                   </div>
@@ -2768,8 +2786,11 @@ function Tasks() {
                               />
                               <TimeInput
                                 value={editForm.dueTime || ''}
-                                onChange={(val) => setEditForm({ ...editForm, dueTime: val })}
-                                disabled={!editForm.dueDate}
+                                onChange={(val) => setEditForm({
+                                  ...editForm,
+                                  dueTime: val,
+                                  dueDate: !editForm.dueDate && val ? todayISODate() : editForm.dueDate
+                                })}
                                 title="Čas (voliteľné)"
                               />
                               <select
@@ -3027,8 +3048,12 @@ function Tasks() {
                                       />
                                       <TimeInput
                                         value={subtaskDueTimes[task.id] || ''}
-                                        onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: val }))}
-                                        disabled={!subtaskDueDates[task.id]}
+                                        onChange={(val) => {
+                                          setSubtaskDueTimes(prev => ({ ...prev, [task.id]: val }));
+                                          if (val && !subtaskDueDates[task.id]) {
+                                            setSubtaskDueDates(prev => ({ ...prev, [task.id]: todayISODate() }));
+                                          }
+                                        }}
                                         className="form-input-sm"
                                         style={{ flex: 1 }}
                                       />

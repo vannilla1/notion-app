@@ -78,6 +78,9 @@ const crmHelpTips = [
   }
 ];
 
+// Helper: keď user nastaví ČAS pred dátumom, dátum auto-doplníme na dnešok.
+const todayISODate = () => new Date().toISOString().split('T')[0];
+
 function CRM() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
@@ -1111,8 +1114,10 @@ function CRM() {
                   />
                   <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={setEditSubtaskDueTime}
-                    disabled={!editSubtaskDueDate}
+                    onChange={(val) => {
+                      setEditSubtaskDueTime(val);
+                      if (val && !editSubtaskDueDate) setEditSubtaskDueDate(todayISODate());
+                    }}
                     className="form-input-sm"
                     title="Čas (voliteľné)"
                     style={{ flex: 1 }}
@@ -1224,8 +1229,12 @@ function CRM() {
                     />
                     <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
-                      disabled={!subtaskDueDates[subtask.id]}
+                      onChange={(val) => {
+                        setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
+                        if (val && !subtaskDueDates[subtask.id]) {
+                          setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
+                        }
+                      }}
                       className="form-input-sm"
                       style={{ flex: 1 }}
                     />
