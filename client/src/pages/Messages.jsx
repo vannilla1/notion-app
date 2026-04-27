@@ -102,7 +102,12 @@ function Messages() {
 
   // New message form
   const [showForm, setShowForm] = useState(false);
-  const { users, refetch: refetchUsers } = useWorkspaceUsers({ excludeUserId: user?.id });
+  // Rovnaké volanie ako v Projektoch/Úlohách — bez excludeUserId, aby
+  // user-self picker pracoval konzistentne. Filter "neposielaj sám sebe"
+  // robíme až vo viewe (pole sa pre seba dá kliknúť, ale je vizuálne
+  // odlíšené ako "Vy"); reálne by k tomu neprišlo lebo button na samého
+  // seba nemá zmysel klikať.
+  const { users, refetch: refetchUsers } = useWorkspaceUsers();
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState({
@@ -881,39 +886,23 @@ function Messages() {
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflow: 'auto', boxShadow: 'var(--shadow-xl)' }}>
             <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Nová správa</h3>
             <form onSubmit={handleSubmit}>
-              {/* Recipient */}
+              {/* Recipient — rovnaký user-picker ako pri priraďovaní v Projektoch/Úlohách */}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Komu *</label>
-                {users.length === 0 ? (
-                  <div style={{
-                    padding: '12px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px dashed var(--border-color)',
-                    background: 'var(--bg-secondary)',
-                    fontSize: '13px',
-                    color: 'var(--text-secondary)',
-                    lineHeight: 1.5
-                  }}>
-                    Vo vašom workspace zatiaľ nie sú žiadni iní členovia, ktorým by ste mohli poslať správu.{' '}
-                    <button
-                      type="button"
-                      onClick={() => { setShowForm(false); resetForm(); navigate('/workspace/members'); }}
-                      style={{
-                        background: 'none', border: 'none', padding: 0,
-                        color: 'var(--accent-color)', cursor: 'pointer',
-                        textDecoration: 'underline', fontSize: '13px', fontWeight: 500
-                      }}
-                    >
-                      Pozvať kolegu →
-                    </button>
-                  </div>
-                ) : (
-                  <select value={form.toUserId} onChange={e => setForm(f => ({ ...f, toUserId: e.target.value }))} required
-                    style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }}>
-                    <option value="">Vyberte príjemcu...</option>
-                    {users.map(u => <option key={u.id} value={u.id}>{u.username} ({u.email})</option>)}
-                  </select>
-                )}
+                <div className="multi-select-users compact">
+                  {users.filter(u => String(u.id) !== String(user?.id)).map(u => (
+                    <label key={u.id} className="user-checkbox">
+                      <input
+                        type="radio"
+                        name="msg-recipient"
+                        checked={String(form.toUserId) === String(u.id)}
+                        onChange={() => setForm(f => ({ ...f, toUserId: u.id }))}
+                      />
+                      <span className="user-dot" style={{ backgroundColor: u.color }}></span>
+                      <span>{u.username}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {/* Type */}
