@@ -898,7 +898,12 @@ function Messages() {
                         checked={String(form.toUserId) === String(u.id)}
                         onChange={() => setForm(f => ({ ...f, toUserId: u.id }))}
                       />
-                      <span className="user-dot" style={{ backgroundColor: u.color }}></span>
+                      <span
+                        className="user-avatar-small"
+                        style={{ backgroundColor: u.color }}
+                      >
+                        {u.username.charAt(0).toUpperCase()}
+                      </span>
                       <span>{u.username}</span>
                     </label>
                   ))}

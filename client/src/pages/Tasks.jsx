@@ -2584,7 +2584,6 @@ function Tasks() {
                             {u.username.charAt(0).toUpperCase()}
                           </span>
                           <span>{u.username}</span>
-                          <span className="user-role-badge">{getWorkspaceRoleLabel(u.role)}</span>
                         </label>
                       ))}
                     </div>
