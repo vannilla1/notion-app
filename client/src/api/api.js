@@ -76,6 +76,23 @@ api.interceptors.response.use(
         window.location.href = '/login';
       }
     }
+
+    // Obohatíme error.message o request kontext PRED reject. Bez tohto je
+    // typický unhandled rejection v Diagnostics len "Request failed with
+    // status code 400" — bezcenné, lebo nevieme ktorý endpoint zlyhal.
+    // Po: "GET /api/contacts → 400: Workspace required" — vidno presne
+    // čo opraviť. Calling code naďalej číta error.response.status / data,
+    // takže overhead je nulový.
+    if (error.response && config.url) {
+      const method = (config.method || 'GET').toUpperCase();
+      const url = config.url;
+      const status = error.response.status;
+      const serverMsg =
+        error.response.data?.message ||
+        error.response.data?.error ||
+        '';
+      error.message = `${method} ${url} → ${status}${serverMsg ? `: ${serverMsg}` : ''}`;
+    }
     return Promise.reject(error);
   }
 );

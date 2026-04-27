@@ -43,6 +43,38 @@ const IGNORED_PATTERNS = [
   /cancelled/i
 ];
 
+// Vite/PWA stale-chunk chyby — po deploy má user starý index.html ktorý
+// odkazuje na chunk hash čo už neexistuje. Auto-reload načíta nové HTML
+// s aktuálnymi hashmi, takže user nezostane na "broken" page.
+const CHUNK_LOAD_PATTERNS = [
+  /Importing a module script failed/i,
+  /Failed to fetch dynamically imported module/i,
+  /Loading chunk \d+ failed/i,
+  /ChunkLoadError/i
+];
+
+const RELOAD_FLAG_KEY = '__prpl_chunk_reload';
+const RELOAD_COOLDOWN_MS = 60 * 1000; // 1 min — zabráni reload-loopu
+
+function isChunkLoadError(message) {
+  return CHUNK_LOAD_PATTERNS.some(p => p.test(String(message || '')));
+}
+
+function maybeAutoReload(message) {
+  if (!isChunkLoadError(message)) return false;
+  try {
+    // Reload-loop guard: nereload-uj ak už sme práve teraz reload-li.
+    const last = parseInt(sessionStorage.getItem(RELOAD_FLAG_KEY) || '0', 10);
+    if (Date.now() - last < RELOAD_COOLDOWN_MS) return false;
+    sessionStorage.setItem(RELOAD_FLAG_KEY, String(Date.now()));
+    // location.reload(true) je deprecated, modern way:
+    window.location.reload();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isIgnored(payload) {
   const msg = payload?.message || '';
   return IGNORED_PATTERNS.some(p => p.test(msg));
@@ -141,9 +173,11 @@ export function installGlobalErrorHandlers() {
     // ResourceLoad errory (img, script) nemajú event.error — ignoruj
     if (!event?.error && !event?.message) return;
     const err = event.error;
+    const message = err?.message || event.message || 'Unknown error';
+    if (maybeAutoReload(message)) return; // chunk-load → reload, neposielaj report
     reportError({
       name: err?.name || 'Error',
-      message: err?.message || event.message || 'Unknown error',
+      message,
       stack: err?.stack,
       line: event.lineno,
       column: event.colno
@@ -153,16 +187,20 @@ export function installGlobalErrorHandlers() {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event?.reason;
     if (!reason) return;
+    const message = reason instanceof Error
+      ? (reason.message || 'Unhandled promise rejection')
+      : (typeof reason === 'string' ? reason : JSON.stringify(reason).slice(0, 500));
+    if (maybeAutoReload(message)) return;
     if (reason instanceof Error) {
       reportError({
         name: reason.name || 'UnhandledRejection',
-        message: reason.message || 'Unhandled promise rejection',
+        message,
         stack: reason.stack
       });
     } else {
       reportError({
         name: 'UnhandledRejection',
-        message: typeof reason === 'string' ? reason : JSON.stringify(reason).slice(0, 500)
+        message
       });
     }
   });
