@@ -10,6 +10,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 
@@ -1098,23 +1099,21 @@ function CRM() {
                   />
                 </div>
                 <div className="subtask-edit-row" style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="date"
+                  <DateInput
                     value={editSubtaskDueDate}
-                    onChange={(e) => {
-                      setEditSubtaskDueDate(e.target.value);
-                      if (!e.target.value) setEditSubtaskDueTime('');
+                    onChange={(val) => {
+                      setEditSubtaskDueDate(val);
+                      if (!val) setEditSubtaskDueTime('');
                     }}
-                    className="form-input form-input-sm task-date-input"
+                    className="form-input-sm task-date-input"
                     title="Termín úlohy"
                     style={{ flex: 2 }}
                   />
-                  <input
-                    type="time"
+                  <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={(e) => setEditSubtaskDueTime(e.target.value)}
+                    onChange={setEditSubtaskDueTime}
                     disabled={!editSubtaskDueDate}
-                    className="form-input form-input-sm"
+                    className="form-input-sm"
                     title="Čas (voliteľné)"
                     style={{ flex: 1 }}
                   />
@@ -1213,24 +1212,21 @@ function CRM() {
                 </button>
                 {showSubtaskDateInput[subtask.id] && (
                   <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
-                    <input
-                      type="date"
+                    <DateInput
                       value={subtaskDueDates[subtask.id] || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
+                      onChange={(val) => {
                         setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
                         if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
                       }}
-                      className="form-input form-input-sm"
+                      className="form-input-sm"
                       style={{ flex: 2 }}
                       autoFocus
                     />
-                    <input
-                      type="time"
+                    <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
                       disabled={!subtaskDueDates[subtask.id]}
-                      className="form-input form-input-sm"
+                      className="form-input-sm"
                       style={{ flex: 1 }}
                     />
                   </div>

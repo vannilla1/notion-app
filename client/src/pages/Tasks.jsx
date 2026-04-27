@@ -13,6 +13,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
 import TimeRemindersPicker from '../components/TimeRemindersPicker';
+import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -1568,23 +1569,21 @@ function Tasks() {
                   />
                 </div>
                 <div className="subtask-edit-row" style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="date"
+                  <DateInput
                     value={editSubtaskDueDate}
-                    onChange={(e) => {
-                      setEditSubtaskDueDate(e.target.value);
-                      if (!e.target.value) setEditSubtaskDueTime('');
+                    onChange={(v) => {
+                      setEditSubtaskDueDate(v);
+                      if (!v) setEditSubtaskDueTime('');
                     }}
-                    className="form-input form-input-sm task-date-input"
+                    className="form-input-sm task-date-input"
                     title="Termín úlohy"
                     style={{ flex: 2 }}
                   />
-                  <input
-                    type="time"
+                  <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={(e) => setEditSubtaskDueTime(e.target.value)}
+                    onChange={setEditSubtaskDueTime}
                     disabled={!editSubtaskDueDate}
-                    className="form-input form-input-sm"
+                    className="form-input-sm"
                     title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
                     style={{ flex: 1 }}
                   />
@@ -1761,24 +1760,21 @@ function Tasks() {
                 </button>
                 {showSubtaskDateInput[subtask.id] && (
                   <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
-                    <input
-                      type="date"
+                    <DateInput
                       value={subtaskDueDates[subtask.id] || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
+                      onChange={(val) => {
                         setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
                         if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
                       }}
-                      className="form-input form-input-sm"
+                      className="form-input-sm"
                       style={{ flex: 2 }}
                       autoFocus
                     />
-                    <input
-                      type="time"
+                    <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
                       disabled={!subtaskDueDates[subtask.id]}
-                      className="form-input form-input-sm"
+                      className="form-input-sm"
                       style={{ flex: 1 }}
                     />
                   </div>
@@ -1862,24 +1858,21 @@ function Tasks() {
               </form>
               {showSubtaskDateInput[subtask.id] && (
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="date"
+                  <DateInput
                     value={subtaskDueDates[subtask.id] || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    onChange={(val) => {
                       setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
                       if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
                     }}
-                    className="form-input form-input-sm"
+                    className="form-input-sm"
                     style={{ flex: 2 }}
                     autoFocus
                   />
-                  <input
-                    type="time"
+                  <TimeInput
                     value={subtaskDueTimes[subtask.id] || ''}
-                    onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
+                    onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
                     disabled={!subtaskDueDates[subtask.id]}
-                    className="form-input form-input-sm"
+                    className="form-input-sm"
                     style={{ flex: 1 }}
                   />
                 </div>
@@ -2497,25 +2490,21 @@ function Tasks() {
                   <div className="form-group">
                     <label>Termín</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <input
-                        type="date"
+                      <DateInput
                         value={newTaskForm.dueDate}
-                        onChange={(e) => setNewTaskForm({
+                        onChange={(val) => setNewTaskForm({
                           ...newTaskForm,
-                          dueDate: e.target.value,
+                          dueDate: val,
                           // Bez dátumu čas stráca význam — zmaž aj dueTime.
-                          dueTime: e.target.value ? newTaskForm.dueTime : '',
-                          reminder: e.target.value ? newTaskForm.reminder : ''
+                          dueTime: val ? newTaskForm.dueTime : '',
+                          reminder: val ? newTaskForm.reminder : ''
                         })}
-                        className="form-input"
                         style={{ flex: 2 }}
                       />
-                      <input
-                        type="time"
+                      <TimeInput
                         value={newTaskForm.dueTime || ''}
-                        onChange={(e) => setNewTaskForm({ ...newTaskForm, dueTime: e.target.value })}
+                        onChange={(val) => setNewTaskForm({ ...newTaskForm, dueTime: val })}
                         disabled={!newTaskForm.dueDate}
-                        className="form-input"
                         style={{ flex: 1 }}
                         placeholder="—"
                         title={newTaskForm.dueDate ? 'Voliteľný čas (HH:MM). Prázdne = celodenná úloha.' : 'Najskôr nastavte dátum'}
@@ -2773,18 +2762,14 @@ function Tasks() {
                               rows={2}
                             />
                             <div className="task-edit-row">
-                              <input
-                                type="date"
+                              <DateInput
                                 value={editForm.dueDate}
-                                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value, reminder: e.target.value ? editForm.reminder : '', dueTime: e.target.value ? editForm.dueTime : '' })}
-                                className="form-input"
+                                onChange={(val) => setEditForm({ ...editForm, dueDate: val, reminder: val ? editForm.reminder : '', dueTime: val ? editForm.dueTime : '' })}
                               />
-                              <input
-                                type="time"
+                              <TimeInput
                                 value={editForm.dueTime || ''}
-                                onChange={(e) => setEditForm({ ...editForm, dueTime: e.target.value })}
+                                onChange={(val) => setEditForm({ ...editForm, dueTime: val })}
                                 disabled={!editForm.dueDate}
-                                className="form-input"
                                 title="Čas (voliteľné)"
                               />
                               <select
@@ -3030,24 +3015,21 @@ function Tasks() {
                                   </button>
                                   {showSubtaskDateInput[task.id] && (
                                     <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
-                                      <input
-                                        type="date"
+                                      <DateInput
                                         value={subtaskDueDates[task.id] || ''}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
+                                        onChange={(val) => {
                                           setSubtaskDueDates(prev => ({ ...prev, [task.id]: val }));
                                           if (!val) setSubtaskDueTimes(prev => ({ ...prev, [task.id]: '' }));
                                         }}
-                                        className="form-input form-input-sm"
+                                        className="form-input-sm"
                                         style={{ flex: 2 }}
                                         autoFocus
                                       />
-                                      <input
-                                        type="time"
+                                      <TimeInput
                                         value={subtaskDueTimes[task.id] || ''}
-                                        onChange={(e) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                        onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: val }))}
                                         disabled={!subtaskDueDates[task.id]}
-                                        className="form-input form-input-sm"
+                                        className="form-input-sm"
                                         style={{ flex: 1 }}
                                       />
                                     </div>

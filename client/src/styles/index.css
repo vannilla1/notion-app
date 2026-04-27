@@ -8870,6 +8870,61 @@ body.ios-app {
   line-height: 1.4;
 }
 
+/* ─── DateInput / TimeInput wrappers ──────────────────────────────────── */
+.dt-input-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.dt-input-wrapper .dt-input {
+  cursor: pointer;
+  /* Padding-right reservuje miesto pre × tlačidlo aby neprekrývalo text. */
+  padding-right: 30px !important;
+}
+.dt-input-wrapper.dt-disabled .dt-input {
+  cursor: not-allowed;
+}
+.dt-clear-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  padding: 0;
+}
+.dt-clear-btn:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.08));
+  color: var(--text-primary);
+}
+.dt-clear-btn:active {
+  background: var(--accent-light);
+  color: var(--accent-color);
+}
+/* iOS Safari skryje calendar picker indicator → necháme natívny pohľad,
+   ale na desktope ukážeme menší indicator aby nebol pri × tlačidle. */
+.dt-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+}
+.dt-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 /* Load-more tlačidlo na konci zoznamu notifikácií.
    Vizuálne nenápadné — full-width, subtle border-top od posledného
    .notif-item, accent-color label, hover zvýrazní pozadie. Zámer: user
