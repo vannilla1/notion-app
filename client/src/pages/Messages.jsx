@@ -889,7 +889,7 @@ function Messages() {
               {/* Recipient — rovnaký user-picker ako pri priraďovaní v Projektoch/Úlohách */}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Komu *</label>
-                <div className="multi-select-users compact">
+                <div className="multi-select-users">
                   {users.filter(u => String(u.id) !== String(user?.id)).map(u => (
                     <label key={u.id} className="user-checkbox">
                       <input
