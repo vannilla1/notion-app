@@ -884,11 +884,36 @@ function Messages() {
               {/* Recipient */}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Komu *</label>
-                <select value={form.toUserId} onChange={e => setForm(f => ({ ...f, toUserId: e.target.value }))} required
-                  style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }}>
-                  <option value="">Vyberte príjemcu...</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.username} ({u.email})</option>)}
-                </select>
+                {users.length === 0 ? (
+                  <div style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px dashed var(--border-color)',
+                    background: 'var(--bg-secondary)',
+                    fontSize: '13px',
+                    color: 'var(--text-secondary)',
+                    lineHeight: 1.5
+                  }}>
+                    Vo vašom workspace zatiaľ nie sú žiadni iní členovia, ktorým by ste mohli poslať správu.{' '}
+                    <button
+                      type="button"
+                      onClick={() => { setShowForm(false); resetForm(); navigate('/workspace/members'); }}
+                      style={{
+                        background: 'none', border: 'none', padding: 0,
+                        color: 'var(--accent-color)', cursor: 'pointer',
+                        textDecoration: 'underline', fontSize: '13px', fontWeight: 500
+                      }}
+                    >
+                      Pozvať kolegu →
+                    </button>
+                  </div>
+                ) : (
+                  <select value={form.toUserId} onChange={e => setForm(f => ({ ...f, toUserId: e.target.value }))} required
+                    style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '14px' }}>
+                    <option value="">Vyberte príjemcu...</option>
+                    {users.map(u => <option key={u.id} value={u.id}>{u.username} ({u.email})</option>)}
+                  </select>
+                )}
               </div>
 
               {/* Type */}
