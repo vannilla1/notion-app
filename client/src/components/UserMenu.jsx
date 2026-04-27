@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
+import NotificationPreferences from './NotificationPreferences';
 import { isMobileDevice } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
@@ -69,6 +70,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
   const { currentWorkspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
+  const [showNotifPrefs, setShowNotifPrefs] = useState(false);
   const [showMobileWorkspaces, setShowMobileWorkspaces] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
@@ -1283,6 +1285,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">📅</span>
             Synchronizácia kalendára
           </button>
+          <button className="user-menu-item" onClick={() => { setIsOpen(false); setShowNotifPrefs(true); }}>
+            <span className="menu-icon">🔔</span>
+            Nastavenia notifikácií
+          </button>
           <div className="user-menu-divider"></div>
           <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/workspace/members'); }}>
             <span className="menu-icon">👥</span>
@@ -2007,6 +2013,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             </div>
           </div>
         </div>
+      )}
+
+      {showNotifPrefs && (
+        <NotificationPreferences onClose={() => setShowNotifPrefs(false)} />
       )}
     </div>
   );

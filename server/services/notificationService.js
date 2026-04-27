@@ -663,6 +663,64 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
   return result;
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// Notification classification + push gating
+// ─────────────────────────────────────────────────────────────────────────
+//
+// 'direct'  — explicit assignment for THIS user, completion of THIS user's
+//             assigned task by someone else, or message addressed to them.
+//             Always sends push regardless of preferences.
+// 'general' — passive team activity, deadline reminders, member events,
+//             overdue. Push only if user opted in via notificationPreferences.
+//
+// `classifyByType()` covers the 90 % case (assignment events). Per-recipient
+// nuance (e.g. task.completed where the recipient is the assignee) is
+// handled in notify* helpers, which pass an explicit `category` parameter.
+
+const DIRECT_TYPES = new Set([
+  'task.assigned',
+  'subtask.assigned',
+  'message.created',
+  'message.commented',
+  'message.comment.reacted'
+]);
+
+const classifyByType = (type) => (DIRECT_TYPES.has(type) ? 'direct' : 'general');
+
+// Map a notification type to the user-preference key that gates its push.
+// Returns null for types that are always pushed (direct).
+const getPushPrefKey = (type, category) => {
+  if (category === 'direct') return null; // direct is always pushed
+  if (type === 'task.dueDate' || type === 'subtask.dueDate') return 'pushDeadlines';
+  if (type === 'task.overdue' || type === 'subtask.overdue') return 'pushOverdue';
+  if (type === 'workspace.memberAdded') return 'pushNewMember';
+  return 'pushTeamActivity'; // default bucket for everything else general
+};
+
+// Trim notification history to the most recent N per user. Runs after every
+// insert so the table stays bounded. Older notifications are deleted.
+const HISTORY_LIMIT_PER_USER = 150;
+
+const trimUserHistory = async (userId) => {
+  try {
+    const count = await Notification.countDocuments({ userId });
+    if (count <= HISTORY_LIMIT_PER_USER) return;
+
+    const excess = count - HISTORY_LIMIT_PER_USER;
+    const oldest = await Notification.find({ userId })
+      .sort({ createdAt: 1 })
+      .limit(excess)
+      .select('_id')
+      .lean();
+
+    if (oldest.length > 0) {
+      await Notification.deleteMany({ _id: { $in: oldest.map(n => n._id) } });
+    }
+  } catch (err) {
+    logger.warn('[NotificationService] history trim failed', { error: err.message, userId });
+  }
+};
+
 /**
  * Create a notification for a specific user
  */
@@ -677,7 +735,8 @@ const createNotification = async ({
   relatedType = null,
   relatedId = null,
   relatedName = null,
-  data = {}
+  data = {},
+  category = null  // explicit override; otherwise classifyByType(type) is used
 }) => {
   try {
     // Ensure workspaceId is also available inside data so push payloads
@@ -685,6 +744,8 @@ const createNotification = async ({
     const dataWithWs = workspaceId
       ? { ...data, workspaceId: workspaceId.toString() }
       : data;
+
+    const resolvedCategory = category || classifyByType(type);
 
     const notification = new Notification({
       userId,
@@ -697,11 +758,15 @@ const createNotification = async ({
       relatedType,
       relatedId,
       relatedName,
-      data: dataWithWs
+      data: dataWithWs,
+      category: resolvedCategory
     });
 
     await notification.save();
     metrics.notifications.created++;
+
+    // Trim user's notification history to last 150 (fire-and-forget).
+    setImmediate(() => trimUserHistory(userId));
 
     // Send real-time notification via Socket.IO
     if (io) {
@@ -709,6 +774,7 @@ const createNotification = async ({
         id: notification._id.toString(),
         workspaceId: notification.workspaceId ? notification.workspaceId.toString() : null,
         type: notification.type,
+        category: notification.category,
         title: notification.title,
         message: notification.message,
         actorName: notification.actorName,
@@ -738,6 +804,22 @@ const createNotification = async ({
 
     setImmediate(async () => {
       try {
+        // ─── Push gating ────────────────────────────────────────────────
+        // Direct → vždy posielame push (priradenia, dokončenie mojej úlohy
+        // niekým iným, správa pre mňa). General → len ak má user explicitne
+        // zapnutý príslušný toggle vo svojich notificationPreferences.
+        const prefKey = getPushPrefKey(notification.type, notification.category);
+        if (prefKey) {
+          const recipient = await User.findById(userId, 'notificationPreferences').lean();
+          const enabled = recipient?.notificationPreferences?.[prefKey];
+          if (!enabled) {
+            // User has not opted in for this kind of general notification —
+            // still saved to the bell panel (Socket.IO emit už prebehol),
+            // ale push na telefón / web sa nepošle.
+            return;
+          }
+        }
+
         // Pre-compute URL once so všetky platformy dostanú identický deep link.
         const url = generateNotificationUrl(pushPayload.type, pushPayload.data);
 
@@ -882,6 +964,8 @@ const getNotificationTitle = (type, actorName, relatedName) => {
     case 'task.dueDate':
     case 'subtask.dueDate':
       return related || 'Blíži sa termín';
+    case 'workspace.memberAdded':
+      return related ? `Nový člen workspace: ${related}` : 'Nový člen workspace';
     default:
       return 'Nová notifikácia';
   }
@@ -1021,6 +1105,18 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
     }
   };
 
+  // Per-recipient categorization for completion events: ak príjemca je
+  // assignee tej úlohy, je to "direct" (treba mu o tom dať vedieť), inak
+  // "general" (passive team activity).
+  const isCompletionEvent = type === 'task.completed' || type === 'subtask.completed';
+  const assignedSet = new Set(
+    (task.assignedTo || []).map(id => id?.toString()).filter(Boolean)
+  );
+  const categoryForRecipient = (id) => {
+    if (isCompletionEvent && assignedSet.has(id)) return 'direct';
+    return 'general';
+  };
+
   // Use workspace-based notification if workspaceId is available
   if (workspaceId) {
     try {
@@ -1039,7 +1135,17 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
         logger.debug('[NotificationService] No workspace recipients for task notification');
         return [];
       }
-      return await notifyUsers(recipientIds, notificationData);
+      // Per-recipient notify so completion events can carry the right category.
+      const out = [];
+      for (const id of recipientIds) {
+        const n = await createNotification({
+          ...notificationData,
+          userId: id,
+          category: categoryForRecipient(id)
+        });
+        if (n) out.push(n);
+      }
+      return out;
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for task notification', { error: error.message });
       return [];
@@ -1059,7 +1165,16 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
   }
 
   if (recipientIds.size === 0) return [];
-  return await notifyUsers(Array.from(recipientIds), notificationData);
+  const out = [];
+  for (const id of Array.from(recipientIds)) {
+    const n = await createNotification({
+      ...notificationData,
+      userId: id,
+      category: categoryForRecipient(id)
+    });
+    if (n) out.push(n);
+  }
+  return out;
 };
 
 /**
@@ -1103,7 +1218,8 @@ const notifyTaskAssignment = async (task, assignedUserIds, actor, workspaceId = 
     id && id.toString() !== (actor?._id || actor?.id)?.toString()
   );
 
-  return await notifyUsers(recipients, notificationData);
+  // task.assigned je vždy direct — explicit assignment patrí na vrch zvončeka.
+  return await notifyUsers(recipients, { ...notificationData, category: 'direct' });
 };
 
 /**
@@ -1140,7 +1256,8 @@ const notifySubtaskAssignment = async (subtask, parentTask, assignedUserIds, act
     id && id.toString() !== (actor?._id || actor?.id)?.toString()
   );
 
-  return await notifyUsers(recipients, notificationData);
+  // subtask.assigned je vždy direct.
+  return await notifyUsers(recipients, { ...notificationData, category: 'direct' });
 };
 
 /**
@@ -1177,6 +1294,18 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
     }
   };
 
+  // Per-recipient categorization for subtask.completed: ak príjemca je
+  // assignee tej PODÚLOHY, dostáva 'direct' (jeho úlohu dokončil iný); ostatní
+  // dostávajú 'general'.
+  const isCompletionEvent = type === 'subtask.completed';
+  const assignedSet = new Set(
+    (subtask.assignedTo || []).map(id => id?.toString()).filter(Boolean)
+  );
+  const categoryForRecipient = (id) => {
+    if (isCompletionEvent && assignedSet.has(id)) return 'direct';
+    return 'general';
+  };
+
   // Use workspace-based notification if workspaceId is available
   if (workspaceId) {
     try {
@@ -1192,7 +1321,16 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
         });
 
       if (recipientIds.length === 0) return [];
-      return await notifyUsers(recipientIds, notificationData);
+      const out = [];
+      for (const id of recipientIds) {
+        const n = await createNotification({
+          ...notificationData,
+          userId: id,
+          category: categoryForRecipient(id)
+        });
+        if (n) out.push(n);
+      }
+      return out;
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for subtask notification', { error: error.message });
       return [];
@@ -1210,7 +1348,68 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
   }
 
   if (recipientIds.size === 0) return [];
-  return await notifyUsers(Array.from(recipientIds), notificationData);
+  const out = [];
+  for (const id of Array.from(recipientIds)) {
+    const n = await createNotification({
+      ...notificationData,
+      userId: id,
+      category: categoryForRecipient(id)
+    });
+    if (n) out.push(n);
+  }
+  return out;
+};
+
+/**
+ * Notify all members of a workspace that a new member has joined.
+ * Pošle 'general' notifikáciu s typom 'workspace.memberAdded' všetkým
+ * existujúcim členom (okrem nového člena samotného).
+ *
+ * @param {Object} params
+ * @param {Object} params.workspace — workspace doc { _id, name }
+ * @param {Object} params.newMember — newly added user { _id, username }
+ * @param {Object} [params.actor]   — invoker (vlastník/manažér ktorý pozval)
+ */
+const notifyWorkspaceMemberAdded = async ({ workspace, newMember, actor }) => {
+  if (!workspace?._id || !newMember?._id) return [];
+  try {
+    const members = await WorkspaceMember.find({ workspaceId: workspace._id }, 'userId').lean();
+    const recipientIds = members
+      .map(m => m.userId.toString())
+      .filter(id => id !== newMember._id.toString());
+
+    if (recipientIds.length === 0) return [];
+
+    const memberName = newMember.username || newMember.email || 'Nový člen';
+    const actorName = actor?.username || 'Systém';
+
+    const notificationData = {
+      type: 'workspace.memberAdded',
+      title: getNotificationTitle('workspace.memberAdded', actorName, memberName),
+      message: `${memberName} sa pridal/a do workspace "${workspace.name || ''}"`,
+      workspaceId: workspace._id,
+      actorId: actor?._id || actor?.id || null,
+      actorName,
+      relatedType: null,
+      relatedId: null,
+      relatedName: memberName,
+      data: {
+        memberId: newMember._id.toString(),
+        memberName,
+        workspaceId: workspace._id.toString(),
+        workspaceName: workspace.name
+      },
+      category: 'general' // member events sú general — neidú push (default)
+    };
+
+    return await notifyUsers(recipientIds, notificationData);
+  } catch (error) {
+    logger.error('[NotificationService] notifyWorkspaceMemberAdded failed', {
+      error: error.message,
+      workspaceId: workspace._id
+    });
+    return [];
+  }
 };
 
 /**
@@ -1251,6 +1450,9 @@ module.exports = {
   notifyTaskAssignment,
   notifySubtaskChange,
   notifySubtaskAssignment,
+  notifyWorkspaceMemberAdded,
+  classifyByType,
+  trimUserHistory,
   getNotificationTitle,
   getNotificationMessage,
   generateNotificationUrl,

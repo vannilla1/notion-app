@@ -42,6 +42,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
         id: n._id.toString(),
         workspaceId: n.workspaceId ? n.workspaceId.toString() : null,
         type: n.type,
+        category: n.category || 'general',
         title: n.title,
         message: n.message,
         actorName: n.actorName,

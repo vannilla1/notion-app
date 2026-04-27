@@ -38,9 +38,22 @@ const notificationSchema = new mongoose.Schema({
       'message.approved',
       'message.rejected',
       'message.commented',
-      'message.comment.reacted'
+      'message.comment.reacted',
+      'workspace.memberAdded'
     ],
     required: true
+  },
+  // Notification category — determines visual treatment in the bell panel
+  // and whether push is sent (direct = always push, general = only if user
+  // opted in via notificationPreferences).
+  //   'direct'  — explicit assignment to this user OR completion of this
+  //               user's assigned task by someone else; high attention.
+  //   'general' — passive team activity, deadlines, member events, etc.
+  category: {
+    type: String,
+    enum: ['direct', 'general'],
+    default: 'general',
+    index: true
   },
   // Title shown in notification
   title: {

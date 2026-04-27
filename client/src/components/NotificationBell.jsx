@@ -207,11 +207,30 @@ function NotificationBell() {
     } catch {}
   };
 
-  const getIcon = (type) => {
+  // Ikona pred textom — kombinácia kategórie a typu.
+  // Direct-event ikonky majú vlastné výrazné symboly, general zachováva
+  // pôvodné emoji per-type.
+  const getIcon = (notif) => {
+    const type = notif?.type || '';
+    const category = notif?.category || 'general';
+
+    // Direct má prioritné ikony, ktoré jasne komunikujú "toto si pýta tvoju
+    // pozornosť": priradenia, dokončenie tvojej úlohy, správa pre teba.
+    if (category === 'direct') {
+      if (type === 'task.assigned' || type === 'subtask.assigned') return '📌';
+      if (type === 'task.completed' || type === 'subtask.completed') return '✅';
+      if (type?.startsWith('message')) return '✉️';
+      return '🔔';
+    }
+
+    // General — pôvodné neutrálne emoji per-type.
     if (type?.startsWith('contact')) return '👤';
-    if (type?.startsWith('task')) return '✅';
+    if (type === 'task.dueDate' || type === 'subtask.dueDate') return '⏰';
+    if (type === 'task.overdue' || type === 'subtask.overdue') return '⚠️';
+    if (type?.startsWith('task')) return '🗂️';
     if (type?.startsWith('subtask')) return '📝';
     if (type?.startsWith('message')) return '📨';
+    if (type === 'workspace.memberAdded') return '👥';
     if (type?.startsWith('workspace')) return '🏢';
     return '🔔';
   };
@@ -257,6 +276,25 @@ function NotificationBell() {
             )}
           </div>
 
+          {/* Sticky summary — súčet nečítaných direct notifikácií. Slúži aby
+              user na prvý pohľad videl, že má niečo na akciu, aj keby to
+              bolo schované za hromadou general notifikácií. */}
+          {(() => {
+            const unreadDirect = notifications.filter(
+              n => !n.read && (n.category || 'general') === 'direct'
+            ).length;
+            if (unreadDirect === 0) return null;
+            const label = unreadDirect === 1
+              ? '1 nová notifikácia ti vyžaduje pozornosť'
+              : `${unreadDirect} nových notifikácií ti vyžaduje pozornosť`;
+            return (
+              <div className="notif-panel-summary">
+                <span className="notif-summary-icon">📌</span>
+                <span className="notif-summary-text">{label}</span>
+              </div>
+            );
+          })()}
+
           <div className="notif-panel-list">
             {loading && notifications.length === 0 && (
               <div className="notif-panel-empty">Načítavam...</div>
@@ -264,25 +302,28 @@ function NotificationBell() {
             {!loading && notifications.length === 0 && (
               <div className="notif-panel-empty">Žiadne notifikácie</div>
             )}
-            {notifications.map(notif => (
-              <div
-                key={notif.id || notif._id}
-                className={`notif-item ${notif.read ? '' : 'unread'}`}
-                onClick={() => handleClick(notif)}
-              >
-                <span className="notif-item-icon">{getIcon(notif.type)}</span>
-                <div className="notif-item-content">
-                  <div className="notif-item-title">{notif.title}</div>
-                  {notif.message && (
-                    <div className="notif-item-msg">{notif.message}</div>
-                  )}
+            {notifications.map(notif => {
+              const cat = notif.category || 'general';
+              return (
+                <div
+                  key={notif.id || notif._id}
+                  className={`notif-item notif-cat-${cat} ${notif.read ? '' : 'unread'}`}
+                  onClick={() => handleClick(notif)}
+                >
+                  <span className="notif-item-icon">{getIcon(notif)}</span>
+                  <div className="notif-item-content">
+                    <div className="notif-item-title">{notif.title}</div>
+                    {notif.message && (
+                      <div className="notif-item-msg">{notif.message}</div>
+                    )}
+                  </div>
+                  <div className="notif-item-meta">
+                    <span className="notif-item-time">{timeAgo(notif.createdAt)}</span>
+                    {!notif.read && <span className="notif-unread-dot" />}
+                  </div>
                 </div>
-                <div className="notif-item-meta">
-                  <span className="notif-item-time">{timeAgo(notif.createdAt)}</span>
-                  {!notif.read && <span className="notif-unread-dot" />}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {/* Load-more — zobrazíme iba ak server hlási viac položiek
                 než máme aktuálne v zozname. Počet zostávajúcich ukážeme
                 v labeli, aby user vedel, koľko ešte čaká. */}

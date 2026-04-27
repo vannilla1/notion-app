@@ -379,6 +379,61 @@ router.get('/me', authenticateToken, (req, res) => {
   res.json(req.user);
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// Notification preferences — per-user push toggles for "general" notifs.
+// Direct notifications (priradenia, dokončenie mojej priradenej úlohy
+// niekým iným) sa nedajú vypnúť — vždy idú push.
+// ─────────────────────────────────────────────────────────────────────
+
+const DEFAULT_NOTIFICATION_PREFS = {
+  pushTeamActivity: false,
+  pushDeadlines:    false,
+  pushOverdue:      false,
+  pushNewMember:    false
+};
+
+router.get('/notification-preferences', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id, 'notificationPreferences').lean();
+    res.json({
+      ...DEFAULT_NOTIFICATION_PREFS,
+      ...(user?.notificationPreferences || {})
+    });
+  } catch (error) {
+    logger.error('Get notification preferences error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.put('/notification-preferences', authenticateToken, async (req, res) => {
+  try {
+    const allowedKeys = Object.keys(DEFAULT_NOTIFICATION_PREFS);
+    const updates = {};
+    for (const key of allowedKeys) {
+      if (typeof req.body?.[key] === 'boolean') {
+        updates[`notificationPreferences.${key}`] = req.body[key];
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'Žiadne platné nastavenia v requeste' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true, projection: 'notificationPreferences' }
+    ).lean();
+
+    res.json({
+      ...DEFAULT_NOTIFICATION_PREFS,
+      ...(user?.notificationPreferences || {})
+    });
+  } catch (error) {
+    logger.error('Update notification preferences error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 // Get user profile
 router.get('/profile', authenticateToken, async (req, res) => {
   try {

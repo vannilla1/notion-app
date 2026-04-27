@@ -66,6 +66,24 @@ const userSchema = new mongoose.Schema({
     ref: 'Workspace',
     default: null
   },
+  // ─────────────────────────────────────────────────────────────────────
+  // Notification preferences — per-user push opt-ins.
+  //
+  // 'direct' notifikácie (priradenia, dokončenie mojej priradenej úlohy
+  // niekým iným, správa pre mňa) sa do bell-panela ukladajú vždy a push
+  // chodí vždy — toto sú akcie, ktoré si pýtajú reakciu user-a.
+  //
+  // 'general' notifikácie (cudzie zmeny, blížiace sa termíny, po termíne,
+  // pridanie člena do workspace) sa vždy ukladajú do bell-panela, ale
+  // push sa posiela LEN ak má user explicitne zapnutý príslušný toggle.
+  // Default je všade false — anti-spam.
+  // ─────────────────────────────────────────────────────────────────────
+  notificationPreferences: {
+    pushTeamActivity: { type: Boolean, default: false }, // cudzie projekty/úlohy/kontakty
+    pushDeadlines:    { type: Boolean, default: false }, // 7d / 3d / dnes pripomienky
+    pushOverdue:      { type: Boolean, default: false }, // po termíne
+    pushNewMember:    { type: Boolean, default: false }  // nový člen workspace
+  },
   // Password reset flow — token sa v DB ukladá ako SHA-256 hash, nie plain.
   // Plain token vidí len user v emaili a v URL query stringu.
   resetPasswordTokenHash: {

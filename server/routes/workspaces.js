@@ -218,6 +218,17 @@ router.post('/join', authenticateToken, async (req, res) => {
 
     logger.info('User joined workspace', { workspaceId: workspace._id, userId: req.user.id });
 
+    // Notify všetkých ostatných členov workspace, že pribudol nový člen.
+    // Beží fire-and-forget — neblokuje response.
+    setImmediate(() => {
+      const newMember = { _id: req.user.id, username: req.user.username, email: req.user.email };
+      notificationService.notifyWorkspaceMemberAdded({
+        workspace,
+        newMember,
+        actor: newMember
+      }).catch(err => logger.warn('notifyWorkspaceMemberAdded (join via code) failed', { error: err.message }));
+    });
+
     res.json({
       message: 'Úspešne ste sa pripojili k pracovnému prostrediu',
       workspace: {
@@ -933,6 +944,16 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       workspaceId: invitation.workspaceId,
       userId: req.user.id,
       email: invitation.email
+    });
+
+    // Notifikuj ostatných členov workspace o novom kolegovi.
+    setImmediate(() => {
+      const newMember = { _id: req.user.id, username: req.user.username, email: req.user.email };
+      notificationService.notifyWorkspaceMemberAdded({
+        workspace,
+        newMember,
+        actor: newMember
+      }).catch(err => logger.warn('notifyWorkspaceMemberAdded (invite accepted) failed', { error: err.message }));
     });
 
     res.json({

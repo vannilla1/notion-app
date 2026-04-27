@@ -8687,6 +8687,140 @@ body.ios-app {
   font-size: 14px;
 }
 
+/* Sticky summary nad zoznamom — keď má user nečítané "direct" notifikácie,
+   vidí to hneď v jednej vete. Mizne keď je ich 0. */
+.notif-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--accent-light, #ede9fe), #f5f3ff);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--accent-color);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.notif-summary-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Kategórie notifikácií —
+   direct  : fialový pruh vľavo + tučnejší font, výraznejšie
+   general : tlmený text, menšia ikona, žiadny pruh */
+.notif-item.notif-cat-direct {
+  border-left: 3px solid var(--accent-color);
+  background: var(--bg-card);
+}
+
+.notif-item.notif-cat-direct .notif-item-title {
+  font-weight: 600;
+}
+
+.notif-item.notif-cat-general {
+  border-left: 3px solid transparent;
+}
+
+.notif-item.notif-cat-general .notif-item-title {
+  color: var(--text-secondary);
+}
+
+.notif-item.notif-cat-general .notif-item-msg {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ─── Notification Preferences modal ─────────────────────────────────── */
+.notif-prefs-modal {
+  max-width: 560px;
+  width: 100%;
+}
+.notif-prefs-body {
+  padding: 4px 24px 24px;
+}
+.notif-prefs-section {
+  margin-top: 18px;
+}
+.notif-prefs-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.notif-prefs-section-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+.notif-prefs-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notif-prefs-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.notif-prefs-toggle:hover {
+  border-color: var(--accent-color);
+}
+.notif-prefs-toggle.saving { opacity: 0.6; }
+.notif-prefs-toggle-text {
+  flex: 1;
+  min-width: 0;
+}
+.notif-prefs-toggle-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.notif-prefs-toggle-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.notif-prefs-toggle input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--accent-color);
+}
+.notif-prefs-loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.notif-prefs-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.notif-prefs-footer-note {
+  margin-top: 18px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 /* Load-more tlačidlo na konci zoznamu notifikácií.
    Vizuálne nenápadné — full-width, subtle border-top od posledného
    .notif-item, accent-color label, hover zvýrazní pozadie. Zámer: user
