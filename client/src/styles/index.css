@@ -11549,3 +11549,68 @@ body.ios-app {
     gap: 6px;
   }
 }
+
+/* =============================================================================
+ * UNIFIED USER PICKER — overrides every context-specific tweak
+ * =============================================================================
+ * Problém: rovnaký markup (.multi-select-users.compact > .user-checkbox >
+ * radio/checkbox + .user-avatar-small + name) sa v rôznych formulároch
+ * rendroval rôzne. Tu prepisujeme všetky predošlé pravidlá tak aby
+ * picker všade vyzeral ako kompaktné horizontálne pilulky:
+ * `[checkbox] [M-avatar] Martin   [checkbox] [V-avatar] vannilla`
+ * — všetko v jednom riadku, kartičky sa skladajú vedľa seba s flex-wrap.
+ * Použité !important záměrne, aby porazili .tasks-page .task-edit-form
+ * mobile rules a iné staršie context-specific overrides.
+ * ========================================================================= */
+.multi-select-users.compact {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  max-height: 160px !important;
+  overflow-y: auto !important;
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+}
+
+.multi-select-users.compact .user-checkbox {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 10px !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  width: auto !important;
+  min-width: 0 !important;
+  cursor: pointer !important;
+}
+
+.multi-select-users.compact .user-checkbox:hover {
+  border-color: var(--accent-color) !important;
+  background: var(--accent-light) !important;
+}
+
+.multi-select-users.compact .user-checkbox input[type="checkbox"],
+.multi-select-users.compact .user-checkbox input[type="radio"] {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+}
+
+.multi-select-users.compact .user-avatar-small {
+  width: 22px !important;
+  height: 22px !important;
+  font-size: 11px !important;
+  flex-shrink: 0 !important;
+}
