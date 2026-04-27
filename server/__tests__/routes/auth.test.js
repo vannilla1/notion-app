@@ -346,7 +346,13 @@ describe('/api/auth route', () => {
       expect(res.status).toBe(401);
     });
 
-    it('vráti prázdny array ak user nemá currentWorkspaceId', async () => {
+    it('vráti 400 NO_WORKSPACE ak user nemá currentWorkspaceId ani membership', async () => {
+      // Endpoint teraz používa requireWorkspace middleware (zmena: aby vrátil
+      // členov AKTUÁLNEHO workspace-u podľa X-Workspace-Id header-a, nie iba
+      // currentWorkspaceId z DB). User bez akéhokoľvek workspace dostane
+      // 400 NO_WORKSPACE — klient na to odpovedá (od commit 6d404c8) cez
+      // axios interceptor: zmaže stale storage a retry-uje, alebo zobrazí
+      // empty-state UI ak user naozaj nemá žiadny workspace.
       const user = await User.create({
         username: 'noworkspace',
         email: 'nws@test.com',
@@ -358,8 +364,8 @@ describe('/api/auth route', () => {
         .get('/api/auth/users')
         .set(authHeader(token));
 
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual([]);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('NO_WORKSPACE');
     });
 
     it('vráti členov rovnakého workspace (bez password field)', async () => {

@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const ContactFile = require('../models/ContactFile');
 const User = require('../models/User');
 
@@ -686,8 +687,28 @@ router.get('/calendar/feed/:token', async (req, res) => {
       return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
     }
 
-    // Get tasks only from user's current workspace
-    const workspaceFilter = user.currentWorkspaceId ? { workspaceId: user.currentWorkspaceId } : {};
+    // CRITICAL SECURITY: bez aktívneho workspace by sme s `workspaceFilter = {}`
+    // vrátili tasks zo VŠETKÝCH workspace-ov všetkých zákazníkov. To by bolo
+    // GDPR porušenie a únik obchodných dát. Ak user nemá currentWorkspaceId,
+    // odmietneme. Skutočná oprava (multi-workspace feed) ide cez WorkspaceMember
+    // lookup nižšie.
+    if (!user.currentWorkspaceId) {
+      return res.status(404).send('Kalendár feed nie je dostupný — nemáte aktívne pracovné prostredie.');
+    }
+
+    // Bezpečnostné rozšírenie: filtrujeme aj membership-om, aby aj v prípade
+    // stale `currentWorkspaceId` (ktorý ukazuje na workspace bez membership)
+    // request neprešiel cez celú DB.
+    const userMemberships = await WorkspaceMember.find(
+      { userId: user._id },
+      { workspaceId: 1 }
+    ).lean();
+    const memberWorkspaceIds = userMemberships.map(m => m.workspaceId);
+    if (!memberWorkspaceIds.some(id => String(id) === String(user.currentWorkspaceId))) {
+      return res.status(404).send('Kalendár feed nie je dostupný — pracovné prostredie už nie je platné.');
+    }
+
+    const workspaceFilter = { workspaceId: user.currentWorkspaceId };
     const globalTasks = await Task.find(
       { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
       { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }

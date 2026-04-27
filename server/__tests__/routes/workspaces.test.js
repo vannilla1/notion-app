@@ -288,8 +288,12 @@ describe('/api/workspaces route', () => {
       expect(res.body.name).toBeUndefined();
     });
 
-    it('úspešné prepnutie updatuje currentWorkspaceId', async () => {
-      // Vytvor druhý workspace kde som member
+    it('úspešné prepnutie vráti workspace shape, ZÁMERNE neprepisuje currentWorkspaceId', async () => {
+      // Endpoint ZÁMERNE neprepisuje currentWorkspaceId (cross-device bleed
+      // ochrana — komentár v server/routes/workspaces.js:276). Workspace
+      // context je per-device cez X-Workspace-Id header. Test overí že
+      // odpoveď nese správny shape, ale DB default sa pre owner-a nemení
+      // (lebo už mal nastavený currentWorkspaceId pri seed-e).
       const anotherOwner = await User.create({
         username: 'ao', email: 'ao@test.com', password: 'x'
       });
@@ -300,15 +304,21 @@ describe('/api/workspaces route', () => {
         workspaceId: secondWs._id, userId: ownerCtx.user._id, role: 'member'
       });
 
+      const beforeUser = await User.findById(ownerCtx.user._id);
+      const originalCurrentWs = beforeUser.currentWorkspaceId?.toString();
+
       const res = await request(app)
         .post(`/api/workspaces/switch/${secondWs._id}`)
         .set(authHeader(ownerCtx.token));
 
       expect(res.status).toBe(200);
       expect(res.body.workspace.role).toBe('member');
+      expect(res.body.workspace.id).toBe(secondWs._id.toString());
 
+      // currentWorkspaceId sa NEMÁ zmeniť — ostáva pôvodný (header je
+      // single source of truth pre per-request workspace, DB default ostáva).
       const freshUser = await User.findById(ownerCtx.user._id);
-      expect(freshUser.currentWorkspaceId.toString()).toBe(secondWs._id.toString());
+      expect(freshUser.currentWorkspaceId?.toString()).toBe(originalCurrentWs);
     });
 
     it('response má FULL workspace shape (rovnaký ako GET /current) — lock-in pre atomický client update', async () => {

@@ -260,7 +260,14 @@ router.post('/checkout', authenticateToken, async (req, res) => {
     res.json({ url: session.url, sessionId: session.id, type: 'checkout' });
   } catch (error) {
     logger.error('[Billing] Checkout error', { error: error.message, stack: error.stack, userId: req.user.id });
-    res.status(500).json({ message: 'Chyba pri vytváraní platby', detail: error.message });
+    // Bezpečnostná hygiena: error.message zo Stripe SDK môže obsahovať
+    // citlivé info o konfigurácii (API key hints, account state). Detail
+    // posielame len v dev/staging prostrediach pre debug; v produkcii
+    // zostáva user-facing iba generická správa, plný error je v logger-i.
+    res.status(500).json({
+      message: 'Chyba pri vytváraní platby',
+      ...(process.env.NODE_ENV !== 'production' && { detail: error.message })
+    });
   }
 });
 
@@ -349,7 +356,11 @@ router.get('/debug', authenticateToken, async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error('[Billing] Debug endpoint error', { error: error.message, userId: req.user.id });
+    res.status(500).json({
+      message: 'Chyba pri načítaní debug údajov',
+      ...(process.env.NODE_ENV !== 'production' && { detail: error.message })
+    });
   }
 });
 

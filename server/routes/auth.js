@@ -553,8 +553,12 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.status(400).json({ message: 'Neplatné ID' });
     }
 
-    // In-memory avatar cache (5 min TTL) to avoid hitting DB for every avatar request
+    // In-memory avatar cache (5 min TTL) to avoid hitting DB for every avatar request.
+    // Bounded LRU-ish (FIFO) na strop AVATAR_CACHE_MAX — bez tohto by útočník
+    // mohol cez random ObjectId-čka v slučke nafúknuť Map a spôsobiť OOM crash
+    // (každý miss zapíše null entry, ktorá by inak nikdy nebola odstránená).
     if (!global._avatarCache) global._avatarCache = new Map();
+    const AVATAR_CACHE_MAX = 500;
     const cacheKey = req.params.userId;
     const cached = global._avatarCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < 300000) {
@@ -567,15 +571,27 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.send(cached.data);
     }
 
+    // Pred zápisom novej entry skontroluj strop. Map.keys() iteruje
+    // v insertion order, takže prvý kľúč je najstarší → FIFO eviction.
+    const evictIfFull = () => {
+      while (global._avatarCache.size >= AVATAR_CACHE_MAX) {
+        const oldestKey = global._avatarCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        global._avatarCache.delete(oldestKey);
+      }
+    };
+
     const user = await User.findById(req.params.userId).select('avatarData avatarMimetype').lean();
 
     if (!user || !user.avatarData) {
+      evictIfFull();
       global._avatarCache.set(cacheKey, { data: null, ts: Date.now() });
       res.set('Cache-Control', 'no-store');
       return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
+    evictIfFull();
     global._avatarCache.set(cacheKey, { data: buffer, mimetype: user.avatarMimetype || 'image/jpeg', ts: Date.now() });
     res.set('Content-Type', user.avatarMimetype || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=3600');

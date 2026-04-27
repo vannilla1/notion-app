@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
+const { adminLoginLimiter } = require('../middleware/rateLimiter');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
@@ -26,7 +27,9 @@ const router = express.Router();
 const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
 
 // ─── ADMIN LOGIN (separate from regular auth) ──────────────────
-router.post('/login', async (req, res) => {
+// adminLoginLimiter: 5 pokusov / 30 min — prísnejšie ako bežný login,
+// keďže super admin účet má prístup k VŠETKÝM userom + billingu + auditu.
+router.post('/login', adminLoginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 

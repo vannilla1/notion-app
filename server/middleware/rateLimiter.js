@@ -122,10 +122,17 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, trustProxy: false },
   skip: (req) => {
-    // Skip rate limiting for health checks, uploads, and file operations
+    // Skip rate limiting iba pre legitímne file upload/download endpointy
+    // (Tasks/Contacts/Messages mountované na /api, takže req.path tu má
+    // tvar /<resource>/<id>/files alebo .../files/<fileId>/download).
+    // Predtým bol `req.path.includes('/files')` substring match — útočník
+    // by vedel obísť limiter na akomkoľvek endpointe ak by URL obsahovala
+    // segment `/files` v inom kontexte. Teraz vyžadujeme `/files` ako
+    // path segment (pred/za '/' alebo koniec stringu).
     return req.path === '/health' ||
-           req.path.startsWith('/uploads') ||
-           req.path.includes('/files');
+           req.path.startsWith('/uploads/') ||
+           req.path === '/uploads' ||
+           /\/files(\/|$)/.test(req.path);
   }
 });
 
@@ -145,8 +152,35 @@ const errorReportLimiter = rateLimit({
   }
 });
 
+// Rate limiter pre super admin login. Prísnejší než loginLimiter, lebo
+// admin endpoint je single-account a strata kompromituje celý systém
+// (všetci users, billing, audit logs). 5 pokusov / 30 minút je v praxi
+// neprekročiteľný limit pre legitimného admina (vie heslo) a brutálne
+// obmedzí brute-force tempo na ~240 pokusov/deň zo single IP.
+const adminLoginLimiter = rateLimit({
+  windowMs: 30 * 60 * 1000, // 30 minutes
+  max: 5,
+  message: {
+    message: 'Príliš veľa pokusov o admin prihlásenie. Skúste znova o 30 minút.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, trustProxy: false },
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: admin login', {
+      ip: req.ip,
+      email: req.body?.email
+    });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development' && process.env.SKIP_RATE_LIMIT === 'true';
+  }
+});
+
 module.exports = {
   loginLimiter,
+  adminLoginLimiter,
   registerLimiter,
   passwordChangeLimiter,
   forgotPasswordLimiter,
