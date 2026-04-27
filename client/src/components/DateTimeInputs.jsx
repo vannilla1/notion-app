@@ -57,17 +57,26 @@ export function TimeInput({ value, onChange, disabled, className = '', style, ti
 function DateTimeInput({ type, value, onChange, disabled, className, style, title, ariaLabel, autoFocus }) {
   const inputRef = useRef(null);
 
+  // Pri click/touch sa pokúsime force-open natívny picker. Niektoré
+  // browser/input-type kombinácie (najmä iOS Safari + type="time") občas
+  // potrebujú aktívny user-gesture flow ktorý showPicker() vyžaduje, inak
+  // tichý "no-op". Preto fallbackujeme na focus(), čo iOS spoľahlivo otvorí.
   const openPicker = () => {
     const el = inputRef.current;
     if (!el || el.disabled) return;
-    // showPicker() je modern API ktoré spoľahlivo otvorí natívny picker aj
-    // keď default tap-to-open zlyhal kvôli prekrytým eventom alebo iOS quirk-u.
+
     if (typeof el.showPicker === 'function') {
-      try { el.showPicker(); } catch { /* user-interaction context not available */ }
-    } else {
-      el.focus();
-      el.click();
+      try {
+        el.showPicker();
+        return;
+      } catch {
+        // showPicker odmietnuté (mimo user-gesture kontextu alebo browser
+        // nepodporuje pre tento input-type) — pokračuj s focus fallbackom.
+      }
     }
+    // Native fallback: focus rozhne picker na iOS, na desktope user uvidí
+    // kurzor v inpute a po stlačení šípky / klávesnice picker otvorí.
+    el.focus();
   };
 
   const clear = (e) => {
@@ -85,8 +94,13 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
         type={type}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        onClick={openPicker}
-        onFocus={openPicker}
+        // onMouseDown sa spustí PRED click + focus → guaranteed user-gesture
+        // context pre showPicker(). Plus pokrýva touch (iOS posiela
+        // syntetický mouseDown). onFocus už voláme len pri kbd-tab cez form
+        // a len ak hodnota chýba (vtedy chceme rovnaký pickerovo-otvárací UX).
+        onMouseDown={openPicker}
+        onTouchStart={openPicker}
+        onFocus={!hasValue ? openPicker : undefined}
         disabled={disabled}
         className={`form-input dt-input ${className}`}
         title={title}
