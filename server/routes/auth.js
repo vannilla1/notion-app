@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const User = require('../models/User');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
+const { requireWorkspace } = require('../middleware/workspace');
 const {
   loginLimiter,
   registerLimiter,
@@ -590,15 +591,17 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
 // User.role — inak sa pri picker-i používateľov v jednom workspace zobrazí rola
 // z iného workspacu (napr. "Admin" pri mene, keď je človek v tomto workspace len
 // member). Enum hodnoty: 'owner' | 'manager' | 'member' (pozri WorkspaceMember.js).
-router.get('/users', authenticateToken, async (req, res) => {
+// Listuje členov AKTUÁLNE OTVORENÉHO workspace-u (z X-Workspace-Id headera).
+// Predtým sme čítali user.currentWorkspaceId — to ale nereflektuje workspace
+// switching v UI (klient drží otvorený WS v lokálnom state, kým DB má len
+// "default workspace"). Dôsledok: ak má user 2 workspaces a aktuálne má
+// otvorený nie-default, picker príjemcov v Správach a priraďovaní v Úlohách
+// vracal členov default workspace-u (často len seba). Cez requireWorkspace
+// middleware je teraz behavior konzistentný s /api/workspaces/current/members.
+router.get('/users', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    if (!user || !user.currentWorkspaceId) {
-      return res.json([]);
-    }
-
     const WorkspaceMember = require('../models/WorkspaceMember');
-    const members = await WorkspaceMember.find({ workspaceId: user.currentWorkspaceId })
+    const members = await WorkspaceMember.find({ workspaceId: req.workspace._id })
       .populate('userId', 'username email color avatar');
 
     res.json(members
