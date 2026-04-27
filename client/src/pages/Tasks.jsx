@@ -1591,9 +1591,9 @@ function Tasks() {
                 </div>
                 <div className="subtask-edit-row">
                   <label className="subtask-assign-label">Priradení:</label>
-                  <div className="subtask-assign-users">
+                  <div className="multi-select-users">
                     {users.map(u => (
-                      <label key={u.id} className="subtask-user-checkbox">
+                      <label key={u.id} className="user-checkbox">
                         <input
                           type="checkbox"
                           checked={editSubtaskAssignedTo.includes(u.id)}
@@ -1606,7 +1606,7 @@ function Tasks() {
                             );
                           }}
                         />
-                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                        <span className="user-avatar-small" style={{ backgroundColor: u.color }}>{u.username.charAt(0).toUpperCase()}</span>
                         <span>{u.username}</span>
                       </label>
                     ))}
@@ -1791,9 +1791,9 @@ function Tasks() {
                   👤
                 </button>
                 {showSubtaskAssignInput[subtask.id] && (
-                  <div className="subtask-assign-users-form add-subtask-expansion">
+                  <div className="multi-select-users add-subtask-expansion">
                     {users.map(u => (
-                      <label key={u.id} className="subtask-user-checkbox">
+                      <label key={u.id} className="user-checkbox">
                         <input
                           type="checkbox"
                           checked={(subtaskAssignedTo[subtask.id] || []).includes(u.id)}
@@ -1807,7 +1807,7 @@ function Tasks() {
                             }));
                           }}
                         />
-                        <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                        <span className="user-avatar-small" style={{ backgroundColor: u.color }}>{u.username.charAt(0).toUpperCase()}</span>
                         <span>{u.username}</span>
                       </label>
                     ))}
@@ -1876,7 +1876,7 @@ function Tasks() {
                 />
               )}
               {showSubtaskAssignInput[subtask.id] && (
-                <div className="subtask-assign-users-form">
+                <div className="multi-select-users">
                   {users.map(u => (
                     <label key={u.id} className="subtask-user-checkbox">
                       <input
@@ -1892,7 +1892,7 @@ function Tasks() {
                           }));
                         }}
                       />
-                      <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                      <span className="user-avatar-small" style={{ backgroundColor: u.color }}>{u.username.charAt(0).toUpperCase()}</span>
                       <span>{u.username}</span>
                     </label>
                   ))}
@@ -3075,9 +3075,9 @@ function Tasks() {
                                     👤
                                   </button>
                                   {showSubtaskAssignInput[task.id] && (
-                                    <div className="subtask-assign-users-form add-subtask-expansion">
+                                    <div className="multi-select-users add-subtask-expansion">
                                       {users.map(u => (
-                                        <label key={u.id} className="subtask-user-checkbox">
+                                        <label key={u.id} className="user-checkbox">
                                           <input
                                             type="checkbox"
                                             checked={(subtaskAssignedTo[task.id] || []).includes(u.id)}
@@ -3091,7 +3091,7 @@ function Tasks() {
                                               }));
                                             }}
                                           />
-                                          <span className="subtask-user-dot" style={{ backgroundColor: u.color }}></span>
+                                          <span className="user-avatar-small" style={{ backgroundColor: u.color }}>{u.username.charAt(0).toUpperCase()}</span>
                                           <span>{u.username}</span>
                                         </label>
                                       ))}
