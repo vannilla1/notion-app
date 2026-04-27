@@ -2828,7 +2828,7 @@ function Tasks() {
                             </div>
                             <div className="form-group">
                               <label>Priradení</label>
-                              <div className="multi-select-users compact">
+                              <div className="multi-select-users">
                                 {users.map(u => (
                                   <label key={u.id} className="user-checkbox">
                                     <input
@@ -2844,7 +2844,12 @@ function Tasks() {
                                         }));
                                       }}
                                     />
-                                    <span className="user-dot" style={{ backgroundColor: u.color }}></span>
+                                    <span
+                                      className="user-avatar-small"
+                                      style={{ backgroundColor: u.color }}
+                                    >
+                                      {u.username.charAt(0).toUpperCase()}
+                                    </span>
                                     <span>{u.username}</span>
                                   </label>
                                 ))}
