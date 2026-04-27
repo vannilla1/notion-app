@@ -8925,6 +8925,35 @@ body.ios-app {
   opacity: 1;
 }
 
+/* Placeholder overlay — zobrazí "📅 Dátum" / "🕐 Čas" v prázdnom inpute,
+   pretože iOS Safari (a niektoré ďalšie prehliadače) štandardne nezobrazia
+   žiadny vizuálny hint pri prázdnom <input type="date|time">. */
+.dt-placeholder-overlay {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.dt-input-wrapper.dt-empty .dt-input {
+  /* Skryjeme natívny placeholder text browsera (napr. "rrrr-mm-dd"),
+     aby neprekrýval naše overlay-y. */
+  color: transparent;
+}
+.dt-input-wrapper.dt-empty .dt-input:focus {
+  /* Pri fokuse vrátime farbu textu (browser ukáže native picker UI). */
+  color: inherit;
+}
+.dt-input-wrapper.dt-empty .dt-input:focus + .dt-placeholder-overlay {
+  /* Skryjeme overlay hneď ako fokus (a teda native picker) sa otvorí. */
+  display: none;
+}
+
 /* Load-more tlačidlo na konci zoznamu notifikácií.
    Vizuálne nenápadné — full-width, subtle border-top od posledného
    .notif-item, accent-color label, hover zvýrazní pozadie. Zámer: user

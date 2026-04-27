@@ -107,8 +107,13 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
 
   const hasValue = !!value;
 
+  // Vizuálny placeholder pre iOS Safari, ktorý štandardne nezobrazí
+  // žiadny placeholder text ani ikonu pri prázdnom <input type="date|time">.
+  // Bez tohto by užívateľ videl len prázdny rámček a netušil čo má vyplniť.
+  const placeholderLabel = type === 'date' ? '📅 Dátum' : '🕐 Čas';
+
   return (
-    <div className={`dt-input-wrapper ${disabled ? 'dt-disabled' : ''}`} style={style}>
+    <div className={`dt-input-wrapper ${disabled ? 'dt-disabled' : ''} ${!hasValue ? 'dt-empty' : ''}`} style={style}>
       <input
         ref={inputRef}
         type={type}
@@ -128,6 +133,11 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
         autoFocus={autoFocus}
         step={type === 'time' ? 60 : undefined}
       />
+      {!hasValue && (
+        <span className="dt-placeholder-overlay" aria-hidden="true">
+          {placeholderLabel}
+        </span>
+      )}
       {hasValue && !disabled && (
         <button
           type="button"
