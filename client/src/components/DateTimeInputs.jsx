@@ -85,6 +85,26 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
     onChange('');
   };
 
+  // Pre type="time": potom čo browser zapíše novú hodnotu HH:MM, pre-mapujeme
+  // textovú selekciu na pozíciu 3-5, čím sa modré highlight presunie z hodín
+  // na minúty. Funguje pri všetkých spôsoboch zadania (klávesnica, šípky,
+  // spinner, native picker) — natívny `<input type="time">` v desktopových
+  // prehliadačoch akceptuje `setSelectionRange()` na visible texte.
+  const handleChange = (e) => {
+    const el = e.target;
+    const newVal = el.value;
+    onChange(newVal);
+    if (type === 'time' && newVal && /^\d{2}:/.test(newVal)) {
+      // requestAnimationFrame zabezpečí že selekciu nastavíme až po tom,
+      // čo browser dokončí svoj vlastný re-render po zmene hodnoty.
+      requestAnimationFrame(() => {
+        try { el.setSelectionRange(3, 5); } catch { /* niektoré browsery
+          (najmä iOS) odmietajú setSelectionRange na time inpute — tam
+          natívny picker beztak rieši UX vlastným wheel widgetom. */ }
+      });
+    }
+  };
+
   const hasValue = !!value;
 
   return (
@@ -93,7 +113,7 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
         ref={inputRef}
         type={type}
         value={value || ''}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={handleChange}
         // onMouseDown sa spustí PRED click + focus → guaranteed user-gesture
         // context pre showPicker(). Plus pokrýva touch (iOS posiela
         // syntetický mouseDown). onFocus už voláme len pri kbd-tab cez form
