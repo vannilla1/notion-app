@@ -42,12 +42,12 @@ const tasksHelpTips = [
   {
     icon: '📅',
     title: 'Ako nastaviť termín, čas a prioritu',
-    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a voliteľne aj presný čas (HH:MM) — pole pre čas sa odomkne hneď ako vyplníte dátum. Vyberte prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Vďaka tomu na prvý pohľad vidíte, čo je urgentné. Rovnako môžete nastaviť termín aj čas pre úlohy a podúlohy.'
+    description: 'Pri vytváraní alebo úprave projektu najskôr nastavte dátum termínu. Až potom sa odomkne pole pre voliteľný čas (HH:MM). Bez vyplneného dátumu má pole času šedý kurzor "zákaz" — to je úmyselné, čas bez dátumu nemá zmysel a poradie zadávania je dátum → čas. Po nastavení času (HH:MM) modré označenie automaticky preskočí z hodín na minúty. Ak chcete čas zrušiť, kliknite na ikonu × vedľa neho. Vyberte prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Rovnako môžete nastaviť termín aj čas pre úlohy a podúlohy.'
   },
   {
     icon: '🔔',
     title: 'Ako fungujú pripomienky',
-    description: 'Pri nastavení termínu si vyberte, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón (funguje aj na iPhone). Systém automaticky posiela upozornenia aj 7 a 3 dni pred termínom.'
+    description: 'Automatické pripomienky chodia vždy keď sa termín vášho projektu/úlohy blíži: 14 dní pred, 7 dní pred, 3 dni pred a po termíne. Tieto sa nedajú vypnúť — sú to základné upozornenia ktoré príde ako in-app notifikácia. Push na telefón pre tieto auto-pripomienky kontrolujete v "Nastavenia notifikácií" (toggle "Pripomienky termínov"). Navyše ak v projekte/úlohe nastavíte aj čas (HH:MM), zobrazí sa pole "🔔 Časové pripomienky" kde si môžete označiť jednu alebo viacero možností: 15 min, 30 min, 1 hodina, 2 hodiny alebo 1 deň pred presným časom. Tieto časové pripomienky chodia vždy ako push (považujeme ich za explicitné, takže ich nedáva zmysel filtrovať cez Settings).'
   },
   {
     icon: '👤',
@@ -403,11 +403,6 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
     </div>
   );
 }
-
-// Helper: keď user nastaví ČAS pred dátumom, dátum auto-doplní na dnešok.
-// Vďaka tomu je TimeInput vždy klikateľný (nie disabled) a UX je prirodzený —
-// "začnem s časom 14:00" → automaticky pridá dnešný dátum + tento čas.
-const todayISODate = () => new Date().toISOString().split('T')[0];
 
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
@@ -1586,12 +1581,10 @@ function Tasks() {
                   />
                   <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={(val) => {
-                      setEditSubtaskDueTime(val);
-                      if (val && !editSubtaskDueDate) setEditSubtaskDueDate(todayISODate());
-                    }}
+                    onChange={setEditSubtaskDueTime}
+                    disabled={!editSubtaskDueDate}
                     className="form-input-sm"
-                    title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
+                    title={editSubtaskDueDate ? 'Voliteľný čas (HH:MM). Prázdne = celodenná úloha.' : 'Najskôr nastavte dátum'}
                     style={{ flex: 1 }}
                   />
                 </div>
@@ -1779,12 +1772,8 @@ function Tasks() {
                     />
                     <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(val) => {
-                        setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
-                        if (val && !subtaskDueDates[subtask.id]) {
-                          setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
-                        }
-                      }}
+                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
+                      disabled={!subtaskDueDates[subtask.id]}
                       className="form-input-sm"
                       style={{ flex: 1 }}
                     />
@@ -1881,12 +1870,8 @@ function Tasks() {
                   />
                   <TimeInput
                     value={subtaskDueTimes[subtask.id] || ''}
-                    onChange={(val) => {
-                      setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
-                      if (val && !subtaskDueDates[subtask.id]) {
-                        setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
-                      }
-                    }}
+                    onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
+                    disabled={!subtaskDueDates[subtask.id]}
                     className="form-input-sm"
                     style={{ flex: 1 }}
                   />
@@ -2518,14 +2503,10 @@ function Tasks() {
                       />
                       <TimeInput
                         value={newTaskForm.dueTime || ''}
-                        onChange={(val) => setNewTaskForm({
-                          ...newTaskForm,
-                          dueTime: val,
-                          // Ak user nastaví čas pred dátumom, dátum auto-doplníme.
-                          dueDate: !newTaskForm.dueDate && val ? todayISODate() : newTaskForm.dueDate
-                        })}
+                        onChange={(val) => setNewTaskForm({ ...newTaskForm, dueTime: val })}
+                        disabled={!newTaskForm.dueDate}
                         style={{ flex: 1 }}
-                        title="Voliteľný čas (HH:MM). Prázdne = celodenná úloha."
+                        title={newTaskForm.dueDate ? 'Voliteľný čas (HH:MM). Prázdne = celodenná úloha.' : 'Najskôr nastavte dátum'}
                       />
                     </div>
                   </div>
@@ -2786,12 +2767,9 @@ function Tasks() {
                               />
                               <TimeInput
                                 value={editForm.dueTime || ''}
-                                onChange={(val) => setEditForm({
-                                  ...editForm,
-                                  dueTime: val,
-                                  dueDate: !editForm.dueDate && val ? todayISODate() : editForm.dueDate
-                                })}
-                                title="Čas (voliteľné)"
+                                onChange={(val) => setEditForm({ ...editForm, dueTime: val })}
+                                disabled={!editForm.dueDate}
+                                title={editForm.dueDate ? 'Čas (voliteľné)' : 'Najskôr nastavte dátum'}
                               />
                               <select
                                 value={editForm.priority}
@@ -3048,12 +3026,8 @@ function Tasks() {
                                       />
                                       <TimeInput
                                         value={subtaskDueTimes[task.id] || ''}
-                                        onChange={(val) => {
-                                          setSubtaskDueTimes(prev => ({ ...prev, [task.id]: val }));
-                                          if (val && !subtaskDueDates[task.id]) {
-                                            setSubtaskDueDates(prev => ({ ...prev, [task.id]: todayISODate() }));
-                                          }
-                                        }}
+                                        onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [task.id]: val }))}
+                                        disabled={!subtaskDueDates[task.id]}
                                         className="form-input-sm"
                                         style={{ flex: 1 }}
                                       />

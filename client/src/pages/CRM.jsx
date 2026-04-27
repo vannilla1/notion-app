@@ -64,7 +64,7 @@ const crmHelpTips = [
   {
     icon: '🔔',
     title: 'Ako nastaviť termín, čas a pripomienku',
-    description: 'Pri vytváraní alebo úprave projektu nastavte termín dokončenia (dátum) a voliteľne aj presný čas (HH:MM) — pole pre čas sa odomkne hneď ako vyplníte dátum. Pod dátumom je možnosť "Pripomenúť" — vyberte si, kedy chcete dostať upozornenie: v deň termínu, 1 deň pred, 3 dni pred, 7 dní pred alebo 14 dní pred. Upozornenie príde ako notifikácia v aplikácii aj ako push správa na váš telefón. Termín s časom sa pri prepojení s Google synchronizuje ako udalosť v Google Calendar.'
+    description: 'Pri vytváraní alebo úprave projektu/úlohy NAJSKÔR nastavte dátum termínu — až potom sa odomkne pole pre voliteľný čas (HH:MM). Bez vyplneného dátumu má pole času šedý kurzor "zákaz" — to je úmyselné, čas bez dátumu nedáva zmysel. Po nastavení času modré označenie automaticky preskočí z hodín na minúty. Ak chcete čas zrušiť, kliknite na ikonu × vedľa neho. Automatické pripomienky chodia 14 / 7 / 3 dni pred a po termíne (push závisí od nastavení v "Nastavenia notifikácií" → toggle "Pripomienky termínov"). Ak vyplníte aj čas, zobrazí sa pole "🔔 Časové pripomienky" kde si môžete vybrať jednu alebo viacero možností: 15 min / 30 min / 1 hodina / 2 hodiny / 1 deň pred presným časom — tieto chodia vždy ako push. Termín s časom sa synchronizuje ako udalosť v Google Calendar.'
   },
   {
     icon: '📨',
@@ -77,9 +77,6 @@ const crmHelpTips = [
     description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o kontakte sa priamo otvorí detail daného kontaktu. Tlačidlo "Označiť všetky" označí všetko ako prečítané naraz.'
   }
 ];
-
-// Helper: keď user nastaví ČAS pred dátumom, dátum auto-doplníme na dnešok.
-const todayISODate = () => new Date().toISOString().split('T')[0];
 
 function CRM() {
   const { user, logout, updateUser } = useAuth();
@@ -1114,12 +1111,10 @@ function CRM() {
                   />
                   <TimeInput
                     value={editSubtaskDueTime}
-                    onChange={(val) => {
-                      setEditSubtaskDueTime(val);
-                      if (val && !editSubtaskDueDate) setEditSubtaskDueDate(todayISODate());
-                    }}
+                    onChange={setEditSubtaskDueTime}
+                    disabled={!editSubtaskDueDate}
                     className="form-input-sm"
-                    title="Čas (voliteľné)"
+                    title={editSubtaskDueDate ? 'Čas (voliteľné)' : 'Najskôr nastavte dátum'}
                     style={{ flex: 1 }}
                   />
                 </div>
@@ -1229,12 +1224,8 @@ function CRM() {
                     />
                     <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(val) => {
-                        setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }));
-                        if (val && !subtaskDueDates[subtask.id]) {
-                          setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: todayISODate() }));
-                        }
-                      }}
+                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
+                      disabled={!subtaskDueDates[subtask.id]}
                       className="form-input-sm"
                       style={{ flex: 1 }}
                     />
