@@ -26,8 +26,11 @@ const subtaskSchema = new mongoose.Schema({
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: String,
-  reminder: Number,
-  reminderSent: { type: Boolean, default: false }
+  reminder: Number, // legacy
+  reminderSent: { type: Boolean, default: false }, // legacy
+  // Time-of-day reminders — viď Task.js subtaskSchema komentár.
+  timeReminders: { type: [Number], default: [] },
+  timeRemindersSent: { type: [Number], default: [] }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -44,8 +47,10 @@ const taskSchema = new mongoose.Schema({
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: String,
-  reminder: Number,
-  reminderSent: { type: Boolean, default: false }
+  reminder: Number, // legacy
+  reminderSent: { type: Boolean, default: false }, // legacy
+  timeReminders: { type: [Number], default: [] },
+  timeRemindersSent: { type: [Number], default: [] }
 }, { _id: false });
 
 const contactSchema = new mongoose.Schema({

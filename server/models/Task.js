@@ -28,8 +28,20 @@ const subtaskSchema = new mongoose.Schema({
   createdAt: { type: String, default: () => new Date().toISOString() },
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking
-  reminder: { type: Number, default: null }, // Days before dueDate to send reminder (null = no reminder)
-  reminderSent: { type: Boolean, default: false }, // Whether reminder was already sent
+  reminder: { type: Number, default: null }, // legacy: days-before reminder. Deprecated v prospech timeReminders.
+  reminderSent: { type: Boolean, default: false }, // legacy
+  // ─── Time-of-day reminders (vyžadujú nastavený `dueTime`) ──────────────
+  // Pole minút PRED `dueDateTime` v ktorých sa má spustiť push pripomienka.
+  // Príklad: [60, 15] = pošli push 60 min pred a 15 min pred presným časom.
+  // User si môže vybrať jednu alebo viacero hodnôt z {15, 30, 60, 120, 1440}.
+  // Posielajú sa ako 'direct' notifikácie (vždy push) — user ich explicitne
+  // nastavil takže o nich CHCE vedieť.
+  timeReminders: { type: [Number], default: [] },
+  // Pole minút ktoré už boli odoslané v tomto cykle. Po zmene dueDate/dueTime
+  // sa toto pole zresetuje (cron checkne, že dueDateTime už neukazuje na ten
+  // istý moment). Pre teraz ho server-side resetuje pri save() ak sa dueDate
+  // alebo dueTime zmenil.
+  timeRemindersSent: { type: [Number], default: [] },
   order: { type: Number, default: 0 }
 }, { _id: false });
 
@@ -80,8 +92,11 @@ const taskSchema = new mongoose.Schema({
   createdBy: String,
   modifiedAt: { type: String, default: null },
   lastUrgencyLevel: { type: String, default: null }, // For due date urgency tracking
-  reminder: { type: Number, default: null }, // Days before dueDate to send reminder (null = no reminder)
-  reminderSent: { type: Boolean, default: false }, // Whether reminder was already sent
+  reminder: { type: Number, default: null }, // legacy
+  reminderSent: { type: Boolean, default: false }, // legacy
+  // Viď komentár pri subtaskSchema. Funguje rovnako pre projekt aj úlohu.
+  timeReminders: { type: [Number], default: [] },
+  timeRemindersSent: { type: [Number], default: [] },
   order: { type: Number, default: 0 }
 }, {
   timestamps: true,

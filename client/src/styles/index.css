@@ -8821,6 +8821,55 @@ body.ios-app {
   line-height: 1.4;
 }
 
+/* ─── Time-of-day reminders picker ────────────────────────────────────── */
+.time-reminders-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.time-reminders-picker--disabled {
+  opacity: 0.7;
+}
+.time-reminders-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.time-reminder-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.time-reminder-pill:hover {
+  border-color: var(--accent-color);
+}
+.time-reminder-pill.checked {
+  background: var(--accent-light);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 500;
+}
+.time-reminder-pill input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent-color);
+}
+.time-reminders-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 /* Load-more tlačidlo na konci zoznamu notifikácií.
    Vizuálne nenápadné — full-width, subtle border-top od posledného
    .notif-item, accent-color label, hover zvýrazní pozadie. Zámer: user

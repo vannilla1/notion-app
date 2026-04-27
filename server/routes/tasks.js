@@ -38,6 +38,19 @@ const { getCachedData, setCachedData, invalidateWorkspaceData } = require('../mi
 
 const router = express.Router();
 
+// Time reminders — povolené hodnoty (v minútach pred presným časom termínu).
+// Iné hodnoty sa zo vstupu odstránia. Klient ponúka tieto v multi-selecte.
+const ALLOWED_TIME_REMINDER_VALUES = [15, 30, 60, 120, 1440];
+
+const sanitizeTimeReminders = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && ALLOWED_TIME_REMINDER_VALUES.includes(n))
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort((a, b) => b - a);
+};
+
 // Helper to sync to both Google Calendar and Google Tasks
 const autoSyncToGoogle = async (taskData, action) => {
   await Promise.all([
@@ -1020,7 +1033,7 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo, reminder } = req.body;
+    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo, reminder, timeReminders } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -1059,7 +1072,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         createdBy: req.user.username,
         modifiedAt: new Date().toISOString(),
         reminder: reminder !== '' && reminder != null ? Number(reminder) : null,
-        reminderSent: false
+        reminderSent: false,
+        timeReminders: sanitizeTimeReminders(timeReminders),
+        timeRemindersSent: []
       });
 
       await task.save();
@@ -1139,7 +1154,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         createdAt: new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
         reminder: reminder !== '' && reminder != null ? Number(reminder) : null,
-        reminderSent: false
+        reminderSent: false,
+        timeReminders: sanitizeTimeReminders(timeReminders),
+        timeRemindersSent: []
       };
 
       // Ensure tasks array exists
@@ -1290,6 +1307,16 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const newReminder = reminder !== undefined ? (reminder !== '' && reminder != null ? Number(reminder) : null) : task.reminder;
             const reminderChanged = newReminder !== task.reminder || (dueDate !== undefined && dueDate !== task.dueDate);
 
+            // Time reminders + reset sent ak sa menil čas/dátum/list
+            const newTimeReminders = req.body.timeReminders !== undefined
+              ? sanitizeTimeReminders(req.body.timeReminders)
+              : (task.timeReminders || []);
+            const oldTimeReminders = task.timeReminders || [];
+            const dueChangedForTimeReminders =
+              (dueDate !== undefined && dueDate !== task.dueDate) ||
+              (dueTime !== undefined && dueTime !== (task.dueTime || '')) ||
+              JSON.stringify(newTimeReminders) !== JSON.stringify(oldTimeReminders);
+
             contact.tasks[taskIndex] = {
               ...task,
               id: task.id,
@@ -1304,7 +1331,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               createdAt: task.createdAt,
               modifiedAt: new Date().toISOString(),
               reminder: newReminder,
-              reminderSent: reminderChanged ? false : (task.reminderSent || false)
+              reminderSent: reminderChanged ? false : (task.reminderSent || false),
+              timeReminders: newTimeReminders,
+              timeRemindersSent: dueChangedForTimeReminders ? [] : (task.timeRemindersSent || [])
             };
             contact.markModified('tasks');
             await contact.save();
@@ -1444,6 +1473,27 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const reminderChanged = newReminder !== task.reminder || (dueDate !== undefined && dueDate !== oldDueDate);
         task.reminder = newReminder;
         if (reminderChanged) task.reminderSent = false;
+      }
+
+      // Handle time-of-day reminders. Reset timeRemindersSent ak sa menil
+      // dueDate, dueTime alebo samotné pole reminders — inak by stale "sent"
+      // záznam zabránil opakovanej pripomienke pre nový čas.
+      const oldTimeReminders = task.timeReminders || [];
+      const oldDueTime = task.dueTime || '';
+      const newDueTime = dueTime !== undefined
+        ? (dueDate !== undefined ? (dueDate ? (dueTime || '') : '') : (dueTime || ''))
+        : oldDueTime;
+      let newTimeReminders = oldTimeReminders;
+      if (req.body.timeReminders !== undefined) {
+        newTimeReminders = sanitizeTimeReminders(req.body.timeReminders);
+        task.timeReminders = newTimeReminders;
+      }
+      const dueChangedForTimeReminders =
+        (dueDate !== undefined && dueDate !== oldDueDate) ||
+        newDueTime !== oldDueTime ||
+        JSON.stringify(newTimeReminders) !== JSON.stringify(oldTimeReminders);
+      if (dueChangedForTimeReminders) {
+        task.timeRemindersSent = [];
       }
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
@@ -1913,7 +1963,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo } = req.body;
+    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
@@ -1932,7 +1982,9 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       subtasks: [],
       assignedTo: assignedTo || [],
       createdAt: now,
-      modifiedAt: now // Set on creation for "new" filter
+      modifiedAt: now, // Set on creation for "new" filter
+      timeReminders: sanitizeTimeReminders(timeReminders),
+      timeRemindersSent: []
     };
 
     // Helper to add subtask to parent (task or subtask)
@@ -2095,7 +2147,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, completed, source, dueDate, dueTime, notes, assignedTo } = req.body;
+    const { title, completed, source, dueDate, dueTime, notes, assignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
 
     // Returns { updated, originalAssignedTo } for assignment notification logic
@@ -2103,6 +2155,21 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
       const found = findSubtaskRecursive(task.subtasks, req.params.subtaskId);
       if (found) {
         const originalAssignedTo = found.subtask.assignedTo || [];
+
+        // Time-of-day reminders + reset 'sent' ak sa zmenil čas/dátum/list.
+        const oldReminders = found.subtask.timeReminders || [];
+        const oldDueTime = found.subtask.dueTime || '';
+        const newDueTime = dueTime !== undefined
+          ? (dueDate !== undefined ? (dueDate ? (dueTime || '') : '') : (dueTime || ''))
+          : oldDueTime;
+        const newReminders = timeReminders !== undefined
+          ? sanitizeTimeReminders(timeReminders)
+          : oldReminders;
+        const dueChangedForTimeReminders =
+          (dueDate !== undefined && dueDate !== found.subtask.dueDate) ||
+          newDueTime !== oldDueTime ||
+          JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
+
         found.parent[found.index] = {
           ...found.subtask,
           id: found.subtask.id, // Ensure ID is preserved
@@ -2115,7 +2182,9 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           assignedTo: assignedTo !== undefined ? assignedTo : (found.subtask.assignedTo || []),
           subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
           createdAt: found.subtask.createdAt, // Preserve createdAt
-          modifiedAt: new Date().toISOString() // Set modification timestamp
+          modifiedAt: new Date().toISOString(), // Set modification timestamp
+          timeReminders: newReminders,
+          timeRemindersSent: dueChangedForTimeReminders ? [] : (found.subtask.timeRemindersSent || [])
         };
         return { updated: found.parent[found.index], originalAssignedTo };
       }

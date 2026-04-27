@@ -12,6 +12,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import TimeRemindersPicker from '../components/TimeRemindersPicker';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -437,7 +438,8 @@ function Tasks() {
     priority: 'medium',
     contactIds: [],
     assignedTo: [],
-    reminder: ''
+    reminder: '',
+    timeReminders: []
   });
 
   // Edit states
@@ -461,6 +463,7 @@ function Tasks() {
   const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
   const [editSubtaskDueTime, setEditSubtaskDueTime] = useState('');
   const [editSubtaskAssignedTo, setEditSubtaskAssignedTo] = useState([]);
+  const [editSubtaskTimeReminders, setEditSubtaskTimeReminders] = useState([]);
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
   // File attachment states
@@ -1183,10 +1186,12 @@ function Tasks() {
         title: '',
         description: '',
         dueDate: '',
+        dueTime: '',
         priority: 'medium',
         contactIds: [],
         assignedTo: [],
-        reminder: ''
+        reminder: '',
+        timeReminders: []
       });
       setShowForm(false);
     } catch (error) {
@@ -1262,6 +1267,7 @@ function Tasks() {
       contactIds: taskContactIds,
       assignedTo: task.assignedTo || [],
       reminder: task.reminder != null ? String(task.reminder) : '',
+      timeReminders: Array.isArray(task.timeReminders) ? task.timeReminders : [],
       source: task.source
     });
   };
@@ -1350,6 +1356,7 @@ function Tasks() {
     setEditSubtaskDueDate(subtask.dueDate || '');
     setEditSubtaskDueTime(subtask.dueTime || '');
     setEditSubtaskAssignedTo(subtask.assignedTo || []);
+    setEditSubtaskTimeReminders(Array.isArray(subtask.timeReminders) ? subtask.timeReminders : []);
   };
 
   const saveSubtask = async (task, subtaskId) => {
@@ -1361,6 +1368,7 @@ function Tasks() {
         dueDate: editSubtaskDueDate || null,
         dueTime: editSubtaskDueDate ? editSubtaskDueTime : '',
         assignedTo: editSubtaskAssignedTo,
+        timeReminders: editSubtaskTimeReminders,
         source: task.source
       });
       setEditingSubtask(null);
@@ -1369,6 +1377,7 @@ function Tasks() {
       setEditSubtaskDueDate('');
       setEditSubtaskDueTime('');
       setEditSubtaskAssignedTo([]);
+      setEditSubtaskTimeReminders([]);
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
@@ -1580,6 +1589,15 @@ function Tasks() {
                     style={{ flex: 1 }}
                   />
                 </div>
+                {editSubtaskDueDate && (
+                  <div className="subtask-edit-row">
+                    <TimeRemindersPicker
+                      hasTime={!!editSubtaskDueTime}
+                      value={editSubtaskTimeReminders}
+                      onChange={setEditSubtaskTimeReminders}
+                    />
+                  </div>
+                )}
                 <div className="subtask-edit-row">
                   <textarea
                     value={editSubtaskNotes}
@@ -2506,19 +2524,12 @@ function Tasks() {
                   </div>
                   {newTaskForm.dueDate && (
                     <div className="form-group">
-                      <label>🔔 Pripomenúť</label>
-                      <select
-                        value={newTaskForm.reminder}
-                        onChange={(e) => setNewTaskForm({ ...newTaskForm, reminder: e.target.value })}
-                        className="form-input"
-                      >
-                        <option value="">Bez pripomienky</option>
-                        <option value="0">V deň termínu</option>
-                        <option value="1">1 deň pred</option>
-                        <option value="3">3 dni pred</option>
-                        <option value="7">7 dní pred</option>
-                        <option value="14">14 dní pred</option>
-                      </select>
+                      <label>🔔 Časové pripomienky</label>
+                      <TimeRemindersPicker
+                        hasTime={!!newTaskForm.dueTime}
+                        value={newTaskForm.timeReminders || []}
+                        onChange={(arr) => setNewTaskForm({ ...newTaskForm, timeReminders: arr })}
+                      />
                     </div>
                   )}
                   <div className="form-group">
@@ -2788,19 +2799,11 @@ function Tasks() {
                             </div>
                             {editForm.dueDate && (
                               <div className="task-edit-row">
-                                <select
-                                  value={editForm.reminder || ''}
-                                  onChange={(e) => setEditForm({ ...editForm, reminder: e.target.value })}
-                                  className="form-input"
-                                  title="Pripomienka pred termínom"
-                                >
-                                  <option value="">🔔 Bez pripomienky</option>
-                                  <option value="0">🔔 V deň termínu</option>
-                                  <option value="1">🔔 1 deň pred</option>
-                                  <option value="3">🔔 3 dni pred</option>
-                                  <option value="7">🔔 7 dní pred</option>
-                                  <option value="14">🔔 14 dní pred</option>
-                                </select>
+                                <TimeRemindersPicker
+                                  hasTime={!!editForm.dueTime}
+                                  value={editForm.timeReminders || []}
+                                  onChange={(arr) => setEditForm({ ...editForm, timeReminders: arr })}
+                                />
                               </div>
                             )}
                             <div className="form-group">
