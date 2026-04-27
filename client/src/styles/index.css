@@ -3011,6 +3011,43 @@ body {
     border-color: #6366f1;
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   }
+
+  /* Tlačidlá pod inputom — Zrušiť + Vytvoriť. Bez týchto by user na mobile
+     nevedel uložiť nový workspace, lebo Enter nie je vždy zrejmá akcia. */
+  .mobile-workspace-create-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .mobile-workspace-btn {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s ease, background 0.15s ease;
+  }
+  .mobile-workspace-btn-cancel {
+    background: var(--bg-secondary, #f3f4f6);
+    color: var(--text-secondary, #4b5563);
+    border: 1px solid var(--border-color, #e2e8f0);
+  }
+  .mobile-workspace-btn-cancel:hover {
+    background: var(--bg-hover, #e5e7eb);
+  }
+  .mobile-workspace-btn-confirm {
+    background: #6366f1;
+    color: #fff;
+  }
+  .mobile-workspace-btn-confirm:hover:not(:disabled) {
+    background: #4f46e5;
+  }
+  .mobile-workspace-btn-confirm:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .user-menu-item {

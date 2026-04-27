@@ -1258,6 +1258,33 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           }
                         }}
                       />
+                      <div className="mobile-workspace-create-actions">
+                        <button
+                          type="button"
+                          className="mobile-workspace-btn mobile-workspace-btn-cancel"
+                          onClick={() => {
+                            setCreatingWorkspace(false);
+                            setNewWorkspaceName('');
+                          }}
+                        >
+                          Zrušiť
+                        </button>
+                        <button
+                          type="button"
+                          className="mobile-workspace-btn mobile-workspace-btn-confirm"
+                          disabled={!newWorkspaceName.trim()}
+                          onClick={async () => {
+                            const trimmed = newWorkspaceName.trim();
+                            if (!trimmed) return;
+                            await createWorkspace(trimmed);
+                            setNewWorkspaceName('');
+                            setCreatingWorkspace(false);
+                            window.location.href = '/app';
+                          }}
+                        >
+                          Vytvoriť
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div
