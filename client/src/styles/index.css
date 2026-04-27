@@ -11614,3 +11614,44 @@ body.ios-app {
   font-size: 11px !important;
   flex-shrink: 0 !important;
 }
+
+/* Rovnaký look pre contact picker — kontakty v projektoch / úlohách. */
+.multi-select-contacts.compact,
+.multi-select-contacts {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+}
+
+.multi-select-contacts .contact-checkbox,
+.multi-select-contacts.compact .contact-checkbox {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 4px 12px !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  width: auto !important;
+  cursor: pointer !important;
+}
+
+.multi-select-contacts .contact-checkbox input[type="checkbox"],
+.multi-select-contacts.compact .contact-checkbox input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+}
