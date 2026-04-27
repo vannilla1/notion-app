@@ -68,6 +68,24 @@ api.interceptors.response.use(
       }
     }
 
+    // 400 NO_WORKSPACE = stale workspace context. Vzniká keď klient pošle
+    // X-Workspace-Id pre workspace ktorý medzičasom bol zmazaný, alebo keď
+    // user.currentWorkspaceId v DB ukazuje na neexistujúci/odpojený workspace.
+    // Bez tohto handlera stránka napr. /crm dostane 400 z GET /api/contacts
+    // a end-user vidí len bielu obrazovku + log "Request failed with status
+    // code 400". Liečenie je rovnaké ako pri NOT_MEMBER — zmaž stale storage
+    // a retry bez headera, čím necháme backend auto-recovery na inú validnú
+    // membership (alebo definitívne 400 ak user už nemá žiadnu — vtedy
+    // WorkspaceContext zachytí prázdne workspaces[] a presmeruje na setup).
+    if (error.response?.status === 400 && error.response?.data?.code === 'NO_WORKSPACE') {
+      if (!config._wsFix) {
+        config._wsFix = true;
+        removeStoredWorkspaceId();
+        if (config.headers) delete config.headers['X-Workspace-Id'];
+        return api(config);
+      }
+    }
+
     if (error.response?.status === 401 || error.response?.status === 403) {
       // removeStoredToken() maže z sessionStorage (web) alebo localStorage (iOS)
       // + cleanup legacy kľúčov (user, starý localStorage token z predošlej verzie).
