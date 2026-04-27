@@ -1591,7 +1591,7 @@ function Tasks() {
                 </div>
                 <div className="subtask-edit-row">
                   <label className="subtask-assign-label">Priradení:</label>
-                  <div className="multi-select-users">
+                  <div className="multi-select-users compact">
                     {users.map(u => (
                       <label key={u.id} className="user-checkbox">
                         <input
@@ -1791,7 +1791,7 @@ function Tasks() {
                   👤
                 </button>
                 {showSubtaskAssignInput[subtask.id] && (
-                  <div className="multi-select-users add-subtask-expansion">
+                  <div className="multi-select-users compact add-subtask-expansion">
                     {users.map(u => (
                       <label key={u.id} className="user-checkbox">
                         <input
@@ -1876,7 +1876,7 @@ function Tasks() {
                 />
               )}
               {showSubtaskAssignInput[subtask.id] && (
-                <div className="multi-select-users">
+                <div className="multi-select-users compact">
                   {users.map(u => (
                     <label key={u.id} className="subtask-user-checkbox">
                       <input
@@ -2561,7 +2561,7 @@ function Tasks() {
                   </div>
                   <div className="form-group full-width">
                     <label>Priradiť používateľom</label>
-                    <div className="multi-select-users">
+                    <div className="multi-select-users compact">
                       {users.map(u => (
                         <label key={u.id} className="user-checkbox">
                           <input
@@ -2828,7 +2828,7 @@ function Tasks() {
                             </div>
                             <div className="form-group">
                               <label>Priradení</label>
-                              <div className="multi-select-users">
+                              <div className="multi-select-users compact">
                                 {users.map(u => (
                                   <label key={u.id} className="user-checkbox">
                                     <input
@@ -3075,7 +3075,7 @@ function Tasks() {
                                     👤
                                   </button>
                                   {showSubtaskAssignInput[task.id] && (
-                                    <div className="multi-select-users add-subtask-expansion">
+                                    <div className="multi-select-users compact add-subtask-expansion">
                                       {users.map(u => (
                                         <label key={u.id} className="user-checkbox">
                                           <input
