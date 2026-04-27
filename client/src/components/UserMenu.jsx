@@ -75,6 +75,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [creatingWorkspaceSubmitting, setCreatingWorkspaceSubmitting] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [showProfile, setShowProfile] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -1247,10 +1248,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         autoFocus
                         onKeyDown={async (e) => {
                           if (e.key === 'Enter' && newWorkspaceName.trim()) {
-                            await createWorkspace(newWorkspaceName.trim());
-                            setNewWorkspaceName('');
-                            setCreatingWorkspace(false);
-                            window.location.href = '/app';
+                            try {
+                              // Backend očakáva { name: '...' }, nie čistý string.
+                              await createWorkspace({ name: newWorkspaceName.trim() });
+                              setNewWorkspaceName('');
+                              setCreatingWorkspace(false);
+                              window.location.href = '/app';
+                            } catch (err) {
+                              alert(err?.response?.data?.message || 'Nepodarilo sa vytvoriť prostredie');
+                            }
                           }
                           if (e.key === 'Escape') {
                             setCreatingWorkspace(false);
@@ -1272,17 +1278,23 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         <button
                           type="button"
                           className="mobile-workspace-btn mobile-workspace-btn-confirm"
-                          disabled={!newWorkspaceName.trim()}
+                          disabled={!newWorkspaceName.trim() || creatingWorkspaceSubmitting}
                           onClick={async () => {
                             const trimmed = newWorkspaceName.trim();
-                            if (!trimmed) return;
-                            await createWorkspace(trimmed);
-                            setNewWorkspaceName('');
-                            setCreatingWorkspace(false);
-                            window.location.href = '/app';
+                            if (!trimmed || creatingWorkspaceSubmitting) return;
+                            setCreatingWorkspaceSubmitting(true);
+                            try {
+                              await createWorkspace({ name: trimmed });
+                              setNewWorkspaceName('');
+                              setCreatingWorkspace(false);
+                              window.location.href = '/app';
+                            } catch (err) {
+                              alert(err?.response?.data?.message || 'Nepodarilo sa vytvoriť prostredie');
+                              setCreatingWorkspaceSubmitting(false);
+                            }
                           }}
                         >
-                          Vytvoriť
+                          {creatingWorkspaceSubmitting ? 'Vytváram…' : 'Vytvoriť'}
                         </button>
                       </div>
                     </div>
