@@ -8925,6 +8925,37 @@ body.ios-app {
   opacity: 1;
 }
 
+/* Time picker = dva oddelené segmenty (HH:MM) s auto-skokom po 2 číslicach.
+   Vyzerá ako jediné pole, len má "neviditeľnú" dvojbodku medzi segmentmi. */
+.dt-input-wrapper.time-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 30px; /* miesto pre × tlačidlo */
+}
+.dt-input-wrapper.time-split .dt-time-segment {
+  width: 2.5em;
+  min-width: 0;
+  padding: var(--input-padding, 6px 8px);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+.dt-input-wrapper.time-split .dt-time-segment:focus {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -1px;
+}
+.dt-time-colon {
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+  margin: 0 -2px;
+}
+/* time-split nepotrebuje extra padding-right na inpute (× tlačidlo má padding na wrapperi) */
+.dt-input-wrapper.time-split .dt-input {
+  padding-right: var(--input-padding, 6px 8px) !important;
+}
+
 /* Load-more tlačidlo na konci zoznamu notifikácií.
    Vizuálne nenápadné — full-width, subtle border-top od posledného
    .notif-item, accent-color label, hover zvýrazní pozadie. Zámer: user
