@@ -15,8 +15,60 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   password: {
+    // OPTIONAL kvôli OAuth-only userom (Google / Apple). User vytvorený cez OAuth
+    // nemá heslo, kým si ho nenastaví cez "Forgot password" reset flow. Bežný
+    // password-flow ďalej validuje povinnosť hesla v register/login route-ách.
     type: String,
-    required: true
+    required: false,
+    default: null
+  },
+  // ─── OAuth identita ──────────────────────────────────────────────────
+  // Provider IDs sú unikátne. User môže mať pripojené 0..2 OAuth providery —
+  // ich ID kľúče sa nastavia až keď user prejde úspešným OAuth callbackom
+  // alebo si pripojí účet v Settings.
+  //
+  // POZOR: zámerne BEZ `default: null`. Sparse index v MongoDB skipuje len
+  // dokumenty, kde dané pole CHÝBA, nie tie kde je explicitne null. Keby sme
+  // mali default:null, každý password-only user by mal googleId=null a druhý
+  // taký user by padol na E11000 (oba null = "duplicate" pre unique index).
+  // Keď pole nie je v dokumente vôbec, sparse správne preskočí. Query
+  // `{ googleId: null }` v MongoDB matchuje oba prípady (null aj missing),
+  // takže existing app code "find user without google" stále funguje.
+  googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  appleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  // Zoznam metód, ktorými sa user môže prihlásiť. Bezpečnostný gate pre
+  // disconnect: nikdy nesmieme dovoliť odpojiť POSLEDNÚ metódu, inak by
+  // user nemal ako sa prihlásiť. Default ['password'] kvôli legacy userom
+  // (pred OAuth update mali heslo). Migration script doplní existujúcich.
+  authProviders: {
+    type: [String],
+    enum: ['password', 'google', 'apple'],
+    default: ['password']
+  },
+  // True iff email overený providerom (OAuth) alebo registračným potvrdzovacím
+  // mailom (zatiaľ neimplementované). Použitie: auto-link pri OAuth flow —
+  // password-only userov so zhodným emailom AUTO-PRIPOJÍME ku Google/Apple
+  // iba ak provider potvrdí email_verified. Ináč by útočník vytvoril Google
+  // účet s niečím cudzím emailom a získal cudzí account.
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  // URL avatara z OAuth provider profilu (Google poskytuje, Apple nie). Ak
+  // user nemá uploadnutý vlastný avatar (avatarData), frontend môže fall-back
+  // na túto URL. Distinct od `avatar` (legacy URL field) a `avatarData`
+  // (base64 nahraný cez UI).
+  avatarUrl: {
+    type: String,
+    default: null
   },
   color: {
     type: String,
