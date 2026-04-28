@@ -74,9 +74,21 @@ function AuthCallback() {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     } catch { /* noop */ }
 
-    // Po úspechu navigate na returnUrl (alebo /app/dashboard).
+    // HARD navigation cez window.location.assign — NIE react-router navigate().
+    //
+    // Prečo? Po OAuth login-e bol často initial render Dashboard-u poškodený
+    // (biela stránka). Príčina: service worker cache držal stale chunky
+    // z pred-OAuth verzie user state-u, soft-navigate spustil Dashboard s
+    // mismatched cache a state. Hard navigation vynúti full page reload →
+    // SW pri novom request dostane up-to-date manifest, načíta fresh chunky,
+    // a všetky context provider-y sa initialize-ujú s aktuálnym JWT.
+    //
+    // Za cenu drobného UX (~200ms re-mountu) získame robustnosť proti
+    // OAuth-flow race conditionom + stale-chunk regresiám.
     const target = sanitizeReturn(returnUrl);
-    setTimeout(() => navigate(target, { replace: true }), 100);
+    setTimeout(() => {
+      window.location.assign(target);
+    }, 50);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Po loginWithToken sa user fetchne a isAuthenticated = true. Druhý useEffect
