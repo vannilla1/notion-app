@@ -17,6 +17,16 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- AD_ID — Android 13+ vyžaduje deklaráciu permission ak appka používa
+         Advertising ID. Naša appka NEPOUŽÍVA reklamy, ale Firebase Analytics
+         (transitively cez firebase-messaging) ho automaticky deklaruje. Tu
+         explicit-ne odoberáme — Play Console Data Safety formulár sa spýta na
+         "Used for advertising": NIE. Bez `tools:node="remove"` Play Store
+         hodí warning "Manifest declares AD_ID but Data Safety form denies use". -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+
     <!-- POZN: USE_BIOMETRIC + USE_FINGERPRINT sme odstránili pre 1.0.0 lebo
          biometric lock ešte nie je implementovaný. Keď pridáme v druhej iterácii,
          znovu ich sem pridáme spolu s BiometricPrompt kódom. Mať ich v manifeste
