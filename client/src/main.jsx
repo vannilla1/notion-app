@@ -7,6 +7,32 @@ import { reportError, installGlobalErrorHandlers } from './utils/reportError';
 import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
 import './styles/index.css';
 
+// DIAGNOSTIC: RAW global error logger PRED filtre. Bez tohto by sa
+// "Failed to fetch dynamically imported module" odfiltrovala v reportError
+// (IGNORED_PATTERNS) → user vidí bielu stránku bez stopy v console.
+// Logy idú PRIAMO do console pred reportError dedup/ignore logikou.
+window.addEventListener('error', (e) => {
+  console.error('[GLOBAL error event]', {
+    message: e.message,
+    filename: e.filename,
+    lineno: e.lineno,
+    colno: e.colno,
+    error: e.error,
+    stack: e.error?.stack
+  });
+}, true); // useCapture=true — chyť skôr než iné listenery
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[GLOBAL unhandledrejection]', {
+    reason: e.reason,
+    message: e.reason?.message || String(e.reason),
+    stack: e.reason?.stack,
+    type: typeof e.reason
+  });
+}, true);
+
+console.log('[main] RAW global error handlers installed BEFORE filter chain');
+
 // In-house error tracking (nahrada Sentry). Poradie záleží — breadcrumbs
 // musia byť nainštalované PRED prvým error handlerom, aby sme pri prvej
 // chybe mali context aspoň pár "app boot" udalostí.
