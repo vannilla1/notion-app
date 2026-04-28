@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, lazy, Suspense } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, lazy, Suspense, Component } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
@@ -33,15 +33,59 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 
-const RouteFallback = () => (
-  <div style={{
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
-    color: 'var(--text-secondary, #64748b)'
-  }}>
-    Načítavam…
-  </div>
-);
+const RouteFallback = () => {
+  console.log('[RouteFallback] Suspense fallback ACTIVE — chunk loading in progress');
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+      color: 'var(--text-secondary, #64748b)'
+    }}>
+      Načítavam…
+    </div>
+  );
+};
+
+// Error boundary pre lazy chunk failures (FailedToFetch, network errors).
+// Bez tohto error v lazy import-e tichom spôsobom unmountuje strom → biela.
+class RouteErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[RouteErrorBoundary] CAUGHT ERROR:', error);
+    console.error('[RouteErrorBoundary] componentStack:', info?.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      const msg = this.state.error?.message || 'Unknown error';
+      return (
+        <div style={{
+          padding: '24px', maxWidth: '600px', margin: '40px auto',
+          background: '#fee2e2', border: '1px solid #fca5a5',
+          borderRadius: '12px', color: '#991b1b'
+        }}>
+          <h2 style={{ margin: '0 0 12px' }}>Chyba pri načítaní stránky</h2>
+          <p style={{ margin: '0 0 12px', fontSize: '14px' }}>{msg}</p>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '10px 20px', background: '#dc2626', color: 'white',
+              border: 'none', borderRadius: '8px', cursor: 'pointer'
+            }}
+          >
+            Obnoviť stránku
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const typeToSection = (type) => {
   if (!type) return null;
@@ -410,6 +454,7 @@ function AppContent() {
       {/* BottomNav je user-app navigácia — admin panel má vlastný tab-bar, takže
           na `/admin*` by bol BottomNav vizuálne rušivý aj zavádzajúci. */}
       {isAuthenticated && !isAdminRoute && <BottomNav unreadCounts={unreadCounts} />}
+      <RouteErrorBoundary>
       <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
@@ -457,6 +502,7 @@ function AppContent() {
         <Route path="/vop" element={<TermsOfService />} />
       </Routes>
       </Suspense>
+      </RouteErrorBoundary>
     </>
   );
 }
