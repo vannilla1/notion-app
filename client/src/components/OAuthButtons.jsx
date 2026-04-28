@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 import api, { API_BASE_URL } from '@/api/api';
+import {
+  isNativeIOSApp,
+  nativeStartGoogleSignIn,
+  nativeStartAppleSignIn
+} from '../utils/nativeBridge';
 
 /**
  * OAuthButtons — render Google + Apple Sign In tlačítok pod login/register form.
@@ -23,6 +28,23 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
 
   const handleProvider = async (provider) => {
     setBusy(provider);
+
+    // iOS native bridge — Google blokuje OAuth v WKWebView, Apple Sign In má
+    // tiež obmedzenia. Native flow rieši autentikáciu cez ASAuthorizationAppleID
+    // alebo GoogleSignIn-iOS SDK, výsledný JWT injecte cez window.__nativeAuthLogin.
+    if (isNativeIOSApp()) {
+      const dispatched = provider === 'google'
+        ? nativeStartGoogleSignIn()
+        : nativeStartAppleSignIn();
+      if (dispatched) {
+        // Native flow beží mimo JS — busy stav resetneme po 30s safety timeout
+        // (ak user zruší v Apple sheet-e, native nepošle žiadnu chybu späť).
+        setTimeout(() => setBusy(null), 30000);
+        return;
+      }
+      // Bridge nedostupný (stará verzia appky?) → fallback na web flow.
+    }
+
     try {
       if (mode === 'connect') {
         // Connect flow potrebuje auth — POST init endpoint vráti URL.

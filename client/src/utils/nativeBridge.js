@@ -76,3 +76,41 @@ export const nativePlatform = () => {
   if (isNativeIOSApp()) return 'ios-native';
   return 'web';
 };
+
+// ── OAuth native bridge ──────────────────────────────────────────────────
+//
+// Web OAuth flow (window.location.assign na backend) NEFUNGUJE v iOS WKWebView:
+//   - Google blokuje OAuth v embedded WebView (security policy)
+//   - Apple Sign In má v WKWebView obmedzenia
+//
+// Riešenie: iOS appka spúšťa NATIVE auth flow:
+//   - Apple:  ASAuthorizationAppleIDProvider (Sign in with Apple capability)
+//   - Google: GoogleSignIn-iOS SPM package
+// Native flow vráti id_token. iOS appka ho POST-uje na /api/auth/{provider}/native,
+// dostane JWT, a injectne ho do WebView cez evaluateJavaScript:
+//   window.__nativeAuthLogin('JWT_HERE')
+// AuthContext-ný handler ho zachytí a app pokračuje do CRM.
+
+/** Spustí native Google Sign In flow v iOS appke. Vracia true ak bolo úspešne odoslané. */
+export const nativeStartGoogleSignIn = () => {
+  if (!isNativeIOSApp()) return false;
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
+      window.webkit.messageHandlers.iosNative.postMessage({ type: 'startGoogleSignIn' });
+      return true;
+    }
+  } catch { /* noop */ }
+  return false;
+};
+
+/** Spustí native Sign in with Apple flow v iOS appke. */
+export const nativeStartAppleSignIn = () => {
+  if (!isNativeIOSApp()) return false;
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
+      window.webkit.messageHandlers.iosNative.postMessage({ type: 'startAppleSignIn' });
+      return true;
+    }
+  } catch { /* noop */ }
+  return false;
+};

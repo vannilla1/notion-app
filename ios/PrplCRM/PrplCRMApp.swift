@@ -51,6 +51,14 @@ struct PrplCRMApp: App {
                 // WebView na danú URL.
                 .onOpenURL { url in
                     debugLog("[UniversalLink] Received: \(url.absoluteString)")
+                    // Google Sign In callback URL má reverse-DNS scheme z
+                    // GoogleService-Info.plist (napr. com.googleusercontent.apps.290370...).
+                    // GIDSignIn handle vráti true ak url patrí jemu — vtedy
+                    // nezasielame ďalej do deep-link logiky.
+                    if OAuthController.handleGoogleOpenURL(url) {
+                        debugLog("[OAuth] Google Sign In handled callback URL")
+                        return
+                    }
                     Self.dispatchDeepLink(url.absoluteString, via: appDelegate)
                 }
                 // Scene-level handler pre continue-user-activity (Safari → app

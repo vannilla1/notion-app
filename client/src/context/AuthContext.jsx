@@ -159,6 +159,35 @@ export const AuthProvider = ({ children }) => {
     // user sa naplní cez fetchUser → useEffect([token])
   };
 
+  // ── Native OAuth bridge ────────────────────────────────────────────────
+  // iOS / Android native appka spustí native Sign in (Apple/Google), POSTne
+  // id_token na /api/auth/{provider}/native, dostane Prpl CRM JWT, a injektne
+  // ho cez webView.evaluateJavaScript("window.__nativeAuthLogin('JWT')").
+  // Tento global handler zavolá loginWithToken a redirectne na /app.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.__nativeAuthLogin = (newToken, opts) => {
+      try {
+        if (!newToken || typeof newToken !== 'string') return false;
+        loginWithToken(newToken);
+        // Redirect na /app — používame nastavenie cez timeout aby sa Auth state
+        // stihol propagate-nuť pred navigation-om.
+        setTimeout(() => {
+          if (window.location.pathname !== '/app' && !window.location.pathname.startsWith('/app/')) {
+            window.location.assign('/app');
+          }
+        }, 50);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    return () => {
+      try { delete window.__nativeAuthLogin; } catch { /* noop */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const logout = () => {
     removeStoredToken();
     delete api.defaults.headers.common['Authorization'];

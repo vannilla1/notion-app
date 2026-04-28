@@ -651,6 +651,26 @@ struct WebView: UIViewRepresentable {
                 KeychainHelper.deleteToken()
                 parent.pushManager.authToken = nil
             }
+
+            // ── Native OAuth bridge (Phase 4) ──────────────────────────
+            // Web OAuth flow nefunguje v WKWebView (Google blokuje, Apple
+            // má obmedzenia). Tieto handlery spustia native auth flow,
+            // ktorý cez OAuthController POSTne id_token na backend
+            // /api/auth/{provider}/native, dostane Prpl CRM JWT a injectne
+            // ho do WebView cez window.__nativeAuthLogin.
+            if type == "startGoogleSignIn" {
+                debugLog("[OAuth] Starting native Google Sign In")
+                if let webView = self.webView {
+                    OAuthController.startGoogleSignIn(from: webView)
+                }
+            }
+
+            if type == "startAppleSignIn" {
+                debugLog("[OAuth] Starting native Sign in with Apple")
+                if let webView = self.webView {
+                    OAuthController.startAppleSignIn(from: webView)
+                }
+            }
         }
 
         private func handleFileDownload(_ message: WKScriptMessage) {
