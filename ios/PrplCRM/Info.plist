@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.1</string>
 	<key>CFBundleVersion</key>
-	<string>60</string>
+	<string>61</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -62,7 +62,26 @@
 				<string>prplcrm</string>
 			</array>
 		</dict>
+		<!-- Google Sign In SDK callback URL — REVERSED_CLIENT_ID z OAuth client
+		     iOS-typu (Google Cloud Console). Client ID je verejné, takže môže
+		     byť v repo. SDK po authorize redirectuje na túto schému + appka
+		     dostane authorization code cez GIDSignIn.sharedInstance.handle(url). -->
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>eu.prplcrm.googlesignin</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.290370700813-jq8rgkejkgs2r1gklbri1onffhk426eb</string>
+			</array>
+		</dict>
 	</array>
+	<!-- Google Sign In iOS Client ID — load-uje sa cez OAuthController.swift
+	     Bundle.main.object(forInfoDictionaryKey: "GIDClientID"). Verejná hodnota,
+	     žiadny secret. Backend audience kontroluje cez GOOGLE_IOS_CLIENT_ID env. -->
+	<key>GIDClientID</key>
+	<string>290370700813-jq8rgkejkgs2r1gklbri1onffhk426eb.apps.googleusercontent.com</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
