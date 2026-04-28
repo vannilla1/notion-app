@@ -62,6 +62,7 @@ const dashboardHelpTips = [
 function Dashboard() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
+  console.log('[Dashboard] mount/render', { hasUser: !!user, userId: user?.id, username: user?.username });
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [messages, setMessages] = useState({ received: [], sent: [] });

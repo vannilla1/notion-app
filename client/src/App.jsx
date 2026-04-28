@@ -360,7 +360,21 @@ function AppContent() {
   const pendingWsSwitch = !!urlWs && !!currentWorkspaceId &&
     urlWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId);
 
+  // DIAGNOSTIC: log render state na každom renderi (pomáha debugovať OAuth flow)
+  console.log('[App] render guard check', {
+    pathname: location.pathname,
+    isPublicPage,
+    loading,
+    isAuthenticated,
+    workspaceLoading,
+    pendingWsSwitch,
+    needsWorkspace,
+    currentWorkspaceId: currentWorkspaceId ? String(currentWorkspaceId) : null,
+    workspacesCount: workspaces ? workspaces.length : 'undefined'
+  });
+
   if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading) || (isAuthenticated && pendingWsSwitch))) {
+    console.log('[App] → returning Načítavam... screen');
     return (
       <div style={{
         display: 'flex',
@@ -376,8 +390,10 @@ function AppContent() {
   }
 
   if (isAuthenticated && needsWorkspace) {
+    console.log('[App] → returning WorkspaceSetup');
     return <WorkspaceSetup />;
   }
+  console.log('[App] → rendering routes');
 
   return (
     <>
