@@ -1,3 +1,7 @@
+// MODULE-LEVEL LOG: ak Dashboard chunk fyzicky parse-uje, tento log sa volá
+// pri prvom import-e. Ak nelogoval, chunk sa nikdy neparse-oval.
+console.log('[Dashboard module] FILE LOADED — chunk parsed successfully');
+
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +13,8 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+
+console.log('[Dashboard module] all imports resolved');
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
