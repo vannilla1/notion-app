@@ -1,7 +1,3 @@
-// MODULE-LEVEL LOG: ak Dashboard chunk fyzicky parse-uje, tento log sa volá
-// pri prvom import-e. Ak nelogoval, chunk sa nikdy neparse-oval.
-console.log('[Dashboard module] FILE LOADED — chunk parsed successfully');
-
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
@@ -13,8 +9,6 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
-
-console.log('[Dashboard module] all imports resolved');
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
@@ -68,7 +62,6 @@ const dashboardHelpTips = [
 function Dashboard() {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
-  console.log('[Dashboard] mount/render', { hasUser: !!user, userId: user?.id, username: user?.username });
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [messages, setMessages] = useState({ received: [], sent: [] });

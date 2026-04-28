@@ -68,11 +68,11 @@ const createOAuth2Client = () => {
 // open-redirect attack (útočník pošle `returnUrl=https://evil.com`).
 function sanitizeReturnUrl(raw) {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) {
-    return '/app/dashboard';
+    return '/app';
   }
   // Iba relative paths začínajúce '/' (a nie '//').
   if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
-  return '/app/dashboard';
+  return '/app';
 }
 
 // Verify ID token z Google — musí byť signed Google JWKS-om a audience musí

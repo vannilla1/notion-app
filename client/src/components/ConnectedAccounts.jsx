@@ -139,7 +139,7 @@ function ConnectedAccounts({ open, onClose, onError }) {
                 <div style={{ marginTop: '16px' }}>
                   <OAuthButtons
                     mode="connect"
-                    returnUrl="/app/dashboard"
+                    returnUrl="/app"
                     onError={(m) => { setMessage(m); setMessageType('error'); }}
                   />
                 </div>

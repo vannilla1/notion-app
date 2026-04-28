@@ -33,18 +33,15 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 
-const RouteFallback = () => {
-  console.log('[RouteFallback] Suspense fallback ACTIVE — chunk loading in progress');
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
-      color: 'var(--text-secondary, #64748b)'
-    }}>
-      Načítavam…
-    </div>
-  );
-};
+const RouteFallback = () => (
+  <div style={{
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+    color: 'var(--text-secondary, #64748b)'
+  }}>
+    Načítavam…
+  </div>
+);
 
 // Error boundary pre lazy chunk failures (FailedToFetch, network errors).
 // Bez tohto error v lazy import-e tichom spôsobom unmountuje strom → biela.
@@ -57,8 +54,9 @@ class RouteErrorBoundary extends Component {
     return { hasError: true, error };
   }
   componentDidCatch(error, info) {
-    console.error('[RouteErrorBoundary] CAUGHT ERROR:', error);
-    console.error('[RouteErrorBoundary] componentStack:', info?.componentStack);
+    // Lazy chunk failures (Failed to fetch dynamically imported module).
+    // Bez ErrorBoundary by React tichom unmount-oval celý strom → biela.
+    console.error('[RouteErrorBoundary] caught:', error?.message);
   }
   render() {
     if (this.state.hasError) {
@@ -404,21 +402,7 @@ function AppContent() {
   const pendingWsSwitch = !!urlWs && !!currentWorkspaceId &&
     urlWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId);
 
-  // DIAGNOSTIC: log render state na každom renderi (pomáha debugovať OAuth flow)
-  console.log('[App] render guard check', {
-    pathname: location.pathname,
-    isPublicPage,
-    loading,
-    isAuthenticated,
-    workspaceLoading,
-    pendingWsSwitch,
-    needsWorkspace,
-    currentWorkspaceId: currentWorkspaceId ? String(currentWorkspaceId) : null,
-    workspacesCount: workspaces ? workspaces.length : 'undefined'
-  });
-
   if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading) || (isAuthenticated && pendingWsSwitch))) {
-    console.log('[App] → returning Načítavam... screen');
     return (
       <div style={{
         display: 'flex',
@@ -434,10 +418,8 @@ function AppContent() {
   }
 
   if (isAuthenticated && needsWorkspace) {
-    console.log('[App] → returning WorkspaceSetup');
     return <WorkspaceSetup />;
   }
-  console.log('[App] → rendering routes');
 
   return (
     <>

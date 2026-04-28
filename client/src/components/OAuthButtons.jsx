@@ -14,7 +14,7 @@ import api, { API_BASE_URL } from '@/api/api';
  *
  * Props:
  *   mode: 'login' | 'connect'  (default 'login')
- *   returnUrl?: string         (kam sa vrátiť po success, default /app/dashboard
+ *   returnUrl?: string         (kam sa vrátiť po success, default /app
  *                               pre login, /app/settings pre connect)
  *   onError?: (msg) => void    (pre connect mode keď init zlyhá)
  */

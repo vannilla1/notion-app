@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
  *
  * Server (auth-google.js / auth-apple.js) po úspešnom flow redirectne sem
  * s URL ako:
- *   /auth/callback#token=JWT_HERE?provider=google&isNew=1&returnUrl=/app/dashboard
+ *   /auth/callback#token=JWT_HERE?provider=google&isNew=1&returnUrl=/app
  *
  * Token je v hash fragmente (#) — neleak-uje do server logov ani referreru.
  * Query stringy nesú meta info (provider, returnUrl, isNew, linked, error).
@@ -29,7 +29,7 @@ function AuthCallback() {
     const error = searchParams.get('error');
     const provider = searchParams.get('provider') || 'oauth';
     const mode = searchParams.get('mode');
-    const returnUrl = searchParams.get('returnUrl') || '/app/dashboard';
+    const returnUrl = searchParams.get('returnUrl') || '/app';
 
     // ─── Error path ───────────────────────────────────────────────────
     if (error) {
@@ -67,12 +67,7 @@ function AuthCallback() {
       return () => clearTimeout(t);
     }
 
-    // Diagnostické logovanie — povie nám čo prešlo a kde sa zasekne.
-    // Logy si user pozrie v DevTools Console na /auth/callback alebo
-    // /app/dashboard. Po vyriešení môžeme odstrániť.
-    console.log('[AuthCallback] token received, calling loginWithToken');
     loginWithToken(token);
-    console.log('[AuthCallback] token stored, waiting for user fetch (isAuthenticated)');
 
     // Cleanup hash z URL aby token nebol viditeľný (replaceState).
     try {
@@ -95,8 +90,7 @@ function AuthCallback() {
   useEffect(() => {
     if (status !== 'processing') return;
     if (isAuthenticated) {
-      const returnUrl = sanitizeReturn(searchParams.get('returnUrl') || '/app/dashboard');
-      console.log('[AuthCallback] isAuthenticated=true, navigating to', returnUrl);
+      const returnUrl = sanitizeReturn(searchParams.get('returnUrl') || '/app');
       navigate(returnUrl, { replace: true });
       return;
     }
@@ -193,9 +187,9 @@ function AuthCallback() {
 // Otvor returnUrl iba ak je relatívny path. Anti open-redirect (rovnaký
 // princíp ako na backende — viď routes/auth-google.js sanitizeReturnUrl).
 function sanitizeReturn(raw) {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) return '/app/dashboard';
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) return '/app';
   if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
-  return '/app/dashboard';
+  return '/app';
 }
 
 // User-friendly preklady error kódov z OAuth flow-u.

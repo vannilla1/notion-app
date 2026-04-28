@@ -155,9 +155,9 @@ async function exchangeCodeForTokens(code) {
 }
 
 function sanitizeReturnUrl(raw) {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) return '/app/dashboard';
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 200) return '/app';
   if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
-  return '/app/dashboard';
+  return '/app';
 }
 
 function buildSuccessRedirect(token, opts = {}) {
