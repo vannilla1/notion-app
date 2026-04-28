@@ -67,38 +67,49 @@ function AuthCallback() {
       return () => clearTimeout(t);
     }
 
+    // Diagnostické logovanie — povie nám čo prešlo a kde sa zasekne.
+    // Logy si user pozrie v DevTools Console na /auth/callback alebo
+    // /app/dashboard. Po vyriešení môžeme odstrániť.
+    console.log('[AuthCallback] token received, calling loginWithToken');
     loginWithToken(token);
+    console.log('[AuthCallback] token stored, waiting for user fetch (isAuthenticated)');
 
     // Cleanup hash z URL aby token nebol viditeľný (replaceState).
     try {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     } catch { /* noop */ }
 
-    // HARD navigation cez window.location.assign — NIE react-router navigate().
-    //
-    // Prečo? Po OAuth login-e bol často initial render Dashboard-u poškodený
-    // (biela stránka). Príčina: service worker cache držal stale chunky
-    // z pred-OAuth verzie user state-u, soft-navigate spustil Dashboard s
-    // mismatched cache a state. Hard navigation vynúti full page reload →
-    // SW pri novom request dostane up-to-date manifest, načíta fresh chunky,
-    // a všetky context provider-y sa initialize-ujú s aktuálnym JWT.
-    //
-    // Za cenu drobného UX (~200ms re-mountu) získame robustnosť proti
-    // OAuth-flow race conditionom + stale-chunk regresiám.
-    const target = sanitizeReturn(returnUrl);
-    setTimeout(() => {
-      window.location.assign(target);
-    }, 50);
+    // ČAKAME na druhý useEffect dolu, ktorý sa spustí keď isAuthenticated=true
+    // (po dokončení fetchUser). Tým zaručíme že Dashboard po navigácii nájde
+    // user state pripravený a nerenderuje s `user=null`.
+    // Žiadne setTimeout + window.location.assign tu — viď druhý useEffect.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Po loginWithToken sa user fetchne a isAuthenticated = true. Druhý useEffect
-  // chytá tento moment a redirectuje (ak prvý useEffect nezvládol).
+  // Po loginWithToken sa user fetchne a isAuthenticated prejde na true.
+  // Tento useEffect čaká na ten moment a urobí soft navigate (cez React Router).
+  // Soft navigation zachová context providery v jednej React tree, čo je
+  // robustnejšie než hard window.location.assign().
+  //
+  // Safeguard: po 8 sekundách bez `isAuthenticated=true` zobrazíme error —
+  // niečo zlyhalo (napr. fetchUser dostal 401 → token bol invalidovaný).
   useEffect(() => {
-    if (status === 'processing' && isAuthenticated) {
+    if (status !== 'processing') return;
+    if (isAuthenticated) {
       const returnUrl = sanitizeReturn(searchParams.get('returnUrl') || '/app/dashboard');
+      console.log('[AuthCallback] isAuthenticated=true, navigating to', returnUrl);
       navigate(returnUrl, { replace: true });
+      return;
     }
-  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Auth-fail safeguard
+    const timeout = setTimeout(() => {
+      if (status === 'processing') {
+        console.error('[AuthCallback] timeout — user fetch did not complete in 8s');
+        setErrorMessage('Prihlásenie sa nepodarilo dokončiť (timeout). Skús to znova.');
+        setStatus('error');
+      }
+    }, 8000);
+    return () => clearTimeout(timeout);
+  }, [isAuthenticated, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{
