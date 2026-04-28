@@ -339,6 +339,14 @@ struct WebView: UIViewRepresentable {
             document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
             document.body.classList.add('ios-app');
 
+            // Phase 4 native OAuth support flag — FE OAuthButtons-y kontrolujú
+            // window.__nativeOAuthSupported aby sa rozhodli medzi web flow
+            // (window.location.assign + Safari redirect) a native bridge
+            // (postMessage startGoogleSignIn / startAppleSignIn). Bez tohto
+            // flag-u by stará iOS appka (pred Phase 4 rebuild-om) ignorovala
+            // postMessage a tlačítko by zostalo v "Načítavam..." stave.
+            window.__nativeOAuthSupported = true;
+
             // Force header padding for status bar - inject CSS directly
             var iosStyle = document.createElement('style');
             iosStyle.textContent = '.crm-header { padding-top: calc(env(safe-area-inset-top, 59px) + 16px) !important; }';

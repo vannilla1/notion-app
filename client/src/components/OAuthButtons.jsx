@@ -29,10 +29,16 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
   const handleProvider = async (provider) => {
     setBusy(provider);
 
-    // iOS native bridge — Google blokuje OAuth v WKWebView, Apple Sign In má
-    // tiež obmedzenia. Native flow rieši autentikáciu cez ASAuthorizationAppleID
-    // alebo GoogleSignIn-iOS SDK, výsledný JWT injecte cez window.__nativeAuthLogin.
-    if (isNativeIOSApp()) {
+    // iOS native bridge — používa sa LEN ak iOS appka oznámila Phase 4 support
+    // cez window.__nativeOAuthSupported flag (nastavuje WKUserScript v Phase 4
+    // rebuild-e). Bez tohto by stará iOS appka ignorovala postMessage a tlačítko
+    // by zostalo navždy v "Načítavam..." stave.
+    //
+    // Bez native bridge appka funguje cez existing web flow: window.location.assign
+    // na backend → backend redirect na Google/Apple → WKWebView decidePolicyFor
+    // zachytí accounts.google.com host a otvorí Safari (UIApplication.shared.open)
+    // → user authorize → Universal Link redirect späť do appky.
+    if (isNativeIOSApp() && window.__nativeOAuthSupported === true) {
       const dispatched = provider === 'google'
         ? nativeStartGoogleSignIn()
         : nativeStartAppleSignIn();
@@ -42,7 +48,6 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
         setTimeout(() => setBusy(null), 30000);
         return;
       }
-      // Bridge nedostupný (stará verzia appky?) → fallback na web flow.
     }
 
     try {
