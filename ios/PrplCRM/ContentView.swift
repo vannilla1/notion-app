@@ -339,13 +339,23 @@ struct WebView: UIViewRepresentable {
             document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
             document.body.classList.add('ios-app');
 
-            // Phase 4 native OAuth support flag — FE OAuthButtons-y kontrolujú
-            // window.__nativeOAuthSupported aby sa rozhodli medzi web flow
-            // (window.location.assign + Safari redirect) a native bridge
-            // (postMessage startGoogleSignIn / startAppleSignIn). Bez tohto
-            // flag-u by stará iOS appka (pred Phase 4 rebuild-om) ignorovala
-            // postMessage a tlačítko by zostalo v "Načítavam..." stave.
-            window.__nativeOAuthSupported = true;
+            // Phase 4 native OAuth bridge je IMPLEMENTOVANÝ ale dočasne VYPNUTÝ.
+            //
+            // Dôvod: GoogleSignIn-iOS SPM package ešte nie je pridaný do Xcode
+            // projektu. OAuthController.startGoogleSignIn má #if canImport(GoogleSignIn)
+            // guard — bez SPM by user-i dostali alert "GoogleSignIn-iOS package
+            // nie je zahrnuté".
+            //
+            // Aktuálny flow: oba providery (Google aj Apple) používajú web flow
+            // cez Safari + custom URL scheme prplcrm://auth?token=... Funguje
+            // jednotne, bez SPM dependency.
+            //
+            // Aktivácia v budúcnosti:
+            //   1. Xcode → File → Add Package Dependencies → GoogleSignIn-iOS
+            //   2. Stiahnuť GoogleService-Info.plist z Google Cloud Console
+            //   3. Render env: GOOGLE_IOS_CLIENT_ID=<iOS client ID>
+            //   4. Zmeniť tu `false` → `true` a urobiť nový archive build
+            window.__nativeOAuthSupported = false;
 
             // Force header padding for status bar - inject CSS directly
             var iosStyle = document.createElement('style');
