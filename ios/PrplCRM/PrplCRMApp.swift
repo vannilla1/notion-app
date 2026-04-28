@@ -51,6 +51,34 @@ struct PrplCRMApp: App {
                 // WebView na danú URL.
                 .onOpenURL { url in
                     debugLog("[UniversalLink] Received: \(url.absoluteString)")
+
+                    // Custom URL scheme `prplcrm://auth?token=...` — používa sa
+                    // pre auto-redirect zo Safari po Google/Apple OAuth flow.
+                    // Universal Links nezachytia server-side 302 redirect (Apple
+                    // policy), takže FE AuthCallback urobí window.location na
+                    // tento scheme a iOS automaticky otvorí appku tu.
+                    if url.scheme == "prplcrm" && url.host == "auth" {
+                        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                           let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
+                           !token.isEmpty {
+                            debugLog("[OAuth] Custom URL scheme — received auth token, length=\(token.count)")
+                            // Token do Keychain — pri ďalšom WebView load ContentView
+                            // ho injectne do localStorage cez WKUserScript.
+                            KeychainHelper.saveToken(token)
+                            appDelegate.pushManager.authToken = token
+                            // Reload WebView na /app (defaultný returnUrl). Ak FE poslal
+                            // ?returnUrl=/tasks, použijeme ho — match s web AuthCallback
+                            // sanitize (iba relative paths). Pendingdeeplink pickne
+                            // ContentView v ďalšom render cykle.
+                            let returnPath = components.queryItems?.first(where: { $0.name == "returnUrl" })?.value ?? "/app"
+                            let safePath = returnPath.hasPrefix("/") && !returnPath.hasPrefix("//") ? returnPath : "/app"
+                            appDelegate.pushManager.pendingDeepLink = "https://prplcrm.eu\(safePath)"
+                        } else {
+                            debugLog("[OAuth] Custom URL scheme without valid token — ignoring")
+                        }
+                        return
+                    }
+
                     // Google Sign In callback URL má reverse-DNS scheme z
                     // GoogleService-Info.plist (napr. com.googleusercontent.apps.290370...).
                     // GIDSignIn handle vráti true ak url patrí jemu — vtedy

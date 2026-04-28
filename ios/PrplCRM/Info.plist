@@ -41,6 +41,28 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<!-- Custom URL Scheme `prplcrm://` — používa sa pre auto-redirect zo Safari
+	     do natívnej appky po Google/Apple OAuth flow. Universal Links nedokážu
+	     zachytiť server-side 302 redirect (Apple security policy: only user-tap
+	     navigation triggers them). Custom scheme je workaround — Safari otvorí
+	     appku okamžite cez `prplcrm://auth?token=...`. AuthCallback FE detekuje
+	     "som v Safari na iOS" a redirectne tam, ak appka nie je nainštalovaná
+	     Safari ostane na pôvodnej URL (acceptable fallback).
+	     Handler: PrplCRMApp.swift .onOpenURL — zachytí auth host, uloží JWT do
+	     Keychain a reloadne WebView na /app. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>eu.prplcrm.auth</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>prplcrm</string>
+			</array>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

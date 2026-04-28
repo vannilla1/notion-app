@@ -67,6 +67,37 @@ function AuthCallback() {
       return () => clearTimeout(t);
     }
 
+    // ── iOS Safari → custom URL scheme redirect ──────────────────────
+    // Universal Links nezachytia server-side 302 redirect (Apple security
+    // policy: only user-tap navigation triggers them). Po Google OAuth
+    // flow Safari ostal otvorený a user musel kliknúť "Otvoriť" v banneri.
+    // Workaround: ak detekujeme že beží iOS Safari (NIE WKWebView v appke),
+    // urobíme window.location na `prplcrm://auth?token=...` — iOS appka
+    // má registrovaný custom scheme handler v Info.plist + onOpenURL ho
+    // zachytí, uloží JWT do Keychain a načíta /app.
+    //
+    // Detection: iPhone/iPad UA + neexistuje webkit.messageHandlers
+    // (to existuje len v WKWebView, NIE v Safari).
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isInWKWebView = !!(window.webkit && window.webkit.messageHandlers);
+    if (isIOS && !isInWKWebView) {
+      const returnUrl = sanitizeReturn(searchParams.get('returnUrl') || '/app');
+      const customSchemeUrl = `prplcrm://auth?token=${encodeURIComponent(token)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+      // Cleanup hash z URL pred redirect-om — ak appka neje nainštalovaná,
+      // Safari ostane na tejto stránke a user uvidí "Prihlasujem..." spinner.
+      // Po 1.5s fallback urobíme normálny web flow (loginWithToken + navigate).
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch { /* noop */ }
+      window.location.href = customSchemeUrl;
+      // Fallback timer — ak Safari nezatvorí stránku za 1.5s, appka pravdepodobne
+      // nie je nainštalovaná → web flow.
+      const fallbackTimer = setTimeout(() => {
+        loginWithToken(token);
+      }, 1500);
+      return () => clearTimeout(fallbackTimer);
+    }
+
     loginWithToken(token);
 
     // Cleanup hash z URL aby token nebol viditeľný (replaceState).
