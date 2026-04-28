@@ -10,6 +10,9 @@ dotenv.config();
 const path = require('path');
 const { connectDB } = require('./config/database');
 const authRoutes = require('./routes/auth');
+const authGoogleRoutes = require('./routes/auth-google');
+const authAppleRoutes = require('./routes/auth-apple');
+const authConnectionsRoutes = require('./routes/auth-connections');
 const pageRoutes = require('./routes/pages');
 const contactRoutes = require('./routes/contacts');
 const taskRoutes = require('./routes/tasks');
@@ -110,6 +113,12 @@ app.set('io', io);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
+// OAuth routery sú mounted na podadresároch /api/auth/google, /api/auth/apple,
+// /api/auth/connections — express ich vyrieši pred fallthrough na authRoutes
+// (ktorý handle-uje /register, /login, /me, atď.).
+app.use('/api/auth/google', authGoogleRoutes);
+app.use('/api/auth/apple', authAppleRoutes);
+app.use('/api/auth/connections', authConnectionsRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/contacts', contactRoutes);

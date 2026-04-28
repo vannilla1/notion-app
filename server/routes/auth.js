@@ -316,6 +316,28 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
+    // OAuth-only useri (Google/Apple) nemajú heslo (user.password = null).
+    // Bez tohto guardu by bcrypt.compare(plain, null) hodil exception. Vraciame
+    // generic message aby sme nepresne neprezradili "tento email má len Google
+    // login" — to by bol enumeration leak. User uvidí "nesprávny email alebo
+    // heslo" a sám si uvedomí, že sa má prihlásiť cez Google/Apple tlačítko.
+    if (!user.password) {
+      logger.auth('login', user._id, user.username, false, req.ip);
+      auditService.logAction({
+        userId: user._id.toString(),
+        username: user.username,
+        email: user.email,
+        action: 'auth.login_failed',
+        category: 'auth',
+        targetType: 'user',
+        targetId: user._id.toString(),
+        details: { reason: 'oauth_only_no_password' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+      return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
+    }
+
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
