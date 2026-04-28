@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api from '@/api/api';
+import api, { API_BASE_URL } from '@/api/api';
 
 /**
  * OAuthButtons — render Google + Apple Sign In tlačítok pod login/register form.
@@ -35,11 +35,13 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
         }
         throw new Error('Init returned no URL');
       } else {
-        // Login flow — server-side redirect, môžeme rovno navigovať.
+        // Login flow — server-side redirect. POZOR: musíme navigovať na BACKEND
+        // doménu (API_BASE_URL), nie relatívnu URL — FE doména /api/auth/...
+        // by skončila 404, lebo Vite serv nemá tieto routes.
         const params = new URLSearchParams();
         if (returnUrl) params.set('returnUrl', returnUrl);
         const qs = params.toString();
-        window.location.assign(`/api/auth/${provider}/login${qs ? `?${qs}` : ''}`);
+        window.location.assign(`${API_BASE_URL}/api/auth/${provider}/login${qs ? `?${qs}` : ''}`);
       }
     } catch (err) {
       setBusy(null);
