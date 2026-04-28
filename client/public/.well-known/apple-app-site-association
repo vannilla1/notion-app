@@ -14,7 +14,9 @@
           "/messages",
           "/messages/*",
           "/workspace",
-          "/workspace/*"
+          "/workspace/*",
+          "/auth/callback",
+          "/auth/callback*"
         ]
       }
     ]

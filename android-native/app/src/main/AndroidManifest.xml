@@ -69,6 +69,12 @@
                 <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/crm" />
                 <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/messages" />
                 <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/workspace" />
+                <!-- /auth/callback — post-OAuth redirect z Google/Apple. Bez tohto
+                     path-u by Chrome ostal otvorený s prplcrm.eu/auth/callback?token=...
+                     po authorize a appka by JWT nedostala. App Links autoVerify vyžaduje
+                     aby /.well-known/assetlinks.json obsahoval rovnakú SHA256 fingerprint
+                     na webe (čo už máme). -->
+                <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/auth" />
             </intent-filter>
         </activity>
 
