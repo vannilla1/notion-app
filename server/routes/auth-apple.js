@@ -41,8 +41,10 @@ const APPLE_KEY_ID = process.env.APPLE_KEY_ID;
 const APPLE_PRIVATE_KEY = process.env.APPLE_PRIVATE_KEY;
 const APPLE_SERVICE_ID = process.env.APPLE_SERVICE_ID;
 const APPLE_APP_BUNDLE_ID = process.env.APPLE_APP_BUNDLE_ID;
+// Backend hostname je perun-crm-api.onrender.com (match s ostatnými Google
+// Calendar/Tasks redirect URI defaultami).
 const APPLE_OAUTH_REDIRECT_URI = process.env.APPLE_OAUTH_REDIRECT_URI ||
-  'https://prplcrm-api.onrender.com/api/auth/apple/callback';
+  'https://perun-crm-api.onrender.com/api/auth/apple/callback';
 const CLIENT_URL = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
 const APPLE_AUTH_URL = 'https://appleid.apple.com/auth/authorize';

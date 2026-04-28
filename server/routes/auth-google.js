@@ -34,8 +34,10 @@ const router = express.Router();
 // ─── Konfigurácia ───────────────────────────────────────────────────
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+// Backend hostname je perun-crm-api.onrender.com (rovnaký pattern ako pre
+// Google Calendar/Tasks integrations — viď routes/googleTasks.js).
 const GOOGLE_OAUTH_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI ||
-  'https://prplcrm-api.onrender.com/api/auth/google/callback';
+  'https://perun-crm-api.onrender.com/api/auth/google/callback';
 const GOOGLE_IOS_CLIENT_ID = process.env.GOOGLE_IOS_CLIENT_ID || null;
 const CLIENT_URL = process.env.CLIENT_URL || 'https://prplcrm.eu';
 
