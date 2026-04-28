@@ -148,6 +148,17 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
+  // Použité po OAuth flow (Google / Apple). Server po úspešnom callbacku
+  // redirectne FE na /auth/callback s tokenom v URL hash. Volajúci stránka
+  // ho extrahuje a posunie sem. fetchUser sa spustí cez useEffect([token]).
+  const loginWithToken = (newToken) => {
+    if (!newToken) return;
+    setStoredToken(newToken);
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    setToken(newToken);
+    // user sa naplní cez fetchUser → useEffect([token])
+  };
+
   const logout = () => {
     removeStoredToken();
     delete api.defaults.headers.common['Authorization'];
@@ -165,6 +176,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     login,
     register,
+    loginWithToken,
     logout,
     updateUser,
     isAuthenticated: !!token && !!user

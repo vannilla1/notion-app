@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import NotificationPreferences from './NotificationPreferences';
+import ConnectedAccounts from './ConnectedAccounts';
 import { isMobileDevice } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
@@ -78,6 +79,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [creatingWorkspaceSubmitting, setCreatingWorkspaceSubmitting] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [showProfile, setShowProfile] = useState(false);
+  const [showConnectedAccounts, setShowConnectedAccounts] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -1320,6 +1322,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">🔒</span>
             Zmeniť heslo
           </button>
+          <button className="user-menu-item" onClick={() => { setIsOpen(false); setShowConnectedAccounts(true); }}>
+            <span className="menu-icon">🔗</span>
+            Pripojené účty
+          </button>
           <button className="user-menu-item" onClick={handleOpenCalendarSettings}>
             <span className="menu-icon">📅</span>
             Synchronizácia kalendára
@@ -2057,6 +2063,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       {showNotifPrefs && (
         <NotificationPreferences onClose={() => setShowNotifPrefs(false)} />
       )}
+
+      <ConnectedAccounts
+        open={showConnectedAccounts}
+        onClose={() => setShowConnectedAccounts(false)}
+      />
     </div>
   );
 }

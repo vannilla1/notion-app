@@ -31,6 +31,7 @@ const AdminPanel = lazy(() => import('./pages/AdminPanel'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 
 const RouteFallback = () => (
   <div style={{
@@ -348,7 +349,7 @@ function AppContent() {
     };
   }, [isAuthenticated, navigateWithWorkspace]);
 
-  const publicPages = ['/', '/login', '/forgot-password', '/reset-password', '/ochrana-udajov', '/vop', '/invite', '/admin'];
+  const publicPages = ['/', '/login', '/forgot-password', '/reset-password', '/auth/callback', '/ochrana-udajov', '/vop', '/invite', '/admin'];
   const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
 
   // Blok renderu child route kým sa deep-link workspace switch nedokončí.
@@ -434,6 +435,7 @@ function AppContent() {
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/invite/:token" element={<AcceptInvite />} />
         <Route path="/ochrana-udajov" element={<PrivacyPolicy />} />
         <Route path="/vop" element={<TermsOfService />} />

@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { acceptInvitation } from '../api/workspaces';
+import OAuthButtons from '../components/OAuthButtons';
 
 function Login() {
   const { login, register } = useAuth();
@@ -148,6 +149,8 @@ function Login() {
             </p>
           )}
         </form>
+
+        <OAuthButtons mode="login" />
 
         <div className="login-footer">
           {isRegister ? (
