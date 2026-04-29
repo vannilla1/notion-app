@@ -120,14 +120,34 @@ extension WKWebView {
     /// Inject Prpl CRM JWT into WebView via global handler nainštalovaný v AuthContext.
     /// AuthContext zachytí token, persistne ho do localStorage + Keychain
     /// (cez existing iosNative bridge), a redirectne na /app.
+    ///
+    /// SECURITY: používa `callAsyncJavaScript(arguments:)` ktoré JSON-enkoduje
+    /// parametre na úrovni WebKit-u. Predošlá verzia robila string-concat injection
+    /// s manuálnym escape (iba `\\` a `'`) — útočník s kompromitovaným backendom
+    /// alebo MITM mohol vrátiť token obsahujúci backtick, `</script>`, unicode
+    /// escape sekvencie atď. a injektnúť ľubovoľný JS. `callAsyncJavaScript` cez
+    /// `arguments` parameter je proti tomu odolné — token sa do JS prostredia
+    /// dostane ako bezpečná premenná.
     func injectPrplCrmAuthToken(_ token: String) {
-        // Escape single quotes pre JS string literal.
-        let escaped = token
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-        let js = "if (window.__nativeAuthLogin) { window.__nativeAuthLogin('\(escaped)'); } else { localStorage.setItem('token','\(escaped)'); window.location.assign('/app'); }"
+        let js = """
+        if (typeof window.__nativeAuthLogin === 'function') {
+            window.__nativeAuthLogin(token);
+        } else {
+            try { localStorage.setItem('token', token); } catch (e) {}
+            window.location.assign('/app');
+        }
+        """
         DispatchQueue.main.async {
-            self.evaluateJavaScript(js, completionHandler: nil)
+            // arguments dictionary sa JSON-enkoduje WebKit-om do JS premenných
+            // s daným názvom — rovnaké ako definovať `let token = "..."` na začiatku
+            // skriptu, ale bez možnosti string injection.
+            self.callAsyncJavaScript(
+                js,
+                arguments: ["token": token],
+                in: nil,
+                in: .page,
+                completionHandler: nil
+            )
         }
     }
 }
