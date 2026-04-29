@@ -8,6 +8,7 @@ const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const {
   loginLimiter,
+  loginEmailLimiter,
   registerLimiter,
   passwordChangeLimiter,
   forgotPasswordLimiter,
@@ -20,6 +21,7 @@ const {
   sendPasswordResetEmail
 } = require('../services/adminEmailService');
 const logger = require('../utils/logger');
+const { validatePassword } = require('../utils/passwordPolicy');
 
 const router = express.Router();
 
@@ -47,8 +49,12 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Všetky polia sú povinné' });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov' });
+    // Password policy — min 8 znakov, písmeno + číslo/špec, HIBP check.
+    // Async kvôli HIBP API call (k-anonymity, posiela len 5-char SHA1 prefix).
+    // Fail-open pri sieťovej chybe HIBP — neblokuje registráciu, len loguje warning.
+    const passwordError = await validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     // Block registration with super admin email
@@ -231,8 +237,11 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Neplatný alebo chýbajúci token.' });
     }
 
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-      return res.status(400).json({ message: 'Heslo musí mať aspoň 6 znakov.' });
+    // Aplikuj rovnakú policy ako pri register-i — min 8 znakov, písmeno+číslo,
+    // HIBP check. Bez tohto by si user mohol cez reset link nastaviť slabé heslo.
+    const passwordError = await validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const tokenHash = hashResetToken(token);
@@ -285,8 +294,10 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
   }
 });
 
-// Login - with rate limiting
-router.post('/login', loginLimiter, async (req, res) => {
+// Login - with two-layer rate limiting (per-IP + per-email).
+// Per-IP zastaví single-IP brute force, per-email distribuovaný útok zo
+// rotujúcich IP. Útočník musí prejsť obidvomi limitermi.
+router.post('/login', loginLimiter, loginEmailLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -651,8 +662,10 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ message: 'Nové heslo musí mať aspoň 6 znakov' });
+    // Password policy — rovnako ako register/reset.
+    const passwordError = await validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const user = await User.findById(userId);
@@ -661,7 +674,29 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       logger.auth('password-change', userId, user.username, false, req.ip);
+      // Audit log failed password change — pre SuperAdmin Diagnostics aby
+      // bolo vidieť pokus s neplatným currentPassword (potenciálny indikátor
+      // session-jacking — niekto sa pokúša zmeniť heslo bez znalosti starého).
+      auditService.logAction({
+        userId: userId.toString(),
+        username: user.username,
+        email: user.email,
+        action: 'auth.password-change_failed',
+        category: 'auth',
+        targetType: 'user',
+        targetId: userId.toString(),
+        details: { reason: 'wrong_current_password' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
       return res.status(400).json({ message: 'Aktuálne heslo nie je správne' });
+    }
+
+    // Detekuj "no-op" zmenu — nové heslo == staré. Zbytočne by sme spamovali
+    // audit log pri user "musí zmeniť heslo" enforcement-och kde user oklamal.
+    const isSame = await bcrypt.compare(newPassword, user.password);
+    if (isSame) {
+      return res.status(400).json({ message: 'Nové heslo musí byť odlišné od aktuálneho.' });
     }
 
     // Hash new password
@@ -671,6 +706,24 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     await User.findByIdAndUpdate(userId, { password: hashedPassword });
 
     logger.auth('password-change', userId, user.username, true, req.ip);
+
+    // Audit log password change — predtým len logger.auth (do file),
+    // teraz aj cez auditService (do MongoDB pre SuperAdmin Audit Trail).
+    // Compliance: GDPR Art. 32 vyžaduje audit security-relevant events.
+    auditService.logAction({
+      userId: userId.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.password-change',
+      category: 'auth',
+      targetType: 'user',
+      targetId: userId.toString(),
+      targetName: user.username,
+      details: {},
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
 
     res.json({ message: 'Heslo bolo úspešne zmenené' });
   } catch (error) {
