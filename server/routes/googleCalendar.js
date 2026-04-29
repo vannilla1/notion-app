@@ -905,12 +905,52 @@ const processCalendarChanges = async (user) => {
       if (!task) continue; // Task no longer exists in CRM or not in user's workspace
 
       if (isDeleted) {
-        // Event was deleted in Google Calendar — remove mapping atomically
+        // Event was deleted in Google Calendar — remove mapping atomically.
+        // Notifikuj front-end (toast "Udalosť bola zmazaná v Google Kalendári,
+        // úloha v CRM ostala") aby user nezmäteno hľadal kde sa stratila.
+        // POZN: predtým niekedy `cancelled` posielalo CRM samé pri completed,
+        // vďaka B1 fixu (status:'confirmed' vždy) je teraz cancelled už LEN
+        // skutočné delete z Google strany.
         await User.findByIdAndUpdate(user._id, {
-          $unset: { [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '' }
+          $unset: {
+            [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '',
+            [`googleCalendar.syncedTaskCalendars.${crmTaskId}`]: '',
+            [`googleCalendar.syncedEventHashes.${crmTaskId}`]: ''
+          }
         });
+        const wsId = task.workspaceId || contact?.workspaceId;
+        if (calendarIo && wsId) {
+          calendarIo.to(`workspace-${wsId}`).emit('calendar-event-deleted', {
+            crmTaskId,
+            taskTitle: task.title || (contact && taskIndex !== -1 ? contact.tasks[taskIndex].title : '')
+          });
+        }
         continue;
       }
+
+      // ─── Bidirectional COMPLETED detection ───
+      // Google Calendar nemá natívne completed pole pre VEVENT. Náš protokol:
+      //   - Primárny zdroj pravdy: extendedProperties.private.completed = 'true'|'false'
+      //   - Backward compat: keď event nemá toto private property (staré eventy
+      //     pred B1 fixom), padá späť na "✓ " prefix detection v summary.
+      //
+      // Toto rieši use case: user v Google Calendar manuálne zmení summary
+      // pridaním/odstránením "✓ " (alebo cez ext. apps), úprava sa propaguje
+      // späť do CRM.
+      const privateCompleted = event.extendedProperties?.private?.completed;
+      let isGoogleCompleted;
+      if (privateCompleted === 'true') {
+        isGoogleCompleted = true;
+      } else if (privateCompleted === 'false') {
+        isGoogleCompleted = false;
+      } else {
+        // Backward compat fallback: starý event bez canonical signal.
+        // "✓ " prefix indicates completion; ostatné = uncompleted.
+        isGoogleCompleted = (event.summary || '').startsWith('✓ ') || (event.summary || '').startsWith('✓');
+      }
+      const currentCompleted = (contact && taskIndex !== -1)
+        ? !!contact.tasks[taskIndex].completed
+        : !!task.completed;
 
       // Check if due date changed
       let changed = false;
@@ -954,6 +994,27 @@ const processCalendarChanges = async (user) => {
           task.modifiedAt = new Date().toISOString();
           changed = true;
         }
+      }
+
+      // Apply completed state change (B1: bidirectional sync).
+      // Loguje cez logger.info aby sme vo SuperAdmin Diagnostics vedeli sledovať
+      // tieto reverse syncy (užitočné pri debug-ovaní "prečo sa task označil sám").
+      if (isGoogleCompleted !== currentCompleted) {
+        if (contact && taskIndex !== -1) {
+          contact.tasks[taskIndex].completed = isGoogleCompleted;
+          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+          changed = true;
+        } else if (task._id) {
+          task.completed = isGoogleCompleted;
+          task.modifiedAt = new Date().toISOString();
+          changed = true;
+        }
+        logger.info('[Calendar Webhook] Completed state synced from Google', {
+          userId: user._id.toString(),
+          crmTaskId,
+          isGoogleCompleted,
+          source: privateCompleted !== undefined ? 'extendedProperties' : 'summary_prefix_fallback'
+        });
       }
 
       if (changed) {
@@ -2215,12 +2276,34 @@ function createEventData(task) {
     end: endObj,
     colorId: colorId,
     transparency: 'transparent', // Don't block time
-    status: task.completed ? 'cancelled' : 'confirmed',
+    // POZOR: status MUSÍ byť vždy 'confirmed', NIKDY 'cancelled' aj keď je task
+    // dokončený. Predtým sme dokončené tasky posielali so `status: 'cancelled'`,
+    // ale to:
+    //   1. Vizuálne v Google Calendar znamená "zrušená udalosť" (sivá),
+    //      nie "dokončená". User sa pýtal "prečo sú moje hotové úlohy zrušené?"
+    //   2. Webhook reverse-sync v processCalendarChanges() si `cancelled`
+    //      interpretuje ako DELETE (riadok ~876) → mapping sa zničí → ďalší
+    //      update toho istého tasku vytvorí duplicate event.
+    // Canonical "completed" signal je teraz v extendedProperties.private.completed,
+    // čo Google neinterpretuje ako delete a my môžeme spätne číst pri sync-u.
+    status: 'confirmed',
     // Marker so we can find our events later (bulk delete in primary calendar use-case).
     // taskId is stored too — lets us reconcile duplicates by grouping via Google Calendar's
     // `privateExtendedProperty=taskId=...` search parameter without having to trust the
     // per-user syncedTaskIds map (which can get out of sync with reality).
-    extendedProperties: { private: { ...EVENT_MARKER, taskId: task.id ? String(task.id) : '' } }
+    //
+    // `completed` je kanonický signal pre bidirectional completion sync — keď user
+    // v Google Calendar zmeni summary z "✓ Title" na "Title" alebo cez extension
+    // pridáva `completed=false` do extendedProperties, processCalendarChanges()
+    // toto detekuje a aktualizuje task.completed v MongoDB. Backward compat:
+    // staré eventy bez tohto poľa fallnú na "✓ " prefix detection.
+    extendedProperties: {
+      private: {
+        ...EVENT_MARKER,
+        taskId: task.id ? String(task.id) : '',
+        completed: task.completed ? 'true' : 'false'
+      }
+    }
   };
 }
 
