@@ -12,6 +12,10 @@
 		A10003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20003 /* Assets.xcassets */; };
 		A10004 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20006 /* KeychainHelper.swift */; };
 		A10005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20007 /* PrivacyInfo.xcprivacy */; };
+		C32EBA4D2FA0F4EF000432AC /* OAuthController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32EBA4C2FA0F4EF000432AC /* OAuthController.swift */; };
+		C32EBA502FA10C45000432AC /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C32EBA4F2FA10C45000432AC /* GoogleSignIn */; };
+		C32EBA522FA10C45000432AC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C32EBA512FA10C45000432AC /* GoogleSignInSwift */; };
+		C32EBA542FA11127000432AC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C32EBA532FA11127000432AC /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +26,8 @@
 		A20005 /* PrplCRM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrplCRM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20006 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A20007 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C32EBA4C2FA0F4EF000432AC /* OAuthController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthController.swift; sourceTree = "<group>"; };
+		C32EBA532FA11127000432AC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		C398032A2F8568D6007EFD20 /* PrplCRM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PrplCRM.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -30,6 +36,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C32EBA502FA10C45000432AC /* GoogleSignIn in Frameworks */,
+				C32EBA522FA10C45000432AC /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,12 +55,14 @@
 		A40002 /* PrplCRM */ = {
 			isa = PBXGroup;
 			children = (
+				C32EBA4C2FA0F4EF000432AC /* OAuthController.swift */,
 				C398032A2F8568D6007EFD20 /* PrplCRM.entitlements */,
 				A20001 /* PrplCRMApp.swift */,
 				A20002 /* ContentView.swift */,
 				A20006 /* KeychainHelper.swift */,
 				A20003 /* Assets.xcassets */,
 				A20004 /* Info.plist */,
+				C32EBA532FA11127000432AC /* GoogleService-Info.plist */,
 				A20007 /* PrivacyInfo.xcprivacy */,
 			);
 			path = PrplCRM;
@@ -110,6 +120,9 @@
 				Base,
 			);
 			mainGroup = A40001;
+			packageReferences = (
+				C32EBA4E2FA10C45000432AC /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			productRefGroup = A40003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -126,6 +139,7 @@
 			files = (
 				A10003 /* Assets.xcassets in Resources */,
 				A10005 /* PrivacyInfo.xcprivacy in Resources */,
+				C32EBA542FA11127000432AC /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +153,7 @@
 				A10001 /* PrplCRMApp.swift in Sources */,
 				A10002 /* ContentView.swift in Sources */,
 				A10004 /* KeychainHelper.swift in Sources */,
+				C32EBA4D2FA0F4EF000432AC /* OAuthController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +352,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C32EBA4E2FA10C45000432AC /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C32EBA4F2FA10C45000432AC /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C32EBA4E2FA10C45000432AC /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		C32EBA512FA10C45000432AC /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C32EBA4E2FA10C45000432AC /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A80001 /* Project object */;
 }

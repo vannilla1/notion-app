@@ -41,15 +41,6 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
-	<!-- Custom URL Scheme `prplcrm://` — používa sa pre auto-redirect zo Safari
-	     do natívnej appky po Google/Apple OAuth flow. Universal Links nedokážu
-	     zachytiť server-side 302 redirect (Apple security policy: only user-tap
-	     navigation triggers them). Custom scheme je workaround — Safari otvorí
-	     appku okamžite cez `prplcrm://auth?token=...`. AuthCallback FE detekuje
-	     "som v Safari na iOS" a redirectne tam, ak appka nie je nainštalovaná
-	     Safari ostane na pôvodnej URL (acceptable fallback).
-	     Handler: PrplCRMApp.swift .onOpenURL — zachytí auth host, uloží JWT do
-	     Keychain a reloadne WebView na /app. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -62,10 +53,6 @@
 				<string>prplcrm</string>
 			</array>
 		</dict>
-		<!-- Google Sign In SDK callback URL — REVERSED_CLIENT_ID z OAuth client
-		     iOS-typu (Google Cloud Console). Client ID je verejné, takže môže
-		     byť v repo. SDK po authorize redirectuje na túto schému + appka
-		     dostane authorization code cez GIDSignIn.sharedInstance.handle(url). -->
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>eu.prplcrm.googlesignin</string>
@@ -77,9 +64,6 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Google Sign In iOS Client ID — load-uje sa cez OAuthController.swift
-	     Bundle.main.object(forInfoDictionaryKey: "GIDClientID"). Verejná hodnota,
-	     žiadny secret. Backend audience kontroluje cez GOOGLE_IOS_CLIENT_ID env. -->
 	<key>GIDClientID</key>
 	<string>290370700813-jq8rgkejkgs2r1gklbri1onffhk426eb.apps.googleusercontent.com</string>
 	<key>UILaunchScreen</key>
