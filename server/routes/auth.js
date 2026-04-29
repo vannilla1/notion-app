@@ -732,6 +732,192 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Account deletion — Apple App Store Guideline 5.1.1(v) compliance.
+//
+// Apps that support account creation MUST offer in-app account deletion.
+// Tento endpoint poskytuje hard-delete účtu používateľa s týmito krokmi:
+//
+//   1. AUTORIZÁCIA — vyžaduje confirm: 'DELETE' v tele requestu (anti-fat-fingers).
+//      Pre password-only userov navyše overujeme heslo (znižuje riziko
+//      session-hijacking → permanentné zničenie dát).
+//
+//   2. WORKSPACE OWNERSHIP CHECK — ak user vlastní workspace s INÝMI členmi,
+//      nepovolíme mazanie kým neprevedie vlastníctvo na manažéra. Bez tohto
+//      by sa stratila celá tímová práca pri delete-e jediného Vlastníka.
+//      Workspaces kde je sole member — bezpečne zmazané.
+//
+//   3. CASCADE DELETE — atomicky:
+//      - Workspaces (sole-member only) + ich Tasks, Contacts, Messages, Pages
+//      - WorkspaceMember záznamy v cudzích workspaces
+//      - Notifications adresované userovi
+//      - APNs/FCM device tokens, PushSubscriptions (web push)
+//      - Invitations (sent + received)
+//      - User document
+//
+//   4. ANONYMIZE refs v cudzích workspaces — Messages, Tasks, Contacts ktoré
+//      user vytvoril v iných workspaces sa NEzmažu (patrí to tímu), ale
+//      `userId` reference ostane orphan. FE handluje "Zmazaný používateľ"
+//      gracefully cez null-check pri populate-e.
+//
+//   5. AUDIT LOG — záznam o delete-e s userId (pre forenzné pátranie ak by
+//      sa neskôr objavili problémy "moje dáta zmizli"). User už neexistuje,
+//      ale audit log si zachová username + email pre dohľadanie.
+//
+// Po delete-e klient musí zmazať lokálny token (frontend sa o to postará).
+// ─────────────────────────────────────────────────────────────────────────
+
+router.delete('/account', authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  let user; // declared outside try aby bol dostupný v catch pre audit log
+
+  try {
+    const { confirm, password } = req.body || {};
+
+    // Anti-fat-fingers — explicit confirmation string
+    if (confirm !== 'DELETE') {
+      return res.status(400).json({
+        message: 'Pre potvrdenie zmazania účtu pošli { confirm: "DELETE" } v tele requestu.'
+      });
+    }
+
+    user = await User.findById(userId);
+    if (!user) {
+      // Token je validný ale user už neexistuje — vraciame 404, klient si zmaže token
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
+    }
+
+    // Super-admin nesmie mazať vlastný účet cez tento endpoint
+    if (user.email === 'support@prplcrm.eu') {
+      return res.status(403).json({ message: 'Super-admin účet nemožno zmazať týmto spôsobom.' });
+    }
+
+    // Pre password-only userov vyžadujeme heslo aby sme zabránili
+    // ukradnutý-token-driven destruction. OAuth-only useri (googleId/appleId
+    // bez password) prechádzajú bez heslo-kontroly — token na sebe je dôkaz
+    // že user prešiel OAuth flow (ekvivalent re-autentifikácie).
+    if (user.password) {
+      if (!password || typeof password !== 'string') {
+        return res.status(400).json({ message: 'Pre potvrdenie zadajte heslo.' });
+      }
+      const passwordOk = await bcrypt.compare(password, user.password);
+      if (!passwordOk) {
+        logger.warn('account-delete: wrong password', { userId, ip: req.ip });
+        return res.status(400).json({ message: 'Nesprávne heslo.' });
+      }
+    }
+
+    // ── 1) Workspace ownership check ──
+    const Workspace = require('../models/Workspace');
+    const WorkspaceMember = require('../models/WorkspaceMember');
+
+    const ownedWorkspaces = await Workspace.find({ ownerId: userId });
+    const blockingWorkspaces = []; // workspaces s inými členmi — blokujú delete
+
+    for (const ws of ownedWorkspaces) {
+      const otherMembers = await WorkspaceMember.countDocuments({
+        workspaceId: ws._id,
+        userId: { $ne: userId }
+      });
+      if (otherMembers > 0) {
+        blockingWorkspaces.push({ id: ws._id.toString(), name: ws.name, otherMembers });
+      }
+    }
+
+    if (blockingWorkspaces.length > 0) {
+      return res.status(409).json({
+        message: 'Pred zmazaním účtu musíte previesť vlastníctvo workspace-ov, ktoré majú ďalších členov, alebo z nich odstrániť všetkých členov.',
+        blockingWorkspaces
+      });
+    }
+
+    // ── 2) Cascade delete sole-owned workspaces (a ich obsah) ──
+    const Task = require('../models/Task');
+    const Contact = require('../models/Contact');
+    const Message = require('../models/Message');
+    const Page = require('../models/Page');
+    const Notification = require('../models/Notification');
+    const Invitation = require('../models/Invitation');
+    const APNsDevice = require('../models/APNsDevice');
+    const FcmDevice = require('../models/FcmDevice');
+    const PushSubscription = require('../models/PushSubscription');
+
+    const soleWorkspaceIds = ownedWorkspaces.map(ws => ws._id);
+
+    if (soleWorkspaceIds.length > 0) {
+      await Promise.all([
+        Task.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Contact.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Message.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Page.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Notification.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Invitation.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        WorkspaceMember.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+        Workspace.deleteMany({ _id: { $in: soleWorkspaceIds } })
+      ]);
+    }
+
+    // ── 3) Cleanup user-specific data v ostatných workspaces ──
+    await Promise.all([
+      // Memberships v cudzích workspaces (kde user nie je owner)
+      WorkspaceMember.deleteMany({ userId }),
+      // Notifications adresované userovi (vo všetkých workspaces)
+      Notification.deleteMany({ userId }),
+      // Push device tokens
+      APNsDevice.deleteMany({ userId }),
+      FcmDevice.deleteMany({ userId }),
+      PushSubscription.deleteMany({ userId }),
+      // Invitations sent BY userovi alebo TO userovmu emailu
+      Invitation.deleteMany({ $or: [{ invitedBy: userId }, { email: user.email }] })
+    ]);
+
+    // POZN: Tasks/Contacts/Messages ktoré user vytvoril v cudzích workspaces
+    // NEMAŽEME — patria tímu. FE handluje orphan userId references gracefully
+    // (zobrazí "[Zmazaný používateľ]" pri populate null).
+
+    // ── 4) Audit log PRED delete-om user dokumentu ──
+    // Audit log si zapamätá username + email aj keď user record už neexistuje.
+    auditService.logAction({
+      userId: userId.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.account-deleted',
+      category: 'auth',
+      targetType: 'user',
+      targetId: userId.toString(),
+      targetName: user.username,
+      details: {
+        deletedWorkspaces: soleWorkspaceIds.length,
+        ownedWorkspaceIds: soleWorkspaceIds.map(id => id.toString())
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
+
+    // ── 5) Final delete user document ──
+    await User.findByIdAndDelete(userId);
+
+    logger.info('Account deleted by user', {
+      userId,
+      username: user.username,
+      email: user.email,
+      deletedWorkspaces: soleWorkspaceIds.length
+    });
+
+    return res.json({
+      message: 'Tvoj účet a všetky pripojené dáta boli úspešne zmazané. Ďakujeme, že si používal Prpl CRM.'
+    });
+  } catch (error) {
+    logger.error('Account deletion error', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id
+    });
+    return res.status(500).json({ message: 'Chyba pri mazaní účtu. Skús znova alebo kontaktuj support@prplcrm.eu.' });
+  }
+});
+
 // Get all users in current workspace (for sharing/assignment)
 // CRITICAL: `role` MUSÍ byť workspace-scoped (WorkspaceMember.role), NIKDY globálne
 // User.role — inak sa pri picker-i používateľov v jednom workspace zobrazí rola

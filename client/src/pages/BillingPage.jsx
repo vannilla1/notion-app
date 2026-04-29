@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -7,8 +7,17 @@ import UserMenu from '../components/UserMenu';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import { isIosNativeApp } from '../utils/platform';
 
 function BillingPage() {
+  // iOS guard — Apple Guideline 3.1.1: žiadne external payment mechanisms (Stripe
+  // Checkout/Portal, promo kódy) pre digital subscriptions v iOS appke. Aj keď je
+  // tento komponent normálne nedosiahnuteľný cez App.jsx route guard, túto
+  // poistku držíme pre prípad deep-link / direct navigation. Redirect na /app
+  // (defaultný authenticated landing).
+  if (isIosNativeApp()) {
+    return <Navigate to="/app" replace />;
+  }
   const { user, logout, updateUser } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();

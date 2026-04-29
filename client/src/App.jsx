@@ -474,7 +474,11 @@ function AppContent() {
         />
         <Route
           path="/app/billing"
-          element={isAuthenticated ? <BillingPage /> : <Navigate to="/login" />}
+          element={
+            isAuthenticated
+              ? (isIosNativeApp() ? <Navigate to="/app" replace /> : <BillingPage />)
+              : <Navigate to="/login" />
+          }
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />

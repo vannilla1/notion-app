@@ -6,7 +6,7 @@ import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import NotificationPreferences from './NotificationPreferences';
 import ConnectedAccounts from './ConnectedAccounts';
-import { isMobileDevice } from '../utils/platform';
+import { isMobileDevice, isIosNativeApp } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId, getStoredWorkspaceId } from '../utils/workspaceStorage';
@@ -79,6 +79,14 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [creatingWorkspaceSubmitting, setCreatingWorkspaceSubmitting] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [showProfile, setShowProfile] = useState(false);
+  // Delete account flow — Apple Guideline 5.1.1(v) compliance.
+  // Otvorí sa cez tlačítko v profile modal, vyžaduje confirm: "DELETE" + heslo
+  // (pre password userov), volá DELETE /api/auth/account, potom logout.
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [showConnectedAccounts, setShowConnectedAccounts] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
@@ -1134,6 +1142,59 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'
   ];
 
+  // ─── Delete Account flow (Apple Guideline 5.1.1(v)) ───
+  const handleOpenDeleteConfirm = () => {
+    setDeleteConfirmText('');
+    setDeletePassword('');
+    setDeleteError('');
+    setShowDeleteConfirm(true);
+  };
+
+  const handleCloseDeleteConfirm = () => {
+    if (deleting) return; // Prevent close počas pending request
+    setShowDeleteConfirm(false);
+    setDeleteConfirmText('');
+    setDeletePassword('');
+    setDeleteError('');
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteError('');
+    if (deleteConfirmText !== 'DELETE') {
+      setDeleteError('Pre potvrdenie napíš presne DELETE (veľkými písmenami).');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await axios.delete(`${API_BASE_URL}/api/auth/account`, {
+        headers: authHeaders(),
+        data: {
+          confirm: 'DELETE',
+          password: deletePassword || undefined
+        }
+      });
+      // Úspech — okamžite logout. Backend zmazal user record + dáta;
+      // lokálny token už nie je platný. onLogout zmaže storage + presmeruje
+      // na /login (alebo landing page).
+      if (onLogout) onLogout();
+      else window.location.assign('/login');
+    } catch (err) {
+      const status = err?.response?.status;
+      const data = err?.response?.data;
+      if (status === 409 && data?.blockingWorkspaces) {
+        // Workspace ownership conflict — povinné transferovať vlastníctvo prv.
+        const wsList = data.blockingWorkspaces.map(ws => `• ${ws.name} (${ws.otherMembers} členov)`).join('\n');
+        setDeleteError(
+          'Pred zmazaním účtu musíš previesť vlastníctvo týchto workspace-ov ' +
+          'alebo z nich odstrániť všetkých členov:\n\n' + wsList
+        );
+      } else {
+        setDeleteError(data?.message || 'Chyba pri mazaní účtu. Skús znova alebo kontaktuj support.');
+      }
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="user-menu" ref={menuRef}>
       <button
@@ -1339,10 +1400,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">👥</span>
             Správa tímu
           </button>
-          <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
-            <span className="menu-icon">💳</span>
-            Predplatné
-          </button>
+          {/*
+            Predplatné položka skrytá v iOS native appke kvôli Apple Guideline 3.1.1.
+            Apple nedovolí externé payment mechanisms (Stripe Checkout, Stripe Portal,
+            promo kódy) pre digital subscriptions konzumované v iOS appke. User v iOS
+            appke spravuje plán cez webovú verziu na prplcrm.eu.
+          */}
+          {!isIosNativeApp() && (
+            <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
+              <span className="menu-icon">💳</span>
+              Predplatné
+            </button>
+          )}
           <div className="user-menu-divider"></div>
           <button className="user-menu-item logout" onClick={onLogout}>
             <span className="menu-icon">🚪</span>
@@ -1462,6 +1531,36 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                   </button>
                   <button className="btn btn-secondary" onClick={handleCloseProfile}>
                     Zavrieť
+                  </button>
+                </div>
+
+                {/*
+                  Account deletion section — Apple App Store Guideline 5.1.1(v)
+                  vyžaduje aby apps s account creation poskytli aj in-app
+                  account deletion. Sekcia je vizuálne oddelená a označená
+                  ako danger zone aby user neklikol omylom.
+                */}
+                <div
+                  style={{
+                    marginTop: '32px',
+                    paddingTop: '24px',
+                    borderTop: '1px solid #fecaca'
+                  }}
+                >
+                  <h3 style={{ color: '#dc2626', fontSize: '15px', margin: '0 0 8px' }}>
+                    Zmazanie účtu
+                  </h3>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
+                    Trvalé zmazanie tvojho účtu a všetkých dát (kontakty, projekty, úlohy,
+                    správy, súbory). Túto akciu <strong>nemožno vrátiť späť</strong>.
+                    Ak vlastníš workspace s ďalšími členmi, najprv preveď vlastníctvo.
+                  </p>
+                  <button
+                    className="btn btn-danger"
+                    onClick={handleOpenDeleteConfirm}
+                    style={{ fontSize: '13px' }}
+                  >
+                    Zmazať účet trvalo
                   </button>
                 </div>
               </div>
@@ -2068,6 +2167,116 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
         open={showConnectedAccounts}
         onClose={() => setShowConnectedAccounts(false)}
       />
+
+      {/*
+        Delete Account confirmation modal — Apple Guideline 5.1.1(v).
+        Vyžaduje typed "DELETE" + heslo (pre password userov). Bez password fieldu
+        pre OAuth-only userov — JWT token je dôkaz autorizácie.
+      */}
+      {showDeleteConfirm && (
+        <div className="modal-overlay" onClick={handleCloseDeleteConfirm}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '480px' }}
+          >
+            <div className="modal-header">
+              <h2 style={{ color: '#dc2626' }}>Zmazať účet trvalo</h2>
+              <button className="modal-close" onClick={handleCloseDeleteConfirm}>×</button>
+            </div>
+
+            <div style={{ padding: '0 4px' }}>
+              <p style={{ fontSize: '14px', lineHeight: 1.6, marginTop: 0 }}>
+                <strong>Túto akciu nemožno vrátiť späť.</strong>
+              </p>
+              <p style={{ fontSize: '14px', lineHeight: 1.6, color: '#475569' }}>
+                Tvoj účet a všetky súvisiace dáta budú trvalo zmazané:
+              </p>
+              <ul style={{ fontSize: '13px', color: '#475569', lineHeight: 1.7, marginTop: '4px' }}>
+                <li>Profil a osobné nastavenia</li>
+                <li>Kontakty, projekty a úlohy v tvojich workspace-och</li>
+                <li>Správy a komentáre</li>
+                <li>Nahrané súbory a fotky</li>
+                <li>Push notifikácie a história</li>
+              </ul>
+
+              <div className="form-group" style={{ marginTop: '20px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                  Pre potvrdenie napíš <code style={{ background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>DELETE</code>
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="form-input"
+                  placeholder="DELETE"
+                  autoComplete="off"
+                  disabled={deleting}
+                />
+              </div>
+
+              {/*
+                Password input zobrazíme len pre password userov. OAuth-only useri
+                (googleId/appleId without password) ho preskočia — backend toleruje
+                undefined password pri OAuth-only accounts.
+              */}
+              {profile && profile.email && profile.email !== 'support@prplcrm.eu' && (
+                <div className="form-group" style={{ marginTop: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                    Heslo (ak máš nastavené)
+                  </label>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    className="form-input"
+                    placeholder="Tvoje aktuálne heslo"
+                    autoComplete="current-password"
+                    disabled={deleting}
+                  />
+                  <p style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                    Ak si sa registroval iba cez Google/Apple, nechaj prázdne.
+                  </p>
+                </div>
+              )}
+
+              {deleteError && (
+                <div
+                  className="form-error"
+                  style={{
+                    marginTop: '12px',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: '13px',
+                    color: '#dc2626',
+                    background: '#fee2e2',
+                    padding: '10px 12px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleCloseDeleteConfirm}
+                  disabled={deleting}
+                >
+                  Zrušiť
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleConfirmDelete}
+                  disabled={deleting || deleteConfirmText !== 'DELETE'}
+                >
+                  {deleting ? 'Mažem...' : 'Zmazať účet trvalo'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
