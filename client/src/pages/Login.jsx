@@ -30,22 +30,55 @@ function Login() {
 
   const inviteToken = searchParams.get('invite');
 
-  // iOS WKWebView keyboard fix: keď sa user dotkne inputu, vysunie sa klávesnica
-  // a pôvodne mohla skryť spodný field (heslo). 100dvh + auto-margin v CSS to
-  // rieši na úrovni layoutu, ale scrollIntoView je poistka pre prípady keď
-  // dvh nezareaguje včas (staršie iOS) alebo keď je viewport focusu na okraji.
-  // Delay 300ms čaká na animáciu vysunutia klávesnice.
+  // iOS WKWebView keyboard handling — multi-vrstvová stratégia (CSS + JS):
+  //
+  // 1. CSS layer:
+  //    - viewport meta `interactive-widget=resizes-content` zmenší layout viewport
+  //      keď sa vysunie kbd (iOS 16+ default)
+  //    - `100dvh` + auto-margin centering scrolluje keď karta nezmestí
+  //    - `@media (max-height: 760px)` kompaktný režim — menšie paddingy/fonty
+  //      aby sa celá karta vrátane Register buttonu zmestila nad kbd
+  //
+  // 2. JS layer (tu) — poistka pre case keď CSS nezareaguje včas alebo keď
+  //    aktívny field je tesne pri okraji viewportu:
+  //    a) Po focuse INPUT-u → scrollIntoView na samotný input (centruje ho)
+  //    b) Pri poslednom inpute (password) navyše scrollneme submit BUTTON do view
+  //       — užívateľ typeuje heslo a hneď vidí kam má kliknúť (Apple review demo
+  //       musí byť bez manuálneho scrollu pre clean video)
+  //
+  //    Delay 300ms čaká na animáciu vysunutia kbd. Druhý 200ms delay zaručí
+  //    že prvý scroll dokončí pred druhým (iOS smooth-scroll je sekvenčný).
   useEffect(() => {
     const handleFocus = (e) => {
       const tag = e.target?.tagName;
       if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+
       setTimeout(() => {
         try {
           e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch {
-          // older browsers without smooth-scroll fallback
           e.target.scrollIntoView();
         }
+
+        // Ak je toto posledný input vo formulári, ešte scrollneme aj submit
+        // button do viditeľnej oblasti — aby user vedel kam má kliknúť bez
+        // nutnosti manuálne scrollovať.
+        const form = e.target.closest('form');
+        if (!form) return;
+        const inputs = form.querySelectorAll('input, textarea');
+        const isLast = inputs[inputs.length - 1] === e.target;
+        if (!isLast) return;
+
+        setTimeout(() => {
+          const submitBtn = form.querySelector('button[type="submit"]');
+          if (submitBtn) {
+            try {
+              submitBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch {
+              submitBtn.scrollIntoView();
+            }
+          }
+        }, 200);
       }, 300);
     };
     document.addEventListener('focusin', handleFocus);

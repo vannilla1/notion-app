@@ -48,7 +48,12 @@
         } catch (e) {}
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      interactive-widget=resizes-content: keď iOS vysunie klávesnicu, layout viewport
+      (jednotky vh/vw) sa zmenší — bez tohto sa pri 100vh karta prekryje s kbd. Spolu
+      s `min-height: 100dvh` v CSS to zaručí že login form sa kompletne zmestí nad kbd.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 
     <!-- Google Search Console Verification -->
     <meta name="google-site-verification" content="rgBidA9aa5uXQi_TzcdfD-iOa6xRwa1vsXqZhUul_4A" />
@@ -292,10 +297,10 @@
       "description": "Moderny slovensky CRM system pre spravu kontaktov, projektov a timovej spoluprace."
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-D3FWPvYF.js"></script>
+    <script type="module" crossorigin src="/assets/index-BMK651VG.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-vendor-Cj9ot0au.js">
     <link rel="modulepreload" crossorigin href="/assets/socket-XvGWOZWK.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-C6XORvlc.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-Cp9Og5G2.css">
   <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
     <div id="root"></div>

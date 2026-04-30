@@ -2728,6 +2728,66 @@ body {
   }
 }
 
+/*
+ * Compact login mode — keď je dostupná výška malá (typicky keď iOS klávesnica
+ * vysunutá pri registrácii s 3 inputmi). Cieľ: celá karta + Register button
+ * musí byť viditeľná nad kbd bez nutnosti scrollovať. Critical pre Apple
+ * review video kvalitu (5.1.1(v) account deletion demo začína registráciou).
+ *
+ * Threshold 760px pokrýva: iPhone (~700px viewport pri kbd up), iPad portrait
+ * a landscape (~600-800px), aj malé Android zariadenia.
+ */
+@media (max-height: 760px) {
+  .login-container {
+    padding: 12px;
+  }
+
+  .login-card {
+    padding: 24px 24px;
+    animation: none; /* slideUp animácia pri každom dvh resize ruší — vypnúť */
+  }
+
+  .login-logo {
+    margin-bottom: 12px;
+  }
+
+  .login-logo img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .login-title {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+
+  .login-subtitle {
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+
+  .form-group {
+    margin-bottom: 10px;
+  }
+
+  .form-input {
+    padding: 10px 12px;
+  }
+
+  .login-card .btn {
+    padding: 10px 16px;
+  }
+
+  /*
+   * T&C disclaimer + login footer schované pri kompaktnom režime — užívateľ
+   * tieto texty needitovateľne nepotrebuje vidieť počas typovania. Po
+   * dokončení registrácie keď kbd zmizne sa všetko vráti na full layout.
+   */
+  .login-card form > p:last-child {
+    display: none;
+  }
+}
+
 /* Landscape orientation on mobile */
 @media (max-height: 500px) and (orientation: landscape) {
   .crm-header {

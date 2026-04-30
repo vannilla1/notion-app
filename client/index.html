@@ -48,7 +48,12 @@
         } catch (e) {}
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      interactive-widget=resizes-content: keď iOS vysunie klávesnicu, layout viewport
+      (jednotky vh/vw) sa zmenší — bez tohto sa pri 100vh karta prekryje s kbd. Spolu
+      s `min-height: 100dvh` v CSS to zaručí že login form sa kompletne zmestí nad kbd.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 
     <!-- Google Search Console Verification -->
     <meta name="google-site-verification" content="rgBidA9aa5uXQi_TzcdfD-iOa6xRwa1vsXqZhUul_4A" />
