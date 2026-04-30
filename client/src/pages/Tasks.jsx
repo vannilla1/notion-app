@@ -1856,59 +1856,6 @@ function Tasks() {
                   Zrušiť
                 </button>
               </form>
-              {showSubtaskDateInput[subtask.id] && (
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <DateInput
-                    value={subtaskDueDates[subtask.id] || ''}
-                    onChange={(val) => {
-                      setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
-                      if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
-                    }}
-                    className="form-input-sm"
-                    style={{ flex: 2 }}
-                    autoFocus
-                  />
-                  <TimeInput
-                    value={subtaskDueTimes[subtask.id] || ''}
-                    onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
-                    disabled={!subtaskDueDates[subtask.id]}
-                    className="form-input-sm"
-                    style={{ flex: 1 }}
-                  />
-                </div>
-              )}
-              {showSubtaskNotesInput[subtask.id] && (
-                <textarea
-                  value={subtaskNotes[subtask.id] || ''}
-                  onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Poznámka k úlohe..."
-                  className="form-input form-input-sm subtask-notes-input"
-                  rows={2}
-                />
-              )}
-              {showSubtaskAssignInput[subtask.id] && (
-                <div className="multi-select-users compact">
-                  {users.map(u => (
-                    <label key={u.id} className="subtask-user-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={(subtaskAssignedTo[subtask.id] || []).includes(u.id)}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setSubtaskAssignedTo(prev => ({
-                            ...prev,
-                            [subtask.id]: checked
-                              ? [...(prev[subtask.id] || []), u.id]
-                              : (prev[subtask.id] || []).filter(id => id !== u.id)
-                          }));
-                        }}
-                      />
-                      <span className="user-avatar-small" style={{ backgroundColor: u.color }}>{u.username.charAt(0).toUpperCase()}</span>
-                      <span>{u.username}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
