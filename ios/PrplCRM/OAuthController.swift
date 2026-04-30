@@ -267,7 +267,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
         // vidí konkrétnu príčinu (napr. error code 1000 = chýba entitlement),
         // user vidí menej technický popis. Bez týchto detailov sa rejection 2.1(a)
         // ťažko diagnostikuje — Apple len napíše "still got an error" bez specifik.
-        let humanReadable = OAuthController.appleSignInErrorMessage(for: nsErr)
+        let humanReadable = AppleSignInController.appleSignInErrorMessage(for: nsErr)
         print("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
 
         OAuthController.showAlert(in: presentingWindow,
