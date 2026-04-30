@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -29,6 +29,28 @@ function Login() {
   const [loading, setLoading] = useState(false);
 
   const inviteToken = searchParams.get('invite');
+
+  // iOS WKWebView keyboard fix: keď sa user dotkne inputu, vysunie sa klávesnica
+  // a pôvodne mohla skryť spodný field (heslo). 100dvh + auto-margin v CSS to
+  // rieši na úrovni layoutu, ale scrollIntoView je poistka pre prípady keď
+  // dvh nezareaguje včas (staršie iOS) alebo keď je viewport focusu na okraji.
+  // Delay 300ms čaká na animáciu vysunutia klávesnice.
+  useEffect(() => {
+    const handleFocus = (e) => {
+      const tag = e.target?.tagName;
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+      setTimeout(() => {
+        try {
+          e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {
+          // older browsers without smooth-scroll fallback
+          e.target.scrollIntoView();
+        }
+      }, 300);
+    };
+    document.addEventListener('focusin', handleFocus);
+    return () => document.removeEventListener('focusin', handleFocus);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

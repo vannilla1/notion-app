@@ -329,11 +329,22 @@ body {
 }
 
 /* Login Page */
+/*
+ * Layout note: používame `flex-direction: column` + `margin: auto` na karte
+ * (auto-margin scroll-safe centering pattern). Keď karta zmestí do viewportu,
+ * je vertikálne vycentrovaná. Keď je vyššia ako viewport (napr. keď je
+ * vysunutá klávesnica na iOS), `margin: auto` degraduje na 0 a obsah sa dá
+ * normálne scrollovať. Pôvodné `align-items: center` to nedovolilo — spodok
+ * formulára sa skrýval za klávesnicou bez možnosti scrollu.
+ *
+ * `100dvh` (dynamic viewport height) automaticky zmenší výšku keď iOS
+ * vysunie klávesnicu. `100vh` je fallback pre staršie WKWebView.
+ */
 .login-container {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
 }
@@ -345,6 +356,7 @@ body {
   box-shadow: var(--shadow-xl);
   width: 100%;
   max-width: 420px;
+  margin: auto;
   animation: slideUp 0.4s ease;
 }
 
