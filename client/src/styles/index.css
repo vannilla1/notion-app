@@ -3441,12 +3441,23 @@ body.modal-open {
     -webkit-overflow-scrolling: touch;
   }
 
+  /*
+   * Profile modal max-height musí počítať s fixed bottom-nav (~64px) + safe area,
+   * inak danger-zone "Zmazať účet natrvalo" tlačidlo zmizne za navigation tabs.
+   * 64px = výška bottom-nav (4px top padding + 32px icon + label + 4px bottom padding ~= 64).
+   */
   .modal-content.profile-modal {
-    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 10px)) - max(20px, env(safe-area-inset-bottom, 10px)));
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 10px)) - 64px - env(safe-area-inset-bottom, 0px) - 20px);
   }
 
   .profile-content {
     padding: 16px;
+    /*
+     * Extra padding-bottom pre danger-zone clearance. Aj keď max-height je orezaná
+     * tak že bottom-nav nezakrýva modal, tento padding zaručí že posledný button
+     * (Zmazať účet natrvalo) má vizuálny breathing room pri scrolle dolu.
+     */
+    padding-bottom: 32px;
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
@@ -7954,7 +7965,8 @@ body.ios-app {
   }
 
   .profile-modal .profile-content {
-    padding: 12px 16px;
+    /* padding-bottom má clearance pre Zmazať účet natrvalo button nad bottom-nav */
+    padding: 12px 16px 32px;
   }
 
   .profile-modal .profile-avatar-section {

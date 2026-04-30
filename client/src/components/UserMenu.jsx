@@ -1539,8 +1539,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                   vyžaduje aby apps s account creation poskytli aj in-app
                   account deletion. Sekcia je vizuálne oddelená a označená
                   ako danger zone aby user neklikol omylom.
+
+                  paddingBottom má clearance pre fixed bottom-nav na mobile
+                  (~64px + safe-area-inset-bottom). Bez toho sa Zmazať tlačidlo
+                  prekrývalo s navigation tabs.
                 */}
                 <div
+                  className="profile-danger-zone"
                   style={{
                     marginTop: '32px',
                     paddingTop: '24px',
@@ -1560,7 +1565,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                     onClick={handleOpenDeleteConfirm}
                     style={{ fontSize: '13px' }}
                   >
-                    Zmazať účet trvalo
+                    Zmazať účet natrvalo
                   </button>
                 </div>
               </div>
@@ -2181,7 +2186,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             style={{ maxWidth: '480px' }}
           >
             <div className="modal-header">
-              <h2 style={{ color: '#dc2626' }}>Zmazať účet trvalo</h2>
+              <h2 style={{ color: '#dc2626' }}>Zmazať účet natrvalo</h2>
               <button className="modal-close" onClick={handleCloseDeleteConfirm}>×</button>
             </div>
 
@@ -2270,7 +2275,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                   onClick={handleConfirmDelete}
                   disabled={deleting || deleteConfirmText !== 'DELETE'}
                 >
-                  {deleting ? 'Mažem...' : 'Zmazať účet trvalo'}
+                  {deleting ? 'Mažem...' : 'Zmazať účet natrvalo'}
                 </button>
               </div>
             </div>
