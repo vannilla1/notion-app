@@ -1768,7 +1768,6 @@ function Tasks() {
                       }}
                       className="form-input-sm"
                       style={{ flex: 2 }}
-                      autoFocus
                     />
                     <TimeInput
                       value={subtaskDueTimes[subtask.id] || ''}
@@ -2969,7 +2968,6 @@ function Tasks() {
                                         }}
                                         className="form-input-sm"
                                         style={{ flex: 2 }}
-                                        autoFocus
                                       />
                                       <TimeInput
                                         value={subtaskDueTimes[task.id] || ''}
