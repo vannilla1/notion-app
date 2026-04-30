@@ -153,6 +153,13 @@ function Login() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Zadajte používateľské meno"
+                /*
+                 * name="username" + autocomplete="username" je hard signal pre iOS
+                 * Password AutoFill že toto je account-name field. Bez `name` iOS
+                 * heuristika niekedy nezistí kontext registrácie a neponúkne
+                 * Strong Password generator. Dôležité pre čistý Apple review demo.
+                 */
+                name="username"
                 autoComplete="username"
                 required
               />
@@ -167,6 +174,7 @@ function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Zadajte email"
+              name="email"
               autoComplete="email"
               required
             />
@@ -180,6 +188,12 @@ function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={isRegister ? 'Min. 8 znakov, písmeno + číslo' : 'Zadajte heslo'}
+              /*
+               * name + autocomplete combo signalizuje iOS Keychain či je toto
+               * registrácia (new-password) alebo prihlásenie (current-password).
+               * Spolu s `passwordrules` triggeruje Strong Password generátor.
+               */
+              name={isRegister ? 'new-password' : 'current-password'}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
               /*
                * passwordrules — Apple Password AutoFill API. Triggeruje "Use Strong Password"
