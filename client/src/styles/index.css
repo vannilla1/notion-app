@@ -330,21 +330,27 @@ body {
 
 /* Login Page */
 /*
- * Layout note: používame `flex-direction: column` + `margin: auto` na karte
- * (auto-margin scroll-safe centering pattern). Keď karta zmestí do viewportu,
- * je vertikálne vycentrovaná. Keď je vyššia ako viewport (napr. keď je
- * vysunutá klávesnica na iOS), `margin: auto` degraduje na 0 a obsah sa dá
- * normálne scrollovať. Pôvodné `align-items: center` to nedovolilo — spodok
- * formulára sa skrýval za klávesnicou bez možnosti scrollu.
+ * Layout pattern: container je sám scrollable (height + overflow-y: auto),
+ * NIE body. Toto je nutné pretože iOS WKWebView v PWA mode niekedy nepustí
+ * body scroll keď je vysunutá klávesnica, aj keď content overflowuje viewport.
+ * Container so svojím vlastným overflow scrollom to garantuje.
  *
- * `100dvh` (dynamic viewport height) automaticky zmenší výšku keď iOS
- * vysunie klávesnicu. `100vh` je fallback pre staršie WKWebView.
+ * - `height: 100dvh` — dynamic viewport, zmenší sa pri kbd up
+ * - `overflow-y: auto` — vnútorný scroll keď karta nezmestí (registrácia +
+ *   OAuth buttony + footer)
+ * - `-webkit-overflow-scrolling: touch` — momentum scroll na iOS
+ * - `margin: auto` na karte + `flex-shrink: 0` — karta vycentrovaná keď zmestí,
+ *   inak top-aligned a container scrolluje
+ *
+ * 100vh je fallback pre staršie WKWebView (< iOS 15.4) ktoré nemajú dvh.
  */
 .login-container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
 }
@@ -357,6 +363,7 @@ body {
   width: 100%;
   max-width: 420px;
   margin: auto;
+  flex-shrink: 0;
   animation: slideUp 0.4s ease;
 }
 
@@ -2779,12 +2786,14 @@ body {
   }
 
   /*
-   * T&C disclaimer + login footer schované pri kompaktnom režime — užívateľ
-   * tieto texty needitovateľne nepotrebuje vidieť počas typovania. Po
-   * dokončení registrácie keď kbd zmizne sa všetko vráti na full layout.
+   * T&C disclaimer ostáva viditeľný — container má overflow-y: auto, takže
+   * user si vie scrollnúť na T&C aj OAuth buttony aj footer. Apple compliance
+   * (5.1.1(v) — privacy/terms musia byť discoverable počas signup).
+   * Tighter margin len.
    */
   .login-card form > p:last-child {
-    display: none;
+    margin-top: 8px !important;
+    font-size: 11px !important;
   }
 }
 
