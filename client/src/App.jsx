@@ -439,7 +439,14 @@ function AppContent() {
       <RouteErrorBoundary>
       <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/"
+          element={
+            isIosNativeApp()
+              ? <Navigate to={isAuthenticated ? '/app' : '/login'} replace />
+              : <LandingPage />
+          }
+        />
         <Route
           path="/login"
           element={isAuthenticated ? <Navigate to="/app" /> : <Login />}
