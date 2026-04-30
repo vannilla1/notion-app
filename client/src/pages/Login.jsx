@@ -179,10 +179,39 @@ function Login() {
               className="form-input"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Zadajte heslo"
+              placeholder={isRegister ? 'Min. 8 znakov, písmeno + číslo' : 'Zadajte heslo'}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
+              /*
+               * passwordrules — Apple Password AutoFill API. Triggeruje "Use Strong Password"
+               * v iOS Keychaine pri registrácii (autocomplete=new-password). iOS vygeneruje
+               * heslo zodpovedajúce týmto pravidlám. Android Chrome Password Generator tiež
+               * rešpektuje minlength. Bez tohoto atribútu iOS niekedy nevie že je to nový
+               * účet a ponúka len existujúce uložené heslá namiesto generovania nového.
+               *
+               * Naša backend policy: min 8, ≥1 písmeno, ≥1 číslo alebo špec. znak, HIBP check.
+               * `required: lower; required: digit` zaručí že vygenerované heslo prejde policy.
+               * `allowed: ascii-printable` dovolí špec. znaky pre vyššiu entropiu.
+               *
+               * Ref: https://developer.apple.com/password-rules/
+               */
+              passwordrules={isRegister ? 'minlength: 8; maxlength: 128; required: lower; required: digit; allowed: ascii-printable;' : undefined}
+              minLength={isRegister ? 8 : undefined}
               required
             />
+            {isRegister && (
+              <p
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-muted, #64748b)',
+                  margin: '6px 2px 0',
+                  lineHeight: 1.4
+                }}
+              >
+                Heslo musí obsahovať minimálne <strong>8 znakov</strong>, aspoň jedno{' '}
+                <strong>písmeno</strong> a aspoň jedno <strong>číslo</strong> alebo{' '}
+                <strong>špeciálny znak</strong>. iOS aj Android vám môžu vygenerovať silné heslo automaticky.
+              </p>
+            )}
           </div>
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
