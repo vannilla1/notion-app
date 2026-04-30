@@ -257,14 +257,44 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
     func authorizationController(controller: ASAuthorizationController,
                                  didCompleteWithError error: Error) {
         defer { cleanup() }
+        let nsErr = error as NSError
         // User cancel je ASAuthorizationError.canceled — ticho ignorujeme.
-        if (error as NSError).code == ASAuthorizationError.canceled.rawValue {
+        if nsErr.code == ASAuthorizationError.canceled.rawValue {
             return
         }
-        print("[AppleSignIn] Authorization error: \(error.localizedDescription)")
+
+        // Diagnostické info pre Apple review tím a pre nás samotných. Apple reviewer
+        // vidí konkrétnu príčinu (napr. error code 1000 = chýba entitlement),
+        // user vidí menej technický popis. Bez týchto detailov sa rejection 2.1(a)
+        // ťažko diagnostikuje — Apple len napíše "still got an error" bez specifik.
+        let humanReadable = OAuthController.appleSignInErrorMessage(for: nsErr)
+        print("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
+
         OAuthController.showAlert(in: presentingWindow,
-            title: "Apple prihlásenie",
-            message: "Prihlásenie sa nepodarilo. Skús to znova.")
+            title: "Apple prihlásenie zlyhalo",
+            message: humanReadable + "\n\n[Diagnostika: code=\(nsErr.code) — \(error.localizedDescription)]")
+    }
+
+    /// Mapping ASAuthorizationError kódov na user-friendly slovenské hlášky.
+    /// Najčastejšie príčiny zlyhania Sign in with Apple:
+    ///   - 1000 (unknown): chýba entitlement `com.apple.developer.applesignin`,
+    ///     alebo App ID na Apple Developer Portal nemá Sign In with Apple capability
+    ///   - 1001 (canceled): user dal cancel (handled vyššie)
+    ///   - 1002 (invalidResponse): Apple servery vrátili neočakávaný response
+    ///   - 1003 (notHandled): no controller dostupný
+    ///   - 1004 (failed): generický fail (často network alebo expired session)
+    ///   - 1005 (notInteractive): silent re-auth zlyhal
+    static func appleSignInErrorMessage(for nsErr: NSError) -> String {
+        switch nsErr.code {
+        case 1000:
+            return "Sign in with Apple nie je správne nakonfigurované pre túto aplikáciu. Kontaktujte podporu."
+        case 1002:
+            return "Server Apple vrátil neplatnú odpoveď. Skús znova o chvíľu."
+        case 1004:
+            return "Prihlásenie zlyhalo. Skontroluj internetové pripojenie a skús znova."
+        default:
+            return "Prihlásenie sa nepodarilo. Skús to znova."
+        }
     }
 
     // MARK: ASAuthorizationControllerPresentationContextProviding
