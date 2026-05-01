@@ -15,47 +15,92 @@ const dashboardHelpTips = [
   {
     icon: '👋',
     title: 'Vitajte v aplikácii',
-    description: 'Toto je váš hlavný prehľad — Dashboard. Zobrazuje súhrn všetkých vašich kontaktov, projektov a správ na jednom mieste. Nižšie nájdete vysvetlenie jednotlivých sekcií. Tento návod si môžete kedykoľvek znova otvoriť kliknutím na fialové tlačidlo "?" v pravom dolnom rohu.'
+    description: 'Toto je Dashboard — váš hlavný prehľad celej aplikácie. Vidíte tu súhrn kontaktov, projektov, dnešné termíny a posledné správy na jednom mieste. Tento návod si môžete kedykoľvek znova otvoriť kliknutím na fialové tlačidlo "?" v pravom dolnom rohu — funguje to na každej obrazovke.'
   },
   {
     icon: '📊',
     title: 'Čo znamenajú čísla hore',
-    description: 'Na vrchu stránky vidíte štatistiky — počet kontaktov, projektov a úloh. Kliknutím na akékoľvek číslo sa presmerujete na podrobný zoznam. Napríklad kliknutím na "Aktívne kontakty" sa otvorí zoznam kontaktov filtrovaný na aktívne.'
-  },
-  {
-    icon: '👥',
-    title: 'Ako fungujú kontakty',
-    description: 'Kontakty sú vaši zákazníci, klienti alebo ľudia, s ktorými pracujete. V sekcii "Kontakty" kliknite na "+ Nový kontakt" pre pridanie. Kontakty majú stavy: Nový (práve pridaný), Aktívny (pracujete s ním), Dokončený (hotový) a Zrušený. Kliknutím na kontakt v zozname rozbalíte jeho detail.'
-  },
-  {
-    icon: '✅',
-    title: 'Ako fungujú projekty a úlohy',
-    description: 'Projekty obsahujú úlohy, ktoré treba splniť. Každý projekt má prioritu (Nízka, Stredná, Vysoká) a voliteľný termín. V sekcii "Projekty" kliknite na "+ Nový projekt" pre vytvorenie. Úlohy pridáte vnútri projektu. Keď je všetko hotové, označte projekt ako dokončený.'
-  },
-  {
-    icon: '🔔',
-    title: 'Ako funguje zvonček notifikácií',
-    description: 'Vpravo hore nájdete fialový zvonček — centrum notifikácií. Červené číslo na ňom znamená počet neprečítaných upozornení. Kliknutím na zvonček sa otvorí panel s poslednými 30 notifikáciami. Neprečítané majú fialový okraj, tučný text a fialovú bodku — prečítané sú vyblednuté. Kliknutím na konkrétnu notifikáciu sa presmerujete priamo na danú zmenu (napr. komentár v správe, upravený kontakt alebo priradenú úlohu). Tlačidlo "Označiť všetky" hore v paneli označí všetky notifikácie ako prečítané naraz.'
-  },
-  {
-    icon: '✉️',
-    title: 'Ako fungujú správy',
-    description: 'Správy sú interná komunikácia vášho tímu. V bočnom paneli (vľavo na počítači, dole na mobile) vidíte prehľad správ podľa stavu. Čísla ukazujú koľko správ čaká na odpoveď, koľko bolo schválených atď. Kliknutím na číslo sa otvorí príslušný zoznam správ. Nové správy vytvoríte v sekcii "Správy".'
-  },
-  {
-    icon: '🏢',
-    title: 'Čo sú pracovné prostredia',
-    description: 'Pracovné prostredie je priestor pre váš tím — napríklad "Firemné CRM" alebo "Osobné". Každé prostredie má vlastné kontakty, projekty a správy. Na počítači prepínate prostredia cez dropdown v hlavičke. Na mobile kliknite na ikonu profilu vpravo hore a tam nájdete zoznam vašich prostredí.'
-  },
-  {
-    icon: '👤',
-    title: 'Kde nájdem nastavenia profilu',
-    description: 'Kliknite na ikonu profilu (koliesko s vašou fotkou alebo iniciálou) vpravo hore. Otvorí sa menu s možnosťami: Môj profil (zmena mena, emailu, fotky), Zmeniť heslo, Synchronizácia kalendára (prepojenie s Google), Správa tímu (pozvanie kolegov) a Predplatné (fakturácia).'
+    description: 'Na vrchu sú štatistiky: celkový počet kontaktov, aktívne kontakty, projekty a dnešné úlohy. Každé číslo je klikateľné — otvorí sa filtrovaný zoznam (napr. klik na "Aktívne kontakty" → zoznam kontaktov v stave Aktívny). Pod štatistikami sú zoznamy najdôležitejších položiek na dnes.'
   },
   {
     icon: '⚡',
     title: 'Ako sa pohybovať v aplikácii',
-    description: 'Na počítači použite tlačidlá v hlavičke: "Kontakty", "Projekty", "Správy". Na mobile (telefóne) nájdete navigáciu na spodku obrazovky — ikony pre Dashboard, Kontakty, Projekty a Správy. Číslo na ikone znamená počet neprečítaných položiek.'
+    description: 'Na počítači použite tlačidlá v hlavičke: Kontakty, Projekty, Správy. Na mobile máte navigáciu na spodku obrazovky — ikony pre Prehľad, Kontakty, Projekty a Správy. Červené číslo na ikone znamená počet neprečítaných položiek pre danú sekciu.'
+  },
+  {
+    icon: '👥',
+    title: 'Sekcia Kontakty',
+    description: 'Kontakty sú vaši zákazníci, klienti alebo ľudia s ktorými pracujete. Stavy kontaktu: Nový (práve pridaný), Aktívny (pracujete s ním), Dokončený (hotový) a Zrušený. V sekcii nájdete vyhľadávanie, filtre, formulár "+ Nový kontakt" a možnosť exportu do Excelu. Detaily si rozkliknete priamo v zozname.'
+  },
+  {
+    icon: '✅',
+    title: 'Sekcia Projekty a úlohy',
+    description: 'Projekt = väčšia jednotka práce (napr. "Renovácia kúpeľne pre p. Nováka"). V projekte máte úlohy a tie môžu mať podúlohy do ľubovoľnej hĺbky. Pri vytvorení nastavíte termín, čas, prioritu (Nízka/Stredná/Vysoká), priradíte kolegu a voliteľne pridáte poznámku. Termíny sa farebne značia: zelená > 14 dní, oranžová < 7 dní, červená = po termíne.'
+  },
+  {
+    icon: '✉️',
+    title: 'Sekcia Správy',
+    description: 'Interná komunikácia tímu. Typy: Schválenie (žltá), Informácia (modrá), Žiadosť (oranžová), Návrh (zelená) a Anketa (ružová). Príjemca môže schváliť/zamietnuť, komentovať, hlasovať v ankete. V Dashboard bočnom paneli vidíte prehľad správ podľa stavu — kliknutím na číslo sa otvorí príslušný filter v sekcii Správy.'
+  },
+  {
+    icon: '🔔',
+    title: 'Zvonček notifikácií',
+    description: 'Fialový zvonček vpravo hore = centrum notifikácií. Červené číslo = počet neprečítaných. Klik otvorí panel s poslednými 30 notifikáciami. Neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Klik na konkrétnu notifikáciu vás presmeruje priamo na zmenu (napr. nová správa, priradená úloha, dokončený projekt). Tlačidlo "Označiť všetky" označí všetky ako prečítané.'
+  },
+  {
+    icon: '🏢',
+    title: 'Pracovné prostredia (workspaces)',
+    description: 'Workspace = oddelený priestor pre tím alebo projekt (napr. "Firemné CRM", "Osobné"). Každé má vlastné kontakty, projekty, správy a členov. Na počítači ich prepínate cez dropdown v hlavičke (vedľa loga). Na mobile cez avatara → klik na názov workspace → rozbalí sa zoznam ostatných.'
+  },
+  {
+    icon: '🎯',
+    title: 'Indikátory notifikácií v zozname workspace-ov',
+    description: 'Pri každom workspace v zozname (na mobile v avatar menu, na desktope v dropdowne) vidíte malú červenú bodku alebo číslo, ak v ňom máte neprečítané notifikácie. Bold názov workspace-u tiež znamená že tam je aktivita. Vďaka tomu viete, kde sa "niečo deje" aj bez prepínania.'
+  },
+  {
+    icon: '➕',
+    title: 'Vytvorenie a zmena workspace-u',
+    description: 'V dropdowne workspace-ov (alebo v avatar menu na mobile) je tlačidlo "+ Nové prostredie". Zadajte názov a vytvorí sa. Vlastník (owner) môže workspace premenovať a zmeniť mu farebnú bodku — kliknite na farebný krúžok vedľa názvu. Pre úpravu názvu je ikona ceruzky pri aktuálnom workspace.'
+  },
+  {
+    icon: '👥',
+    title: 'Členovia, pozvánky a Správa tímu',
+    description: 'Avatar → Správa tímu otvorí stránku Členovia. Tu vidíte zoznam členov, ich roly (owner / manager / member), môžete pozývať nových cez email alebo invite link. Owner a manager môžu meniť role, odstraňovať členov a posielať pozvánky.'
+  },
+  {
+    icon: '🚪',
+    title: 'Opustiť alebo vymazať prostredie',
+    description: 'V Správa tímu nájdete dole tlačidlá. Ak nie ste owner: "🚪 Opustiť prostredie" — sami sa odstránite zo zoznamu členov. Ak ste owner: "🗑️ Vymazať prostredie" — natrvalo zmaže workspace + všetky kontakty, projekty, úlohy, správy a členstvá. Mazanie vyžaduje typed-in potvrdenie názvu workspace-u (proti náhodným klikom). Po vymazaní sa automaticky prepnete na ďalší workspace v ktorom ste.'
+  },
+  {
+    icon: '👤',
+    title: 'Avatar menu — všetky možnosti profilu',
+    description: 'Klik na vašu ikonu profilu vpravo hore otvorí menu s: Môj profil (meno, email, foto, farba), Zmeniť heslo, Pripojené účty (Google, Apple), Synchronizácia kalendára, Nastavenia notifikácií, Správa tímu, Predplatné (zmena plánu / faktúry) a Odhlásiť sa. Na mobile je tu aj zoznam workspace-ov a možnosť ich vytvorenia.'
+  },
+  {
+    icon: '🔐',
+    title: 'Pripojené účty (Google, Apple)',
+    description: 'V profilovom menu → Pripojené účty viete prepojiť svoj účet s Google alebo Apple ID. Po prepojení sa môžete prihlásiť bez hesla cez tieto služby (jedným klikom). Užitočné aj pre obnovu prístupu — ak zabudnete heslo, prihlásite sa cez Google/Apple.'
+  },
+  {
+    icon: '📅',
+    title: 'Synchronizácia s Google Calendar a Tasks',
+    description: 'Avatar → Synchronizácia kalendára. Pripojte svoj Google účet — projekty s termínmi sa automaticky prejavia v Google Calendar (samostatný kalendár "Prpl CRM — názov_workspace"), úlohy v Google Tasks. Sync je obojsmerný: zmeny v Google sa prejavia aj tu. Per-workspace toggle vám umožňuje vypnúť sync pre konkrétny workspace.'
+  },
+  {
+    icon: '🔕',
+    title: 'Nastavenia notifikácií',
+    description: 'Avatar → Nastavenia notifikácií. Zapnite/vypnite push notifikácie (zariadenia majú vlastné nastavenia). Toggle "Pripomienky termínov" ovláda či push pre auto-pripomienky (14/7/3 dni pred termínom) idú aj na telefón — in-app notifikácie chodia vždy.'
+  },
+  {
+    icon: '💳',
+    title: 'Plán a fakturácia',
+    description: 'Avatar → Predplatné (Free / Tím / Pro). Free má limity (5 kontaktov, 10 úloh na kontakt). Tím a Pro odomykajú vyššie limity a tímové funkcie. Tu môžete promo kódom uplatniť zľavu, prepnúť plán, stiahnuť faktúru.'
+  },
+  {
+    icon: '🗑️',
+    title: 'Vymazanie účtu (GDPR)',
+    description: 'V Môj profil dole je tlačidlo "Vymazať účet". Trvale zmaže váš účet, všetky vaše dáta a sole-owned workspaces (kde ste jediný owner). Vyžaduje napísanie "DELETE" + heslo. Postup je nevratný — Apple Guideline 5.1.1(v) compliance pre iOS.'
   }
 ];
 

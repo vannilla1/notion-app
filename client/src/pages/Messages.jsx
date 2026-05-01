@@ -16,59 +16,79 @@ import { linkifyText } from '../utils/linkify';
 
 const messagesHelpTips = [
   {
-    icon: '📨',
-    title: 'Na čo slúžia správy',
-    description: 'Správy sú interná komunikácia vo vašom tíme. Môžete cez ne posielať žiadosti o schválenie, návrhy, informácie alebo ankety. Správy sa zobrazujú v troch záložkách: "Všetky" (prijaté aj odoslané spolu), "Prijaté" (správy adresované vám) a "Odoslané" (správy, ktoré ste poslali vy).'
+    icon: '🎯',
+    title: 'Na čo slúžia Správy',
+    description: 'Interná komunikácia vášho tímu — žiadosti o schválenie, informácie, návrhy, ankety. Drží všetko na jednom mieste s históriou kto čo schválil/zamietol/komentoval. Alternatíva k emailom a chatom keď potrebujete formálnejší proces.'
   },
   {
-    icon: '✉️',
-    title: 'Ako vytvoriť novú správu',
-    description: 'Kliknite na fialové tlačidlo "+ Nová správa" vpravo hore. Vo formulári vyberte príjemcu (člen vášho tímu), typ správy a napíšte predmet a popis. Voliteľne môžete priložiť súbor, prepojiť správu s kontaktom alebo projektom a nastaviť termín na odpoveď. Odošlite tlačidlom "Odoslať".'
+    icon: '🗂️',
+    title: 'Tri záložky hore',
+    description: 'Všetky (prijaté + odoslané spolu, default), Prijaté (kde ste príjemca), Odoslané (kde ste odosielateľ). Číslo pri záložke = počet správ čakajúcich na vašu akciu. Klik prepne pohľad.'
+  },
+  {
+    icon: '➕',
+    title: '+ Nová správa — vytvorenie',
+    description: 'Fialové tlačidlo vpravo hore. Vo formulári: príjemca (člen workspace-u), typ správy, predmet, popis. Voliteľne: priloha (📎), prepojenie s kontaktom/projektom (🔗), termín na odpoveď. Tlačidlo "Odoslať" pošle správu, "Zrušiť" formulár zatvorí.'
   },
   {
     icon: '🟡',
-    title: 'Aké sú typy správ',
-    description: 'Schválenie (žltá) — keď potrebujete od niekoho súhlas alebo rozhodnutie. Informácia (modrá) — keď chcete niekoho len informovať, nevyžaduje sa odpoveď. Žiadosť (oranžová) — keď prosíte o vykonanie nejakej akcie. Návrh (zelená) — keď chcete otvoriť diskusiu. Anketa (ružová) — keď chcete, aby tím hlasoval.'
+    title: 'Typy správ a ich farby',
+    description: 'Schválenie (žltá 🟡) — potrebujete súhlas/rozhodnutie. Informácia (modrá 🔵) — len informácia, bez očakávanej odpovede. Žiadosť (oranžová 🟠) — prosba o akciu. Návrh (zelená 🟢) — diskusia / brainstorming. Anketa (ružová 📊) — hlasovanie tímu.'
   },
   {
     icon: '📊',
-    title: 'Ako vytvoriť anketu',
-    description: 'Pri vytváraní správy vyberte typ "Anketa". Zobrazí sa sekcia, kde pridáte 2 až 10 možností na výber. Zvoľte, či sa dá vybrať len jedna odpoveď alebo viacero. Po odoslaní členovia tímu hlasujú kliknutím na možnosť. Výsledky sa zobrazujú priebežne s percentami a menami hlasujúcich.'
+    title: 'Anketa — vytvorenie a hlasovanie',
+    description: 'Vyberte typ Anketa pri novej správe → odomkne sa sekcia s možnosťami (2 až 10). Zvolíte single-choice (len jedna odpoveď) alebo multi-choice (viac). Členovia hlasujú klikom na možnosť. Výsledky sú live: percentá + mená hlasujúcich (transparentné).'
+  },
+  {
+    icon: '📋',
+    title: 'Detail správy — rozkliknutie',
+    description: 'Klik na správu v zozname → otvorí sa detail panel s celým popisom, prílohami, komentármi, akčnými tlačidlami. Druhý klik (alebo na inú) zatvorí. Na mobile je detail full-screen.'
   },
   {
     icon: '✅',
-    title: 'Ako schváliť alebo zamietnuť správu',
-    description: 'Keď otvoríte prijatú správu typu "Schválenie", "Žiadosť" alebo "Návrh", dole uvidíte tlačidlá: zelené "Schváliť" a červené "Zamietnuť". Kliknite na jedno z nich. Odosielateľ okamžite dostane upozornenie o vašom rozhodnutí. Ak si rozhodnutie rozmyslíte, môžete ho zrušiť a vrátiť správu späť na posúdenie.'
+    title: 'Schváliť / Zamietnuť',
+    description: 'Pri prijatej správe typu Schválenie / Žiadosť / Návrh sú dole tlačidlá: zelené "Schváliť" a červené "Zamietnuť". Klik nastaví stav správy a odosielateľ dostane okamžitú notifikáciu (in-app + push). Rozhodnutie môžete neskôr zrušiť — správa sa vráti späť na posúdenie.'
   },
   {
     icon: '💬',
-    title: 'Ako pridať komentár ku správe',
-    description: 'V detaile správy nájdete dole pole "Napíšte komentár". Napíšte text a kliknite na tlačidlo odoslania. Ku komentáru môžete voliteľne priložiť aj súbor. Vaše vlastné komentáre môžete upraviť (ikona ceruzky) alebo vymazať (ikona koša). Komentáre ostatných sa nedajú meniť ani mazať.'
+    title: 'Komentáre',
+    description: 'V detaile dole pole "Napíšte komentár". Komentár môže obsahovať aj prílohu (ikona 📎). Vlastné komentáre upravíte ikonou ceruzky alebo zmažete ikonou koša. Cudzie komentáre meniť nemôžete. Každý komentár vyvolá notifikáciu pre odosielateľa správy.'
   },
   {
     icon: '📎',
-    title: 'Ako priložiť súbory ku správe',
-    description: 'Pri vytváraní správy alebo komentára kliknite na ikonu kancelárskej sponky (📎). Vyberte súbor z vášho zariadenia — obrázky, dokumenty (PDF, Word, Excel), textové súbory a ďalšie formáty. Maximálna veľkosť jedného súboru je 10 MB. Ku jednej správe môžete priložiť aj viacero súborov.'
+    title: 'Súbory v správach',
+    description: 'Pri novej správe alebo komentári ikona 📎 → pridáte súbor (alebo viacero). Podporované: JPG, PNG, GIF, PDF, Word, Excel, TXT, MD, ZIP. Max. 10 MB / súbor. Klik na priložený súbor → preview alebo download.'
   },
   {
     icon: '🔗',
-    title: 'Ako prepojiť správu s kontaktom alebo projektom',
-    description: 'Pri vytváraní správy nájdete pole "Prepojenie". Kliknite naň a vyberte kontakt alebo projekt, ku ktorému správa patrí. Prepojená správa sa potom zobrazí aj v detaile daného kontaktu alebo projektu — takže váš tím má všetky informácie na jednom mieste.'
+    title: 'Prepojenie s kontaktom / projektom',
+    description: 'Pri vytváraní pole "Prepojenie" → vyberiete kontakt alebo projekt. Správa sa potom zobrazí aj v detaile daného kontaktu (záložka Správy) alebo projektu, čím má tím kompletný kontext. Jedna správa môže mať viacero prepojení.'
   },
   {
     icon: '🔍',
-    title: 'Ako filtrovať správy',
-    description: 'Nad zoznamom správ nájdete filtre podľa stavu: "Všetky", "Čaká" (ešte nerozhodnuté), "Schválené", "Zamietnuté" a "Komentované". Filter "Ankety" zobrazí len ankety. V bočnom paneli (na počítači vľavo) vidíte štatistiky počtu správ v jednotlivých stavoch — kliknutím na číslo sa zobrazí príslušný filter.'
+    title: 'Vyhľadávanie a filtre',
+    description: 'Nad zoznamom: filtre podľa stavu — Všetky, Čaká (ešte nerozhodnuté), Schválené, Zamietnuté, Komentované, Ankety. V bočnom paneli (desktop vľavo) vidíte štatistiky počtu — klik na číslo aktivuje príslušný filter. Vyhľadávanie hľadá v predmete a popise.'
+  },
+  {
+    icon: '✏️',
+    title: 'Úprava správy',
+    description: 'Vlastné odoslané správy môžete upraviť — v detaile ikona ceruzky. Otvorí sa formulár s pôvodnými hodnotami, môžete meniť predmet, popis, prepojenia, prílohy. Po uložení sa upraví. Príjemcovia neuvidia notifikáciu o úprave (predpokladá sa malá oprava preklepu).'
   },
   {
     icon: '🗑️',
-    title: 'Ako upraviť alebo vymazať správu',
-    description: 'Vlastné odoslané správy môžete upraviť alebo vymazať — v detaile správy kliknite na ikonu ceruzky (upraviť) alebo koša (vymazať). Vlastník a manažér prostredia môžu vymazať akúkoľvek správu v rámci svojho prostredia, aj keď ju nepísali oni.'
+    title: 'Vymazanie správy',
+    description: 'V detaile ikona koša. Vyžaduje potvrdenie. Vlastné správy môžete mazať vždy. Owner a manager workspace-u môžu vymazať aj cudzie správy v rámci svojho workspace-u (admin moderation).'
+  },
+  {
+    icon: '⏰',
+    title: 'Termín na odpoveď',
+    description: 'Pri novej správe voliteľné pole "Termín na odpoveď". Ak ho vyplníte, správa sa farebne zvýrazní pri blížiacom sa termíne (oranžová < 7 dní, červená = po). Príjemcovia dostanú pripomienku v zvončeku.'
   },
   {
     icon: '🔔',
-    title: 'Zvonček notifikácií',
-    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o správe sa priamo otvorí a zvýrazní daná správa — či už ide o novú správu, komentár, schválenie alebo zamietnutie.'
+    title: 'Zvonček a notifikácie',
+    description: 'Pri každej akcii (nová správa, schválenie, zamietnutie, komentár, hlas v ankete) tím / odosielateľ dostane notifikáciu. Klik na notifikáciu o správe vás presmeruje do sekcie Správy s rozkliknutým detailom danej správy.'
   }
 ];
 

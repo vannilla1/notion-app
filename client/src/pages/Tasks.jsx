@@ -25,74 +25,104 @@ import { getStoredToken } from '../utils/authStorage';
 // Help tips for Tasks page
 const tasksHelpTips = [
   {
-    icon: '➕',
-    title: 'Ako vytvoriť nový projekt',
-    description: 'Kliknite na fialové tlačidlo "+ Nový projekt" v pravom hornom rohu. Zadajte názov projektu (povinné). Voliteľne vyberte kontakt, ku ktorému projekt patrí, alebo ho nechajte ako globálny projekt bez kontaktu. Nastavte termín a prioritu. Po uložení sa projekt zobrazí v zozname.'
+    icon: '🎯',
+    title: 'Na čo slúži sekcia Projekty',
+    description: 'Centrálne miesto pre prácu — všetky vaše projekty (väčšie celky) a v nich úlohy s ľubovoľne hlbokými podúlohami. Každý projekt môže byť viazaný ku konkrétnemu kontaktu (napr. "Renovácia pre p. Nováka") alebo globálny (bez kontaktu — napr. interná úloha).'
   },
   {
-    icon: '📝',
-    title: 'Ako pridať úlohy do projektu',
-    description: 'Kliknite na projekt — rozbalí sa. Dole uvidíte tlačidlo "+ Pridať úlohu" — klikom sa otvorí formulár. Zadajte názov a priamo v ňom môžete pridať aj termín s časom (📅), poznámku (📝) a priradiť kolegu (👤) — každá z týchto možností sa rozbalí pod ikonkou. Uložíte tlačidlom "Uložiť" alebo Enter, "Zrušiť" formulár zavrie. Každá úloha môže mať aj podúlohy — kliknite na úlohu a otvorí sa pole "Nová podúloha" s rovnakými možnosťami.'
+    icon: '➕',
+    title: '+ Nový projekt — vytvorenie',
+    description: 'Fialové tlačidlo vpravo hore. Vyplníte: názov (povinné), voliteľne kontakt, termín, čas, prioritu (Nízka/Stredná/Vysoká) a popis. Po uložení sa zobrazí v zozname a tím dostane notifikáciu. Tlačidlo Zrušiť zatvorí formulár bez uloženia.'
+  },
+  {
+    icon: '📂',
+    title: 'Rozbalenie projektu (klik)',
+    description: 'Klik na názov projektu rozbalí jeho obsah priamo v zozname (žiadna nová stránka). Vidíte: úlohy, ich podúlohy, súbory, prepojené správy a "+ Pridať úlohu" formulár dole. Druhý klik (alebo klik na iný projekt) zavrie.'
   },
   {
     icon: '✅',
-    title: 'Ako dokončiť projekt alebo úlohu',
-    description: 'Vedľa každého projektu a úlohy je krúžok (checkbox). Kliknite naň — označí sa ako dokončené. Dôležité: keď označíte hlavný projekt ako dokončený, automaticky sa dokončia aj všetky jeho úlohy a podúlohy. Dokončené projekty sa presunú na koniec zoznamu.'
+    title: 'Úlohy v projekte',
+    description: 'V rozbalenom projekte tlačidlo "+ Pridať úlohu" otvorí inline formulár: názov + ikony 📅 (termín+čas), 📝 (poznámka), 👤 (priradenie). Každá ikona rozbalí svoju oblasť priamo vo formulári. Submit cez Enter alebo "Uložiť", zatvorenie cez "Zrušiť".'
+  },
+  {
+    icon: '🌳',
+    title: 'Podúlohy (rekurzívne)',
+    description: 'Klik na úlohu rozbalí jej podúlohy. Tlačidlo "+ Nová podúloha" pridá ďalšiu úroveň. Podúlohy môžu mať vlastné podúlohy bez limitu hĺbky — vhodné na delenie veľkej úlohy na menšie kroky. V zozname uvidíte indikátor počtu (napr. "✓ 3/8") koľko z nich je dokončených.'
+  },
+  {
+    icon: '☑️',
+    title: 'Označenie ako dokončené',
+    description: 'Krúžok (checkbox) vľavo od názvu — klik označí ako hotové. Pri dokončení projektu sa automaticky dokončia aj všetky jeho úlohy a podúlohy (kaskáda). Dokončené sa presunú na koniec zoznamu a vyblednú. Pre re-otvorenie znova kliknite na krúžok.'
+  },
+  {
+    icon: '✏️',
+    title: 'Úprava projektu / úlohy',
+    description: 'Pri každom projekte a úlohe je ikona ceruzky. Klik otvorí inline edit form s rovnakými poľami ako pri vytvorení — môžete meniť názov, termín, prioritu, priradenia. "Uložiť" potvrdí, "Zrušiť" zahodí zmeny.'
+  },
+  {
+    icon: '🗑️',
+    title: 'Vymazanie',
+    description: 'Ikona koša pri každej položke. Klik vyžaduje potvrdenie. Vymazanie projektu zruší aj všetky jeho úlohy (cascade). Pre podúlohy ikona × otvorí potvrdenie a vymaže rekurzívne všetky vnorené podúlohy.'
   },
   {
     icon: '📅',
-    title: 'Ako nastaviť termín, čas a prioritu',
-    description: 'Pri vytváraní alebo úprave projektu najskôr nastavte dátum termínu. Až potom sa odomkne pole pre voliteľný čas (HH:MM). Bez vyplneného dátumu má pole času šedý kurzor "zákaz" — to je úmyselné, čas bez dátumu nemá zmysel a poradie zadávania je dátum → čas. Po nastavení času (HH:MM) modré označenie automaticky preskočí z hodín na minúty. Ak chcete čas zrušiť, kliknite na ikonu × vedľa neho. Vyberte prioritu: Nízka (šedá), Stredná (oranžová) alebo Vysoká (červená). Termíny sú farebne označené: zelená = viac ako 14 dní, oranžová = menej ako 7 dní, červená = po termíne. Rovnako môžete nastaviť termín aj čas pre úlohy a podúlohy.'
+    title: 'Termín, čas a priorita',
+    description: 'Najskôr dátum, potom sa odomkne pole pre čas (HH:MM). Po zadaní času modré highlighty automaticky preskočia z hodín na minúty. Termíny sa farebne značia: zelená > 14 dní, oranžová < 7 dní, červená = po termíne. Priorita: Nízka (šedá), Stredná (oranžová), Vysoká (červená). Klik na × vedľa termínu/času ho vymaže.'
   },
   {
     icon: '🔔',
-    title: 'Ako fungujú pripomienky',
-    description: 'Automatické pripomienky chodia vždy keď sa termín vášho projektu/úlohy blíži: 14 dní pred, 7 dní pred, 3 dni pred a po termíne. Tieto sa nedajú vypnúť — sú to základné upozornenia ktoré príde ako in-app notifikácia. Push na telefón pre tieto auto-pripomienky kontrolujete v "Nastavenia notifikácií" (toggle "Pripomienky termínov"). Navyše ak v projekte/úlohe nastavíte aj čas (HH:MM), zobrazí sa pole "🔔 Časové pripomienky" kde si môžete označiť jednu alebo viacero možností: 15 min, 30 min, 1 hodina, 2 hodiny alebo 1 deň pred presným časom. Tieto časové pripomienky chodia vždy ako push (považujeme ich za explicitné, takže ich nedáva zmysel filtrovať cez Settings).'
+    title: 'Pripomienky a notifikácie',
+    description: 'Auto-pripomienky chodia 14 / 7 / 3 dni pred a po termíne (in-app vždy, push závisí od toggle "Pripomienky termínov" v Nastaveniach). Pri zadaní času sa odomkne pole "🔔 Časové pripomienky" — vyberiete jednu alebo viacero: 15 min / 30 min / 1 h / 2 h / 1 deň pred presným časom (push vždy).'
   },
   {
     icon: '👤',
-    title: 'Ako priradiť projekt alebo úlohu kolegovi',
-    description: 'V detaile projektu alebo úlohy kliknite na ikonu osoby alebo na výber "Priradiť". Zobrazí sa zoznam členov vášho tímu — vyberte jedného. Priradený kolega okamžite dostane upozornenie v aplikácii aj na telefón, že mu bol priradený nový projekt alebo úloha.'
+    title: 'Priradenie kolegu',
+    description: 'Ikona 👤 v projekte alebo úlohe — vyberiete členov workspace-u (jedného alebo viacerých). Priradený dostane okamžite in-app + push notifikáciu. Avatari priradených sa zobrazia priamo v zozname pri úlohe pre rýchly prehľad.'
   },
   {
     icon: '↕️',
-    title: 'Ako meniť poradie projektov',
-    description: 'Projekty sú automaticky zoradené podľa priority (Vysoká prvá, potom Stredná, potom Nízka). Dokončené projekty sa zobrazia na konci. Ak chcete zmeniť poradie ručne, uchopte projekt za ikonu ⠿ (šesť bodiek vľavo) a pretiahnite ho na požadované miesto.'
+    title: 'Drag-and-drop poradie',
+    description: 'Default zoradenie: najprv podľa priority (Vysoká → Stredná → Nízka), dokončené na konci. Pre vlastné poradie chytite ikonu ⠿ (šesť bodiek vľavo) a presuňte projekt na nové miesto. Funguje aj pre úlohy a podúlohy v rámci ich nadradeného projektu.'
   },
   {
     icon: '📎',
-    title: 'Ako priložiť súbory k projektu',
-    description: 'V detaile projektu alebo úlohy kliknite na ikonu kancelárskej sponky (📎). Vyberte súbor z vášho zariadenia. Podporované formáty: obrázky (JPG, PNG), dokumenty (PDF, Word, Excel), textové súbory, archívy (ZIP) a médiá (MP3, MP4). Maximálna veľkosť jedného súboru je 10 MB.'
+    title: 'Súbory pri projekte / úlohe',
+    description: 'V detaile sekcia "Súbory" alebo ikona 📎 — nahráte JPG, PNG, GIF, PDF, Word, Excel, TXT, MD, ZIP, MP3, MP4. Max. 10 MB / súbor. Klik na súbor → preview alebo download. Mazanie ikonou × pri súbore.'
   },
   {
     icon: '🔍',
-    title: 'Ako filtrovať projekty',
-    description: 'V ľavom paneli (na mobile hore) nájdete filtre: "Všetky" zobrazí všetko, "Na dnes" zobrazí projekty s dnešným termínom, "Priradené mne" zobrazí len vaše projekty, "Nové" zobrazí projekty za posledných 24 hodín. Filtre podľa priority zobrazia len projekty s danou prioritou.'
+    title: 'Filtre v zozname',
+    description: 'V ľavom paneli (mobile cez hamburger): Všetky, Na dnes (dnešný termín), Priradené mne, Nové (24h), Po termíne, Bez termínu, podľa priority (Vysoká/Stredná/Nízka), podľa kontaktu. Filtre sa dajú kombinovať s vyhľadávaním v hornom paneli.'
   },
   {
     icon: '🗓️',
-    title: 'Ako používať kalendárový pohľad',
-    description: 'Vpravo hore kliknite na ikonu kalendára (📅). Prepnete sa z pohľadu zoznamu na kalendár. Vyberte si mesačný, týždenný alebo denný prehľad pomocou tlačidiel hore. V mesačnom pohľade kliknite na konkrétny deň — zobrazí sa denný detail. Na mobile môžete kalendár posúvať dotykom doľava a doprava.'
-  },
-  {
-    icon: '📥',
-    title: 'Ako exportovať projekty do Excelu',
-    description: 'Kliknite na tlačidlo "📥 CSV" vedľa prepínača pohľadu. Stiahne sa tabuľkový súbor so všetkými projektmi a ich úlohami. Súbor sa dá otvoriť v Exceli alebo Google Sheets. Obsahuje názov, stav, termín, prioritu, priradeného používateľa a ďalšie údaje. Diakritika (háčky, čiarky) funguje správne.'
+    title: 'Kalendárový pohľad',
+    description: 'Ikona kalendára vpravo hore prepne pohľad zo zoznamu na kalendár. Tri zobrazenia: mesačný, týždenný, denný (prepínač hore). V mesačnom kliknite na deň → otvorí denný detail. Na mobile podporuje swipe doľava/doprava pre prechod medzi obdobiami.'
   },
   {
     icon: '📆',
-    title: 'Ako prepojiť s Google kalendárom',
-    description: 'Kliknite na ikonu profilu vpravo hore, potom na "Synchronizácia kalendára". Prepojte svoj Google účet — vaše projekty s termínmi sa automaticky zobrazia v Google Calendar a úlohy v Google Tasks. Synchronizácia funguje obojsmerne: zmeny v Google sa prejavia aj v aplikácii. Ak ste pri projekte/úlohe zadali aj čas, v Google Calendar sa zobrazí ako udalosť s konkrétnym časom; v Google Tasks (panel Úlohy) sa čas zobrazí v poznámke pri úlohe — Google Tasks API totiž samostatný čas nepodporuje.'
+    title: 'Google Calendar a Tasks sync',
+    description: 'Avatar → Synchronizácia kalendára. Po prepojení Google účtu: projekty s termínom + časom idú do Google Calendar (samostatný kalendár "Prpl CRM — &lt;workspace&gt;"), úlohy do Google Tasks. Sync je obojsmerný. Per-workspace toggle umožňuje vypnúť pre konkrétny workspace.'
   },
   {
     icon: '📨',
-    title: 'Ako vidieť prepojené správy',
-    description: 'V detaile projektu nájdete sekciu "Správy". Tu sa zobrazujú všetky interné správy vášho tímu, ktoré boli prepojené s týmto projektom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú alebo na ňu odpoviete.'
+    title: 'Prepojené správy',
+    description: 'V detaile projektu sekcia "Správy" zobrazí všetky interné tímové správy prepojené s týmto projektom. Klik vás presmeruje do sekcie Správy. Vytvorenie prepojenia: pri novej správe je pole "Prepojenie" → vyberiete projekt.'
+  },
+  {
+    icon: '📥',
+    title: 'Export do Excelu (CSV)',
+    description: 'Tlačidlo "📥 CSV" vedľa prepínača pohľadu. Stiahne tabuľku všetkých projektov + ich úloh (rešpektuje aktívny filter). Stĺpce: názov, stav, termín, čas, priorita, priradený, kontakt, popis. Otvoriteľné v Exceli aj Google Sheets s korektnou diakritikou.'
+  },
+  {
+    icon: '🔢',
+    title: 'Limity podľa plánu',
+    description: 'Free plán: max 10 úloh na kontakt + 10 podúloh na úlohu. Tím (4,99 €/mes): 25/25. Pro (9,99 €/mes): neobmedzené. Pri dosiahnutí sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.'
   },
   {
     icon: '🔔',
-    title: 'Zvonček notifikácií',
-    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o projekte alebo úlohe sa priamo otvorí a zvýrazní daný projekt, vrátane konkrétnej podúlohy ak sa zmena týkala jej.'
+    title: 'Zvonček a notifikácie',
+    description: 'Pri každej zmene (vytvorenie, dokončenie, priradenie, komentár, blížiaci sa termín) tím / vy dostanete notifikáciu. Klik na notifikáciu o projekte v zvončeku otvorí daný projekt + zvýrazní konkrétnu (pod)úlohu ktorej sa zmena týkala.'
   }
 ];
 

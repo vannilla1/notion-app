@@ -17,64 +17,89 @@ import { getStoredToken } from '../utils/authStorage';
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
   {
-    icon: '👤',
-    title: 'Ako pridať nový kontakt',
-    description: 'V pravom hornom rohu kliknite na fialové tlačidlo "+ Nový kontakt". Otvorí sa formulár, kde vyplníte meno kontaktu (povinné), email, telefónne číslo, názov firmy a poznámku. Po uložení sa kontakt zobrazí v zozname a všetci členovia vášho tímu o ňom dostanú upozornenie.'
+    icon: '🎯',
+    title: 'Na čo slúži sekcia Kontakty',
+    description: 'Toto je vaša databáza zákazníkov, klientov alebo akýchkoľvek ľudí s ktorými pracujete. Pri každom kontakte môžete viesť projekty, úlohy, súbory aj prepojené správy — všetko na jednom mieste. Cieľ: nikdy nestratiť kontext zákazníka.'
   },
   {
-    icon: '📋',
-    title: 'Ako zobraziť detail kontaktu',
-    description: 'Kliknite na meno kontaktu v zozname — rozbalí sa jeho detail. Tu uvidíte všetky informácie: projekty, úlohy, poznámky, nahrané súbory a prepojené správy. Na zatvorenie detailu kliknite na kontakt znova alebo na iný kontakt.'
-  },
-  {
-    icon: '✏️',
-    title: 'Ako upraviť kontakt',
-    description: 'V rozbalenom detaile kontaktu kliknite na ikonu ceruzky (✏️) vedľa mena. Otvorí sa formulár, kde môžete zmeniť akékoľvek údaje — meno, email, telefón, firmu alebo stav kontaktu (Nový, Aktívny, Dokončený, Zrušený). Zmeny uložte tlačidlom "Uložiť".'
-  },
-  {
-    icon: '📝',
-    title: 'Ako pridať projekt ku kontaktu',
-    description: 'V detaile kontaktu nájdite sekciu "Projekty" a kliknite na "+ Nový projekt". Zadajte názov projektu, nastavte termín dokončenia a prioritu (Nízka, Stredná, Vysoká). Projekt sa priradí ku kontaktu a môžete do neho pridávať úlohy.'
-  },
-  {
-    icon: '✅',
-    title: 'Ako pracovať s úlohami',
-    description: 'V projekte kliknite na "+ Pridať úlohu" — otvorí sa formulár, kde zadáte názov a voliteľne aj termín s časom (📅), poznámku (📝) a priradíte kolegu (👤). Každá z týchto možností sa rozbalí pod ikonkou hneď v rovnakom formulári. Úlohu dokončíte kliknutím na krúžok vedľa nej. Každá úloha môže mať aj podúlohy s rovnakými možnosťami. Keď dokončíte hlavný projekt (kliknutím na jeho checkbox), automaticky sa dokončia všetky jeho úlohy.'
-  },
-  {
-    icon: '📎',
-    title: 'Ako nahrať súbory',
-    description: 'V detaile kontaktu kliknite na záložku "Súbory". Potom kliknite na "Nahrať súbor" a vyberte súbor z vášho zariadenia. Podporované sú obrázky (JPG, PNG), dokumenty (PDF, Word, Excel), textové súbory a archívy. Maximálna veľkosť jedného súboru je 10 MB.'
-  },
-  {
-    icon: '🔍',
-    title: 'Ako vyhľadávať kontakty',
-    description: 'Na vrchu stránky je vyhľadávacie pole. Stačí začať písať meno, email alebo názov firmy — zoznam sa okamžite filtruje a zobrazí len kontakty, ktoré zodpovedajú vášmu hľadaniu. Pre zrušenie hľadania vymažte text z poľa.'
+    icon: '➕',
+    title: '+ Nový kontakt — vytvorenie',
+    description: 'Fialové tlačidlo vpravo hore. Vo formulári zadáte: meno (povinné), email, telefón, firma, web, poznámka, status (default Nový). Po uložení sa zobrazí v zozname a tím dostane notifikáciu. Tlačidlo "Zrušiť" formulár zatvorí bez uloženia.'
   },
   {
     icon: '🏷️',
-    title: 'Ako filtrovať podľa stavu',
-    description: 'V ľavom paneli (na mobile hore) nájdete filtre podľa stavu: Všetky, Nové, Aktívne, Dokončené a Zrušené. Kliknite na požadovaný filter — zobrazia sa len kontakty v danom stave. Kontakty sú automaticky zoradené: Nové a Aktívne sú prvé, Dokončené za nimi, Zrušené na konci.'
+    title: 'Stavy kontaktu',
+    description: '4 stavy s farebným odlíšením: Nový (modrá — práve pridaný), Aktívny (zelená — pracujete s ním), Dokončený (sivá — uzavretý) a Zrušený (červená). V detaile kontaktu môžete stav meniť. Zoradenie zoznamu je automatické: Nové+Aktívne hore, Dokončené v strede, Zrušené dolu.'
   },
   {
-    icon: '📥',
-    title: 'Ako exportovať kontakty do Excelu',
-    description: 'Kliknite na tlačidlo "📥 CSV" v hlavičke zoznamu kontaktov. Stiahne sa tabuľkový súbor, ktorý otvoríte v Exceli alebo Google Sheets. Obsahuje všetky údaje: meno, email, telefón, firmu, stav a počet projektov. Súbor má správnu diakritiku (háčky, čiarky).'
+    icon: '🔍',
+    title: 'Vyhľadávanie',
+    description: 'Pole hľadania na vrchu stránky. Píšte meno, email, telefón alebo firmu — zoznam sa filtruje okamžite (live). Vymažte text pre zrušenie hľadania a návrat na celý zoznam.'
+  },
+  {
+    icon: '🎚️',
+    title: 'Filtre podľa stavu',
+    description: 'V ľavom paneli (mobile: hore alebo cez hamburger) sú filtre: Všetky, Nové, Aktívne, Dokončené, Zrušené. Klik aplikuje filter. Pri každom filtri vidíte v zátvorke počet kontaktov v danom stave.'
+  },
+  {
+    icon: '📋',
+    title: 'Detail kontaktu — rozkliknutie',
+    description: 'Klik na meno v zozname → rozbalí sa detail priamo v zozname (akord, neopustí stránku). Vidíte: kontaktné údaje, projekty (s úlohami), záložku Súbory, záložku Správy. Druhý klik (alebo klik na iný) detail zatvorí.'
+  },
+  {
+    icon: '✏️',
+    title: 'Úprava kontaktu',
+    description: 'V rozbalenom detaile kliknite na ikonu ceruzky vedľa mena. Otvorí sa formulár s rovnakými poľami ako pri vytvorení. Zmeny uložíte tlačidlom Uložiť, alebo zatvoríte tlačidlom Zrušiť.'
+  },
+  {
+    icon: '🗑️',
+    title: 'Vymazanie kontaktu',
+    description: 'V detaile kontaktu pri ikone ceruzky je aj ikona koša. Klik vyžaduje potvrdenie. Mazanie kontaktu zruší aj všetky jeho projekty a prepojenia so správami. Akcia je nevratná.'
+  },
+  {
+    icon: '📝',
+    title: 'Projekty pri kontakte',
+    description: 'V detaile sekcia "Projekty" má tlačidlo "+ Nový projekt". Zadáte názov, termín, čas, prioritu a popis. Projekt sa pripojí k tomuto kontaktu a môžete do neho pridávať úlohy. Pre väčší prehľad globálnych projektov (cez všetky kontakty) prejdite na sekciu Projekty cez navigáciu.'
+  },
+  {
+    icon: '✅',
+    title: 'Úlohy a podúlohy pri kontakte',
+    description: 'V projekte tlačidlo "+ Pridať úlohu" otvorí formulár s názvom + ikonami 📅 (termín+čas), 📝 (poznámka), 👤 (priradenie kolegu) — každá ikona rozbalí svoju oblasť. Úloha môže mať podúlohy s rovnakými možnosťami. Krúžok vľavo označuje stav: prázdny = nedokončené, zaškrtnutý = hotové. Pri dokončení projektu sa všetky jeho úlohy automaticky dokončia.'
   },
   {
     icon: '🔔',
-    title: 'Ako nastaviť termín, čas a pripomienku',
-    description: 'Pri vytváraní alebo úprave projektu/úlohy NAJSKÔR nastavte dátum termínu — až potom sa odomkne pole pre voliteľný čas (HH:MM). Bez vyplneného dátumu má pole času šedý kurzor "zákaz" — to je úmyselné, čas bez dátumu nedáva zmysel. Po nastavení času modré označenie automaticky preskočí z hodín na minúty. Ak chcete čas zrušiť, kliknite na ikonu × vedľa neho. Automatické pripomienky chodia 14 / 7 / 3 dni pred a po termíne (push závisí od nastavení v "Nastavenia notifikácií" → toggle "Pripomienky termínov"). Ak vyplníte aj čas, zobrazí sa pole "🔔 Časové pripomienky" kde si môžete vybrať jednu alebo viacero možností: 15 min / 30 min / 1 hodina / 2 hodiny / 1 deň pred presným časom — tieto chodia vždy ako push. Termín s časom sa synchronizuje ako udalosť v Google Calendar.'
+    title: 'Termíny, časy a pripomienky',
+    description: 'Najskôr nastavte dátum, potom sa odomkne pole pre čas (HH:MM). Auto-pripomienky chodia 14 / 7 / 3 dni pred a po termíne (in-app vždy, push závisí od toggle "Pripomienky termínov" v Nastaveniach). Ak vyplníte aj čas, zobrazí sa pole "🔔 Časové pripomienky" s možnosťami 15 min / 30 min / 1 h / 2 h / 1 deň pred — tieto chodia vždy ako push.'
+  },
+  {
+    icon: '👤',
+    title: 'Priradenie kolegu',
+    description: 'V projekte alebo úlohe ikona 👤 — vyberiete jedného alebo viacerých členov vášho workspace-u. Priradený kolega okamžite dostane in-app + push notifikáciu. V zozname potom uvidíte avatara priradených pri úlohe.'
+  },
+  {
+    icon: '📎',
+    title: 'Súbory ku kontaktu',
+    description: 'V detaile kontaktu záložka "Súbory" → "Nahrať súbor". Podporované: obrázky (JPG, PNG, GIF), dokumenty (PDF, Word, Excel), textové (TXT, MD), archívy (ZIP). Max. 10 MB / súbor. Klik na súbor → preview alebo download podľa typu.'
   },
   {
     icon: '📨',
     title: 'Prepojené správy',
-    description: 'V detaile kontaktu vidíte sekciu "Správy" — zobrazujú sa tu všetky interné správy, ktoré boli prepojené s týmto kontaktom. Kliknutím na správu sa presmerujete do sekcie Správy, kde si ju prečítate celú.'
+    description: 'V detaile kontaktu sekcia "Správy" zobrazuje všetky interné tímové správy ktoré boli prepojené s týmto kontaktom (cez "Prepojenie" pri vytváraní správy). Klik na správu vás presmeruje do sekcie Správy, kde si ju prečítate celú a môžete reagovať.'
+  },
+  {
+    icon: '📥',
+    title: 'Export do Excelu (CSV)',
+    description: 'Tlačidlo "📥 CSV" v hlavičke zoznamu. Stiahne sa tabuľkový súbor s aktuálne zobrazenými kontaktmi (rešpektuje filter a hľadanie). Obsahuje: meno, email, telefón, firma, web, stav, počet projektov, dátum vzniku. Diakritika funguje korektne v Exceli aj Google Sheets.'
+  },
+  {
+    icon: '🔢',
+    title: 'Limity podľa plánu',
+    description: 'Free plán má limit 5 kontaktov a 10 úloh na kontakt. Tím (4,99 €/mes) — 25 kontaktov, 25 úloh. Pro (9,99 €/mes) — neobmedzené. Pri dosiahnutí limitu sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.'
   },
   {
     icon: '🔔',
-    title: 'Zvonček notifikácií',
-    description: 'Fialový zvonček vpravo hore zobrazuje centrum notifikácií. Červené číslo znamená neprečítané upozornenia. Kliknutím sa otvorí panel — neprečítané majú fialový okraj a bodku, prečítané sú vyblednuté. Kliknutím na notifikáciu o kontakte sa priamo otvorí detail daného kontaktu. Tlačidlo "Označiť všetky" označí všetko ako prečítané naraz.'
+    title: 'Zvonček a notifikácie pre kontakty',
+    description: 'Pri akejkoľvek zmene kontaktu (vytvorenie, úprava, prepojená správa, priradená úloha) tím dostane notifikáciu. Klik na notifikáciu o kontakte v zvončeku otvorí daný kontakt priamo s rozbaleným detailom.'
   }
 ];
 
