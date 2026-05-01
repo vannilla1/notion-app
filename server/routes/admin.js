@@ -1235,20 +1235,20 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
     const workspaces = await Workspace.find().select('name slug color ownerId createdAt').lean();
     const wsIds = workspaces.map(w => w._id);
 
-    const [contactStats, taskStats, messageStats, memberStats] = await Promise.all([
+    // Pre Task: namiesto Mongo aggregation (ktorá by spočítala len top-level
+    // Task dokumenty = "projekty") načítame celé dokumenty a rátame subtasks
+    // rekurzívne v JS. Subtask schema má `subtasks: Array` ktoré môže byť
+    // ľubovoľne hlboko zanorené — Mongo $unwind by zvládol len jednu úroveň.
+    // Pre admin prehľad (~stovky workspace-ov × pár desiatok tasks) je
+    // in-memory walk bezproblémový.
+    const [contactStats, allTasks, messageStats, memberStats] = await Promise.all([
       Contact.aggregate([
         { $match: { workspaceId: { $in: wsIds } } },
         { $group: { _id: '$workspaceId', count: { $sum: 1 }, recent: { $max: '$createdAt' } } }
       ]),
-      Task.aggregate([
-        { $match: { workspaceId: { $in: wsIds } } },
-        { $group: {
-          _id: '$workspaceId',
-          total: { $sum: 1 },
-          completed: { $sum: { $cond: ['$completed', 1, 0] } },
-          recent: { $max: '$createdAt' }
-        }}
-      ]),
+      Task.find({ workspaceId: { $in: wsIds } })
+        .select('workspaceId completed subtasks createdAt')
+        .lean(),
       Message.aggregate([
         { $match: { workspaceId: { $in: wsIds } } },
         { $group: { _id: '$workspaceId', count: { $sum: 1 }, recent: { $max: '$createdAt' } } }
@@ -1259,10 +1259,43 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
       ])
     ]);
 
-    // Build maps
-    const cMap = {}, tMap = {}, mMap = {}, mbMap = {};
+    // Aggregate task & subtask metrics per workspace.
+    // Projekty = top-level Task documents.
+    // Úlohy = subtasks (embedded), recursively counted including nested levels.
+    const tMap = {};
+    const countSubtasksRecursive = (arr, acc) => {
+      if (!Array.isArray(arr)) return;
+      for (const sub of arr) {
+        acc.subtasks += 1;
+        if (sub && sub.completed === true) acc.subtasksCompleted += 1;
+        if (sub && Array.isArray(sub.subtasks) && sub.subtasks.length > 0) {
+          countSubtasksRecursive(sub.subtasks, acc);
+        }
+      }
+    };
+    for (const task of allTasks) {
+      const wid = task.workspaceId.toString();
+      if (!tMap[wid]) {
+        tMap[wid] = {
+          projects: 0,
+          projectsCompleted: 0,
+          subtasks: 0,
+          subtasksCompleted: 0,
+          recent: null,
+        };
+      }
+      const acc = tMap[wid];
+      acc.projects += 1;
+      if (task.completed === true) acc.projectsCompleted += 1;
+      if (task.createdAt && (!acc.recent || task.createdAt > acc.recent)) {
+        acc.recent = task.createdAt;
+      }
+      countSubtasksRecursive(task.subtasks, acc);
+    }
+
+    // Build other maps
+    const cMap = {}, mMap = {}, mbMap = {};
     contactStats.forEach(c => { cMap[c._id.toString()] = c; });
-    taskStats.forEach(t => { tMap[t._id.toString()] = t; });
     messageStats.forEach(m => { mMap[m._id.toString()] = m; });
     memberStats.forEach(m => { mbMap[m._id.toString()] = m; });
 
@@ -1275,12 +1308,22 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
     const result = workspaces.map(w => {
       const id = w._id.toString();
       const c = cMap[id] || { count: 0 };
-      const t = tMap[id] || { total: 0, completed: 0 };
+      const t = tMap[id] || { projects: 0, projectsCompleted: 0, subtasks: 0, subtasksCompleted: 0, recent: null };
       const m = mMap[id] || { count: 0 };
       const mb = mbMap[id] || { count: 0 };
 
       // Most recent activity across all types
       const lastActivity = [c.recent, t.recent, m.recent].filter(Boolean).sort((a, b) => b - a)[0];
+
+      // Completion rate prefers subtask-level measure (čo user reálne pracuje
+      // = úlohy v projektoch). Ak workspace nemá subtasks vôbec, fallbackneme
+      // na project-level rate. Ak nemá ani projekty, rate je 0.
+      let completionRate = 0;
+      if (t.subtasks > 0) {
+        completionRate = Math.round((t.subtasksCompleted / t.subtasks) * 100);
+      } else if (t.projects > 0) {
+        completionRate = Math.round((t.projectsCompleted / t.projects) * 100);
+      }
 
       return {
         id,
@@ -1291,13 +1334,21 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
         createdAt: w.createdAt,
         members: mb.count,
         contacts: c.count,
-        tasks: t.total,
-        completedTasks: t.completed,
-        completionRate: t.total > 0 ? Math.round((t.completed / t.total) * 100) : 0,
+        // 'tasks' field zachovávame pre backward compat (= projekty/top-level Task docs).
+        tasks: t.projects,
+        completedTasks: t.projectsCompleted,
+        // Nové explicitné polia pre subtasky (= úlohy v UI terminológii).
+        projects: t.projects,
+        projectsCompleted: t.projectsCompleted,
+        subtasks: t.subtasks,
+        subtasksCompleted: t.subtasksCompleted,
+        completionRate,
         messages: m.count,
         lastActivity,
-        // Score: weighted activity metric
-        activityScore: c.count * 2 + t.total * 3 + m.count * 1
+        // Score: weighted activity metric — teraz váži aj subtasky lebo to
+        // je reálna jednotka práce (pred fixom score nereagovalo na pridávanie
+        // subtaskov, keďže rátalo len top-level Tasks).
+        activityScore: c.count * 2 + t.projects * 3 + t.subtasks * 1 + m.count * 1
       };
     }).sort((a, b) => b.activityScore - a.activityScore);
 

@@ -2113,11 +2113,16 @@ function WorkspaceComparisonTab() {
 
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
 
+  // Chart agreguje "real work units" — kontakty, projekty + úlohy v nich,
+  // a správy. Pred fixom rátal len projekty (top-level Task docs), takže
+  // workspace s 1 projektom + 100 úlohami vyzeral rovnako "veľký" ako
+  // workspace s 1 prázdnym projektom.
   const comparisonChart = {
     labels: sorted.slice(0, 10).map(w => w.name),
     datasets: [
       { label: 'Kontakty', data: sorted.slice(0, 10).map(w => w.contacts), backgroundColor: chartColors.blue },
-      { label: 'Úlohy', data: sorted.slice(0, 10).map(w => w.tasks), backgroundColor: chartColors.green },
+      { label: 'Projekty', data: sorted.slice(0, 10).map(w => w.projects ?? w.tasks), backgroundColor: chartColors.green },
+      { label: 'Úlohy', data: sorted.slice(0, 10).map(w => w.subtasks ?? 0), backgroundColor: chartColors.purple || '#a78bfa' },
       { label: 'Správy', data: sorted.slice(0, 10).map(w => w.messages), backgroundColor: chartColors.orange }
     ]
   };
@@ -2146,7 +2151,8 @@ function WorkspaceComparisonTab() {
             style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '12px' }}>
             <option value="activityScore">Podľa aktivity</option>
             <option value="contacts">Podľa kontaktov</option>
-            <option value="tasks">Podľa úloh</option>
+            <option value="projects">Podľa projektov</option>
+            <option value="subtasks">Podľa úloh</option>
             <option value="messages">Podľa správ</option>
             <option value="members">Podľa členov</option>
             <option value="completionRate">Podľa dokončenia</option>
@@ -2161,15 +2167,23 @@ function WorkspaceComparisonTab() {
                 <th>Vlastník</th>
                 <th style={{ textAlign: 'right' }}>Členovia</th>
                 <th style={{ textAlign: 'right' }}>Kontakty</th>
-                <th style={{ textAlign: 'right' }}>Úlohy</th>
-                <th style={{ textAlign: 'right' }}>Dokončené</th>
+                <th style={{ textAlign: 'right' }} title="Top-level projekty (Task dokumenty)">Projekty</th>
+                <th style={{ textAlign: 'right' }} title="Úlohy (subtasky) vrátane všetkých zanorených úrovní">Úlohy</th>
+                <th style={{ textAlign: 'right' }} title="% dokončených úloh (alebo projektov, ak workspace nemá úlohy)">Dokončené</th>
                 <th style={{ textAlign: 'right' }}>Správy</th>
                 <th>Posledná aktivita</th>
                 <th>Skóre</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((w, i) => (
+              {sorted.map((w, i) => {
+                // Backward-compat: staré API verzie nemali projects/subtasks polia
+                // (vracali len `tasks` = projekty); zachováme rendering aj v tom
+                // prípade, len úlohy ukáže "—".
+                const projects = w.projects ?? w.tasks ?? 0;
+                const subtasks = w.subtasks ?? null;
+                const subtasksCompleted = w.subtasksCompleted ?? null;
+                return (
                 <tr key={w.id}>
                   <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{i + 1}</td>
                   <td>
@@ -2181,7 +2195,14 @@ function WorkspaceComparisonTab() {
                   <td style={{ color: 'var(--text-muted)' }}>{w.owner}</td>
                   <td style={{ textAlign: 'right' }}>{w.members}</td>
                   <td style={{ textAlign: 'right' }}>{w.contacts}</td>
-                  <td style={{ textAlign: 'right' }}>{w.tasks}</td>
+                  <td style={{ textAlign: 'right' }}>{projects}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {subtasks !== null
+                      ? (subtasksCompleted !== null && subtasks > 0
+                          ? <span title={`${subtasksCompleted} dokončených z ${subtasks}`}>{subtasksCompleted}/{subtasks}</span>
+                          : subtasks)
+                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  </td>
                   <td style={{ textAlign: 'right' }}>
                     <span style={{ color: w.completionRate > 50 ? chartColors.green : w.completionRate > 20 ? chartColors.orange : chartColors.red }}>{w.completionRate}%</span>
                   </td>
@@ -2196,20 +2217,27 @@ function WorkspaceComparisonTab() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
       <AdminHelpToggle title="Porovnanie">
-        <p><strong>Čo tu vidíš:</strong> tabuľkové porovnanie všetkých workspace-ov — koľko kontaktov, projektov, správ, členov má každý.</p>
+        <p><strong>Čo tu vidíš:</strong> tabuľkové porovnanie všetkých workspace-ov — koľko kontaktov, projektov, úloh, správ a členov má každý.</p>
         <ul>
-          <li><strong>Stĺpce</strong> — názov, vlastník, plán vlastníka, počet členov, kontaktov, projektov, správ, dátum vzniku.</li>
-          <li><strong>Sortovanie</strong> — klik na hlavičku stĺpca → zoradí podľa neho (napr. najväčšie workspace-y podľa počtu kontaktov).</li>
-          <li><strong>Filter</strong> hore — vyhľadávanie podľa názvu alebo vlastníka.</li>
+          <li><strong>Stĺpce</strong>:
+            <ul>
+              <li><strong>Projekty</strong> — top-level Task dokumenty v DB (UI ich volá "Projekty").</li>
+              <li><strong>Úlohy</strong> — počet úloh (subtasks) vrátane všetkých zanorených úrovní. Zobrazené ako <code>{'<dokončené>'}/{'<celkom>'}</code> ak existuje aspoň jedna úloha.</li>
+              <li><strong>Dokončené</strong> — % dokončenosti počítané z úrovne úloh (ak workspace má aspoň jednu úlohu); inak fallback na úroveň projektov.</li>
+            </ul>
+          </li>
+          <li><strong>Sortovanie</strong> — selectbox vpravo, prepínač medzi metrikami (aktivita, kontakty, projekty, úlohy, správy, členovia, % dokončenia).</li>
+          <li><strong>Skóre aktivity</strong> — vážený metric: kontakty × 2 + projekty × 3 + úlohy × 1 + správy × 1. Po fixe reaguje aj na pridávanie úloh do existujúcich projektov (predtým rátalo len projekty).</li>
         </ul>
-        <p><strong>Tipy:</strong> Užitočné na identifikáciu power-userov (najviac kontaktov/projektov) a workspace-ov ktoré sa neuživili (0 dát po týždňoch). Pre detailný drill-down klikni na riadok → presmeruje na <strong>Workspace-y</strong> tab s detail panelom.</p>
+        <p><strong>Pred fixom (do tohto deployu)</strong>: stĺpec "Úlohy" rátal len projekty (top-level Task dokumenty). Workspace s 1 projektom označeným ako dokončený a 50 nedokončenými úlohami vnútri ukazoval "Dokončené: 100%". Po fixe sa % počíta z úloh, takže reálne reflektuje koľko práce je hotovej.</p>
       </AdminHelpToggle>
     </div>
   );
