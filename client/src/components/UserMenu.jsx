@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { API_BASE_URL } from '../api/api';
+import api, { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
 import PushNotificationToggle from './PushNotificationToggle';
 import NotificationPreferences from './NotificationPreferences';
@@ -88,6 +88,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [showConnectedAccounts, setShowConnectedAccounts] = useState(false);
+  // Unread counts per workspace — used to badge workspaces in the mobile
+  // dropdown (desktop má vlastný WorkspaceSwitcher s rovnakou logikou,
+  // mobile bol predtým bez per-ws indikácie a user musel postupne prepínať
+  // aby zistil kde je aktivita).
+  const [unreadByWs, setUnreadByWs] = useState({});
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -158,6 +163,25 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Per-workspace unread counts — only matters on mobile where this menu hosts
+  // the workspace switcher. Same endpoint that HeaderLogo + WorkspaceSwitcher
+  // poll; if you want to reduce poll frequency, hoist this into WorkspaceContext
+  // (3 components currently each poll independently every 30 s).
+  const fetchUnreadByWs = useCallback(async () => {
+    try {
+      const res = await api.get('/api/notifications/unread-by-workspace');
+      setUnreadByWs(res.data || {});
+    } catch {
+      // transient; next poll will retry
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUnreadByWs();
+    const interval = setInterval(fetchUnreadByWs, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadByWs]);
 
   // Po OAuth návrate z Google (query ?google_calendar=connected | ?google_tasks=connected)
   // automaticky otvoríme "Synchronizácia kalendára" modal a scrollneme k relevantnej
@@ -1265,31 +1289,58 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               </div>
               {showMobileWorkspaces && (
                 <div className="mobile-workspace-list">
-                  {workspaces.filter(w => (w.id || w._id) !== (currentWorkspace.id || currentWorkspace._id)).map(ws => (
-                    <div
-                      key={ws.id || ws._id}
-                      className="mobile-workspace-item"
-                      onClick={async () => {
-                        const wsId = ws.id || ws._id;
-                        await switchWorkspaceApi(wsId);
-                        // Per-device storage + native Android bridge write-through.
-                        setStoredWorkspaceId(wsId);
-                        // ws= URL param má v WorkspaceContext najvyššiu prioritu
-                        // (nad localStorage aj DB default) → bulletproof pre
-                        // Android race medzi MainActivity inject a React boot.
-                        window.location.href = `/app?ws=${encodeURIComponent(wsId)}`;
-                      }}
-                    >
-                      <span
-                        className="workspace-color-dot"
-                        style={{ backgroundColor: ws.color || '#6366f1' }}
-                      />
-                      <span className="workspace-name-mobile">{ws.name}</span>
-                      <span className="workspace-role-mobile">
-                        {getWorkspaceRoleLabel(ws.role)}
-                      </span>
-                    </div>
-                  ))}
+                  {workspaces.filter(w => (w.id || w._id) !== (currentWorkspace.id || currentWorkspace._id)).map(ws => {
+                    const wsId = ws.id || ws._id;
+                    const unread = unreadByWs[wsId] || 0;
+                    return (
+                      <div
+                        key={wsId}
+                        className="mobile-workspace-item"
+                        onClick={async () => {
+                          await switchWorkspaceApi(wsId);
+                          // Per-device storage + native Android bridge write-through.
+                          setStoredWorkspaceId(wsId);
+                          // ws= URL param má v WorkspaceContext najvyššiu prioritu
+                          // (nad localStorage aj DB default) → bulletproof pre
+                          // Android race medzi MainActivity inject a React boot.
+                          window.location.href = `/app?ws=${encodeURIComponent(wsId)}`;
+                        }}
+                      >
+                        <span
+                          className="workspace-color-dot"
+                          style={{ backgroundColor: ws.color || '#6366f1' }}
+                        />
+                        {/* Wrapper drží name + pill spolu (flex: 1), pill je
+                            tesne za textom názvu — pri dlhých ws.name sa
+                            text orežu ellipsisom a pill ostane viditeľný.
+                            Inline indikátor: pri 1 unread bodka, pri 2+ pill
+                            s číslom (99+ cap). */}
+                        <span className="workspace-name-mobile-wrap">
+                          <span className={`workspace-name-mobile${unread > 0 ? ' has-unread' : ''}`}>
+                            {ws.name}
+                          </span>
+                          {unread > 0 && (
+                            unread === 1 ? (
+                              <span
+                                className="workspace-unread-pill-inline dot"
+                                aria-label="1 nová notifikácia"
+                              />
+                            ) : (
+                              <span
+                                className="workspace-unread-pill-inline"
+                                aria-label={`${unread} nových notifikácií`}
+                              >
+                                {unread > 99 ? '99+' : unread}
+                              </span>
+                            )
+                          )}
+                        </span>
+                        <span className="workspace-role-mobile">
+                          {getWorkspaceRoleLabel(ws.role)}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {currentWorkspace?.role !== 'owner' && (
                     <div
                       className="mobile-workspace-item"

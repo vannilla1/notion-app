@@ -3026,6 +3026,58 @@ body {
   font-size: 14px;
   color: var(--text-primary);
   flex: 1;
+  /* Truncate dlhých názvov ellipsisom — keď je riadok widthlocked vo flex
+     row, bez min-width: 0 a overflow:hidden by sa name natiahol cez celý
+     dropdown a vytlačil pill + role label za viewport. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bold variant — slúži ako sekundárny vizuálny cue pre unread workspace
+   (paralelne s pill); funguje aj pre čitateľov s farbosleposťou pre
+   ktorých červená pill nemusí byť dostatočne výrazná. */
+.workspace-name-mobile.has-unread {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Wrapper: name + inline pill spolu, zaberá flex priestor. Bez tohto
+   wrapperu by pill skončil pri role badge na pravom okraji (kvôli
+   gap-em medzi flex itemami). */
+.workspace-name-mobile-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Inline pill — kompaktný indikátor unread count tesne za názvom ws.
+   Pri 1 unread sa použije variant `.dot` (čistá bodka, bez čísla);
+   pri 2+ classic pill so zaokrúhleným číslom. Tieto rozmery boli
+   ladené pre čitateľnosť aj na 320px iPhone SE displeji. */
+.workspace-unread-pill-inline {
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 9px;
+  min-width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.workspace-unread-pill-inline.dot {
+  width: 8px;
+  height: 8px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
 }
 
 .workspace-role-mobile {
@@ -3034,6 +3086,7 @@ body {
   background: var(--bg-hover);
   padding: 2px 8px;
   border-radius: 10px;
+  flex-shrink: 0;
 }
 
 /* Show workspace info only on mobile */
