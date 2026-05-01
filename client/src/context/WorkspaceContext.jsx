@@ -230,6 +230,36 @@ export const WorkspaceProvider = ({ children }) => {
     return result;
   };
 
+  /**
+   * Delete current workspace (owner only — server enforces).
+   * After deletion, returns { nextWorkspaceId } pointing to another workspace
+   * the user is still a member of, or null if they have no other workspaces.
+   * Caller is responsible for the actual redirect (typically a hard navigation
+   * to /app?ws=<id> to ensure all in-memory state is rebuilt with the new ws).
+   */
+  const deleteWorkspace = async () => {
+    const deletedId = currentWorkspace?.id || currentWorkspaceId;
+    await workspaceApi.deleteWorkspace();
+    // Refetch workspaces — server-side deleteWorkspace clears
+    // currentWorkspaceId for affected users, takže `getWorkspaces()` vráti
+    // všetky zostávajúce v ktorých má user membership.
+    const data = await workspaceApi.getWorkspaces();
+    const remaining = (data.workspaces || []).filter(
+      (w) => (w.id || w._id)?.toString() !== deletedId?.toString()
+    );
+    setWorkspaces(remaining);
+    if (remaining.length === 0) {
+      // Žiadne ďalšie workspaces → user uvidí WorkspaceSetup screen.
+      setCurrentWorkspace(null);
+      setCurrentWorkspaceId(null);
+      return { nextWorkspaceId: null };
+    }
+    // Vráti najnovší (alebo prvý) zo zostávajúcich — caller si zariadi
+    // switch + redirect (window.location.href = `/app?ws=${id}`).
+    const next = remaining[0];
+    return { nextWorkspaceId: next.id || next._id };
+  };
+
   const refreshCurrentWorkspace = async () => {
     try {
       const current = await workspaceApi.getCurrentWorkspace();
@@ -254,6 +284,7 @@ export const WorkspaceProvider = ({ children }) => {
     updateWorkspace,
     regenerateInviteCode,
     leaveWorkspace,
+    deleteWorkspace,
     refreshCurrentWorkspace
   };
 

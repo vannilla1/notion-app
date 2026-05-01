@@ -8,6 +8,7 @@ import {
   sendInvitation, getInvitations, cancelInvitation,
   leaveWorkspace as leaveWorkspaceApi
 } from '../api/workspaces';
+import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import UserMenu from '../components/UserMenu';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
@@ -15,7 +16,7 @@ import NotificationBell from '../components/NotificationBell';
 
 function WorkspaceMembers() {
   const { user, logout, updateUser } = useAuth();
-  const { currentWorkspace, refreshCurrentWorkspace } = useWorkspace();
+  const { currentWorkspace, refreshCurrentWorkspace, deleteWorkspace } = useWorkspace();
   const navigate = useNavigate();
 
   const [members, setMembers] = useState([]);
@@ -29,6 +30,14 @@ function WorkspaceMembers() {
   const [transferring, setTransferring] = useState(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
+  // Delete workspace flow — owner-only. Vyžaduje typed-in confirmation
+  // (názov workspace) aby sa zabránilo náhodnému kliku v tomto destruktívnom
+  // toku — všetky kontakty, projekty, úlohy, správy a členstvá sa zmažú,
+  // server endpoint je nevratný (žiadny soft-delete / undo window).
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const isOwner = currentWorkspace?.role === 'owner';
   const canManage = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
@@ -393,6 +402,25 @@ function WorkspaceMembers() {
               </button>
             </div>
           )}
+          {/* Delete workspace - owner only. Destruktívna akcia, server endpoint
+              robí cascade delete (memberships, contacts, tasks, messages,
+              invitations + samotný workspace). Nevratné — preto modal
+              vyžaduje typed-in confirmation názvu workspace. */}
+          {currentWorkspace?.role === 'owner' && (
+            <div className="wm-leave-section">
+              <button
+                className="wm-leave-btn"
+                style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5' }}
+                onClick={() => {
+                  setDeleteError('');
+                  setDeleteConfirmText('');
+                  setShowDeleteConfirm(true);
+                }}
+              >
+                🗑️ Vymazať prostredie
+              </button>
+            </div>
+          )}
           </div>
         </main>
       </div>
@@ -432,6 +460,92 @@ function WorkspaceMembers() {
                 disabled={leavingWorkspace}
               >
                 {leavingWorkspace ? 'Opúšťam...' : 'Áno, opustiť'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete workspace confirm modal — owner only */}
+      {showDeleteConfirm && currentWorkspace && (
+        <div className="workspace-leave-overlay" onClick={() => !deletingWorkspace && setShowDeleteConfirm(false)}>
+          <div className="workspace-leave-modal" onClick={e => e.stopPropagation()}>
+            <div className="workspace-leave-modal-icon">⚠️</div>
+            <h3 className="workspace-leave-modal-title">Vymazať prostredie?</h3>
+            <p className="workspace-leave-modal-text">
+              Naozaj chceš natrvalo vymazať prostredie <strong>{currentWorkspace.name}</strong>?
+            </p>
+            <p className="workspace-leave-modal-text" style={{ color: '#b91c1c', fontWeight: 600 }}>
+              ⚠️ Táto akcia je <strong>nevratná</strong>. Vymažú sa všetky kontakty,
+              projekty, úlohy, správy, pozvánky aj členstvá. Ostatní členovia stratia
+              prístup okamžite.
+            </p>
+            <p className="workspace-leave-modal-text" style={{ fontSize: '13px' }}>
+              Pre potvrdenie napíš názov prostredia: <strong>{currentWorkspace.name}</strong>
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => { setDeleteConfirmText(e.target.value); setDeleteError(''); }}
+              placeholder={currentWorkspace.name}
+              disabled={deletingWorkspace}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color, #e2e8f0)',
+                fontSize: '14px',
+                marginTop: '8px',
+                marginBottom: '8px',
+                boxSizing: 'border-box',
+              }}
+            />
+            {deleteError && (
+              <div style={{ color: '#b91c1c', fontSize: '13px', marginBottom: '8px' }}>
+                {deleteError}
+              </div>
+            )}
+            <div className="workspace-leave-modal-actions">
+              <button
+                className="workspace-leave-modal-btn cancel"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingWorkspace}
+              >
+                Zrušiť
+              </button>
+              <button
+                className="workspace-leave-modal-btn confirm"
+                style={{ background: '#dc2626' }}
+                onClick={async () => {
+                  // Strict equality s názvom workspace — žiadne case-insensitive
+                  // ani trim, aby user reálne pozorne prečítal čo maže.
+                  if (deleteConfirmText !== currentWorkspace.name) {
+                    setDeleteError('Názov nesúhlasí. Prepíš ho presne tak ako je vyššie.');
+                    return;
+                  }
+                  try {
+                    setDeletingWorkspace(true);
+                    setDeleteError('');
+                    const { nextWorkspaceId } = await deleteWorkspace();
+                    if (nextWorkspaceId) {
+                      // Switch + hard reload na ďalší workspace. Hard reload
+                      // (window.location) namiesto navigate aby všetky in-memory
+                      // listy / sockety prebehli rebuild s novým wsId.
+                      setStoredWorkspaceId(nextWorkspaceId);
+                      window.location.href = `/app?ws=${encodeURIComponent(nextWorkspaceId)}`;
+                    } else {
+                      // Žiadny ďalší workspace — user uvidí WorkspaceSetup po /app.
+                      window.location.href = '/app';
+                    }
+                  } catch (err) {
+                    setDeleteError(err?.response?.data?.message || 'Chyba pri mazaní prostredia');
+                    setDeletingWorkspace(false);
+                  }
+                }}
+                disabled={deletingWorkspace || deleteConfirmText !== currentWorkspace.name}
+              >
+                {deletingWorkspace ? 'Mažem...' : 'Áno, vymazať natrvalo'}
               </button>
             </div>
           </div>
