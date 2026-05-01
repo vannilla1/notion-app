@@ -458,6 +458,11 @@ function Tasks() {
   const [highlightedTaskIds, setHighlightedTaskIds] = useState(new Set());
   const taskRefs = useRef({});
   const pendingHighlightRef = useRef(null);
+  // tasksRef drží vždy aktuálnu hodnotu `tasks`. Po toggleTask/toggleSubtask
+  // potrebujeme čítať čerstvé tasks (po fetchTasks), ale React state update
+  // je async — closure v setTimeout by čítala stale `tasks` zo svojho času.
+  // Ref sa aktualizuje synchrónne v useEffect nižšie a je vždy aktuálny.
+  const tasksRef = useRef([]);
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -567,6 +572,13 @@ function Tasks() {
       // User may not have Google Tasks connected
     }
   }, [fetchTasks]);
+
+  // Keep tasksRef in sync with tasks state — used by focusNextMatch after
+  // toggle-complete, where we need to read fresh tasks AFTER fetchTasks
+  // resolved but state update closure was captured earlier.
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
 
   // Fetch all data in parallel (saves ~2-4s vs sequential on Atlas M0).
   // Google Tasks sync beží na pozadí (5min interval) — nespúšťame ho na
@@ -859,6 +871,59 @@ function Tasks() {
       }
     }
     return parentIds;
+  };
+
+  // Flatten všetky položky (top-level tasks + subtasky všetkých úrovní)
+  // ktoré matchujú aktuálny filter, zoradené chronologicky podľa dueDate.
+  // Položky bez dueDate idú na koniec. Použité po toggle-complete v
+  // Termín / Priradené mne / Nové filtri — chceme presunúť focus na
+  // ďalšiu najbližšiu úlohu.
+  const flattenMatchingItems = (taskList, currentFilter, currentUserId) => {
+    const items = [];
+    const isDueFilter = isDueDateFilter(currentFilter);
+    const isAssigned = isAssignedFilter(currentFilter);
+    const isNew = currentFilter === 'new';
+    const dueClass = isDueFilter ? currentFilter : null;
+    if (!isDueFilter && !isAssigned && !isNew) return items;
+
+    const visitSubtasks = (subs, taskId) => {
+      if (!Array.isArray(subs)) return;
+      for (const sub of subs) {
+        if (!sub.completed) {
+          let matches = false;
+          if (isDueFilter && getDueDateClass(sub.dueDate, sub.completed) === dueClass) matches = true;
+          if (isAssigned && currentUserId && (sub.assignedTo || []).some(id => id?.toString() === currentUserId)) matches = true;
+          if (isNew && isSubtaskNewOrModified(sub)) matches = true;
+          if (matches) {
+            items.push({ type: 'subtask', taskId, subtaskId: sub.id, dueDate: sub.dueDate || null });
+          }
+        }
+        if (sub.subtasks?.length) visitSubtasks(sub.subtasks, taskId);
+      }
+    };
+
+    for (const task of taskList) {
+      if (!task.completed) {
+        let taskMatches = false;
+        if (isDueFilter && getDueDateClass(task.dueDate, task.completed) === dueClass) taskMatches = true;
+        if (isAssigned && currentUserId && (task.assignedTo || []).some(id => id?.toString() === currentUserId)) taskMatches = true;
+        if (isNew && isNewOrModified(task)) taskMatches = true;
+        if (taskMatches) {
+          items.push({ type: 'task', taskId: task.id, dueDate: task.dueDate || null });
+        }
+      }
+      visitSubtasks(task.subtasks, task.id);
+    }
+
+    // Sort by dueDate ascending; null dates at the end. localeCompare na
+    // ISO 'YYYY-MM-DD' stringoch je ekvivalentné chronologickému poradiu.
+    items.sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+    return items;
   };
 
   // Handle highlight from navigation state OR URL query params (push notification click)
@@ -1232,16 +1297,57 @@ function Tasks() {
     }
   };
 
+  // Po toggle-complete v aktívnom Termín / Priradené mne / Nové filtri
+  // presunúť focus na ďalšiu najbližšiu položku — aby user nemusel ručne
+  // hľadať čo je ďalej. exclude{Task,Subtask}Id potrebujeme lebo fetchTasks
+  // beží paralelne so socket eventami a môže zachytiť stav PRED odzrkadlením
+  // completed=true v DB → just-completed item by sa znova javil ako matching.
+  const focusNextMatch = (currentFilter, currentUserId, excludeTaskId, excludeSubtaskId) => {
+    const items = flattenMatchingItems(tasksRef.current, currentFilter, currentUserId);
+    if (items.length === 0) return;
+    // Vyhľadáme prvý item ktorý NIE JE just-completed.
+    const next = items.find(it => {
+      if (excludeSubtaskId && it.type === 'subtask' && it.subtaskId === excludeSubtaskId) return false;
+      if (excludeTaskId && it.type === 'task' && it.taskId === excludeTaskId) return false;
+      return true;
+    });
+    if (!next) return;
+    if (next.type === 'task') {
+      setExpandedTask(next.taskId);
+      setHighlightedTaskId(next.taskId);
+      scrollToTaskWithRetry(next.taskId);
+      // Auto-clear po 2.5s — krátky vizuálny pulz, nie permanentný highlight.
+      setTimeout(() => setHighlightedTaskId(prev => prev === next.taskId ? null : prev), 2500);
+    } else {
+      // Subtask — najprv treba expandnúť parent task aby bol v DOM.
+      setExpandedTask(next.taskId);
+      setHighlightedSubtaskId(next.subtaskId);
+      scrollToSubtaskWithRetry(next.subtaskId);
+      setTimeout(() => setHighlightedSubtaskId(prev => prev === next.subtaskId ? null : prev), 2500);
+    }
+  };
+
   const toggleTask = async (task) => {
     if (!task.completed) {
       if (!window.confirm(`Naozaj chcete označiť projekt "${task.title}" ako dokončený?`)) return;
     }
+    const wasCompleting = !task.completed;
+    const filterAtToggle = filter;
+    const userIdAtToggle = user?.id?.toString();
+    const shouldFocusNext = wasCompleting && (
+      isDueDateFilter(filterAtToggle) || isAssignedFilter(filterAtToggle) || filterAtToggle === 'new'
+    );
     try {
       await api.put(`/api/tasks/${task.id}`, {
         completed: !task.completed,
         source: task.source
       });
       await fetchTasks();
+      if (shouldFocusNext) {
+        // setTimeout 0 počká na React commit (tasksRef sa updatne v useEffect),
+        // potom flattenMatchingItems uvidí už čerstvý stav.
+        setTimeout(() => focusNextMatch(filterAtToggle, userIdAtToggle, task.id, null), 0);
+      }
     } catch {
       // Silently fail
     }
@@ -1359,12 +1465,21 @@ function Tasks() {
     if (!subtask.completed) {
       if (!window.confirm(`Naozaj chcete označiť úlohu "${subtask.title}" ako dokončenú?`)) return;
     }
+    const wasCompleting = !subtask.completed;
+    const filterAtToggle = filter;
+    const userIdAtToggle = user?.id?.toString();
+    const shouldFocusNext = wasCompleting && (
+      isDueDateFilter(filterAtToggle) || isAssignedFilter(filterAtToggle) || filterAtToggle === 'new'
+    );
     try {
       await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
         completed: !subtask.completed,
         source: task.source
       });
       await fetchTasks();
+      if (shouldFocusNext) {
+        setTimeout(() => focusNextMatch(filterAtToggle, userIdAtToggle, null, subtask.id), 0);
+      }
     } catch {
       // Silently fail
     }
