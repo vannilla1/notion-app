@@ -86,10 +86,27 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    const user = await getCachedUser(decoded.id);
+    let user = await getCachedUser(decoded.id);
 
     if (!user) {
       return res.status(401).json({ message: 'Neplatný token' });
+    }
+
+    // Lazy plan expiration — when a user's paidUntil has elapsed and the
+    // plan isn't backed by an active Stripe subscription, atomically
+    // downgrade to 'free' before any limit-checking endpoint sees stale
+    // premium state. Pre-check via isExpired() is a pure read so we don't
+    // pay a DB write on the 99.99% of requests that don't need it.
+    // Lazy require avoids circular import (planExpiration -> auth.invalidateUserCache).
+    const { isExpired, expireUserIfNeeded } = require('../services/planExpiration');
+    if (isExpired(user)) {
+      const downgraded = await expireUserIfNeeded(user._id);
+      if (downgraded) {
+        // Re-read fresh state. Cache was invalidated inside expireUserIfNeeded,
+        // so getCachedUser will hit the DB and re-cache the new (free) state.
+        const fresh = await getCachedUser(decoded.id);
+        if (fresh) user = fresh;
+      }
     }
 
     req.user = {

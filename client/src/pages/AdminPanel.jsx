@@ -1401,6 +1401,7 @@ function SyncTab({ filter, onFilterChange }) {
 const ACTION_LABELS = {
   'user.role_changed': '🔑 Zmena role', 'user.plan_changed': '💳 Zmena plánu', 'user.deleted': '🗑️ Vymazaný užívateľ',
   'user.discount_applied': '🏷️ Zľava pridaná', 'user.discount_removed': '🏷️ Zľava odobratá', 'user.subscription_updated': '💳 Predplatné upravené',
+  'user.plan_auto_expired': '⏰ Plán automaticky expiroval (vrátený na Free)',
   'auth.login': '🔓 Prihlásenie', 'auth.register': '📝 Registrácia',
   'contact.created': '➕ Nový kontakt', 'contact.updated': '✏️ Úprava kontaktu', 'contact.deleted': '🗑️ Vymazaný kontakt',
   'task.created': '➕ Nová úloha', 'task.completed': '✅ Dokončená úloha', 'task.deleted': '🗑️ Vymazaná úloha',

@@ -31,6 +31,7 @@ const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
+const { schedulePlanExpiration } = require('./services/planExpiration');
 const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
@@ -413,6 +414,10 @@ server.listen(PORT, () => {
       setTimeout(() => {
         scheduleDueDateChecks();
         scheduleSubscriptionCleanup();
+        // Auto-revert expired paid plans (admin-granted free months / planUpgrade
+        // discounts) back to 'free'. Runs every 6h; complemented by lazy check
+        // in auth middleware for instant downgrade on next request.
+        schedulePlanExpiration();
         scheduleErrorAlerter();
         startGoogleTasksPolling(io);
         initializeCalendarWebhooks(io);
