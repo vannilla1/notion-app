@@ -6709,8 +6709,14 @@ body.ios-app {
 
 .sa-content {
   padding: 32px 40px;
-  max-width: 1400px;
-  margin: 0 auto;
+  /* Predtým: max-width: 1400px + margin: 0 auto. Centrovalo content na max
+     1400px, takže pri menšom obsahu bola sekcia úzka a "skákala" na šírku
+     pri otvorení AdminHelpToggle (ktorý má dlhý text → roztiahol parent).
+     Teraz vždy full-width — admin panel má veľa tabuliek a hutnejších
+     dát, na ktorých sa wide layout vypláca. Padding 40px po bokoch
+     zachováva zdravý dýchajúci priestor pri okrajoch. */
+  width: 100%;
+  box-sizing: border-box;
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
