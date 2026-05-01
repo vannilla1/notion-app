@@ -259,14 +259,99 @@ function OverviewTab({ onNavigate }) {
       </div>
 
       <AdminHelpToggle title="Prehľad">
-        <p><strong>Čo tu vidíš:</strong> rýchly snímok celej aplikácie — stav servera, agregované počty a rozdelenie užívateľov.</p>
+        <p><strong>Čo tu vidíš:</strong> rýchly snímok celej aplikácie — stav servera, agregované počty a rozdelenie užívateľov. Toto je tvoj denný štartovací bod — keď ti niečo nesedí v reálnom svete (sťažnosť usera, padajúce featury, neskoré notifikácie), sem pozri prvé.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>🩺 Stav systému (sekcia hore)</h4>
         <ul>
-          <li><strong>Stav systému</strong> — uptime servera, využitie pamäte (heap = JS objekty, RSS = celá Node.js process), MongoDB konektivita, verzia Node.js a prostredie (production/staging). Bodka vľavo: zelená = MongoDB OK, červená = výpadok.</li>
-          <li><strong>Karty štatistík</strong> — Používatelia, Workspace-y, Projekty, Kontakty, Google Calendar/Tasks počty. Klik na kartu → presmeruje na relevantný tab so zoznamom.</li>
-          <li><strong>Plány</strong> — koľko užívateľov má Free / Tím / Pro plán.</li>
-          <li><strong>Role</strong> — počet adminov, manažérov a bežných používateľov.</li>
+          <li><strong>Bodka vľavo (zelená/červená)</strong> — top-level health indikátor. Zelená = MongoDB connected, server obsluhuje requesty normálne. Červená = MongoDB výpadok → <em>P1 incident</em>, server síce beží ale nedostáva ani neukladá dáta. Skontroluj Render dashboard / MongoDB Atlas hneď.</li>
+          <li><strong>Uptime</strong> — doba od posledného reštartu Node procesu. <br/>
+            ⚠️ <strong>Krátky (&lt;5 min) bez nedávneho deploy-a</strong> = server crashol a Render ho reštartol. Choď do <em>Diagnostika → Chyby</em> a hľadaj 5xx errory s timestampom okolo reštartu.<br/>
+            ⚠️ <strong>Veľmi dlhý (&gt;30 dní)</strong> = možná postupná RAM akumulácia (memory leak). Zvážiť plánovaný reštart pre čistý štart.<br/>
+            ✅ Healthy: niekoľko hodín až desiatky dní bez záhadných reštartov.
+          </li>
+          <li><strong>RAM (heap)</strong> — pamäť alokovaná V8 enginom pre JS objekty (heapUsed / heapTotal). Render Starter má cca 512 MB RAM celkovo.<br/>
+            ✅ Healthy: heapUsed &lt; 70 % heapTotal.<br/>
+            ⚠️ Watch: 70–85 % → GC pressure, response časy môžu rásť.<br/>
+            🚨 Critical: &gt; 85 % alebo heapUsed &gt; 400 MB → naplánuj reštart, hľadaj memory leak (najčastejšie: nezavretý socket, akumulujúci cache, infinite event listener).
+          </li>
+          <li><strong>RAM (RSS)</strong> — Resident Set Size, celá pamäť, ktorú process zaberá v OS (heap + buffers + native code). Toto je hodnota, ktorú meria Render pre OOM kill.<br/>
+            ✅ Healthy: &lt; 350 MB.<br/>
+            ⚠️ Watch: 350–450 MB.<br/>
+            🚨 Critical: &gt; 450 MB → riziko OOM kill (Render zabije proces). Reštart hneď.
+          </li>
+          <li><strong>MongoDB</strong> — status DB konektivity. <strong>OK</strong> = connected, <strong>Offline</strong> = výpadok. Offline znamená, že žiadny user nedokáže nič načítať ani uložiť. Skontroluj DB provider (Render / Atlas), connection string v env vars, network connectivity.</li>
+          <li><strong>Node.js</strong> — verzia runtime. Sleduj keď sa zmení po deploy-e (mohol byť zmenený engine). LTS verzie (18.x, 20.x, 22.x) sú stabilné, vyhýbať odd-number major (19, 21) v produkcii.</li>
+          <li><strong>Prostredie</strong> — <code>production</code> / <code>staging</code> / <code>development</code>. Ak v admin paneli vidíš development, niečo je zle s deploy-om — hodnoty by si nemal brať vážne.</li>
+          <li><strong>Timestamp vpravo</strong> — kedy bol health check vykonaný. Stránka neauto-refreshuje, pre aktuálne hodnoty refresni browser.</li>
         </ul>
-        <p><strong>Tipy:</strong> ak Stav systému ukáže červenú MongoDB → server beží ale databáza odpadla, používatelia nedostanú žiadne dáta. RAM dlhodobo nad 80% → time-to-restart server (Render manual deploy).</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>📊 Karty štatistík (klikateľné)</h4>
+        <ul>
+          <li><strong>👥 Používatelia</strong> — celkový počet registrovaných users. <em>Sub-text "+N za 30 dní"</em> = nové registrácie za posledný mesiac (rýchlosť rastu).<br/>
+            ⚠️ Pokles tempa registrácií &gt; 50 % medzi mesiacmi → spýtaj sa marketingu / SEO čo sa zmenilo.<br/>
+            📈 Trend sleduj v <em>Grafy → Registrácie podľa dní</em>.<br/>
+            Klik → otvorí <em>Používatelia</em> tab so zoznamom.
+          </li>
+          <li><strong>🏢 Workspace-y</strong> — total počet workspace-ov + počet aktívnych. <em>Aktívny workspace</em> = má dáta (kontakty/úlohy/správy) za posledné obdobie.<br/>
+            ⚠️ Veľký rozdiel total vs. aktívne (napr. 100 total / 12 aktívnych) = veľa "mŕtvych" workspace-ov. Užívatelia sa zaregistrovali, vytvorili workspace a opustili.<br/>
+            💡 Akcia: pošli reactivačný email, alebo cez <em>Storage</em> tab identifikuj prázdne workspace-y na cleanup.<br/>
+            Klik → <em>Workspace-y</em> tab.
+          </li>
+          <li><strong>📋 Projekty</strong> — počet Task dokumentov v DB (top-level projekty, nie úlohy v nich). Pre rozpis úloh aj projektov per workspace pozri <em>Porovnanie</em>.<br/>
+            ⚠️ Stagnujúci alebo klesajúci počet týždeň-na-týždeň pri raste user base = engagement problém.<br/>
+            Klik → <em>Porovnanie</em> tab.
+          </li>
+          <li><strong>👤 Kontakty</strong> — počet Contact dokumentov. Pri B2B CRM by malo byť v hrubom 3-10× viac kontaktov ako workspace-ov (každý tím má pár klientov).<br/>
+            ⚠️ Pomer kontakty/workspace &lt; 1 = užívatelia sa zaregistrujú, ale nezačnú reálne používať produkt.<br/>
+            Klik → <em>Porovnanie</em> tab.
+          </li>
+          <li><strong>📅 Google Calendar</strong> — počet užívateľov, ktorí si pripojili Google Calendar sync. Toto je dobrý <em>power-user signal</em>.<br/>
+            ⚠️ Ak číslo dlho stagnuje pri raste users = feature je málo objavená alebo má UX bariéru.<br/>
+            Klik → <em>Sync</em> tab s filtrom calendar.
+          </li>
+          <li><strong>✅ Google Tasks</strong> — počet užívateľov so sync na Google Tasks. Typicky menej ako Calendar (Tasks API obmedzenia).<br/>
+            Klik → <em>Sync</em> tab s filtrom tasks.
+          </li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>💳 Plány (sekcia dole vľavo)</h4>
+        <ul>
+          <li>Rozdelenie users podľa plánu: <strong>Free</strong>, <strong>Tím</strong> (4,99 €/mes), <strong>Pro</strong> (9,99 €/mes).</li>
+          <li><strong>Konverzný pomer</strong> = (Tím + Pro) / Total. Cieľ pre B2B SaaS je 5–15 %, world-class produkty &gt; 20 %.<br/>
+            ✅ Healthy: ≥ 8 %.<br/>
+            ⚠️ Watch: 3–8 % → onboarding alebo pricing môže odpudzovať.<br/>
+            🚨 Problem: &lt; 3 % → vážna pricing/value mismatch.
+          </li>
+          <li><strong>Skoková zmena</strong> v breakdownu (napr. Pro počet zrazu klesol o 5):<br/>
+            → Skontroluj <em>Audit log</em> filtrovaný na <code>billing</code> kategóriu — uvidíš či to bol auto-expire (<code>user.plan_auto_expired</code>) alebo manuálny downgrade (<code>user.subscription_updated</code>).<br/>
+            → Ak hromadný auto-expire → niekomu vypršal trial / paid period. <em>Diagnostika → Príjmy</em> ti ukáže detail MRR.
+          </li>
+          <li><strong>Pre detailné MRR/ARR</strong> choď do <em>Diagnostika → Príjmy</em>. Ak chceš vidieť kto presne je na ktorom pláne, použi <em>Používatelia</em> tab a filter podľa plánu.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>🔑 Role (sekcia dole vpravo)</h4>
+        <ul>
+          <li>Globálne aplikačné role (nie workspace role, tie sú samostatné).</li>
+          <li><strong>Admin</strong> — has access do super-admin panelu (toho v ktorom si). Mali by byť 1–2 ľudia max (ty + možno backup).<br/>
+            🚨 Critical: ak vidíš počet adminov &gt; 2 a nepoznáš všetkých → niekto získal admin práva neoprávnene. Skontroluj <em>Audit log → user.role_changed</em>.
+          </li>
+          <li><strong>Manažér</strong> — global manager role (zriedkavá; väčšina manager práv beží na workspace úrovni). V praxi by mal byť počet 0 alebo veľmi nízky.</li>
+          <li><strong>Používateľ</strong> — bežný user (default po registrácii). Najväčšie číslo, by-design.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>🚦 Daily check rituál (odporúčaný workflow)</h4>
+        <ol>
+          <li>Otvor Prehľad → over že bodka stavu systému je <strong>zelená</strong>.</li>
+          <li>RAM heap a RSS pod &lt; 70 % / &lt; 350 MB? Ak nie, naplánuj reštart.</li>
+          <li>Uptime sedí (žiadny záhadný recent reštart)?</li>
+          <li>Skontroluj kartu Používatelia — denný/týždenný rast ide podľa očakávaní?</li>
+          <li>Plány — pomer Free:Paid sa nepohol negatívne?</li>
+          <li>Ak čokoľvek vyzerá zle → choď do <em>Diagnostika</em> tabu (Chyby, Výkon, Zdravie) na drill-down.</li>
+        </ol>
+
+        <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Niektoré hodnoty (napr. recentRegistrations, activeWorkspaces) sa počítajú server-side z agregátnych Mongo queries. Pre real-time monitoring (každých 5 min) máme samostatný health monitor v <code>jobs/healthMonitor.js</code>, ktorý pri 3× zlyhaní pošle email na support@prplcrm.eu.
+        </p>
       </AdminHelpToggle>
     </div>
   );
