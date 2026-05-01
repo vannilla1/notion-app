@@ -2047,8 +2047,12 @@ function StorageTab() {
       {/* Per workspace */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
         <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Storage per workspace</h3>
-        <div className="sa-table-wrap">
-          <table className="sa-table" style={{ fontSize: '12px' }}>
+        <div className="sa-table-wrap" style={{ width: '100%' }}>
+          {/* width: 100% — bez tohto sa table autosizuje na šírku obsahu
+              (default <table> behavior) a pri 6 úzkych stĺpcoch zaberá len
+              ~40% šírky karty. Comparison tab to nemá lebo má 11 stĺpcov
+              ktoré sami zaplnia šírku. */}
+          <table className="sa-table" style={{ fontSize: '12px', width: '100%' }}>
             <thead>
               <tr>
                 <th>Workspace</th>
