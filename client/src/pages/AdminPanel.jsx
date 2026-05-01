@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import adminApi, { API_BASE_URL } from '@/api/adminApi';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
+import AdminHelpToggle from '../components/AdminHelpToggle';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler);
 
@@ -256,6 +257,17 @@ function OverviewTab({ onNavigate }) {
           </div>
         </div>
       </div>
+
+      <AdminHelpToggle title="Prehľad">
+        <p><strong>Čo tu vidíš:</strong> rýchly snímok celej aplikácie — stav servera, agregované počty a rozdelenie užívateľov.</p>
+        <ul>
+          <li><strong>Stav systému</strong> — uptime servera, využitie pamäte (heap = JS objekty, RSS = celá Node.js process), MongoDB konektivita, verzia Node.js a prostredie (production/staging). Bodka vľavo: zelená = MongoDB OK, červená = výpadok.</li>
+          <li><strong>Karty štatistík</strong> — Používatelia, Workspace-y, Projekty, Kontakty, Google Calendar/Tasks počty. Klik na kartu → presmeruje na relevantný tab so zoznamom.</li>
+          <li><strong>Plány</strong> — koľko užívateľov má Free / Tím / Pro plán.</li>
+          <li><strong>Role</strong> — počet adminov, manažérov a bežných používateľov.</li>
+        </ul>
+        <p><strong>Tipy:</strong> ak Stav systému ukáže červenú MongoDB → server beží ale databáza odpadla, používatelia nedostanú žiadne dáta. RAM dlhodobo nad 80% → time-to-restart server (Render manual deploy).</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -690,6 +702,25 @@ function UsersTab() {
           </div>
         </div>
       )}
+
+      <AdminHelpToggle title="Používatelia">
+        <p><strong>Čo tu vidíš:</strong> kompletný zoznam všetkých registrovaných užívateľov + nástroje na úpravu ich účtu, plánu a zliav.</p>
+        <ul>
+          <li><strong>Vyhľadávanie a filtre</strong> hore — hľadanie podľa mena/emailu, filter podľa plánu, role, registrácie atď.</li>
+          <li><strong>Hromadné akcie</strong> — zaškrtni viacerých → hromadne zmeň plán alebo rolu (super admin je vždy vynechaný).</li>
+          <li><strong>Klik na riadok</strong> → otvorí detail panel vpravo so:
+            <ul>
+              <li><strong>Profil</strong> — meno, email, role, registračný dátum, posledné prihlásenie.</li>
+              <li><strong>Workspaces</strong> — kde je členom a v akej role.</li>
+              <li><strong>Zariadenia</strong> — zaregistrované iOS/Android/web push tokeny.</li>
+              <li><strong>Posledná aktivita</strong> — výňatok z Audit logu pre tohto usera.</li>
+              <li><strong>Predplatné — úprava</strong> — zmena plánu (Free/Tím/Pro) a "Platené do" dátumu. Po vypršaní paidUntil a bez Stripe sub sa plán automaticky vráti na Free (cez auto-expiry službu).</li>
+              <li><strong>Zľava</strong> — pridanie discount metadata: percentuálna, fixná, voľné mesiace, plán-upgrade zadarmo. <em>Pozor:</em> "voľné mesiace" predĺži paidUntil ale nezmení plán — pre "mesiac Pro zdarma" radšej použi "Predplatné — úprava" (plán Pro + dátum o mesiac).</li>
+            </ul>
+          </li>
+        </ul>
+        <p><strong>Tipy:</strong> mazanie usera je permanentné (DELETE z DB + GDPR cleanup). Pred zmenou role/plánu vždy skontroluj kontext — všetky zmeny sa logujú do Audit logu so záznamom kto/kedy/čo.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -941,6 +972,22 @@ function WorkspacesTab() {
           </div>
         </div>
       )}
+
+      <AdminHelpToggle title="Workspace-y">
+        <p><strong>Čo tu vidíš:</strong> všetky workspace-y v systéme — vlastníci, počet členov, dáta vo vnútri.</p>
+        <ul>
+          <li><strong>Vyhľadávanie</strong> hore — podľa názvu alebo emailu vlastníka.</li>
+          <li><strong>Riadok workspace-u</strong> — ukazuje názov, vlastníka, počet členov, počet kontaktov a projektov.</li>
+          <li><strong>Klik na workspace</strong> → otvorí detail panel:
+            <ul>
+              <li><strong>Členovia</strong> — kto je v workspace-u + ich rola (owner / manager / member).</li>
+              <li><strong>Posledné kontakty</strong> — výpis 10 najnovších pridaných kontaktov.</li>
+              <li><strong>Vymazať workspace</strong> — destructive akcia, kompletne odstráni workspace + všetky kontakty, úlohy, správy, členstvá.</li>
+            </ul>
+          </li>
+        </ul>
+        <p><strong>Tipy:</strong> Workspace môže existovať aj keď vlastník už nemá aktívne predplatné — limity sa kontrolujú podľa plánu majiteľa workspace-u (workspace owner). Pri vymazaní user-a sa jeho workspaces neodstránia automaticky — treba ich vymazať ručne tu.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1386,6 +1433,17 @@ function SyncTab({ filter, onFilterChange }) {
           </div>
         ))}
       </div>
+
+      <AdminHelpToggle title="Sync (Google Calendar / Tasks)">
+        <p><strong>Čo tu vidíš:</strong> stav synchronizácie Google Calendar a Google Tasks pre každého používateľa, ktorý si pripojil Google účet.</p>
+        <ul>
+          <li><strong>Filter</strong> hore — prepínač Calendar / Tasks; URL hash <code>#sync/calendar</code> alebo <code>#sync/tasks</code> pamätá výber pri refreshi.</li>
+          <li><strong>Riadok usera</strong> — meno, email, počet sync-ovaných eventov / úloh, posledný sync timestamp.</li>
+          <li><strong>Workspace task listy</strong> — Google Tasks robí osobitný task list pre každý workspace (názov "Prpl CRM — &lt;workspace&gt;"). Tu vidíš koľko úloh je v ktorom liste.</li>
+          <li><strong>Unattributed</strong> — úlohy/eventy, ktoré nemajú priradený workspace (legacy alebo manuálne pridané do Google).</li>
+        </ul>
+        <p><strong>Tipy:</strong> Pripojenie/odpojenie Google účtu robí user sám v UserMenu → Synchronizácia kalendára. Tu len monitoruješ stav. Ak je sync zaseknutý → skontroluj Diagnostika → Errors, či OAuth token nevyexspiroval.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1529,6 +1587,30 @@ function AuditLogTab() {
           <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} style={{ fontSize: '13px', padding: '4px 12px' }}>→</button>
         </div>
       )}
+
+      <AdminHelpToggle title="Audit log">
+        <p><strong>Čo tu vidíš:</strong> kompletnú históriu zmien v aplikácii — kto, kedy, čo zmenil. Slúži na forenznú analýzu a compliance.</p>
+        <ul>
+          <li><strong>Filtre</strong> hore — kategória (Používateľ, Workspace, Kontakt, Úloha, Správa, Auth, Fakturácia, Systém), dátumový rozsah, vyhľadávanie podľa user-a alebo cieľa.</li>
+          <li><strong>Riadok záznamu</strong>:
+            <ul>
+              <li>🕐 timestamp + IP adresa (ak je k dispozícii)</li>
+              <li>👤 kto akciu vykonal (username + email; "system" ak išlo o cron / automatizáciu)</li>
+              <li>📋 akcia + cieľ (napr. "💳 Zmena plánu — Marek Novák")</li>
+              <li>kategória ako badge vpravo</li>
+            </ul>
+          </li>
+          <li><strong>Detaily záznamu</strong> — klik rozbalí JSON s pred/po hodnotami (napr. <code>oldPlan: free, plan: pro</code>).</li>
+          <li><strong>Stránkovanie</strong> — typicky 50 záznamov na stranu.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Najčastejšie audit akcie:</p>
+        <ul>
+          <li><strong>user.plan_auto_expired</strong> — automatický downgrade na Free po vypršaní paidUntil</li>
+          <li><strong>user.discount_applied/removed</strong> — admin pridal/odstránil zľavu</li>
+          <li><strong>user.subscription_updated</strong> — admin manuálne zmenil plán/paidUntil</li>
+          <li><strong>auth.login</strong> — prihlásenie (failed pokusy sa logujú v Diagnostika → Active)</li>
+        </ul>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1651,6 +1733,17 @@ function ChartsTab() {
           </div>
         )}
       </div>
+
+      <AdminHelpToggle title="Grafy">
+        <p><strong>Čo tu vidíš:</strong> vizuálne trendy rastu aplikácie — registrácie, aktivita, plány v čase.</p>
+        <ul>
+          <li><strong>Registrácie podľa dní</strong> — line chart, koľko nových userov pribudlo za posledných N dní.</li>
+          <li><strong>Plány v čase</strong> — stacked bar chart, distribúcia Free/Tím/Pro užívateľov v jednotlivých dňoch.</li>
+          <li><strong>Aktivita</strong> — počet vytvorených kontaktov / projektov / správ za obdobie.</li>
+          <li><strong>Doughnut</strong> — aktuálny snapshot rozdelenia plánov / rolí.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Grafy fetchujú agregované dáta zo servera (žiadny per-user lookup), preto sú rýchle aj pri tisícoch userov. Hover na bod ukáže presnú hodnotu pre daný deň. Toto je read-only pohľad — pre úpravy choď do tabu Používatelia.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1743,6 +1836,16 @@ function ActivityFeedTab() {
           </div>
         ))}
       </div>
+
+      <AdminHelpToggle title="Aktivita">
+        <p><strong>Čo tu vidíš:</strong> live feed posledných akcií v aplikácii (auth.login, contact.created, task.completed atď.) — krátkejšia verzia Audit logu, určená na rýchly prehľad.</p>
+        <ul>
+          <li><strong>Real-time aktivita</strong> — zoznam najnovších akcií z AuditLog s timestampom a meno user-a.</li>
+          <li><strong>Detaily zmien</strong> — pri zmene plánu/role vidíš pred/po hodnoty (napr. <code>free → pro</code>).</li>
+          <li><strong>Subject</strong> — pri správach zobrazí predmet (subject) v úvodzovkách.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Pre detailnejšie filtrovanie a stránkovanie použi tab <strong>Audit log</strong>. Tento tab je skôr "kuchynský" pohľad — vidíš tu dianie v aplikácii za uplynulé minúty/hodiny.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1845,6 +1948,17 @@ function ApiMetricsTab() {
           {metrics.topRoutes.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadne dáta — metriky sa začnú zbierať po reštarte servera</div>}
         </div>
       </div>
+
+      <AdminHelpToggle title="API metriky">
+        <p><strong>Čo tu vidíš:</strong> štatistiky výkonu serverového API — koľko requestov sa volá, ktoré endpointy sú najťažšie, error rate.</p>
+        <ul>
+          <li><strong>Total requests</strong> — kumulatívny počet HTTP requestov za uplynulé obdobie.</li>
+          <li><strong>Error rate</strong> — % requestov s 4xx/5xx odpoveďou. Zdravé je &lt; 1%.</li>
+          <li><strong>Avg duration</strong> — priemerný čas odpovede v ms. Endpointy nad 500 ms sú kandidáti na optimalizáciu.</li>
+          <li><strong>Top routes</strong> — endpointy s najvyšším počtom volaní; ukazuje aj per-route avgDuration.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Metriky sa zbierajú in-memory v server procese (apiMetrics service) — pri reštarte servera sa vynulujú. Ak vidíš dlhý avg duration na konkrétnom endpointe → preplauj queries (Mongo indexy), pridaj caching, alebo presuni výpočet do background.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -1965,6 +2079,15 @@ function StorageTab() {
           </table>
         </div>
       </div>
+
+      <AdminHelpToggle title="Storage">
+        <p><strong>Čo tu vidíš:</strong> využitie databázy MongoDB — koľko miesta zaberajú jednotlivé kolekcie a ktoré workspace-y ich najviac napĺňajú.</p>
+        <ul>
+          <li><strong>Kolekcie</strong> — zoznam všetkých Mongo kolekcií (users, contacts, tasks, messages, notifications, auditlogs, pages, workspaces, workspacemembers, pushsubscriptions, apnsdevices) s počtom dokumentov a estimated size.</li>
+          <li><strong>Top workspace-y</strong> — kto produkuje najviac dát (kontakty + úlohy + správy spolu).</li>
+        </ul>
+        <p><strong>Tipy:</strong> Render Mongo (alebo váš poskytovateľ) má fixné limity — keď sa blížiš k stropu, treba buď pricovať vyšší tier, alebo cleanovať staré dáta. <strong>auditlogs</strong> kolekcia rastie najrýchlejšie — zvážiť TTL index na dokumenty staršie ako 1 rok ak treba šetriť priestor.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -2078,6 +2201,16 @@ function WorkspaceComparisonTab() {
           </table>
         </div>
       </div>
+
+      <AdminHelpToggle title="Porovnanie">
+        <p><strong>Čo tu vidíš:</strong> tabuľkové porovnanie všetkých workspace-ov — koľko kontaktov, projektov, správ, členov má každý.</p>
+        <ul>
+          <li><strong>Stĺpce</strong> — názov, vlastník, plán vlastníka, počet členov, kontaktov, projektov, správ, dátum vzniku.</li>
+          <li><strong>Sortovanie</strong> — klik na hlavičku stĺpca → zoradí podľa neho (napr. najväčšie workspace-y podľa počtu kontaktov).</li>
+          <li><strong>Filter</strong> hore — vyhľadávanie podľa názvu alebo vlastníka.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Užitočné na identifikáciu power-userov (najviac kontaktov/projektov) a workspace-ov ktoré sa neuživili (0 dát po týždňoch). Pre detailný drill-down klikni na riadok → presmeruje na <strong>Workspace-y</strong> tab s detail panelom.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -2445,6 +2578,24 @@ function PromoCodesTab() {
           </div>
         </div>
       )}
+
+      <AdminHelpToggle title="Promo kódy">
+        <p><strong>Čo tu vidíš:</strong> správa promo kódov, ktoré užívatelia môžu uplatniť pri checkoute v Stripe (alebo zobraziť v aplikácii).</p>
+        <ul>
+          <li><strong>Vytvorenie kódu</strong> — názov (napr. "WELCOME20"), typ:
+            <ul>
+              <li><strong>Percentuálna zľava</strong> (napr. 20% zľava na prvý mesiac)</li>
+              <li><strong>Fixná zľava</strong> (napr. −5 € z faktúry)</li>
+              <li><strong>Voľné mesiace</strong> (napr. 2 mesiace zdarma)</li>
+            </ul>
+          </li>
+          <li><strong>Limit použití</strong> — maximálny počet užívateľov, ktorí môžu kód uplatniť (napr. prvých 100).</li>
+          <li><strong>Platnosť</strong> — od/do dátumy.</li>
+          <li><strong>Stripe sync</strong> — pri vytvorení sa kód propaguje aj do Stripe ako Promotion Code (aby fungoval v ich checkoute). Ak Stripe sync zlyhá, kód existuje len lokálne.</li>
+          <li><strong>História použití</strong> — pri každom kóde vidíš zoznam užívateľov, ktorí ho uplatnili + kedy.</li>
+        </ul>
+        <p><strong>Tipy:</strong> Promo kódy sa od admin-applied zliav (DiscountEditor v Používateľoch) líšia tým, že ich uplatňuje user sám pri checkoute. Discount editor je ručný "darček od admina".</p>
+      </AdminHelpToggle>
     </div>
   );
 }
@@ -2502,6 +2653,19 @@ function DiagnosticsTab() {
       {section === 'active' && <DiagActiveSection />}
       {section === 'usage' && <DiagUsageSection />}
       {section === 'revenue' && <DiagRevenueSection />}
+
+      <AdminHelpToggle title="Diagnostika">
+        <p><strong>Čo tu vidíš:</strong> diagnostické centrum servera — chyby, výkon, zdravie subsystémov, aktívni užívatelia, využitie funkcionalít a príjmy. Každá sekcia má vlastný sub-tab hore.</p>
+        <ul>
+          <li><strong>🐛 Chyby</strong> — zoznam zachytených 5xx server errorov (z DB cez serverErrorService). Auto-refresh každých 30s. Pri každej chybe vidíš stack trace, request URL, user-a (ak bol prihlásený), timestamp. Klik na riadok → expanded view s plným contextom.</li>
+          <li><strong>⚡ Výkon</strong> — top 10 najpomalších endpointov + 4xx/5xx error rate. Slúži na detekciu performance regresií.</li>
+          <li><strong>💚 Zdravie</strong> — stav externých subsystémov: MongoDB, SMTP (mailer), APNs (Apple Push), Google OAuth, Memory utilization. Health monitor každých 5 min skontroluje a pri 3× zlyhaní pošle email na support@prplcrm.eu.</li>
+          <li><strong>🟢 Aktívni</strong> — práve online používatelia (cez Socket.IO heartbeat) + posledné failed login pokusy (na detekciu brute-force útokov).</li>
+          <li><strong>📊 Využitie</strong> — agregované feature usage z AuditLogu — ktoré akcie sú najčastejšie (creating contacts, completing tasks atď.). Pomáha pri prioritizácii feature work.</li>
+          <li><strong>💰 Príjmy</strong> — MRR (Monthly Recurring Revenue) + breakdown po plánoch (počet active Tím / Pro user-ov, ich príspevok do MRR). Yearly subscriptions sa rátajú s 0.83× faktorom (12-mesačná zľava).</li>
+        </ul>
+        <p><strong>Tipy:</strong> Ak vidíš nárast chýb v <strong>Chyby</strong> → najprv pozri timestamp koreláciu s nedávnym deployom v <strong>Audit log</strong>. Pre persistnutie chýb mimo nášho UI máme aj Sentry-like in-house tracking — všetko je v Mongo kolekcii <code>servererrors</code>.</p>
+      </AdminHelpToggle>
     </div>
   );
 }
