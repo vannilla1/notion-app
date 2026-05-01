@@ -28,14 +28,14 @@ const auditService = require('./auditService');
  * user, or two parallel requests from one user) collapse to one downgrade
  * thanks to MongoDB's atomic findOneAndUpdate.
  *
- * Plans that can expire: trial, team, pro. Free can't expire (no-op). Admin
+ * Plans that can expire: team, pro. Free can't expire (no-op). Admin
  * accounts seeded with paidUntil=2099 will never trip the threshold either.
  */
 
 const SCHEDULE_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const INITIAL_DELAY_MS = 90 * 1000; // wait for DB warm-up after server boot
 
-const PAID_PLANS = ['team', 'pro', 'trial'];
+const PAID_PLANS = ['team', 'pro'];
 
 /**
  * Returns true if the user record (lean object or hydrated doc) currently

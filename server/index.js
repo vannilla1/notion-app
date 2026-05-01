@@ -382,15 +382,19 @@ server.listen(PORT, () => {
         logger.error('Failed to set pro plans', { error: err.message });
       }
 
-      // Migrate trial users to free plan
+      // One-shot migration: 'trial' plán bol odstránený z aplikácie. Užívatelia
+      // ktorí v DB stále majú 'trial' (z čias keď to bola validná hodnota)
+      // sa preklopia na 'free'. Po pár restartoch produkcie keď žiadny user
+      // nemá 'trial' to môžeme odstrániť. Ponechávame aj tu (defenzívne)
+      // aby sa zlé dáta neprekĺzli cez enum validáciu po deployi.
       try {
         const migrated = await User.updateMany(
           { 'subscription.plan': 'trial' },
-          { $set: { 'subscription.plan': 'free' } }
+          { $set: { 'subscription.plan': 'free' }, $unset: { 'subscription.trialEndsAt': '' } }
         );
-        if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} trial users to free plan`);
+        if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} legacy trial users to free plan`);
       } catch (err) {
-        logger.error('Failed to migrate trial users', { error: err.message });
+        logger.error('Failed to migrate legacy trial users', { error: err.message });
       }
 
       // Migrate workspace members with 'admin' role to 'manager'

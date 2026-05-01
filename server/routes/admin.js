@@ -295,7 +295,7 @@ router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, asy
 router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { plan } = req.body;
-    if (!['free', 'team', 'pro', 'trial'].includes(plan)) {
+    if (!['free', 'team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
     }
 
@@ -817,7 +817,7 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
     const { userIds, action, value } = req.body;
     if (!userIds?.length || !['plan', 'role'].includes(action)) return res.status(400).json({ message: 'Neplatné parametre' });
 
-    const validPlans = ['free', 'team', 'pro', 'trial'];
+    const validPlans = ['free', 'team', 'pro'];
     const validRoles = ['admin', 'manager', 'user'];
     if (action === 'plan' && !validPlans.includes(value)) return res.status(400).json({ message: 'Neplatný plán' });
     if (action === 'role' && !validRoles.includes(value)) return res.status(400).json({ message: 'Neplatná rola' });
@@ -849,10 +849,9 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
-    const { plan, trialEndsAt, paidUntil } = req.body;
+    const { plan, paidUntil } = req.body;
     const oldPlan = user.subscription?.plan;
     if (plan) user.subscription.plan = plan;
-    if (trialEndsAt !== undefined) user.subscription.trialEndsAt = trialEndsAt || null;
     if (paidUntil !== undefined) user.subscription.paidUntil = paidUntil || null;
     await user.save();
 
@@ -860,7 +859,7 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
       userId: req.user.id, username: req.user.username, email: req.user.email,
       action: 'user.subscription_updated', category: 'billing',
       targetType: 'user', targetId: req.params.userId, targetName: user.username,
-      details: { oldPlan, plan, trialEndsAt, paidUntil },
+      details: { oldPlan, plan, paidUntil },
       ipAddress: req.ip
     });
 

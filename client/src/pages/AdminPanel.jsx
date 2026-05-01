@@ -950,7 +950,6 @@ function SubscriptionEditor({ user, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [plan, setPlan] = useState(user.subscription?.plan || 'free');
   const [paidUntil, setPaidUntil] = useState(user.subscription?.paidUntil ? new Date(user.subscription.paidUntil).toISOString().split('T')[0] : '');
-  const [trialEndsAt, setTrialEndsAt] = useState(user.subscription?.trialEndsAt ? new Date(user.subscription.trialEndsAt).toISOString().split('T')[0] : '');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -958,8 +957,7 @@ function SubscriptionEditor({ user, onUpdate }) {
     try {
       const res = await adminApi.put(`/api/admin/users/${user._id}/subscription`, {
         plan,
-        paidUntil: paidUntil || null,
-        trialEndsAt: trialEndsAt || null
+        paidUntil: paidUntil || null
       });
       onUpdate(res.data.subscription);
       setEditing(false);
@@ -1014,11 +1012,6 @@ function SubscriptionEditor({ user, onUpdate }) {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <label style={{ fontSize: '12px', width: '80px', color: 'var(--text-muted)' }}>Platené do</label>
           <input type="date" value={paidUntil} onChange={e => setPaidUntil(e.target.value)}
-            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontSize: '12px', width: '80px', color: 'var(--text-muted)' }}>Trial do</label>
-          <input type="date" value={trialEndsAt} onChange={e => setTrialEndsAt(e.target.value)}
             style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1 }} />
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -2465,7 +2458,7 @@ function PromoCodesTab() {
 //   - Zdravie — Mongo/SMTP/APNs/Google/Memory status
 //   - Aktívni — online users + failed logins
 //   - Využitie — agregované feature usage z AuditLog
-//   - Príjmy — MRR + plans breakdown + trials ending
+//   - Príjmy — MRR + plans breakdown
 // ═══════════════════════════════════════════════════════════════════
 function DiagnosticsTab() {
   const [section, setSection] = useState('errors');

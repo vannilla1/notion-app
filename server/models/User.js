@@ -93,12 +93,15 @@ const userSchema = new mongoose.Schema({
   },
   // Subscription / plan
   subscription: {
-    plan: { type: String, enum: ['free', 'team', 'pro', 'trial'], default: 'free' },
+    plan: { type: String, enum: ['free', 'team', 'pro'], default: 'free' },
     stripeCustomerId: { type: String, default: null },
     stripeSubscriptionId: { type: String, default: null },
     stripePriceId: { type: String, default: null },
     billingPeriod: { type: String, enum: ['monthly', 'yearly', null], default: null },
-    trialEndsAt: { type: Date, default: null },
+    // 'trialEndsAt' field (and 'trial' plan) was removed — local trial flow
+    // was inert and confusing. Stripe-side trial state ('trialing' status)
+    // is still tracked separately by Stripe webhooks. Existing docs may
+    // have a stale trialEndsAt — Mongoose silently ignores it (strict mode).
     paidUntil: { type: Date, default: null },
     cancelAtPeriodEnd: { type: Boolean, default: false },
     // Admin-applied discount

@@ -1072,7 +1072,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     // Check plan limits
     const user = await User.findById(req.user.id);
     const plan = user?.subscription?.plan || 'free';
-    const taskLimits = { free: 10, trial: 10, team: 25, pro: Infinity };
+    const taskLimits = { free: 10, team: 25, pro: Infinity };
     const maxTasks = taskLimits[plan] || 10;
     const isLimited = maxTasks !== Infinity;
 

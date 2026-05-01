@@ -297,7 +297,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     // Check plan contact limit
     const user = await User.findById(req.user.id);
     const plan = user?.subscription?.plan || 'free';
-    const contactLimits = { free: 5, trial: 5, team: 25, pro: Infinity };
+    const contactLimits = { free: 5, team: 25, pro: Infinity };
     const maxContacts = contactLimits[plan] || 5;
     if (maxContacts !== Infinity) {
       const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
@@ -693,7 +693,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     // Check plan limit for subtasks per task
     const user = await User.findById(req.user.id);
     const plan = user?.subscription?.plan || 'free';
-    const subtaskLimits = { free: 10, trial: 10, team: 25, pro: Infinity };
+    const subtaskLimits = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimits[plan] || 10;
     if (maxSubtasks !== Infinity) {
       const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
