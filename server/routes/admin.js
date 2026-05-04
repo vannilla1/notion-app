@@ -10,6 +10,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const logger = require('../utils/logger');
+const { escapeRegex } = require('../utils/regexHelpers');
 const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const PushSubscription = require('../models/PushSubscription');
@@ -348,12 +349,58 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
     // Capture info before deletion
     const deletedUsername = targetUser.username;
     const deletedEmail = targetUser.email;
+    const targetUserId = targetUser._id;
 
-    // Remove workspace memberships
-    await WorkspaceMember.deleteMany({ userId: targetUser._id });
+    // ── Cascade delete (audit LOW-001 fix) ──
+    // Predtým: mazali sme len WorkspaceMember + User, čo nechávalo orphan
+    // dáta v DB (push tokeny, notifikácie, pozvánky, sole-owned workspaces
+    // s ich obsahom). Teraz parita so self-delete flow v auth.js DELETE
+    // /api/auth/account.
+    const Workspace = require('../models/Workspace');
+    const Task = require('../models/Task');
+    const Contact = require('../models/Contact');
+    const Message = require('../models/Message');
+    const Page = require('../models/Page');
+    const Notification = require('../models/Notification');
+    const Invitation = require('../models/Invitation');
+    const APNsDevice = require('../models/APNsDevice');
+    const FcmDevice = require('../models/FcmDevice');
 
-    // Delete user
-    await User.findByIdAndDelete(targetUser._id);
+    // 1) Sole-owned workspaces — admin override: mažeme aj keď majú iných
+    // členov (admin akcia je "definitívna nuke"). Self-delete blokuje pri
+    // ostatných členoch, ale super-admin musí vedieť odstrániť aj
+    // problematické účty bez ručnej intervencie do každého workspace-u.
+    const ownedWorkspaces = await Workspace.find({ ownerId: targetUserId });
+    const ownedWorkspaceIds = ownedWorkspaces.map(w => w._id);
+
+    if (ownedWorkspaceIds.length > 0) {
+      await Promise.all([
+        Task.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Contact.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Message.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Page.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Notification.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Invitation.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        WorkspaceMember.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
+        Workspace.deleteMany({ _id: { $in: ownedWorkspaceIds } })
+      ]);
+    }
+
+    // 2) User-specific cleanup (vo všetkých workspaces, vrátane cudzích)
+    await Promise.all([
+      WorkspaceMember.deleteMany({ userId: targetUserId }),
+      Notification.deleteMany({ userId: targetUserId }),
+      APNsDevice.deleteMany({ userId: targetUserId }),
+      FcmDevice.deleteMany({ userId: targetUserId }),
+      PushSubscription.deleteMany({ userId: targetUserId }),
+      Invitation.deleteMany({ $or: [{ invitedBy: targetUserId }, { email: deletedEmail }] })
+    ]);
+
+    // POZN: Tasks/Contacts/Messages ktoré user vytvoril v cudzích workspaces
+    // NEMAŽEME — patria tímu (rovnaké pravidlo ako self-delete).
+
+    // 3) Final delete user document
+    await User.findByIdAndDelete(targetUserId);
 
     logger.info('Admin delete user', { targetUserId: req.params.userId, deletedBy: req.user.id });
 
@@ -696,11 +743,15 @@ router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
       if (to) query.createdAt.$lte = new Date(to);
     }
     if (search) {
+      // ReDoS hardening (audit MED-002): escapujeme regex meta-znaky
+      // a obmedzujeme dĺžku, aby kompromitovaný admin token nemohol
+      // poslať katastrofický pattern typu (a+)+ na DoS Mongo connection pool.
+      const safeSearch = escapeRegex(String(search).slice(0, 100));
       query.$or = [
-        { username: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { targetName: { $regex: search, $options: 'i' } },
-        { action: { $regex: search, $options: 'i' } }
+        { username: { $regex: safeSearch, $options: 'i' } },
+        { email: { $regex: safeSearch, $options: 'i' } },
+        { targetName: { $regex: safeSearch, $options: 'i' } },
+        { action: { $regex: safeSearch, $options: 'i' } }
       ];
     }
 
@@ -1671,9 +1722,11 @@ router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
       filter.source = req.query.source;
     }
     if (req.query.search) {
+      // ReDoS hardening — viď komentár v audit-log endpoint
+      const safeSearch = escapeRegex(String(req.query.search).slice(0, 100));
       filter.$or = [
-        { message: { $regex: req.query.search, $options: 'i' } },
-        { path: { $regex: req.query.search, $options: 'i' } }
+        { message: { $regex: safeSearch, $options: 'i' } },
+        { path: { $regex: safeSearch, $options: 'i' } }
       ];
     }
     if (req.query.from) filter.lastSeen = { ...filter.lastSeen, $gte: new Date(req.query.from) };

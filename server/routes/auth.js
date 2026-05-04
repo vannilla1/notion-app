@@ -25,6 +25,26 @@ const { validatePassword } = require('../utils/passwordPolicy');
 
 const router = express.Router();
 
+// Module-level avatar cache (audit LOW-003 fix). Predtým bolo cez `global._avatarCache`,
+// čo je anti-pattern — global namespace v Node module systéme nie je
+// potrebný a sťažuje testovanie/refactoring. Module-level Map drží
+// rovnaké semantiky (process-wide singleton, FIFO eviction, TTL),
+// ale je explicitne scope-ovaný k tomuto modulu.
+//
+// FIFO eviction (Map.keys() iteruje v insertion order) bráni OOM crashu
+// keby útočník v slučke poslal random ObjectId-čka — bez stropu by každý
+// miss zapísal null entry, ktorá by inak nikdy nebola odstránená.
+const AVATAR_CACHE_MAX = 500;
+const AVATAR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const _avatarCache = new Map();
+const evictAvatarCacheIfFull = () => {
+  while (_avatarCache.size >= AVATAR_CACHE_MAX) {
+    const oldestKey = _avatarCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    _avatarCache.delete(oldestKey);
+  }
+};
+
 // Configure multer for avatar uploads - using memory storage for Base64
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
@@ -564,7 +584,7 @@ router.post('/avatar', authenticateToken, (req, res) => {
       await user.save();
 
       // Invalidate avatar cache so next request gets fresh image
-      if (global._avatarCache) global._avatarCache.delete(userId);
+      _avatarCache.delete(userId);
 
       logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
 
@@ -586,15 +606,10 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.status(400).json({ message: 'Neplatné ID' });
     }
 
-    // In-memory avatar cache (5 min TTL) to avoid hitting DB for every avatar request.
-    // Bounded LRU-ish (FIFO) na strop AVATAR_CACHE_MAX — bez tohto by útočník
-    // mohol cez random ObjectId-čka v slučke nafúknuť Map a spôsobiť OOM crash
-    // (každý miss zapíše null entry, ktorá by inak nikdy nebola odstránená).
-    if (!global._avatarCache) global._avatarCache = new Map();
-    const AVATAR_CACHE_MAX = 500;
+    // In-memory avatar cache (5 min TTL) — viď komentár pri _avatarCache deklarácii.
     const cacheKey = req.params.userId;
-    const cached = global._avatarCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 300000) {
+    const cached = _avatarCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < AVATAR_CACHE_TTL_MS) {
       if (!cached.data) {
         res.set('Cache-Control', 'no-store');
         return res.status(404).json({ message: 'Avatar nenájdený' });
@@ -604,28 +619,18 @@ router.get('/avatar/:userId', async (req, res) => {
       return res.send(cached.data);
     }
 
-    // Pred zápisom novej entry skontroluj strop. Map.keys() iteruje
-    // v insertion order, takže prvý kľúč je najstarší → FIFO eviction.
-    const evictIfFull = () => {
-      while (global._avatarCache.size >= AVATAR_CACHE_MAX) {
-        const oldestKey = global._avatarCache.keys().next().value;
-        if (oldestKey === undefined) break;
-        global._avatarCache.delete(oldestKey);
-      }
-    };
-
     const user = await User.findById(req.params.userId).select('avatarData avatarMimetype').lean();
 
     if (!user || !user.avatarData) {
-      evictIfFull();
-      global._avatarCache.set(cacheKey, { data: null, ts: Date.now() });
+      evictAvatarCacheIfFull();
+      _avatarCache.set(cacheKey, { data: null, ts: Date.now() });
       res.set('Cache-Control', 'no-store');
       return res.status(404).json({ message: 'Avatar nenájdený' });
     }
 
     const buffer = Buffer.from(user.avatarData, 'base64');
-    evictIfFull();
-    global._avatarCache.set(cacheKey, { data: buffer, mimetype: user.avatarMimetype || 'image/jpeg', ts: Date.now() });
+    evictAvatarCacheIfFull();
+    _avatarCache.set(cacheKey, { data: buffer, mimetype: user.avatarMimetype || 'image/jpeg', ts: Date.now() });
     res.set('Content-Type', user.avatarMimetype || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
@@ -646,7 +651,7 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
       avatarMimetype: null
     });
     // Invalidate avatar cache
-    if (global._avatarCache) global._avatarCache.delete(userId);
+    _avatarCache.delete(userId);
     logger.info('Avatar deleted', { userId });
 
     res.json({ message: 'Avatar bol odstránený' });

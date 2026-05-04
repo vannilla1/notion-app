@@ -119,9 +119,22 @@ app.post('/api/billing/webhook',
   billingRoutes.handleWebhook
 );
 
-// Body parsers with size limits
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+// Body parsers with size limits.
+//
+// Audit MED-004 fix: globálny limit znížený z 20MB na 1MB. 20MB na
+// unauthenticated endpointoch (register, login, forgot-password) bolo
+// memory-DoS riziko na Render Starter (~512MB RAM). File uploads idú
+// cez multer (multipart/form-data) s vlastnými fileSize limitmi v
+// jednotlivých routes — express.json sa ich netýka.
+//
+// Override pre routy ktoré reálne potrebujú väčšie JSON payloady (rich
+// content, pages editor, batch operations) idú s 5MB. Tieto sú za auth-om
+// takže útočná plocha je menšia.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+// Override pre Pages (rich-text editor, content limit 500K znakov ×
+// JSON overhead ≈ 2-3MB v krajnom prípade)
+app.use('/api/pages', express.json({ limit: '5mb' }));
 
 // Apply general API rate limiting
 app.use('/api', apiLimiter);
