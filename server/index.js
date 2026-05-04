@@ -65,8 +65,46 @@ const io = new Server(server, {
 });
 
 // Security headers
+//
+// Audit MED-001 fix: CSP zapnutý ako HTTP response header (predtým bolo
+// {contentSecurityPolicy: false}). Frontend CSP via meta tag NESTAČÍ —
+// browser musí dostať header pre aktivovanie XSS protections.
+//
+// Directívy kompromis:
+//  - script-src: 'unsafe-inline' je nutné lebo index.html má inline script
+//    pre iOS service worker neutralization (musí bežať pred ostatnými JS).
+//    Plus JSON-LD štruktúrované dáta. Hash/nonce by vyžadovali build-time
+//    injection v Vite čo nemáme. Future hardening: nonce-based CSP.
+//  - style-src: 'unsafe-inline' kvôli React inline-style propom + Google Fonts
+//  - connect-src: API endpoint + WebSocket pre Socket.IO + production domain
+//  - frame-ancestors: 'none' — anti-clickjacking (Apple Pay / Stripe nikdy
+//    nás neembedduje, len redirectne)
+//  - form-action: povoľujeme Stripe Checkout pre web billing flow
+//  - object-src + base-uri: prísne (žiaden Flash, žiadne base tag injekcie)
+const apiHost = process.env.API_PUBLIC_HOST || 'perun-crm-api.onrender.com';
 app.use(helmet({
-  contentSecurityPolicy: false, // CSP handled by frontend
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: [
+        "'self'",
+        `https://${apiHost}`,
+        `wss://${apiHost}`,
+        "https://prplcrm.eu",
+        "wss://prplcrm.eu"
+      ],
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'", "https://checkout.stripe.com"],
+      frameAncestors: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  },
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow frontend to load images from API
 }));
