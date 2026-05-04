@@ -16,7 +16,10 @@ export default function AdminLogin() {
 
     try {
       const res = await api.post('/api/admin/login', { email, password });
-      localStorage.setItem('adminToken', res.data.token);
+      // sessionStorage namiesto localStorage — admin token sa stratí pri
+      // zatvorení tabu, čo redukuje útokovú plochu pri XSS (token je
+      // dostupný iba kým je tab otvorený). Audit HIGH-001 mitigation.
+      sessionStorage.setItem('adminToken', res.data.token);
       navigate('/admin/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Prihlásenie zlyhalo.');

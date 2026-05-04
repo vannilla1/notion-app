@@ -90,18 +90,19 @@ function AdminPanel() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem('adminToken');
+    // Admin token v sessionStorage (XSS hardening) — viď adminApi.js
+    const token = sessionStorage.getItem('adminToken');
     if (!token) {
       navigate('/admin');
     }
   }, [navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminToken');
     navigate('/admin');
   };
 
-  if (!localStorage.getItem('adminToken')) {
+  if (!sessionStorage.getItem('adminToken')) {
     return null;
   }
 
