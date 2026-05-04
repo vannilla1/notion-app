@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { getInvitationByToken, acceptInvitation } from '../api/workspaces';
 import { getWorkspaceRoleLabel } from '../utils/constants';
+import { isIosNativeApp } from '../utils/platform';
 
 function AcceptInvite() {
   const { token } = useParams();
@@ -132,14 +133,23 @@ function AcceptInvite() {
             </div>
           ) : (
             <div className="invite-actions">
-              <p className="invite-not-logged">Pre prijatie pozvánky sa musíte prihlásiť alebo zaregistrovať.</p>
+              {/* App Store 3.1.1: na iOS native nezobrazujeme "Vytvoriť účet"
+                  CTA — registrácia musí prebiehať na webe. Text inštrukcie
+                  upravený aby user vedel kam ísť. */}
+              <p className="invite-not-logged">
+                {isIosNativeApp()
+                  ? 'Pre prijatie pozvánky sa prihláste. Ak ešte nemáte účet, vytvorte si ho na webe prplcrm.eu a vráťte sa.'
+                  : 'Pre prijatie pozvánky sa musíte prihlásiť alebo zaregistrovať.'}
+              </p>
               <div className="invite-auth-buttons">
                 <Link to={`/login?invite=${token}`} className="btn btn-primary">
                   Prihlásiť sa
                 </Link>
-                <Link to={`/login?register=true&invite=${token}`} className="btn btn-secondary">
-                  Vytvoriť účet
-                </Link>
+                {!isIosNativeApp() && (
+                  <Link to={`/login?register=true&invite=${token}`} className="btn btn-secondary">
+                    Vytvoriť účet
+                  </Link>
+                )}
               </div>
             </div>
           )

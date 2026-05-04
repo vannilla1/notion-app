@@ -4,16 +4,26 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { acceptInvitation } from '../api/workspaces';
 import OAuthButtons from '../components/OAuthButtons';
+import { isIosNativeApp } from '../utils/platform';
 
 function Login() {
   const { login, register } = useAuth();
   const { fetchWorkspaces, switchWorkspace } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  // App Store Review Guideline 3.1.1 + 3.1.3(d) Reader-app exception: na iOS
+  // native (WKWebView shell) NESMIE byť žiadny registračný flow — Apple to
+  // považuje za "access to external mechanisms for purchases or subscriptions"
+  // (Reject z 3. mája 2026 pre Submission 6d6c20b0). Forcujeme iba login,
+  // register query param ignorujeme, "Zaregistrujte sa" CTA skryjeme. Nový
+  // účet si user vytvorí na webe (prplcrm.eu).
+  const iosNative = isIosNativeApp();
   // isRegister sa deriva priamo z URL, aby bol stav zachovaný aj pri návrate
   // cez browser back button (napr. z /vop alebo /ochrana-udajov).
-  const isRegister = searchParams.get('register') === 'true';
+  // Na iOS native ignorujeme query param a vždy show login.
+  const isRegister = !iosNative && searchParams.get('register') === 'true';
   const setIsRegister = (value) => {
+    if (iosNative) return; // no-op na iOS — register flow nie je dostupný
     const newParams = new URLSearchParams(searchParams);
     if (value) {
       newParams.set('register', 'true');
@@ -250,23 +260,29 @@ function Login() {
 
         <OAuthButtons mode="login" />
 
-        <div className="login-footer">
-          {isRegister ? (
-            <>
-              Už máte účet?{' '}
-              <a href="#" onClick={() => setIsRegister(false)}>
-                Prihláste sa
-              </a>
-            </>
-          ) : (
-            <>
-              Nemáte účet?{' '}
-              <a href="#" onClick={() => setIsRegister(true)}>
-                Zaregistrujte sa
-              </a>
-            </>
-          )}
-        </div>
+        {/* Toggle login/register — na iOS native skrytý úplne, lebo App Store
+            3.1.1 / 3.1.3(d) zakazuje "account registration features for
+            businesses and organizations" v Reader-app exception flow. Na webe
+            a Androide ostáva normálne. */}
+        {!iosNative && (
+          <div className="login-footer">
+            {isRegister ? (
+              <>
+                Už máte účet?{' '}
+                <a href="#" onClick={() => setIsRegister(false)}>
+                  Prihláste sa
+                </a>
+              </>
+            ) : (
+              <>
+                Nemáte účet?{' '}
+                <a href="#" onClick={() => setIsRegister(true)}>
+                  Zaregistrujte sa
+                </a>
+              </>
+            )}
+          </div>
+        )}
 
         {!isRegister && (
           <a href="/ochrana-udajov" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
