@@ -284,4 +284,55 @@ userSchema.index({ 'googleCalendar.enabled': 1 });
 userSchema.index({ 'googleTasks.enabled': 1 });
 userSchema.index({ role: 1 });
 
+// At-rest encryption pre OAuth tokeny (audit MED-003).
+// Hooks pracujú na hydratovaných documentoch — `.lean()` queries getters
+// obchádzajú, ale Google routes (jediní konzumenti tokenov) používajú
+// hydrated User.findById bez .lean(), takže to je OK.
+const { encryptToken, decryptToken } = require('../utils/cryptoHelpers');
+
+const ENCRYPTED_TOKEN_PATHS = [
+  'googleCalendar.accessToken',
+  'googleCalendar.refreshToken',
+  'googleTasks.accessToken',
+  'googleTasks.refreshToken',
+];
+
+// pre('save'): pri ukladaní zaszifruj všetky modifikované token polia.
+// `.isModified(path)` zaručí že nešifrujeme legacy tokeny pri každom save
+// (zachovaná lazy migration semantika — encrypt sa udeje až keď user
+// reálne meni hodnotu, napr. cez OAuth refresh).
+userSchema.pre('save', function (next) {
+  for (const path of ENCRYPTED_TOKEN_PATHS) {
+    if (this.isModified(path)) {
+      const value = this.get(path);
+      if (value) {
+        this.set(path, encryptToken(value));
+      }
+    }
+  }
+  next();
+});
+
+// post('init'): keď Mongoose inicializuje document z DB query result,
+// dekryptne tokeny do in-memory dokumentu. Aplikačný kód v routes potom
+// vidí plaintext (transparent decryption).
+//
+// IMPORTANT: post('init') je `function (doc)` syntax (nie arrow), aby `this`
+// bolo document.
+userSchema.post('init', function () {
+  for (const path of ENCRYPTED_TOKEN_PATHS) {
+    const value = this.get(path);
+    if (value) {
+      const decrypted = decryptToken(value);
+      // null sa môže vrátiť ak decrypt zlyhal (rotated key, corrupt data) —
+      // ponechávame raw hodnotu aby Google routes uvideli že token "existuje"
+      // ale následne API call zlyhá → /reconnect flow user ho znova nastaví.
+      // Lepšie ako tichá strata.
+      if (decrypted !== null) {
+        this.set(path, decrypted, { strict: false });
+      }
+    }
+  }
+});
+
 module.exports = mongoose.model('User', userSchema);
