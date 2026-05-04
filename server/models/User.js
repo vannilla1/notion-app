@@ -284,16 +284,72 @@ userSchema.index({ 'googleCalendar.enabled': 1 });
 userSchema.index({ 'googleTasks.enabled': 1 });
 userSchema.index({ role: 1 });
 
-// MED-003 token encryption hooks dočasne ROLLBACK-nuté.
-// Pôvodný pre('save')/post('init') hook implementáciu (commit 31ae22f)
-// sme stiahli, lebo v Mongoose 9.0.2 + Node 24 spôsobovala chybu
-// "next is not a function" pri každom user.save() — token refresh,
-// bootstrap migrations, atď. Token encryption je dôležité ale nie
-// kritické (DB je za auth-om Atlas IP allowlist), bez encrypt-u
-// produkcia funguje ako predtým.
+// At-rest encryption pre OAuth tokeny (audit MED-003 v2).
 //
-// Re-implementácia plánovaná: helper-based encrypt/decrypt priamo
-// v Google routes (explicit calls okolo accessToken/refreshToken
-// reads/writes) — vyhne sa Mongoose hook signature nuancám.
+// V1 pokus (commit 31ae22f, rollback v acdd4c6) sa zdal padať s
+// "next is not a function" — to bol falošný viník, skutočná príčina
+// bola deprecated `client.refreshAccessToken()` v google-auth-library 10.x
+// (fix v commit e2d71e4). Hooky teraz vraciame s defensívnejšou syntax
+// pre Mongoose 9.0.2:
+//
+//   - pre('save', async function ()):
+//     async function explicitne signalizuje Mongoose že hook vracia
+//     Promise. Žiadny `next` callback — vyhýba sa heuristike `fn.length`
+//     ktorá v rôznych Mongoose verziách trošku rôzne riadi flow.
+//
+//   - post('init', function (doc)):
+//     explicit `doc` parameter (nie len `this`) — Mongoose 7+ recommended.
+//     Žiadny `{ strict: false }` v set() — všetky encrypted paths sú
+//     definované v schéme, takže strict mode nehrozí rejection.
+//
+// Hooky pracujú na hydratovaných documentoch — `.lean()` queries getters
+// obchádzajú, ale Google routes (jediní konzumenti tokenov) používajú
+// hydrated User.findById bez .lean(), takže to je OK.
+const { encryptToken, decryptToken } = require('../utils/cryptoHelpers');
+
+const ENCRYPTED_TOKEN_PATHS = [
+  'googleCalendar.accessToken',
+  'googleCalendar.refreshToken',
+  'googleTasks.accessToken',
+  'googleTasks.refreshToken',
+];
+
+// pre('save'): pri ukladaní zaszifruj všetky modifikované token polia.
+// `.isModified(path)` zaručí že nešifrujeme legacy tokeny pri každom save
+// — encrypt sa udeje až keď user reálne zmení hodnotu (typicky pri OAuth
+// refresh). Bez ENCRYPTION_KEY env var encryptToken() vráti plaintext
+// (no-op), takže produkcia bezo zmeny env funguje ako predtým.
+userSchema.pre('save', async function () {
+  for (const path of ENCRYPTED_TOKEN_PATHS) {
+    if (this.isModified(path)) {
+      const value = this.get(path);
+      if (value) {
+        this.set(path, encryptToken(value));
+      }
+    }
+  }
+});
+
+// post('init'): keď Mongoose inicializuje document z DB query result,
+// dekryptne tokeny do in-memory dokumentu. Aplikačný kód v routes potom
+// vidí plaintext (transparent decryption). Legacy plaintext tokeny ostanú
+// nedotknuté (decryptToken vráti as-is keď chýba `enc:v1:` prefix).
+userSchema.post('init', function (doc) {
+  for (const path of ENCRYPTED_TOKEN_PATHS) {
+    const value = doc.get(path);
+    if (value) {
+      const decrypted = decryptToken(value);
+      // Set len ak sa hodnota reálne zmenila (encrypted → plaintext) —
+      // inak by sme triggrovali isModified flag pre legacy plaintext
+      // tokeny a zbytočne ich pri ďalšom save znova "encryptli" idempotentne.
+      // null sa môže vrátiť ak decrypt zlyhal (rotated key, corrupt) —
+      // ponechávame raw hodnotu, aby Google routes uvideli token "existuje"
+      // a následný API call s ňou zlyhá → /reconnect flow user pre-založí.
+      if (decrypted !== null && decrypted !== value) {
+        doc.set(path, decrypted);
+      }
+    }
+  }
+});
 
 module.exports = mongoose.model('User', userSchema);
