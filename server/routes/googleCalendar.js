@@ -133,7 +133,11 @@ const getCalendarClient = async (user, forceRefresh = false) => {
     });
 
     try {
-      const { credentials } = await client.refreshAccessToken();
+      // google-auth-library 10.x: refreshAccessToken() callback-style API
+      // padá s "next is not a function". getAccessToken() handluje refresh
+      // transparentne a updatne client.credentials.
+      await client.getAccessToken();
+      const credentials = client.credentials || {};
       user.googleCalendar.accessToken = credentials.access_token;
       user.googleCalendar.tokenExpiry = new Date(credentials.expiry_date);
       // Google sometimes returns a new refresh token - always save it
@@ -567,7 +571,11 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         const needsRefresh = !snapshotTokenExpiry || Date.now() >= snapshotTokenExpiry.getTime() - 5 * 60 * 1000;
         if (needsRefresh && snapshotRefreshToken) {
           try {
-            const { credentials } = await client.refreshAccessToken();
+            // google-auth-library 10.x: refreshAccessToken() callback-style API
+      // padá s "next is not a function". getAccessToken() handluje refresh
+      // transparentne a updatne client.credentials.
+      await client.getAccessToken();
+      const credentials = client.credentials || {};
             client.setCredentials(credentials);
           } catch (refreshErr) {
             logger.warn('[Google Calendar] Disconnect: token refresh failed, trying with stale token', { error: refreshErr.message });

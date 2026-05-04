@@ -154,7 +154,13 @@ const getTasksClient = async (user, forceRefresh = false) => {
     });
 
     try {
-      const { credentials } = await client.refreshAccessToken();
+      // google-auth-library 10.x: client.refreshAccessToken() callback-style
+      // API už nie je supported (padá s "next is not a function"). Použiť
+      // getAccessToken() ktoré automaticky refresh handluje a updatne
+      // client.credentials, alebo refreshAccessTokenAsync ktorý vracia
+      // credentials object kompatibilný s pôvodným kódom.
+      await client.getAccessToken();
+      const credentials = client.credentials || {};
       user.googleTasks.accessToken = credentials.access_token;
       user.googleTasks.tokenExpiry = new Date(credentials.expiry_date);
       // Google sometimes returns a new refresh token - always save it
@@ -724,7 +730,13 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         const needsRefresh = !snapshotTokenExpiry || Date.now() >= snapshotTokenExpiry.getTime() - 5 * 60 * 1000;
         if (needsRefresh && snapshotRefreshToken) {
           try {
-            const { credentials } = await client.refreshAccessToken();
+            // google-auth-library 10.x: client.refreshAccessToken() callback-style
+      // API už nie je supported (padá s "next is not a function"). Použiť
+      // getAccessToken() ktoré automaticky refresh handluje a updatne
+      // client.credentials, alebo refreshAccessTokenAsync ktorý vracia
+      // credentials object kompatibilný s pôvodným kódom.
+      await client.getAccessToken();
+      const credentials = client.credentials || {};
             client.setCredentials(credentials);
           } catch (refreshErr) {
             logger.warn('[Google Tasks] Disconnect: token refresh failed, trying with stale token', { error: refreshErr.message });
