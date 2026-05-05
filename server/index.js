@@ -32,6 +32,8 @@ const notificationService = require('./services/notificationService');
 const { scheduleDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { schedulePlanExpiration } = require('./services/planExpiration');
+const { scheduleSubscriptionReminders } = require('./services/subscriptionReminders');
+const emailUnsubscribeRoutes = require('./routes/emailUnsubscribe');
 const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
@@ -185,6 +187,7 @@ app.use('/api/contact-form', contactFormRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/errors', errorRoutes);
+app.use('/api/email', emailUnsubscribeRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);
@@ -473,6 +476,10 @@ server.listen(PORT, () => {
         // discounts) back to 'free'. Runs every 6h; complemented by lazy check
         // in auth middleware for instant downgrade on next request.
         schedulePlanExpiration();
+        // Subscription lifecycle emails (T-7, T-1, winback). Runs once daily;
+        // initial run delayed 5 min so it doesn't pile on top of plan-expiration
+        // sweep. Idempotency via subscription.notifications.* timestamps.
+        scheduleSubscriptionReminders();
         scheduleErrorAlerter();
         startGoogleTasksPolling(io);
         initializeCalendarWebhooks(io);

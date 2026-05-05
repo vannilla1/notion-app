@@ -19,6 +19,7 @@ const TABS = [
   { id: 'comparison', label: 'Porovnanie', icon: '⚖️' },
   { id: 'promo', label: 'Promo kódy', icon: '🎟️' },
   { id: 'audit', label: 'Audit log', icon: '📋' },
+  { id: 'emails', label: 'Emaily', icon: '📧' },
   { id: 'sync', label: 'Sync', icon: '🔄' }
 ];
 
@@ -26,7 +27,7 @@ const TABS = [
 // s URL (napr. ?foo=bar#fake) nenastavila neznámy tab a render nepadol.
 const VALID_TAB_IDS = new Set([
   'overview', 'diagnostics', 'users', 'workspaces', 'charts', 'activity',
-  'api', 'storage', 'comparison', 'promo', 'audit', 'sync'
+  'api', 'storage', 'comparison', 'promo', 'audit', 'emails', 'sync'
 ]);
 
 // Povolené sub-filtre pre Sync tab. Rozlišujú, ktorú Google službu chceme
@@ -147,6 +148,7 @@ function AdminPanel() {
         {activeTab === 'comparison' && <WorkspaceComparisonTab />}
         {activeTab === 'promo' && <PromoCodesTab />}
         {activeTab === 'audit' && <AuditLogTab />}
+        {activeTab === 'emails' && <EmailsTab />}
         {activeTab === 'sync' && <SyncTab filter={syncFilter} onFilterChange={setSyncFilter} />}
       </div>
     </div>
@@ -1125,6 +1127,7 @@ function SubscriptionEditor({ user, onUpdate }) {
             <div style={{ fontWeight: 600 }}>{sub.stripeSubscriptionId ? 'Aktívne' : '—'}</div>
           </div>
         </div>
+        <UserEmailLogsMini userId={user._id} />
       </div>
     );
   }
@@ -3451,6 +3454,505 @@ function DiagStat({ label, value, color }) {
     <div style={{ padding: '16px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{label}</div>
       <div style={{ fontSize: '24px', fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</div>
+    </div>
+  );
+}
+
+// Mini list posledných 5 mailov pre konkrétneho usera, vrátane tlačidla
+// na manuálne preposlanie reminderu (užitočné pre support workflow).
+function UserEmailLogsMini({ userId }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [showSendMenu, setShowSendMenu] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await adminApi.get(`/api/admin/users/${userId}/email-logs?limit=5`);
+      setLogs(r.data || []);
+    } catch (err) {
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleManualSend = async (type) => {
+    setShowSendMenu(false);
+    if (!confirm(`Naozaj poslať email „${EMAIL_TYPE_LABELS[type]?.label || type}" tomuto používateľovi?`)) return;
+    setSending(true);
+    try {
+      const r = await adminApi.post(`/api/admin/users/${userId}/send-email`, { type });
+      const status = r.data?.status || 'unknown';
+      alert(status === 'sent' ? '✅ Email odoslaný' : `Stav: ${status}`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri odosielaní');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Posledné maily</h4>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowSendMenu(!showSendMenu)}
+            disabled={sending}
+            style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: 'var(--primary, #8B5CF6)', fontWeight: 500 }}
+          >
+            📤 Poslať email
+          </button>
+          {showSendMenu && (
+            <div style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: 4,
+              background: 'var(--bg-primary, #fff)', border: '1px solid var(--border-color, #e5e7eb)',
+              borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 10, minWidth: 200
+            }}>
+              {['reminder_t7', 'reminder_t1', 'expired', 'winback', 'welcome_pro', 'discount_assigned'].map((t) => {
+                const meta = EMAIL_TYPE_LABELS[t];
+                return (
+                  <button
+                    key={t}
+                    onClick={() => handleManualSend(t)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '8px 12px', background: 'transparent', border: 'none',
+                      cursor: 'pointer', fontSize: 13
+                    }}
+                  >
+                    {meta?.icon} {meta?.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      {loading ? (
+        <div style={{ fontSize: 12, color: '#9ca3af' }}>Načítavam...</div>
+      ) : logs.length === 0 ? (
+        <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Žiadne maily ešte neboli poslané.</div>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 12 }}>
+          {logs.map((l) => {
+            const typeMeta = EMAIL_TYPE_LABELS[l.type] || { label: l.type, icon: '✉️', color: '#94a3b8' };
+            const statusMeta = EMAIL_STATUS_LABELS[l.status] || { label: l.status, color: '#64748b' };
+            return (
+              <li key={l._id} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color, #e5e7eb)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span>
+                  <span style={{ color: typeMeta.color, fontWeight: 600 }}>{typeMeta.icon} {typeMeta.label}</span>
+                  <span style={{ color: '#9ca3af', marginLeft: 8 }}>{new Date(l.sentAt).toLocaleString('sk-SK', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                </span>
+                <span style={{ color: statusMeta.color, fontWeight: 600 }}>{statusMeta.label}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── EMAILS TAB ───────────────────────────────────────────────────
+//
+// Centrálny prehľad odoslaných systémových mailov. Filtre v hlavičke,
+// stránkovaný list, klik na riadok otvorí HTML preview modal.
+//
+// Backend endpoints (server/routes/admin.js):
+//   GET /api/admin/email-logs           paginated list
+//   GET /api/admin/email-logs/:id       full preview (incl. HTML snapshot)
+//   GET /api/admin/email-logs-stats     headline counters
+//   GET /api/admin/email-config         SMTP status + promo codes
+
+const EMAIL_TYPE_LABELS = {
+  subscription_assigned: { label: 'Plán priradený', icon: '📦', color: '#8B5CF6' },
+  discount_assigned: { label: 'Zľava priradená', icon: '🎁', color: '#10b981' },
+  welcome_pro: { label: 'Welcome Pro', icon: '🎉', color: '#f59e0b' },
+  reminder_t7: { label: 'Reminder T-7', icon: '⏰', color: '#06b6d4' },
+  reminder_t1: { label: 'Reminder T-1', icon: '⚠️', color: '#f97316' },
+  expired: { label: 'Expirovaný', icon: '🔚', color: '#ef4444' },
+  winback: { label: 'Winback', icon: '💝', color: '#ec4899' },
+  welcome: { label: 'Welcome', icon: '👋', color: '#6366f1' },
+  invitation: { label: 'Pozvánka', icon: '✉️', color: '#3b82f6' },
+  password_reset: { label: 'Reset hesla', icon: '🔑', color: '#64748b' },
+  admin_notify: { label: 'Admin notify', icon: '🛎️', color: '#94a3b8' }
+};
+
+const EMAIL_STATUS_LABELS = {
+  sent: { label: 'Odoslané', color: '#10b981', bg: '#d1fae5' },
+  failed: { label: 'Zlyhalo', color: '#dc2626', bg: '#fee2e2' },
+  skipped_cooldown: { label: 'Cooldown', color: '#92400e', bg: '#fef3c7' },
+  skipped_optout: { label: 'Opt-out', color: '#6b7280', bg: '#f3f4f6' },
+  skipped_no_smtp: { label: 'Bez SMTP', color: '#6b7280', bg: '#f3f4f6' }
+};
+
+function EmailsTab() {
+  const [stats, setStats] = useState(null);
+  const [config, setConfig] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const limit = 50;
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ type: '', status: '', search: '', days: '30' });
+  const [previewLog, setPreviewLog] = useState(null);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const r = await adminApi.get('/api/admin/email-logs-stats?days=30');
+      setStats(r.data);
+    } catch (err) { /* ignore */ }
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const r = await adminApi.get('/api/admin/email-config');
+      setConfig(r.data);
+    } catch (err) { /* ignore */ }
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filters.type) params.append('type', filters.type);
+      if (filters.status) params.append('status', filters.status);
+      if (filters.search) params.append('search', filters.search);
+      if (filters.days) {
+        const since = new Date(Date.now() - parseInt(filters.days) * 24 * 60 * 60 * 1000);
+        params.append('from', since.toISOString());
+      }
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+      const r = await adminApi.get(`/api/admin/email-logs?${params.toString()}`);
+      setLogs(r.data.logs || []);
+      setTotal(r.data.total || 0);
+    } catch (err) {
+      setLogs([]); setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, page]);
+
+  useEffect(() => { loadStats(); loadConfig(); }, [loadStats, loadConfig]);
+  useEffect(() => { loadLogs(); }, [loadLogs]);
+
+  const updateFilter = (key, value) => {
+    setFilters((f) => ({ ...f, [key]: value }));
+    setPage(1);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <div className="sa-section sa-section-wide">
+      <div className="sa-section-head">
+        <h2>📧 Emaily</h2>
+        <p>Prehľad všetkých systémových mailov — transakčných (zmena plánu, zľava) a marketingových (pripomienky, winback).</p>
+      </div>
+
+      {/* HEADLINE STAT CARDS */}
+      <div className="sa-stat-grid" style={{ marginBottom: 20 }}>
+        <StatCard
+          icon="📬"
+          label="Odoslaných za 7 dní"
+          value={stats?.total7d ?? '—'}
+        />
+        <StatCard
+          icon="📊"
+          label="Odoslaných za 30 dní"
+          value={stats?.total30d ?? '—'}
+        />
+        <StatCard
+          icon="✅"
+          label="Úspešnosť"
+          value={stats ? `${(100 - (stats.failureRatePct || 0)).toFixed(1)}%` : '—'}
+          sub={stats ? `${stats.failureRatePct}% failed` : ''}
+        />
+        <StatCard
+          icon={config?.smtpConfigured ? '🟢' : '🔴'}
+          label="SMTP stav"
+          value={config?.smtpConfigured ? 'Pripojené' : 'Nepripojené'}
+          sub={config?.smtpHost || ''}
+        />
+      </div>
+
+      {/* TOP TYPES */}
+      {stats?.topTypes7d?.length > 0 && (
+        <div className="sa-card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0 }}>Najčastejšie typy (7 dní)</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {stats.topTypes7d.map((t) => {
+              const meta = EMAIL_TYPE_LABELS[t.type] || { label: t.type, icon: '✉️', color: '#94a3b8' };
+              return (
+                <span key={t.type} style={{
+                  padding: '6px 12px', borderRadius: 999,
+                  background: meta.color + '20', color: meta.color,
+                  fontSize: 13, fontWeight: 600
+                }}>
+                  {meta.icon} {meta.label} · {t.count}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* RECENT FAILED ALERT */}
+      {stats?.recentFailed?.length > 0 && (
+        <div className="sa-card" style={{ marginBottom: 20, borderLeft: '4px solid #ef4444' }}>
+          <h3 style={{ marginTop: 0, color: '#dc2626' }}>⚠️ Posledné zlyhania (7 dní)</h3>
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            {stats.recentFailed.map((f) => (
+              <li key={f._id} style={{ fontSize: 13, marginBottom: 6 }}>
+                <strong>{f.toEmail}</strong> · {EMAIL_TYPE_LABELS[f.type]?.label || f.type} ·{' '}
+                <span style={{ color: '#dc2626' }}>{f.error || 'Unknown'}</span>{' '}
+                <span style={{ color: '#9ca3af' }}>({new Date(f.sentAt).toLocaleString('sk-SK')})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* FILTERS */}
+      <div className="sa-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12 }}>
+          <input
+            type="text"
+            placeholder="🔍 Hľadať email alebo username..."
+            value={filters.search}
+            onChange={(e) => updateFilter('search', e.target.value)}
+            className="sa-input"
+          />
+          <select value={filters.type} onChange={(e) => updateFilter('type', e.target.value)} className="sa-input">
+            <option value="">Všetky typy</option>
+            {Object.entries(EMAIL_TYPE_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v.icon} {v.label}</option>
+            ))}
+          </select>
+          <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)} className="sa-input">
+            <option value="">Všetky stavy</option>
+            {Object.entries(EMAIL_STATUS_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+          <select value={filters.days} onChange={(e) => updateFilter('days', e.target.value)} className="sa-input">
+            <option value="7">Posledných 7 dní</option>
+            <option value="30">Posledných 30 dní</option>
+            <option value="90">Posledných 90 dní</option>
+            <option value="">Všetko</option>
+          </select>
+        </div>
+      </div>
+
+      {/* LOG TABLE */}
+      <div className="sa-card" style={{ padding: 0, overflow: 'hidden' }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Načítavam...</div>
+        ) : logs.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Žiadne maily nenájdené</div>
+        ) : (
+          <table className="sa-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Čas</th>
+                <th>Príjemca</th>
+                <th>Typ</th>
+                <th>Subject</th>
+                <th>Stav</th>
+                <th>Trigger</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => {
+                const typeMeta = EMAIL_TYPE_LABELS[log.type] || { label: log.type, icon: '✉️', color: '#94a3b8' };
+                const statusMeta = EMAIL_STATUS_LABELS[log.status] || { label: log.status, color: '#64748b', bg: '#f3f4f6' };
+                return (
+                  <tr key={log._id} style={{ cursor: 'pointer' }} onClick={() => setPreviewLog(log)}>
+                    <td style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+                      {new Date(log.sentAt).toLocaleString('sk-SK', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 500 }}>{log.user?.username || '—'}</div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>{log.toEmail}</div>
+                    </td>
+                    <td>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4,
+                        background: typeMeta.color + '20', color: typeMeta.color,
+                        fontSize: 12, fontWeight: 600
+                      }}>
+                        {typeMeta.icon} {typeMeta.label}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 13, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {log.subject || '—'}
+                    </td>
+                    <td>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4,
+                        background: statusMeta.bg, color: statusMeta.color,
+                        fontSize: 12, fontWeight: 600
+                      }}>
+                        {statusMeta.label}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 12, color: '#64748b' }}>{log.triggeredBy || 'system'}</td>
+                    <td><span style={{ color: '#8B5CF6', fontSize: 12 }}>Zobraziť →</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {totalPages > 1 && (
+          <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e5e7eb' }}>
+            <span style={{ fontSize: 13, color: '#64748b' }}>
+              Strana {page} z {totalPages} ({total} záznamov)
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Predch.</button>
+              <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Ďalšia →</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* CONFIG INFO */}
+      {config && (
+        <div className="sa-card" style={{ marginTop: 20 }}>
+          <h3 style={{ marginTop: 0 }}>⚙️ Konfigurácia</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
+            <div><strong>SMTP host:</strong> {config.smtpHost || '—'}</div>
+            <div><strong>From:</strong> {config.smtpFrom}</div>
+            <div><strong>Admin email:</strong> {config.adminEmail}</div>
+            <div><strong>SMTP stav:</strong> {config.smtpConfigured
+              ? <span style={{ color: '#10b981' }}>● Pripojené</span>
+              : <span style={{ color: '#ef4444' }}>● Nepripojené</span>}</div>
+          </div>
+          <h4 style={{ marginBottom: 8 }}>Aktívne promo kódy</h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {Object.entries(config.promoCodes || {}).map(([k, v]) => (
+              <span key={k} style={{
+                padding: '4px 10px', borderRadius: 4,
+                background: '#f5f3ff', color: '#6D28D9',
+                fontSize: 13, fontFamily: 'monospace'
+              }}>{k}: <strong>{v}</strong></span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <AdminHelpToggle title="Manuál — Emaily">
+        <h4>Čo je v tomto tabe</h4>
+        <p>
+          Centrálny prehľad všetkých emailov ktoré systém poslal používateľom. Pokrýva transakčné maily
+          (zmena plánu, zľava, vymazanie účtu) aj marketingové (pripomienky pred expiráciou, winback).
+        </p>
+
+        <h4>Typy mailov</h4>
+        <ul>
+          <li><strong>📦 Plán priradený</strong> — admin manuálne zmenil predplatné používateľa</li>
+          <li><strong>🎁 Zľava priradená</strong> — admin pridal zľavu / freeMonths / planUpgrade</li>
+          <li><strong>🎉 Welcome Pro</strong> — prvý upgrade na Tím/Pro plán (jednorazový)</li>
+          <li><strong>⏰ Reminder T-7</strong> — 7 dní pred expiráciou (so zľavou 20%)</li>
+          <li><strong>⚠️ Reminder T-1</strong> — deň pred expiráciou (so zľavou 30%, urgency copy)</li>
+          <li><strong>🔚 Expirovaný</strong> — po automatickom downgrade na Free (so zľavou 30%)</li>
+          <li><strong>💝 Winback</strong> — 14 dní po expirácii (50% posledná ponuka)</li>
+        </ul>
+
+        <h4>Stavy</h4>
+        <ul>
+          <li><strong>Odoslané</strong> — SMTP úspešne prijal mail</li>
+          <li><strong>Zlyhalo</strong> — SMTP error (vidno detail v preview)</li>
+          <li><strong>Cooldown</strong> — rovnaký typ poslaný v posledných 24 h, skip</li>
+          <li><strong>Opt-out</strong> — user vypol marketingové maily v profile</li>
+          <li><strong>Bez SMTP</strong> — server nemá SMTP konfiguráciu</li>
+        </ul>
+
+        <h4>Klik na riadok</h4>
+        <p>
+          Otvorí preview odoslaného HTML — presne to čo používateľ videl. Užitočné pre support
+          ("ako vyzerá ten email čo som dostal?") aj pre debug.
+        </p>
+
+        <h4>Manuálne odoslanie</h4>
+        <p>
+          V tabe Používatelia → Predplatné je tlačidlo „📤 Poslať email" pre support workflow
+          (napr. user nedostal automatický reminder a admin chce ručne preposlať).
+        </p>
+      </AdminHelpToggle>
+
+      {previewLog && <EmailPreviewModal log={previewLog} onClose={() => setPreviewLog(null)} />}
+    </div>
+  );
+}
+
+function EmailPreviewModal({ log, onClose }) {
+  const [full, setFull] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminApi.get(`/api/admin/email-logs/${log._id}`);
+        if (!cancelled) setFull(r.data);
+      } catch (err) {
+        if (!cancelled) setFull({ error: 'Nepodarilo sa načítať preview' });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [log._id]);
+
+  const typeMeta = EMAIL_TYPE_LABELS[log.type] || { label: log.type, icon: '✉️' };
+  const statusMeta = EMAIL_STATUS_LABELS[log.status] || { label: log.status };
+
+  return (
+    <div className="sa-modal-overlay" onClick={onClose}>
+      <div className="sa-modal" style={{ maxWidth: 800, maxHeight: '90vh' }} onClick={(e) => e.stopPropagation()}>
+        <div className="sa-modal-head">
+          <h3>{typeMeta.icon} {typeMeta.label}</h3>
+          <button className="sa-modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="sa-modal-body" style={{ overflow: 'auto' }}>
+          <div style={{ marginBottom: 16, fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
+            <div><strong>Príjemca:</strong> {log.toEmail}</div>
+            <div><strong>Subject:</strong> {log.subject || '—'}</div>
+            <div><strong>From:</strong> {full?.fromAddress || '—'}</div>
+            <div><strong>Stav:</strong> {statusMeta.label}</div>
+            <div><strong>Čas:</strong> {new Date(log.sentAt).toLocaleString('sk-SK')}</div>
+            <div><strong>Trigger:</strong> {log.triggeredBy || 'system'}</div>
+            {full?.error && <div style={{ color: '#dc2626' }}><strong>Chyba:</strong> {full.error}</div>}
+            {full?.context?.promoCode && <div><strong>Promo kód:</strong> <code>{full.context.promoCode}</code></div>}
+          </div>
+
+          {loading && <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>Načítavam preview...</div>}
+          {!loading && full?.htmlSnapshot && (
+            <div>
+              <h4>Preview HTML</h4>
+              <iframe
+                srcDoc={full.htmlSnapshot}
+                title="Email preview"
+                style={{ width: '100%', height: 500, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
+                sandbox=""
+              />
+            </div>
+          )}
+          {!loading && !full?.htmlSnapshot && !full?.error && (
+            <p style={{ color: '#9ca3af', fontStyle: 'italic' }}>HTML snapshot nie je dostupný (skipped pred renderom).</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

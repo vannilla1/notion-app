@@ -134,6 +134,21 @@ const expireUserIfNeeded = async (userId) => {
     previousPaidUntil: previous.subscription?.paidUntil,
   });
 
+  // Send "your plan expired" email + winback offer. Lazy require to avoid
+  // a circular load order — subscriptionEmailService doesn't depend on this
+  // module, but we want to keep planExpiration loadable even if email
+  // service has init errors.
+  try {
+    const subscriptionEmailService = require('./subscriptionEmailService');
+    await subscriptionEmailService.sendExpired({
+      user: previous,
+      previousPlan: previous.subscription?.plan,
+      triggeredBy: 'system'
+    });
+  } catch (emailErr) {
+    logger.warn('[PlanExpiration] Expired email failed', { error: emailErr.message });
+  }
+
   return previous;
 };
 

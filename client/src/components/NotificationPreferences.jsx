@@ -32,7 +32,12 @@ const DEFAULT_PREFS = {
   pushTeamActivity: false,
   pushDeadlines: false,
   pushOverdue: false,
-  pushNewMember: false
+  pushNewMember: false,
+  // Email-channel opt-out for marketing reminders (T-7, T-1, winback).
+  // Default true = opt-in by default; user may disable here or via the
+  // 1-click unsubscribe link in any reminder email footer. Transactional
+  // emails (plan changes, password reset) ignore this flag.
+  marketingEmails: true
 };
 
 export default function NotificationPreferences({ onClose }) {
@@ -122,6 +127,33 @@ export default function NotificationPreferences({ onClose }) {
             )}
 
             {error && <div className="notif-prefs-error">{error}</div>}
+          </div>
+
+          {/* Email channel — marketing pripomienky o predplatnom */}
+          <div className="notif-prefs-section">
+            <h3>📧 Emaily o predplatnom</h3>
+            <p className="notif-prefs-section-desc">
+              Pripomienky pred expiráciou plánu (7 dní vopred, 1 deň vopred), špeciálne ponuky a marketingové novinky.
+              <strong> Transakčné emaily</strong> (zmena plánu, zľava, obnova hesla) chodia vždy bez ohľadu na toto nastavenie.
+            </p>
+            {!loading && (
+              <div className="notif-prefs-toggles">
+                <label className={`notif-prefs-toggle ${saving === 'marketingEmails' ? 'saving' : ''}`}>
+                  <div className="notif-prefs-toggle-text">
+                    <div className="notif-prefs-toggle-title">Pripomienky a marketingové ponuky</div>
+                    <div className="notif-prefs-toggle-desc">
+                      Zľavy pred expiráciou, winback ponuky, novinky.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={!!prefs.marketingEmails}
+                    disabled={saving === 'marketingEmails'}
+                    onChange={() => toggle('marketingEmails')}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="notif-prefs-footer-note">

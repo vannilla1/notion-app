@@ -447,10 +447,14 @@ const DEFAULT_NOTIFICATION_PREFS = {
 
 router.get('/notification-preferences', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id, 'notificationPreferences').lean();
+    const user = await User.findById(req.user.id, 'notificationPreferences preferences').lean();
     res.json({
       ...DEFAULT_NOTIFICATION_PREFS,
-      ...(user?.notificationPreferences || {})
+      ...(user?.notificationPreferences || {}),
+      // marketingEmails ide v rovnakom payloade — UI komponent ho zobrazuje
+      // v sekcii "Marketing & pripomienky", default je true (opt-in by default,
+      // user môže vypnúť cez UI toggle alebo unsubscribe link v emaili).
+      marketingEmails: user?.preferences?.marketingEmails !== false
     });
   } catch (error) {
     logger.error('Get notification preferences error', { error: error.message, userId: req.user.id });
@@ -467,6 +471,12 @@ router.put('/notification-preferences', authenticateToken, async (req, res) => {
         updates[`notificationPreferences.${key}`] = req.body[key];
       }
     }
+    // marketingEmails sedí v inom path-e (preferences.*) lebo to nie je push
+    // toggle — je to email-channel opt-out. Spracovaný v rovnakom requeste,
+    // aby UI nemuselo viesť dva paralelné PUT-y.
+    if (typeof req.body?.marketingEmails === 'boolean') {
+      updates['preferences.marketingEmails'] = req.body.marketingEmails;
+    }
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: 'Žiadne platné nastavenia v requeste' });
     }
@@ -474,12 +484,13 @@ router.put('/notification-preferences', authenticateToken, async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.user.id,
       { $set: updates },
-      { new: true, projection: 'notificationPreferences' }
+      { new: true, projection: 'notificationPreferences preferences' }
     ).lean();
 
     res.json({
       ...DEFAULT_NOTIFICATION_PREFS,
-      ...(user?.notificationPreferences || {})
+      ...(user?.notificationPreferences || {}),
+      marketingEmails: user?.preferences?.marketingEmails !== false
     });
   } catch (error) {
     logger.error('Update notification preferences error', { error: error.message, userId: req.user.id });

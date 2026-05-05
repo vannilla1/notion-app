@@ -18,6 +18,8 @@ const APNsDevice = require('../models/APNsDevice');
 const PromoCode = require('../models/PromoCode');
 const ServerError = require('../models/ServerError');
 const auditService = require('../services/auditService');
+const subscriptionEmailService = require('../services/subscriptionEmailService');
+const EmailLog = require('../models/EmailLog');
 const onlineUsers = require('../services/onlineUsers');
 const { getMetrics } = require('../services/apiMetrics');
 const healthMonitor = require('../jobs/healthMonitor');
@@ -310,6 +312,18 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
     await targetUser.save();
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
+
+    // Reset reminder flags + send notification email (fire-and-forget so admin
+    // response isn't blocked by SMTP latency). welcome_pro is auto-substituted
+    // for first-time upgrades inside sendSubscriptionAssigned.
+    if (oldPlan !== plan) {
+      subscriptionEmailService.resetReminderFlags(targetUser._id).catch(() => {});
+      subscriptionEmailService.sendSubscriptionAssigned({
+        user: targetUser,
+        oldPlan,
+        triggeredBy: `admin:${req.user.username || req.adminUser?.username || 'unknown'}`
+      }).catch((err) => logger.error('Plan change email failed', { error: err.message }));
+    }
 
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
@@ -902,6 +916,7 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
 
     const { plan, paidUntil } = req.body;
     const oldPlan = user.subscription?.plan;
+    const oldPaidUntil = user.subscription?.paidUntil;
     if (plan) user.subscription.plan = plan;
     if (paidUntil !== undefined) user.subscription.paidUntil = paidUntil || null;
     await user.save();
@@ -913,6 +928,19 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
       details: { oldPlan, plan, paidUntil },
       ipAddress: req.ip
     });
+
+    // Fire notification email if plan or expiry actually changed. Reset
+    // reminder flags so the new cycle generates fresh T-7/T-1 reminders.
+    const planChanged = plan && plan !== oldPlan;
+    const expiryChanged = paidUntil !== undefined && String(paidUntil) !== String(oldPaidUntil);
+    if (planChanged || expiryChanged) {
+      subscriptionEmailService.resetReminderFlags(user._id).catch(() => {});
+      subscriptionEmailService.sendSubscriptionAssigned({
+        user,
+        oldPlan,
+        triggeredBy: `admin:${req.user.username || req.adminUser?.username || 'unknown'}`
+      }).catch((err) => logger.error('Subscription update email failed', { error: err.message }));
+    }
 
     res.json({ success: true, subscription: user.subscription });
   } catch (error) {
@@ -1015,6 +1043,15 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
       details: { type, value, targetPlan, reason, expiresAt, oldDiscount },
       ipAddress: req.ip
     });
+
+    // Reset reminder cycle flags (planUpgrade or freeMonths extends paidUntil
+    // → user shouldn't keep getting expiry reminders for the OLD date) and
+    // notify the user about the discount/upgrade.
+    subscriptionEmailService.resetReminderFlags(user._id).catch(() => {});
+    subscriptionEmailService.sendDiscountAssigned({
+      user,
+      triggeredBy: `admin:${req.adminUser.username}`
+    }).catch((err) => logger.error('Discount email failed', { error: err.message }));
 
     res.json({ success: true, subscription: user.subscription });
   } catch (error) {
@@ -2047,6 +2084,221 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error('Revenue error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── EMAIL LOGS — admin overview of every email sent ────────────────────
+//
+// 4 endpoints back the "📧 Emaily" tab in AdminPanel:
+//   GET  /email-logs           paginated list with filters
+//   GET  /email-logs/:id       full HTML preview of a single mail
+//   GET  /email-logs-stats     headline counters for dashboard cards
+//   GET  /email-config         SMTP status + active promo codes
+//   POST /users/:userId/send-email  manual trigger (reminder/winback)
+//
+// All require super admin (existing `requireAdmin`).
+
+router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { type, status, search, from, to } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
+
+    const q = {};
+    if (type) q.type = type;
+    if (status) q.status = status;
+    if (from || to) {
+      q.sentAt = {};
+      if (from) q.sentAt.$gte = new Date(from);
+      if (to) q.sentAt.$lte = new Date(to);
+    }
+    if (search) {
+      const safe = escapeRegex(String(search).slice(0, 100));
+      const matchingUsers = await User.find({
+        $or: [
+          { email: { $regex: safe, $options: 'i' } },
+          { username: { $regex: safe, $options: 'i' } }
+        ]
+      }).select('_id').limit(500).lean();
+      q.$or = [
+        { toEmail: { $regex: safe, $options: 'i' } },
+        { userId: { $in: matchingUsers.map((u) => u._id) } }
+      ];
+    }
+
+    const [total, logs] = await Promise.all([
+      EmailLog.countDocuments(q),
+      EmailLog.find(q)
+        .sort({ sentAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('userId', 'username email avatar avatarData avatarMimetype color')
+        .select('-htmlSnapshot') // omit big blob from list view
+        .lean()
+    ]);
+
+    res.json({
+      total,
+      page,
+      limit,
+      logs: logs.map((l) => ({
+        ...l,
+        user: l.userId ? {
+          _id: l.userId._id,
+          username: l.userId.username,
+          email: l.userId.email,
+          color: l.userId.color,
+          avatar: l.userId.avatar,
+          hasAvatarData: !!l.userId.avatarData
+        } : null,
+        userId: l.userId?._id || null
+      }))
+    });
+  } catch (err) {
+    logger.error('Email logs list error', { error: err.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.get('/email-logs/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
+    const log = await EmailLog.findById(req.params.id)
+      .populate('userId', 'username email')
+      .lean();
+    if (!log) return res.status(404).json({ message: 'Záznam nenájdený' });
+    res.json(log);
+  } catch (err) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.get('/email-logs-stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [byStatus, byType, total7d, total30d, recentFailed] = await Promise.all([
+      EmailLog.aggregate([
+        { $match: { sentAt: { $gte: since } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      EmailLog.aggregate([
+        { $match: { sentAt: { $gte: since7d } } },
+        { $group: { _id: '$type', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]),
+      EmailLog.countDocuments({ sentAt: { $gte: since7d } }),
+      EmailLog.countDocuments({ sentAt: { $gte: since } }),
+      EmailLog.find({ status: 'failed', sentAt: { $gte: since7d } })
+        .sort({ sentAt: -1 })
+        .limit(5)
+        .select('toEmail type error sentAt')
+        .lean()
+    ]);
+
+    const statusMap = byStatus.reduce((acc, r) => { acc[r._id] = r.count; return acc; }, {});
+    const sentTotal = statusMap.sent || 0;
+    const failedTotal = statusMap.failed || 0;
+    const failureRate = sentTotal + failedTotal > 0
+      ? Math.round((failedTotal / (sentTotal + failedTotal)) * 1000) / 10
+      : 0;
+
+    res.json({
+      windowDays: days,
+      total7d,
+      total30d,
+      byStatus: statusMap,
+      failureRatePct: failureRate,
+      topTypes7d: byType.map((t) => ({ type: t._id, count: t.count })),
+      recentFailed
+    });
+  } catch (err) {
+    logger.error('Email stats error', { error: err.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.get('/email-config', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const subEmail = require('../services/subscriptionEmailService');
+    const transporter = subEmail.initTransporter();
+    res.json({
+      smtpConfigured: !!transporter,
+      smtpHost: process.env.SMTP_HOST || null,
+      smtpFrom: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
+      adminEmail: process.env.ADMIN_EMAIL || 'support@prplcrm.eu',
+      promoCodes: subEmail.PROMO,
+      reminderTypes: ['reminder_t7', 'reminder_t1', 'winback'],
+      transactionalTypes: ['subscription_assigned', 'discount_assigned', 'expired', 'welcome_pro', 'welcome', 'invitation', 'password_reset']
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Per-user: zoznam posledných N mailov pre subscription editor
+router.get('/users/:userId/email-logs', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    if (!req.params.userId.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    const logs = await EmailLog.find({ userId: req.params.userId })
+      .sort({ sentAt: -1 })
+      .limit(limit)
+      .select('-htmlSnapshot')
+      .lean();
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Manuálny trigger reminder/winback emailu — pre support workflow
+router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { type } = req.body;
+    const allowed = ['reminder_t7', 'reminder_t1', 'winback', 'expired', 'welcome_pro', 'subscription_assigned', 'discount_assigned'];
+    if (!allowed.includes(type)) {
+      return res.status(400).json({ message: 'Neplatný typ emailu pre manuálne odoslanie' });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
+
+    const subEmail = require('../services/subscriptionEmailService');
+    const triggeredBy = `admin:${req.adminUser?.username || req.user.username || 'unknown'}-manual`;
+
+    let result;
+    if (type === 'reminder_t7') {
+      result = await subEmail.sendReminderT7({ user, triggeredBy });
+    } else if (type === 'reminder_t1') {
+      result = await subEmail.sendReminderT1({ user, triggeredBy });
+    } else if (type === 'winback') {
+      result = await subEmail.sendWinback({ user, triggeredBy });
+    } else if (type === 'expired') {
+      result = await subEmail.sendExpired({ user, previousPlan: user.subscription?.plan === 'free' ? 'pro' : user.subscription?.plan, triggeredBy });
+    } else if (type === 'welcome_pro') {
+      result = await subEmail.sendWelcomePaid({ user, triggeredBy });
+    } else if (type === 'subscription_assigned') {
+      result = await subEmail.sendSubscriptionAssigned({ user, oldPlan: 'free', triggeredBy });
+    } else if (type === 'discount_assigned') {
+      result = await subEmail.sendDiscountAssigned({ user, triggeredBy });
+    }
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser?.username || req.user.username, email: req.adminUser?.email || req.user.email,
+      action: 'user.email_manual_send', category: 'billing',
+      targetType: 'user', targetId: req.params.userId, targetName: user.username,
+      details: { type, status: result?.status },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: result?.ok, status: result?.status, logId: result?.logId });
+  } catch (err) {
+    logger.error('Manual email send error', { error: err.message });
+    res.status(500).json({ message: 'Chyba pri odosielaní' });
   }
 });
 

@@ -12111,3 +12111,115 @@ body.ios-app {
   flex-shrink: 0 !important;
   cursor: pointer !important;
 }
+
+/* ─── Admin Panel — Emails tab (added with email automation) ───────── */
+
+.sa-section {
+  padding: 16px 0;
+}
+.sa-section-wide {
+  width: 100%;
+}
+.sa-section-head {
+  margin-bottom: 16px;
+}
+.sa-section-head h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  color: var(--text-primary, #1f2937);
+}
+.sa-section-head p {
+  margin: 0;
+  color: var(--text-muted, #64748b);
+  font-size: 14px;
+}
+.sa-card {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+.sa-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.sa-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #1f2937);
+  width: 100%;
+}
+.sa-input:focus {
+  outline: none;
+  border-color: #8B5CF6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+.sa-table {
+  border-collapse: collapse;
+}
+.sa-table thead th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  padding: 10px 14px;
+  background: var(--bg-secondary, #f9fafb);
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sa-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color, #f3f4f6);
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+  vertical-align: top;
+}
+.sa-table tbody tr:hover {
+  background: var(--bg-hover, #f9fafb);
+}
+.sa-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+.sa-modal {
+  background: var(--bg-primary, #ffffff);
+  border-radius: 14px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+.sa-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+.sa-modal-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.sa-modal-close {
+  background: none;
+  border: none;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-muted, #64748b);
+}
+.sa-modal-body {
+  padding: 22px;
+}

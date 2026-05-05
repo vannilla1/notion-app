@@ -113,7 +113,38 @@ const userSchema = new mongoose.Schema({
       expiresAt: { type: Date, default: null },
       createdAt: { type: Date, default: null },
       createdBy: { type: String, default: null }
+    },
+    // Subscription-related email notification timestamps. Used by
+    // subscriptionReminders cron to enforce idempotency: each reminder
+    // type is sent at most once per "billing cycle" (i.e. per current
+    // paidUntil value). Resetting these fields whenever paidUntil changes
+    // allows the next cycle to fire reminders again.
+    notifications: {
+      // T-7 (7 days before expiry) — sent once per cycle
+      t7ReminderSentAt: { type: Date, default: null },
+      // T-1 (1 day before expiry) — last-chance ping
+      t1ReminderSentAt: { type: Date, default: null },
+      // Sent right after auto-downgrade to free
+      expiredEmailSentAt: { type: Date, default: null },
+      // Sent ~14 days after expiration if user hasn't reactivated
+      winbackSentAt: { type: Date, default: null },
+      // Welcome-to-Pro email — sent on first transition to paid plan,
+      // separate from the generic subscription_assigned transactional mail.
+      welcomePaidSentAt: { type: Date, default: null }
     }
+  },
+  // Per-user opt-in / opt-out for non-essential email categories.
+  //
+  // marketingEmails covers reminders (T-7, T-1, winback) — informational
+  // about retention/upsell. User can disable via profile settings or
+  // unsubscribe link in the email footer.
+  //
+  // Transactional emails (assigned plan, assigned discount, expired,
+  // password reset, invitation) are NOT gated by this flag — they
+  // describe state changes the user requested or which legally must be
+  // communicated. GDPR compliant under "legitimate interest" vs. consent.
+  preferences: {
+    marketingEmails: { type: Boolean, default: true }
   },
   // Current active workspace
   currentWorkspaceId: {
