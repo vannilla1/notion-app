@@ -2626,6 +2626,12 @@ const pollGoogleTasksChanges = async () => {
     const users = await User.find({ 'googleTasks.enabled': true });
     if (users.length === 0) return;
 
+    // Heartbeat log — bežal v debug fáze ako [POLL_DEBUG] Cycle start, teraz
+    // ostáva ako lightweight info marker (1 riadok / 5 min × per server)
+    // aby user videl že polling reálne beží. Bez tohto log-u "no news =
+    // good news" nevyzerá rozdielne od "service crashlo".
+    logger.info('[Google Tasks Poll] Cycle running', { enabledUsers: users.length });
+
     for (const user of users) {
       try {
         const tasksApi = await getTasksClient(user);
