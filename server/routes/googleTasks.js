@@ -9,6 +9,7 @@ const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
+const { invalidateWorkspaceData } = require('../middleware/dataCache');
 
 const router = express.Router();
 
@@ -2505,6 +2506,11 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
         if (changed) {
           parentTask.markModified('subtasks');
           await parentTask.save();
+          // Invalidate server-side cache (GET /api/tasks má 30s cache).
+          // Bez tohto volania F5 vracia stale data 30 s po reverse sync.
+          if (parentTask.workspaceId) {
+            invalidateWorkspaceData(parentTask.workspaceId.toString(), 'tasks');
+          }
           if (pollingIo && parentTask.workspaceId) {
             pollingIo.to(`workspace-${parentTask.workspaceId}`).emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
           }
@@ -2559,9 +2565,33 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   if (changed) {
     const now = new Date().toISOString();
     if (contact && taskIndex !== -1) {
+      const attemptedCompleted = contact.tasks[taskIndex].completed;
       contact.tasks[taskIndex].modifiedAt = now;
       contact.markModified('tasks');
       await contact.save();
+
+      // [VERIFY] Check that save actually persisted to Mongo. User reports
+      // F5 doesn't show change → suspect cache or save not persisting.
+      try {
+        const reloaded = await Contact.findById(contact._id, 'tasks').lean();
+        const reloadedTask = reloaded?.tasks?.find(t => t.id === crmTaskId);
+        logger.info('[Google Tasks Poll] [VERIFY] contact.tasks save', {
+          contactId: contact._id.toString(),
+          crmTaskId,
+          attemptedCompleted,
+          actualInDB: reloadedTask?.completed,
+          persistOK: reloadedTask?.completed === attemptedCompleted
+        });
+      } catch (e) {
+        logger.warn('[Google Tasks Poll] [VERIFY] failed', { error: e.message });
+      }
+
+      // Invalidate server cache pre tasks AJ contacts (oba endpointy
+      // môžu zobrazovať tento task).
+      if (contact.workspaceId) {
+        invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
+        invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
+      }
       if (pollingIo && contact.workspaceId) {
         pollingIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
         pollingIo.to(`workspace-${contact.workspaceId}`).emit('task-updated', {
@@ -2574,6 +2604,10 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
     } else {
       task.modifiedAt = now;
       await task.save();
+      // Invalidate server cache pre tasks endpoint.
+      if (task.workspaceId) {
+        invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
+      }
       if (pollingIo && task.workspaceId) {
         pollingIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
           ...task.toObject(),

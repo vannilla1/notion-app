@@ -11,6 +11,7 @@ const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
+const { invalidateWorkspaceData } = require('../middleware/dataCache');
 
 const router = express.Router();
 
@@ -1029,11 +1030,20 @@ const processCalendarChanges = async (user) => {
         if (contact) {
           contact.markModified('tasks');
           await contact.save();
+          // Invalidate server cache (GET /api/tasks + /api/contacts má 30s cache).
+          // Bez toho frontend dostane stale data 30 s po reverse sync.
+          if (contact.workspaceId) {
+            invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
+            invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
+          }
           if (calendarIo && contact.workspaceId) {
             calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
           }
         } else {
           await task.save();
+          if (task.workspaceId) {
+            invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
+          }
           if (calendarIo && task.workspaceId) {
             calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
               ...task.toObject(),
