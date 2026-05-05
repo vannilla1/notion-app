@@ -2491,14 +2491,38 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
     for (const parentTask of parentTasks) {
       const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
       if (subtask) {
+        const subtaskBefore = subtask.completed;
         let changed = false;
         if (isCompleted && !subtask.completed) {
           subtask.completed = true;
+          changed = true;
+        } else if (!isCompleted && subtask.completed) {
+          // Bidirectional: Google un-checked → CRM un-check (was missing!)
+          subtask.completed = false;
           changed = true;
         }
         if (changed) {
           parentTask.markModified('subtasks');
           await parentTask.save();
+
+          // [POLL_DEBUG] Verify save reálne zapísal do Mongo (kvôli Mixed type
+          // tracking issue). Načítame fresh dokument z DB a pozeráme.
+          try {
+            const reloaded = await Task.findById(parentTask._id).lean();
+            const reloadedSub = findSubtaskById(reloaded.subtasks, crmTaskId);
+            logger.info('[Google Tasks Poll] [DEBUG] Subtask save verify', {
+              parentTaskId: parentTask._id.toString(),
+              crmTaskId,
+              subtaskTitle: subtask.title,
+              before: subtaskBefore,
+              attempted: subtask.completed,
+              actualInDB: reloadedSub?.completed,
+              persistOK: reloadedSub?.completed === subtask.completed
+            });
+          } catch (e) {
+            logger.warn('[Google Tasks Poll] [DEBUG] Verify failed', { error: e.message });
+          }
+
           if (pollingIo && parentTask.workspaceId) {
             pollingIo.to(`workspace-${parentTask.workspaceId}`).emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
           }
