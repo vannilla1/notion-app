@@ -55,6 +55,54 @@ const SITE_URL = () => process.env.CLIENT_URL || 'https://prplcrm.eu';
 
 const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h per user+type
 
+const REPLY_TO = process.env.SMTP_REPLY_TO || 'support@prplcrm.eu';
+const SUPPORT_EMAIL = 'support@prplcrm.eu';
+
+/**
+ * Stripuje HTML do plain-text verzie pre multipart/alternative. Gmail/Yahoo
+ * Bayesian filter chápe HTML-only ako podozrivé (typický pattern marketing
+ * spamu). Multipart s plain-text fallbackom zlepšuje deliverability score.
+ *
+ * Jednoduchý regex stripper: odstráni style/script bloky, prevedie odkazy
+ * na "text (URL)", odstráni tagy, dekóduje bežné entity, normalizuje
+ * whitespace. Pre naše šablóny stačí — žiadne tabuľky-v-tabuľkách s
+ * nested obsahom, ktoré by potrebovali full DOM parser.
+ */
+const htmlToText = (html) => {
+  if (!html) return '';
+  return html
+    // remove style/script blocks completely
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // turn anchor tags into "text (url)"
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+      const cleanText = text.replace(/<[^>]+>/g, '').trim();
+      if (!cleanText) return href;
+      if (cleanText === href) return href;
+      return `${cleanText} (${href})`;
+    })
+    // br/p/li/h*/tr/div/table → newline
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|h[1-6]|tr|div|table)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '  • ')
+    // strip remaining tags
+    .replace(/<[^>]+>/g, '')
+    // decode common entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&euro;/g, '€')
+    // normalize whitespace
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 const PROMO = {
   KEEP20:    process.env.PROMO_KEEP20    || 'KEEP20',     // 20% pri reminder T-7
   KEEP30:    process.env.PROMO_KEEP30    || 'LASTCALL30', // 30% pri reminder T-1
@@ -206,12 +254,40 @@ const sendAndLog = async ({ user, toEmail, type, subject, html, context, trigger
   }
 
   // 4. actually send
+  // Build mail options:
+  //  - text alternative — multipart improves Bayesian score on Yahoo/Gmail
+  //  - Reply-To — directs replies to a real human inbox (support@), not the
+  //    no-reply hello@ — Gmail uses presence of valid Reply-To as positive signal
+  //  - List-Unsubscribe + List-Unsubscribe-Post — RFC 8058 one-click,
+  //    REQUIRED by Gmail and Yahoo bulk sender guidelines (Feb 2024). Gmail
+  //    auto-renders native "Unsubscribe" button in inbox using these headers.
+  //    Even transactional mails benefit from including it (no penalty,
+  //    user can opt-out of all marketing this way).
+  const userIdHeader = userIdForCooldown ? String(userIdForCooldown) : null;
+  const unsubscribeUrl = userIdHeader ? buildUnsubscribeLink(userIdHeader) : null;
+
+  const headers = {};
+  if (unsubscribeUrl) {
+    headers['List-Unsubscribe'] = `<${unsubscribeUrl}>, <mailto:${SUPPORT_EMAIL}?subject=unsubscribe>`;
+    headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  }
+  // Precedence: bulk for marketing types — signals to inbox providers that
+  // this is not a 1:1 conversation, helps with proper threading and stops
+  // auto-replies (vacation responders) from bouncing back.
+  if (MARKETING_TYPES.has(type)) {
+    headers['Precedence'] = 'bulk';
+    headers['X-Auto-Response-Suppress'] = 'OOF, AutoReply';
+  }
+
   try {
     await t.sendMail({
       from: process.env.SMTP_FROM || FROM_DEFAULT,
       to: toEmail,
+      replyTo: REPLY_TO,
       subject,
-      html
+      html,
+      text: htmlToText(html),
+      headers
     });
     const log = await EmailLog.create({
       userId: userIdForCooldown,
@@ -365,7 +441,9 @@ const sendDiscountAssigned = async ({ user, triggeredBy }) => {
  */
 const sendWelcomePaid = async ({ user, triggeredBy }) => {
   const plan = user.subscription?.plan || 'pro';
-  const subject = `Vitajte v PrplCRM ${PLAN_LABELS[plan] || plan} 🎉`;
+  // Subject bez emoji — emoji v subjecte je negatívny signal pre Yahoo
+  // (typický pattern marketing spamu). Stačí emoji v body.
+  const subject = `Vitajte v PrplCRM ${PLAN_LABELS[plan] || plan}`;
 
   const bodyHtml = `
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
@@ -417,7 +495,7 @@ const sendReminderT7 = async ({ user, accountStats, triggeredBy }) => {
   const plan = user.subscription?.plan || 'pro';
   const expires = formatDateSk(user.subscription?.paidUntil);
   const promo = PROMO.KEEP20;
-  const subject = `O 7 dní vyprší váš plán ${PLAN_LABELS[plan]} — predĺžte so zľavou 20%`;
+  const subject = `Plán ${PLAN_LABELS[plan]} vyprší o 7 dní`;
 
   const statsBlock = accountStats ? `
     <p style="font-size:14px;color:#555;margin:0 0 12px;line-height:1.5;">Za posledný mesiac ste cez PrplCRM:</p>
@@ -436,10 +514,10 @@ const sendReminderT7 = async ({ user, accountStats, triggeredBy }) => {
       váš plán <strong>${PLAN_LABELS[plan]}</strong> vyprší <strong>${expires}</strong> — to je o <strong>7 dní</strong>.
     </p>
     ${statsBlock}
-    <div style="margin:0 0 20px;padding:16px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-radius:10px;border:1px solid #ddd6fe;text-align:center;">
-      <p style="font-size:13px;color:#6D28D9;margin:0 0 8px;letter-spacing:0.5px;text-transform:uppercase;font-weight:600;">Špeciálna ponuka pre vás</p>
-      <p style="font-size:18px;color:#333;margin:0 0 4px;font-weight:700;">20% zľava pri predĺžení</p>
-      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#6D28D9;">${promo}</code></p>
+    <div style="margin:0 0 20px;padding:16px;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
+      <p style="font-size:14px;color:#1f2937;margin:0 0 6px;font-weight:600;">Ponuka pri predĺžení</p>
+      <p style="font-size:14px;color:#555;margin:0 0 4px;">20% zľava na predplatné platná 7 dní.</p>
+      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#6D28D9;border:1px solid #e5e7eb;">${promo}</code></p>
     </div>
     ${ctaButton('Predĺžiť plán', `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
     <p style="font-size:12px;color:#999;margin:16px 0 0;line-height:1.5;">
@@ -480,7 +558,10 @@ const sendReminderT1 = async ({ user, triggeredBy }) => {
   const plan = user.subscription?.plan || 'pro';
   const expires = formatDateSk(user.subscription?.paidUntil);
   const promo = PROMO.KEEP30;
-  const subject = `Posledný deň plánu ${PLAN_LABELS[plan]} — 30% zľava na predĺženie`;
+  // Subject bez emoji a bez ALL CAPS / "POSLEDNÝ DEŇ" patternu —
+  // tieto trigger-uju Yahoo a Gmail spam filter. Vecná formulácia
+  // "vyprší zajtra" + zľava ako informácia.
+  const subject = `Pripomienka: váš plán ${PLAN_LABELS[plan]} vyprší zajtra`;
 
   const bodyHtml = `
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
@@ -493,12 +574,12 @@ const sendReminderT1 = async ({ user, triggeredBy }) => {
       <li>žiadny tímový workspace pre kolegov</li>
       <li>vypnutie synchronizácie s Google Calendar/Tasks</li>
     </ul>
-    <div style="margin:0 0 20px;padding:18px;background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;border:1px solid #f59e0b;text-align:center;">
-      <p style="font-size:13px;color:#92400e;margin:0 0 8px;letter-spacing:0.5px;text-transform:uppercase;font-weight:700;">⏰ Posledná šanca</p>
-      <p style="font-size:20px;color:#1f2937;margin:0 0 6px;font-weight:700;">30% zľava — len dnes</p>
-      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#92400e;font-weight:600;">${promo}</code></p>
+    <div style="margin:0 0 20px;padding:16px;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
+      <p style="font-size:14px;color:#1f2937;margin:0 0 6px;font-weight:600;">Ponuka pri predĺžení</p>
+      <p style="font-size:14px;color:#555;margin:0 0 4px;">30% zľava ak predĺžite do konca platnosti.</p>
+      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#6D28D9;font-weight:600;border:1px solid #e5e7eb;">${promo}</code></p>
     </div>
-    ${ctaButton('Predĺžiť plán teraz', `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
+    ${ctaButton('Predĺžiť plán', `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
     <p style="font-size:12px;color:#999;margin:16px 0 0;line-height:1.5;">
       Po expirácii vaše dáta zostanú bezpečne uložené, len sa obmedzia funkcie. Predplatné si môžete kedykoľvek aktivovať späť.
     </p>`;
@@ -533,7 +614,7 @@ const sendReminderT1 = async ({ user, triggeredBy }) => {
  */
 const sendExpired = async ({ user, previousPlan, triggeredBy }) => {
   const promo = PROMO.COMEBACK30;
-  const subject = `Váš účet je teraz na Free — vrátiť ${PLAN_LABELS[previousPlan] || 'plán'} so zľavou 30%`;
+  const subject = `Váš plán vypršal — účet prešiel na Free`;
 
   const bodyHtml = `
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
@@ -546,11 +627,10 @@ const sendExpired = async ({ user, previousPlan, triggeredBy }) => {
       <li>Tímové funkcie sú zatiaľ pozastavené</li>
       <li>Google Calendar/Tasks synchronizácia bola vypnutá</li>
     </ul>
-    <div style="margin:0 0 20px;padding:18px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-radius:10px;border:1px solid #c4b5fd;text-align:center;">
-      <p style="font-size:13px;color:#6D28D9;margin:0 0 8px;letter-spacing:0.5px;text-transform:uppercase;font-weight:700;">Vráťte sa späť so zľavou</p>
-      <p style="font-size:20px;color:#1f2937;margin:0 0 6px;font-weight:700;">30% zľava na ${PLAN_LABELS[previousPlan] || 'predplatné'}</p>
-      <p style="font-size:13px;color:#555;margin:0 0 4px;">Platí 14 dní. Promo kód:</p>
-      <p style="margin:0;"><code style="background:#fff;padding:4px 10px;border-radius:4px;font-size:14px;color:#6D28D9;font-weight:600;">${promo}</code></p>
+    <div style="margin:0 0 20px;padding:16px;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
+      <p style="font-size:14px;color:#1f2937;margin:0 0 6px;font-weight:600;">Ponuka pri obnovení</p>
+      <p style="font-size:14px;color:#555;margin:0 0 4px;">30% zľava na ${PLAN_LABELS[previousPlan] || 'predplatné'}, platná 14 dní.</p>
+      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#6D28D9;font-weight:600;border:1px solid #e5e7eb;">${promo}</code></p>
     </div>
     ${ctaButton(`Aktivovať ${PLAN_LABELS[previousPlan] || 'plán'}`, `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
     <p style="font-size:12px;color:#999;margin:16px 0 0;line-height:1.5;">
@@ -581,26 +661,26 @@ const sendExpired = async ({ user, previousPlan, triggeredBy }) => {
  */
 const sendWinback = async ({ user, triggeredBy }) => {
   const promo = PROMO.WINBACK50;
-  const deadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
-  const subject = `Posledná ponuka — 50% zľava na PrplCRM Pro, končí o 48 h`;
+  // Subject — vecná formulácia, žiadne "POSLEDNÁ PONUKA / ZĽAVA / 48 h"
+  // (silné spam triggery v Yahoo aj Gmail). 50% zľava sa spomenie v body.
+  const subject = `Stále tu pre vás — ponuka na návrat do PrplCRM`;
 
   const bodyHtml = `
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
-      pred dvoma týždňami vám expiroval plán a chceli sme sa naposledy spýtať — radi by sme vás mali späť.
+      pred dvoma týždňami vám expiroval plán. Vaše dáta sú stále uložené — kontakty, projekty, úlohy aj synchronizácia s Google. Ak by ste sa chceli vrátiť, pripravili sme pre vás ponuku.
     </p>
-    <div style="margin:0 0 24px;padding:20px;background:linear-gradient(135deg,#fee2e2,#fecaca);border-radius:10px;border:2px solid #ef4444;text-align:center;">
-      <p style="font-size:13px;color:#991b1b;margin:0 0 8px;letter-spacing:0.5px;text-transform:uppercase;font-weight:700;">⚡ Najvyššia zľava ktorú dávame</p>
-      <p style="font-size:24px;color:#1f2937;margin:0 0 6px;font-weight:800;">50% zľava na PrplCRM Pro</p>
-      <p style="font-size:13px;color:#7f1d1d;margin:0 0 8px;">Končí ${formatDateSk(deadline)} o ${deadline.getHours()}:00</p>
-      <p style="margin:0;"><code style="background:#fff;padding:4px 12px;border-radius:4px;font-size:15px;color:#991b1b;font-weight:700;">${promo}</code></p>
+    <div style="margin:0 0 24px;padding:18px;background:#f9fafb;border-radius:10px;border:1px solid #e5e7eb;">
+      <p style="font-size:14px;color:#1f2937;margin:0 0 6px;font-weight:600;">Ponuka na obnovenie</p>
+      <p style="font-size:14px;color:#555;margin:0 0 4px;">50% zľava na prvý mesiac PrplCRM Pro.</p>
+      <p style="font-size:13px;color:#555;margin:0;">Promo kód: <code style="background:#fff;padding:2px 8px;border-radius:4px;font-size:14px;color:#6D28D9;font-weight:600;border:1px solid #e5e7eb;">${promo}</code></p>
     </div>
     <p style="font-size:14px;color:#555;margin:0 0 20px;line-height:1.5;">
-      Vaše dáta sú stále uložené — žiadny export, žiadna migrácia, ihneď tam kde ste skončili.
+      Po prihlásení sa všetky funkcie aktivujú okamžite — žiadny export, žiadna migrácia.
     </p>
-    ${ctaButton('Aktivovať Pro so zľavou', `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
+    ${ctaButton('Otvoriť PrplCRM', `${SITE_URL()}/app?upgrade=1&promo=${promo}`)}
     <p style="font-size:12px;color:#999;margin:16px 0 0;line-height:1.5;">
-      Toto je posledný email tohto typu od nás. Ďalej už takéto pripomienky neposielame.
+      Toto je posledný marketingový email od nás. Ďalej už takéto pripomienky neposielame, pokiaľ nezaregistrujete nový aktívny plán.
     </p>`;
 
   const result = await sendAndLog({

@@ -16,8 +16,12 @@ const router = express.Router();
  * One-click flow: click → marketingEmails=false + simple HTML confirmation.
  * GDPR-friendly: covers Article 21 (right to object to direct marketing).
  */
-router.get('/unsubscribe', async (req, res) => {
-  const { token } = req.query;
+// Shared handler — funguje pre GET (user click v emaili) aj POST (Gmail/Yahoo
+// one-click cez List-Unsubscribe-Post header per RFC 8058). POST telo
+// `List-Unsubscribe=One-Click` zasielané inboxovým providerom — tu ho
+// akceptujeme bez ďalšej validácie, token sám je proof-of-intent.
+const handleUnsubscribe = async (req, res) => {
+  const token = req.query.token || req.body?.token;
   if (!token) {
     return res.status(400).send(renderResult({
       ok: false,
@@ -65,7 +69,17 @@ router.get('/unsubscribe', async (req, res) => {
       message: 'Nastala chyba pri spracovaní. Skúste to prosím znova alebo nám napíšte na support@prplcrm.eu.'
     }));
   }
-});
+};
+
+// GET — user-facing klik v emaili (vráti HTML potvrdenie)
+router.get('/unsubscribe', handleUnsubscribe);
+
+// POST — RFC 8058 one-click. Gmail/Yahoo vidí `List-Unsubscribe-Post:
+// List-Unsubscribe=One-Click` v hlavičkách a pri kliku na natívny
+// "Unsubscribe" tlačidlo v rozhraní inboxu pošle POST request bez
+// otvárania prehliadača. Bez tejto cesty by Gmail/Yahoo nezobrazili
+// natívny unsubscribe link → mail vyzerá podozrivejšie a chodí do spamu.
+router.post('/unsubscribe', express.urlencoded({ extended: false }), handleUnsubscribe);
 
 const renderResult = ({ ok, title, message }) => `
 <!DOCTYPE html>

@@ -1,6 +1,30 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
+// Centralizovaný HTML→text stripper pre multipart/alternative. Yahoo a Gmail
+// penalizujú HTML-only maily ako podozrivé bulk-marketing pattern, preto
+// každé volanie sendMail by malo mať aj `text:` alternatívu.
+const htmlToText = (html) => {
+  if (!html) return '';
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+      const cleanText = text.replace(/<[^>]+>/g, '').trim();
+      if (!cleanText || cleanText === href) return href;
+      return `${cleanText} (${href})`;
+    })
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|h[1-6]|tr|div|table)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '  • ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 let transporter = null;
 
 const initializeEmail = () => {
@@ -111,6 +135,8 @@ const sendInvitationEmail = async ({ toEmail, inviterName, workspaceName, role, 
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
+      replyTo: process.env.SMTP_REPLY_TO || 'support@prplcrm.eu',
+      text: htmlToText(html),
       to: toEmail,
       subject: `Pozvánka do prostredia ${workspaceName} — PrplCRM`,
       html
@@ -195,6 +221,8 @@ const sendWelcomeEmail = async ({ toEmail, username }) => {
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
+      replyTo: process.env.SMTP_REPLY_TO || 'support@prplcrm.eu',
+      text: htmlToText(html),
       to: toEmail,
       subject: 'Vitajte v PrplCRM 👋',
       html: wrapEmail({ headerSubtitle: 'Vitajte na palube', bodyHtml })
@@ -245,6 +273,8 @@ const sendPasswordResetEmail = async ({ toEmail, username, resetLink }) => {
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
+      replyTo: process.env.SMTP_REPLY_TO || 'support@prplcrm.eu',
+      text: htmlToText(html),
       to: toEmail,
       subject: 'Obnovenie hesla — PrplCRM',
       html: wrapEmail({ headerSubtitle: 'Obnovenie hesla', bodyHtml })
