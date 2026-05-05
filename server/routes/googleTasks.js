@@ -2491,38 +2491,20 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
     for (const parentTask of parentTasks) {
       const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
       if (subtask) {
-        const subtaskBefore = subtask.completed;
         let changed = false;
         if (isCompleted && !subtask.completed) {
           subtask.completed = true;
           changed = true;
         } else if (!isCompleted && subtask.completed) {
-          // Bidirectional: Google un-checked → CRM un-check (was missing!)
+          // Bidirectional: Google un-checked → CRM un-check.
+          // Predtým jednosmerné (Google true → CRM true), čo viedlo k drift-u
+          // ak user odznačil v Google. Teraz oba smery.
           subtask.completed = false;
           changed = true;
         }
         if (changed) {
           parentTask.markModified('subtasks');
           await parentTask.save();
-
-          // [POLL_DEBUG] Verify save reálne zapísal do Mongo (kvôli Mixed type
-          // tracking issue). Načítame fresh dokument z DB a pozeráme.
-          try {
-            const reloaded = await Task.findById(parentTask._id).lean();
-            const reloadedSub = findSubtaskById(reloaded.subtasks, crmTaskId);
-            logger.info('[Google Tasks Poll] [DEBUG] Subtask save verify', {
-              parentTaskId: parentTask._id.toString(),
-              crmTaskId,
-              subtaskTitle: subtask.title,
-              before: subtaskBefore,
-              attempted: subtask.completed,
-              actualInDB: reloadedSub?.completed,
-              persistOK: reloadedSub?.completed === subtask.completed
-            });
-          } catch (e) {
-            logger.warn('[Google Tasks Poll] [DEBUG] Verify failed', { error: e.message });
-          }
-
           if (pollingIo && parentTask.workspaceId) {
             pollingIo.to(`workspace-${parentTask.workspaceId}`).emit('task-updated', { ...parentTask.toObject(), id: parentTask._id.toString(), source: 'global' });
           }
@@ -2610,12 +2592,6 @@ const pollGoogleTasksChanges = async () => {
     const users = await User.find({ 'googleTasks.enabled': true });
     if (users.length === 0) return;
 
-    // [POLL_DEBUG] TEMPORARY VERBOSE — odstrániť po vyriešení reverse-sync issue
-    logger.info('[Google Tasks Poll] [DEBUG] Cycle start', {
-      enabledUsers: users.length,
-      userIds: users.map(u => u._id.toString())
-    });
-
     for (const user of users) {
       try {
         const tasksApi = await getTasksClient(user);
@@ -2629,16 +2605,6 @@ const pollGoogleTasksChanges = async () => {
             if (entry?.taskListId) listsToPoll.add(entry.taskListId);
           }
         }
-
-        // [POLL_DEBUG]
-        logger.info('[Google Tasks Poll] [DEBUG] User context', {
-          userId: user._id.toString(),
-          listsToPollSize: listsToPoll.size,
-          listsToPoll: Array.from(listsToPoll),
-          syncedTaskIdsCount: user.googleTasks.syncedTaskIds?.size || 0,
-          lastSyncAt: user.googleTasks.lastSyncAt
-        });
-
         if (listsToPoll.size === 0) continue;
 
         // Build reverse map: googleTaskId → crmTaskId
@@ -2668,14 +2634,6 @@ const pollGoogleTasksChanges = async () => {
                 params.updatedMin = new Date(user.googleTasks.lastSyncAt.getTime() - 30000).toISOString();
               }
 
-              // [POLL_DEBUG]
-              logger.info('[Google Tasks Poll] [DEBUG] Calling Google list API', {
-                userId: user._id.toString(),
-                taskListId,
-                updatedMin: params.updatedMin || '(none — first sync)',
-                pageToken: pageToken || '(initial)'
-              });
-
               const response = await tasksApi.tasks.list(params);
               if (response.data.items) {
                 allGoogleTasks = allGoogleTasks.concat(response.data.items);
@@ -2686,20 +2644,6 @@ const pollGoogleTasksChanges = async () => {
             logger.warn('[Google Tasks Poll] List query failed', { userId: user._id, taskListId, error: e.message });
           }
         }
-
-        // [POLL_DEBUG]
-        logger.info('[Google Tasks Poll] [DEBUG] Google returned tasks', {
-          userId: user._id.toString(),
-          totalReturned: allGoogleTasks.length,
-          taskSamples: allGoogleTasks.slice(0, 5).map(t => ({
-            id: t.id,
-            title: t.title,
-            status: t.status,
-            updated: t.updated,
-            hasReverseMapping: reverseMap.has(t.id),
-            crmTaskId: reverseMap.get(t.id) || null
-          }))
-        });
 
         if (allGoogleTasks.length === 0) {
           // Update lastSyncAt even if no changes
@@ -2712,16 +2656,10 @@ const pollGoogleTasksChanges = async () => {
         const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
         const userWorkspaceIds = memberships.map(m => m.workspaceId);
         let updated = 0;
-        let skippedNoMapping = 0;
-        let skippedWrongWorkspace = 0;
-        let appliedNoChange = 0;
 
         for (const googleTask of allGoogleTasks) {
           const crmTaskId = reverseMap.get(googleTask.id);
-          if (!crmTaskId) {
-            skippedNoMapping++;
-            continue;
-          }
+          if (!crmTaskId) continue;
 
           // Find the actual task to get its workspaceId (instead of using currentWorkspaceId)
           let wsId = null;
@@ -2739,23 +2677,10 @@ const pollGoogleTasksChanges = async () => {
 
           // Only sync if task belongs to a workspace where the user is a member
           if (wsId && !userWorkspaceIds.some(wId => wId.toString() === wsId.toString())) {
-            skippedWrongWorkspace++;
             continue;
           }
 
           const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
-
-          // [POLL_DEBUG]
-          logger.info('[Google Tasks Poll] [DEBUG] applyGoogleTaskChange result', {
-            userId: user._id.toString(),
-            googleTaskId: googleTask.id,
-            googleTitle: googleTask.title,
-            googleStatus: googleTask.status,
-            crmTaskId,
-            wsId: wsId?.toString() || null,
-            result: result === 'deleted' ? 'deleted' : (result ? 'changed' : 'no-change')
-          });
-
           if (result === 'deleted') {
             // Clean up mapping for task deleted from Google
             await User.findByIdAndUpdate(user._id, {
@@ -2763,24 +2688,12 @@ const pollGoogleTasksChanges = async () => {
             });
           } else if (result) {
             updated++;
-          } else {
-            appliedNoChange++;
           }
         }
 
         // Update last sync timestamp
         user.googleTasks.lastSyncAt = new Date();
         await user.save();
-
-        // [POLL_DEBUG] Always log summary, not just when updated > 0
-        logger.info('[Google Tasks Poll] [DEBUG] Cycle summary', {
-          userId: user._id.toString(),
-          totalGoogleTasks: allGoogleTasks.length,
-          updated,
-          skippedNoMapping,
-          skippedWrongWorkspace,
-          appliedNoChange
-        });
 
         if (updated > 0) {
           logger.info('[Google Tasks Poll] Synced changes from Google', { userId: user._id, updated, total: allGoogleTasks.length });
