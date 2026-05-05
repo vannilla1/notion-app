@@ -2565,26 +2565,9 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   if (changed) {
     const now = new Date().toISOString();
     if (contact && taskIndex !== -1) {
-      const attemptedCompleted = contact.tasks[taskIndex].completed;
       contact.tasks[taskIndex].modifiedAt = now;
       contact.markModified('tasks');
       await contact.save();
-
-      // [VERIFY] Check that save actually persisted to Mongo. User reports
-      // F5 doesn't show change → suspect cache or save not persisting.
-      try {
-        const reloaded = await Contact.findById(contact._id, 'tasks').lean();
-        const reloadedTask = reloaded?.tasks?.find(t => t.id === crmTaskId);
-        logger.info('[Google Tasks Poll] [VERIFY] contact.tasks save', {
-          contactId: contact._id.toString(),
-          crmTaskId,
-          attemptedCompleted,
-          actualInDB: reloadedTask?.completed,
-          persistOK: reloadedTask?.completed === attemptedCompleted
-        });
-      } catch (e) {
-        logger.warn('[Google Tasks Poll] [VERIFY] failed', { error: e.message });
-      }
 
       // Invalidate server cache pre tasks AJ contacts (oba endpointy
       // môžu zobrazovať tento task).
