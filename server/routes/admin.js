@@ -2255,6 +2255,63 @@ router.get('/users/:userId/email-logs', authenticateToken, requireAdmin, async (
   }
 });
 
+// Test email — pošle preview ľubovoľného typu na ľubovoľnú adresu (mock dáta).
+// Pre vizuálne testovanie šablón bez nutnosti meniť reálnemu userovi plán.
+router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { toEmail, type } = req.body;
+    if (!toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
+      return res.status(400).json({ message: 'Neplatný email' });
+    }
+    const allowed = ['subscription_assigned', 'discount_assigned', 'welcome_pro', 'reminder_t7', 'reminder_t1', 'expired', 'winback'];
+    const t = allowed.includes(type) ? type : 'welcome_pro';
+
+    // Mock user — neukladá sa, len ako payload pre template render. _id je
+    // valídny ObjectId (potrebné pre unsubscribe token), ostatné fields
+    // pokrývajú všetky templates.
+    const mongoose = require('mongoose');
+    const mockUser = {
+      _id: new mongoose.Types.ObjectId(),
+      username: 'Test User',
+      email: toEmail,
+      subscription: {
+        plan: 'pro',
+        paidUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        discount: {
+          type: 'percentage', value: 25, targetPlan: 'pro',
+          reason: 'Toto je testovací email pre vizuálnu kontrolu šablóny',
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        },
+        notifications: {}
+      }
+    };
+
+    const subEmail = require('../services/subscriptionEmailService');
+    const triggeredBy = `admin:${req.adminUser?.username || 'test'}-preview`;
+    let result;
+    if (t === 'subscription_assigned') {
+      result = await subEmail.sendSubscriptionAssigned({ user: mockUser, oldPlan: 'free', triggeredBy });
+    } else if (t === 'discount_assigned') {
+      result = await subEmail.sendDiscountAssigned({ user: mockUser, triggeredBy });
+    } else if (t === 'welcome_pro') {
+      result = await subEmail.sendWelcomePaid({ user: mockUser, triggeredBy });
+    } else if (t === 'reminder_t7') {
+      result = await subEmail.sendReminderT7({ user: mockUser, accountStats: { contactCount: 47, taskCount: 134, workspaceCount: 3 }, triggeredBy });
+    } else if (t === 'reminder_t1') {
+      result = await subEmail.sendReminderT1({ user: mockUser, triggeredBy });
+    } else if (t === 'expired') {
+      result = await subEmail.sendExpired({ user: { ...mockUser, subscription: { ...mockUser.subscription, plan: 'free' } }, previousPlan: 'pro', triggeredBy });
+    } else if (t === 'winback') {
+      result = await subEmail.sendWinback({ user: { ...mockUser, subscription: { ...mockUser.subscription, plan: 'free' } }, triggeredBy });
+    }
+
+    res.json({ success: result?.ok, status: result?.status, type: t, toEmail });
+  } catch (err) {
+    logger.error('Email test send error', { error: err.message });
+    res.status(500).json({ message: 'Chyba pri odosielaní testu', error: err.message });
+  }
+});
+
 // Manuálny trigger reminder/winback emailu — pre support workflow
 router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async (req, res) => {
   try {

@@ -3825,6 +3825,9 @@ function EmailsTab() {
         )}
       </div>
 
+      {/* TEST EMAIL SENDER */}
+      <EmailTestSender />
+
       {/* CONFIG INFO */}
       {config && (
         <div className="sa-card" style={{ marginTop: 20 }}>
@@ -3891,6 +3894,79 @@ function EmailsTab() {
       </AdminHelpToggle>
 
       {previewLog && <EmailPreviewModal log={previewLog} onClose={() => setPreviewLog(null)} />}
+    </div>
+  );
+}
+
+function EmailTestSender() {
+  const [toEmail, setToEmail] = useState('');
+  const [type, setType] = useState('welcome_pro');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleSend = async () => {
+    setSending(true);
+    setResult(null);
+    try {
+      const r = await adminApi.post('/api/admin/email-test', { toEmail, type });
+      setResult({ ok: r.data?.success, status: r.data?.status });
+    } catch (err) {
+      setResult({ ok: false, status: 'error', error: err.response?.data?.message || err.message });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="sa-card" style={{ marginTop: 20, borderLeft: '4px solid #06b6d4' }}>
+      <h3 style={{ marginTop: 0 }}>🧪 Test šablóny</h3>
+      <p style={{ fontSize: 13, color: '#64748b', marginTop: 0 }}>
+        Pošle preview email s mock dátami na zadanú adresu — pre vizuálnu kontrolu šablóny bez nutnosti meniť plán reálnemu užívateľovi. Tieto maily nepodliehajú cooldown ani opt-out.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 12, alignItems: 'end' }}>
+        <div>
+          <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Príjemca</label>
+          <input
+            type="email"
+            placeholder="email@example.com"
+            value={toEmail}
+            onChange={(e) => setToEmail(e.target.value)}
+            className="sa-input"
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Typ</label>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="sa-input">
+            <option value="welcome_pro">🎉 Welcome Pro</option>
+            <option value="subscription_assigned">📦 Plán priradený</option>
+            <option value="discount_assigned">🎁 Zľava priradená</option>
+            <option value="reminder_t7">⏰ Reminder T-7</option>
+            <option value="reminder_t1">⚠️ Reminder T-1</option>
+            <option value="expired">🔚 Expirovaný</option>
+            <option value="winback">💝 Winback</option>
+          </select>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={handleSend}
+          disabled={sending || !toEmail}
+          style={{ height: 40, padding: '0 20px' }}
+        >
+          {sending ? 'Posielam...' : 'Poslať test'}
+        </button>
+      </div>
+      {result && (
+        <div style={{
+          marginTop: 12, padding: 10, borderRadius: 8,
+          background: result.ok ? '#d1fae5' : '#fee2e2',
+          color: result.ok ? '#065f46' : '#991b1b',
+          fontSize: 13
+        }}>
+          {result.ok
+            ? `✅ Email odoslaný. Status: ${result.status}`
+            : `❌ Chyba: ${result.error || result.status}`}
+        </div>
+      )}
     </div>
   );
 }
