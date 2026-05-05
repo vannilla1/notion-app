@@ -101,6 +101,16 @@ const dashboardHelpTips = [
     icon: '🗑️',
     title: 'Vymazanie účtu (GDPR)',
     description: 'V Môj profil dole je tlačidlo "Vymazať účet". Trvale zmaže váš účet, všetky vaše dáta a sole-owned workspaces (kde ste jediný owner). Vyžaduje napísanie "DELETE" + heslo. Postup je nevratný — Apple Guideline 5.1.1(v) compliance pre iOS.'
+  },
+  {
+    icon: '🛡️',
+    title: 'Bezpečnosť a ochrana vašich dát',
+    description: 'Aplikácia prešla bezpečnostným auditom (máj 2026). Čo to pre vás znamená v praxi: (1) Heslá sú uložené ako hashe (bcrypt) — ani administrátor ich nevidí. (2) Prepojenia s Google Calendar/Tasks sú v databáze šifrované (AES-256-GCM) — keby aj niekto získal prístup k DB dumpu, tokeny sú nečitateľné. (3) Komunikácia prebieha cez HTTPS s prísnou Content Security Policy hlavičkou. (4) Databázoví používatelia majú minimal privileges (least privilege) — žiadny admin prístup. (5) Pre prihlásenie cez Google/Apple sa používajú overené OAuth knižnice. Citlivé úkony (zmena hesla, vymazanie účtu) vyžadujú potvrdenie heslom.'
+  },
+  {
+    icon: '🔑',
+    title: 'Čo robiť pri podozrení na únik prístupu',
+    description: 'Ak máte podozrenie že niekto pozná vaše heslo: Avatar → Zmeniť heslo (okamžite). Ak máte prepojený Google účet a chcete odpojiť prístup k vášmu kalendáru/tasks: Avatar → Synchronizácia kalendára → Odpojiť. Tým sa zruší token v aplikácii aj na strane Google. Zmena hesla automaticky neodhlasuje iné zariadenia — ak máte podozrenie, odhláste sa zo všetkých zariadení a prihláste znova.'
   }
 ];
 
