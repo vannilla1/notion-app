@@ -6671,10 +6671,14 @@ body.ios-app {
 /* ─── SuperAdmin Panel Styles ─────────────────────────────────── */
 .sa-tabs {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 2px;
   padding: 12px 24px 0;
-  max-width: 1200px;
-  margin: 0 auto;
+  /* Full-width: predtým max-width:1200px + margin:auto orezávalo posledné
+     2 taby (Emaily, Sync) na 1400px monitoroch a pri 13 položkách spôsobovalo
+     vizuálny "tlak doprava". Border-bottom teraz prirodzene spanuje celú
+     šírku obrazovky aj keď tabs flow do druhého riadku. */
+  justify-content: center;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -6682,7 +6686,7 @@ body.ios-app {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 16px;
+  padding: 10px 14px;
   border: none;
   background: none;
   color: var(--text-secondary);
@@ -6691,6 +6695,8 @@ body.ios-app {
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sa-tab:hover {
@@ -7095,6 +7101,11 @@ body.ios-app {
     padding: 8px 12px 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    /* Na mobile preferujeme single-line scroll cez všetky taby — wrap by
+       zaberalo veľa vertikálu nad obsahom. Desktop má wrap aktívny pre
+       prirodzené flow keď sa nezmestia. */
+    flex-wrap: nowrap;
+    justify-content: flex-start;
   }
 
   .sa-tab {
