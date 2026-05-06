@@ -1114,9 +1114,12 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
 
 // ─── AUDIT LOG ─────────────────────────────────────────────────
 // GET /api/admin/audit-log — paginated, filterable audit log
+// Defaultne excludujeme super admin akcie (testovanie nezahŕňame do
+// forenzných záznamov reálnej user-base). Cez ?includeSuperAdmin=true
+// admin može override.
 router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 50, category, action, userId, from, to, search } = req.query;
+    const { page = 1, limit = 50, category, action, userId, from, to, search, includeSuperAdmin } = req.query;
     const parsedPage = Math.max(parseInt(page) || 1, 1);
     const parsedLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 100);
     const skip = (parsedPage - 1) * parsedLimit;
@@ -1125,6 +1128,12 @@ router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
     if (category) query.category = category;
     if (action) query.action = action;
     if (userId) query.userId = userId;
+    if (includeSuperAdmin !== 'true') {
+      const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+      if (superAdmin && !userId) {
+        query.userId = { $ne: superAdmin._id };
+      }
+    }
     if (from || to) {
       query.createdAt = {};
       if (from) query.createdAt.$gte = new Date(from);
@@ -1168,6 +1177,52 @@ router.get('/audit-log/categories', authenticateToken, requireAdmin, async (req,
     res.json({ categories, actions });
   } catch (error) {
     logger.error('Admin audit log categories error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// GET /api/admin/audit-log/stats — counts za rôzne obdobia + top users/actions
+router.get('/audit-log/stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const baseFilter = superAdmin ? { userId: { $ne: superAdmin._id } } : {};
+
+    const now = Date.now();
+    const day = new Date(now - 24 * 60 * 60 * 1000);
+    const week = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const month = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+    const [count24h, count7d, count30d, topUsers7d, topActions7d, topCategories7d] = await Promise.all([
+      AuditLog.countDocuments({ ...baseFilter, createdAt: { $gte: day } }),
+      AuditLog.countDocuments({ ...baseFilter, createdAt: { $gte: week } }),
+      AuditLog.countDocuments({ ...baseFilter, createdAt: { $gte: month } }),
+      AuditLog.aggregate([
+        { $match: { ...baseFilter, createdAt: { $gte: week }, username: { $exists: true, $ne: null } } },
+        { $group: { _id: '$username', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]),
+      AuditLog.aggregate([
+        { $match: { ...baseFilter, createdAt: { $gte: week } } },
+        { $group: { _id: '$action', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]),
+      AuditLog.aggregate([
+        { $match: { ...baseFilter, createdAt: { $gte: week } } },
+        { $group: { _id: '$category', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ])
+    ]);
+
+    res.json({
+      count24h, count7d, count30d,
+      topUsers7d: topUsers7d.map((u) => ({ username: u._id, count: u.count })),
+      topActions7d: topActions7d.map((a) => ({ action: a._id, count: a.count })),
+      topCategories7d: topCategories7d.map((c) => ({ category: c._id, count: c.count }))
+    });
+  } catch (error) {
+    logger.error('Admin audit log stats error', { error: error.message });
     res.status(500).json({ message: 'Chyba' });
   }
 });

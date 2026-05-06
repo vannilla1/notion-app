@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApi, { API_BASE_URL } from '@/api/adminApi';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
@@ -2360,37 +2360,73 @@ const CATEGORY_LABELS = {
 
 function AuditLogTab() {
   const [logs, setLogs] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState({ category: '', search: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ category: '', action: '', search: '', from: '', to: '' });
+  const [includeSuperAdmin, setIncludeSuperAdmin] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState(null);
+  const [userDetailId, setUserDetailId] = useState(null);
+  const [userDetail, setUserDetail] = useState(null);
 
-  const fetchLogs = () => {
-    setLoading(true);
+  const fetchLogs = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     const params = { page, limit: 30 };
     if (filters.category) params.category = filters.category;
+    if (filters.action) params.action = filters.action;
     if (filters.search) params.search = filters.search;
     if (filters.from) params.from = filters.from;
     if (filters.to) params.to = filters.to;
+    if (includeSuperAdmin) params.includeSuperAdmin = 'true';
 
-    adminApi.get('/api/admin/audit-log', { params })
-      .then(res => {
-        setLogs(res.data.logs || []);
-        setTotalPages(res.data.pages || 1);
-        setTotal(res.data.total || 0);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+    try {
+      const res = await adminApi.get('/api/admin/audit-log', { params });
+      setLogs(res.data.logs || []);
+      setTotalPages(res.data.pages || 1);
+      setTotal(res.data.total || 0);
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [page, filters.category, filters.action, filters.search, filters.from, filters.to, includeSuperAdmin]);
 
-  useEffect(() => { fetchLogs(); }, [page, filters.category]);
+  // Initial + filter-triggered reload
+  useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setPage(1);
-    fetchLogs();
-  };
+  // Stats fetch — single load + refresh každých 60s
+  useEffect(() => {
+    let cancelled = false;
+    const loadStats = async () => {
+      try {
+        const r = await adminApi.get('/api/admin/audit-log/stats');
+        if (!cancelled) setStats(r.data);
+      } catch { /* ignore */ }
+    };
+    loadStats();
+    const id = setInterval(() => { if (!document.hidden) loadStats(); }, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // Auto-refresh logs 30s s pause keď je rozbalený detail (user číta JSON)
+  useEffect(() => {
+    if (expandedLogId) return;
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) fetchLogs(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 30000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [fetchLogs, expandedLogId]);
+
+  // Reset page pri zmene filtrov
+  useEffect(() => { setPage(1); }, [filters.category, filters.action, filters.search, filters.from, filters.to, includeSuperAdmin]);
 
   const formatDateTime = (d) => {
     if (!d) return '—';
@@ -2403,42 +2439,141 @@ function AuditLogTab() {
     const parts = [];
     if (d.oldRole && d.newRole) parts.push(`${d.oldRole} → ${d.newRole}`);
     if (d.oldPlan && d.newPlan) parts.push(`${d.oldPlan} → ${d.newPlan}`);
+    if (d.oldPriority && d.newPriority) parts.push(`priorita ${d.oldPriority} → ${d.newPriority}`);
     if (d.subject) parts.push(`"${d.subject}"`);
     if (d.recipient) parts.push(`→ ${d.recipient}`);
     if (d.reason) parts.push(`Dôvod: ${d.reason}`);
     if (d.changedFields) parts.push(`Polia: ${d.changedFields.join(', ')}`);
     if (d.email && !d.oldRole && !d.oldPlan) parts.push(d.email);
-    return parts.length > 0 ? <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{parts.join(' · ')}</span> : null;
+    return parts.length > 0 ? <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{parts.join(' · ')}</span> : null;
+  };
+
+  const exportCsv = async () => {
+    // Fetch all matching logs (bez paginácie — limit 1000 ako rozumný strop)
+    const params = { page: 1, limit: 1000 };
+    if (filters.category) params.category = filters.category;
+    if (filters.action) params.action = filters.action;
+    if (filters.search) params.search = filters.search;
+    if (filters.from) params.from = filters.from;
+    if (filters.to) params.to = filters.to;
+    if (includeSuperAdmin) params.includeSuperAdmin = 'true';
+    try {
+      const res = await adminApi.get('/api/admin/audit-log', { params });
+      const rows = (res.data.logs || []).map((l) => [
+        new Date(l.createdAt).toISOString(),
+        l.username || '',
+        l.email || '',
+        l.action || '',
+        l.category || '',
+        l.targetType || '',
+        l.targetName || '',
+        l.ipAddress || '',
+        JSON.stringify(l.details || {})
+      ]);
+      const header = ['Date', 'Username', 'Email', 'Action', 'Category', 'TargetType', 'TargetName', 'IP', 'Details'];
+      const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch { alert('Export zlyhal'); }
+  };
+
+  const openUserDetail = (userId) => {
+    if (!userId) return;
+    setUserDetailId(userId);
+    adminApi.get(`/api/admin/users/${userId}`)
+      .then((res) => setUserDetail(res.data))
+      .catch(() => setUserDetail(null));
   };
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Audit Log <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '14px' }}>({total} záznamov)</span></h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Audit Log <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 14 }}>({total} záznamov)</span>
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportCsv} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            📥 Export CSV
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <select value={filters.category} onChange={e => { setFilters(f => ({ ...f, category: e.target.value })); setPage(1); }}
-          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', background: 'var(--bg-primary)' }}>
+      {/* Stat header */}
+      {stats && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+            Posledných 24h: <strong>{stats.count24h}</strong>
+          </span>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+            Posledných 7d: <strong>{stats.count7d}</strong>
+          </span>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+            Posledných 30d: <strong>{stats.count30d}</strong>
+          </span>
+          {stats.topUsers7d?.length > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#ede9fe', color: '#6D28D9' }}>
+              👤 Top user (7d): <strong>{stats.topUsers7d[0].username}</strong> ({stats.topUsers7d[0].count}×)
+            </span>
+          )}
+          {stats.topActions7d?.length > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#dbeafe', color: '#1e40af' }}>
+              🎯 Top akcia (7d): <strong>{ACTION_LABELS[stats.topActions7d[0].action] || stats.topActions7d[0].action}</strong> ({stats.topActions7d[0].count}×)
+            </span>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13, background: 'var(--bg-primary)' }}>
           <option value="">Všetky kategórie</option>
           {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))}
-          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
-          placeholder="Od" />
-        <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))}
-          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}
-          placeholder="Do" />
-        <input type="text" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-          placeholder="Hľadať meno, email, akciu..."
-          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', flex: 1, minWidth: '150px' }} />
-        <button type="submit" className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 14px' }}>Hľadať</button>
-      </form>
+        <input
+          type="text"
+          placeholder="Action filter (napr. user.plan_changed)"
+          value={filters.action}
+          onChange={(e) => setFilters((f) => ({ ...f, action: e.target.value }))}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 12, fontFamily: 'monospace', width: 220 }}
+        />
+        <input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13 }} />
+        <input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13 }} />
+        <input
+          type="text"
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+          placeholder="🔍 Hľadať meno, email, target..."
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13, flex: 1, minWidth: 150 }}
+        />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '0 8px', cursor: 'pointer', color: 'var(--text-muted)' }} title="Zahrnúť aj akcie super admina (default vylúčené)">
+          <input
+            type="checkbox"
+            checked={includeSuperAdmin}
+            onChange={(e) => setIncludeSuperAdmin(e.target.checked)}
+          />
+          Super admin
+        </label>
+        {(filters.category || filters.action || filters.search || filters.from || filters.to) && (
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setFilters({ category: '', action: '', search: '', from: '', to: '' })}
+          >
+            ✕ Vymazať filtre
+          </button>
+        )}
+      </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Načítavam...</div>
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Načítavam...</div>
       ) : logs.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Žiadne záznamy</div>
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Žiadne záznamy</div>
       ) : (
         <div className="sa-table-wrap">
           <table className="sa-table">
@@ -2452,58 +2587,139 @@ function AuditLogTab() {
               </tr>
             </thead>
             <tbody>
-              {logs.map(log => (
-                <tr key={log.id || log._id}>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>{formatDateTime(log.createdAt)}</td>
-                  <td>
-                    <div style={{ fontSize: '13px', fontWeight: 500 }}>{log.username || '—'}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{log.email || ''}</div>
-                  </td>
-                  <td>
-                    <span style={{ fontSize: '13px' }}>{ACTION_LABELS[log.action] || log.action}</span>
-                  </td>
-                  <td>
-                    <div style={{ fontSize: '13px' }}>{log.targetName || '—'}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{log.targetType || ''}</div>
-                  </td>
-                  <td>{renderDetails(log)}</td>
-                </tr>
-              ))}
+              {logs.map((log) => {
+                const expanded = expandedLogId === (log.id || log._id);
+                return (
+                  <Fragment key={log.id || log._id}>
+                    <tr
+                      onClick={() => setExpandedLogId(expanded ? null : (log.id || log._id))}
+                      style={{ cursor: 'pointer', background: expanded ? 'var(--bg-secondary)' : 'transparent' }}
+                    >
+                      <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{formatDateTime(log.createdAt)}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {log.userId ? (
+                          <button
+                            onClick={() => openUserDetail(log.userId)}
+                            style={{ background: 'none', border: 'none', padding: 0, fontSize: 13, fontWeight: 500, color: 'var(--accent-color, #6366f1)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+                          >
+                            {log.username || '—'}
+                          </button>
+                        ) : (
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{log.username || 'systém'}</div>
+                        )}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{log.email || ''}</div>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: 13 }}>{ACTION_LABELS[log.action] || log.action}</span>
+                        {log.category && (
+                          <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#f3f4f6', color: '#6b7280' }}>
+                            {log.category}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ fontSize: 13 }}>{log.targetName || '—'}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{log.targetType || ''}</div>
+                      </td>
+                      <td>{renderDetails(log)}</td>
+                    </tr>
+                    {expanded && (
+                      <tr>
+                        <td colSpan={5} style={{ background: 'var(--bg-primary)', padding: 12 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                            Raw JSON • IP: <code>{log.ipAddress || '—'}</code> • User-Agent: <code style={{ fontSize: 10 }}>{(log.userAgent || '—').slice(0, 100)}</code>
+                          </div>
+                          <pre style={{ fontSize: 11, background: 'var(--bg-secondary)', padding: 10, borderRadius: 4, margin: 0, overflow: 'auto', maxHeight: 240 }}>
+                            {JSON.stringify(log, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
       {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '16px' }}>
-          <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage(p => p - 1)} style={{ fontSize: '13px', padding: '4px 12px' }}>←</button>
-          <span style={{ fontSize: '13px', padding: '4px 8px', color: 'var(--text-secondary)' }}>{page} / {totalPages}</span>
-          <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} style={{ fontSize: '13px', padding: '4px 12px' }}>→</button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} style={{ fontSize: 13, padding: '4px 12px' }}>←</button>
+          <span style={{ fontSize: 13, padding: '4px 8px', color: 'var(--text-secondary)' }}>{page} / {totalPages}</span>
+          <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} style={{ fontSize: 13, padding: '4px 12px' }}>→</button>
+        </div>
+      )}
+
+      {/* User detail mini modal */}
+      {userDetailId && userDetail && (
+        <div className="modal-overlay" onClick={() => { setUserDetailId(null); setUserDetail(null); }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, padding: 20 }}>
+            <h3 style={{ marginTop: 0 }}>👤 {userDetail.user?.username}</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{userDetail.user?.email}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 12, fontSize: 13 }}>
+              <div><strong>Plán:</strong> {userDetail.user?.subscription?.plan || 'free'}</div>
+              <div><strong>Rola:</strong> {userDetail.user?.role || 'user'}</div>
+              <div><strong>Workspaces:</strong> {userDetail.memberships?.length || 0}</div>
+              <div><strong>Kontakty:</strong> {userDetail.stats?.contactCount || 0}</div>
+              <div><strong>Projekty:</strong> {userDetail.stats?.taskCount || 0}</div>
+              <div><strong>Registrácia:</strong> {userDetail.user?.createdAt ? new Date(userDetail.user.createdAt).toLocaleDateString('sk-SK') : '—'}</div>
+            </div>
+            <button className="btn btn-secondary" onClick={() => { setUserDetailId(null); setUserDetail(null); }} style={{ marginTop: 16, fontSize: 12 }}>
+              Zavrieť
+            </button>
+          </div>
         </div>
       )}
 
       <AdminHelpToggle title="Audit log">
-        <p><strong>Čo tu vidíš:</strong> kompletnú históriu zmien v aplikácii — kto, kedy, čo zmenil. Slúži na forenznú analýzu a compliance.</p>
+        <p><strong>Čo tu vidíš:</strong> kompletnú históriu zmien v aplikácii — kto, kedy, čo zmenil. Slúži na forenznú analýzu a compliance. Defaultne sú vylúčené akcie super admina (toggle "Super admin" pre zobrazenie).</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Stat header</h4>
         <ul>
-          <li><strong>Filtre</strong> hore — kategória (Používateľ, Workspace, Kontakt, Úloha, Správa, Auth, Fakturácia, Systém), dátumový rozsah, vyhľadávanie podľa user-a alebo cieľa.</li>
-          <li><strong>Riadok záznamu</strong>:
-            <ul>
-              <li>🕐 timestamp + IP adresa (ak je k dispozícii)</li>
-              <li>👤 kto akciu vykonal (username + email; "system" ak išlo o cron / automatizáciu)</li>
-              <li>📋 akcia + cieľ (napr. "💳 Zmena plánu — Marek Novák")</li>
-              <li>kategória ako badge vpravo</li>
-            </ul>
-          </li>
-          <li><strong>Detaily záznamu</strong> — klik rozbalí JSON s pred/po hodnotami (napr. <code>oldPlan: free, plan: pro</code>).</li>
-          <li><strong>Stránkovanie</strong> — typicky 50 záznamov na stranu.</li>
+          <li><strong>Počty 24h / 7d / 30d</strong> — celková aktivita za rôzne obdobia.</li>
+          <li><strong>👤 Top user (7d)</strong> — najaktívnejší užívateľ za posledný týždeň.</li>
+          <li><strong>🎯 Top akcia (7d)</strong> — najčastejšia akcia za týždeň.</li>
         </ul>
-        <p><strong>Tipy:</strong> Najčastejšie audit akcie:</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filtre</h4>
         <ul>
-          <li><strong>user.plan_auto_expired</strong> — automatický downgrade na Free po vypršaní paidUntil</li>
-          <li><strong>user.discount_applied/removed</strong> — admin pridal/odstránil zľavu</li>
+          <li><strong>Kategória</strong> — Auth / Contact / Task / Message / Workspace / Billing / User / Security / System.</li>
+          <li><strong>Action</strong> — exact match (napr. <code>user.plan_changed</code>, <code>auth.login_failed</code>).</li>
+          <li><strong>Dátumový rozsah</strong> — Od / Do.</li>
+          <li><strong>Search</strong> — substring v username / email / targetName / action.</li>
+          <li><strong>Super admin checkbox</strong> — opt-in zobrazenie tvojich akcií (default skryté).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📋 Tabuľka záznamov</h4>
+        <ul>
+          <li><strong>Dátum</strong> — kedy akcia nastala.</li>
+          <li><strong>Používateľ</strong> — username (klikateľný → user detail modal) + email + IP.</li>
+          <li><strong>Akcia</strong> — slovenský label (cez ACTION_LABELS) + kategória badge.</li>
+          <li><strong>Cieľ</strong> — targetName + targetType (napr. „Marek Novák" / „user").</li>
+          <li><strong>Detaily</strong> — pred/po hodnoty (oldRole → newRole, oldPlan → newPlan, priority changes, subject, recipient, reason, changedFields).</li>
+          <li><strong>Klik na riadok</strong> → rozbalí raw JSON s plným kontextom (IP, User-Agent, all details).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📥 Export CSV</h4>
+        <p>Tlačidlo vpravo hore exportuje aktuálne <em>filtrovaný</em> zoznam (max 1000 záznamov). Stĺpce: Date / Username / Email / Action / Category / TargetType / TargetName / IP / Details (JSON).</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔄 Auto-refresh</h4>
+        <p>Logs sa obnovujú každých 30s, stats každých 60s. Pri rozbalenom raw JSON sa pause, aby ti zápis neskrolloval pod ruky.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Najčastejšie akcie</h4>
+        <ul>
+          <li><strong>user.plan_auto_expired</strong> — auto-downgrade na Free po vypršaní paidUntil</li>
+          <li><strong>user.discount_applied / removed</strong> — admin pridal/odstránil zľavu</li>
           <li><strong>user.subscription_updated</strong> — admin manuálne zmenil plán/paidUntil</li>
-          <li><strong>auth.login</strong> — prihlásenie (failed pokusy sa logujú v Diagnostika → Active)</li>
+          <li><strong>auth.login / auth.oauth.login</strong> — prihlásenie</li>
+          <li><strong>auth.login_failed</strong> — failed pokus (cudzia IP = potenciálny brute-force)</li>
+          <li><strong>billing.checkout_completed</strong> — reálna Stripe platba</li>
         </ul>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Audit log je append-only. Neexistuje admin UI na delete (iba TTL index v MongoDB by mohol auto-cleanup-ovať staré záznamy — viď Storage tab).
+        </p>
       </AdminHelpToggle>
     </div>
   );
