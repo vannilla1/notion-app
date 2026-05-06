@@ -813,6 +813,18 @@
   transform: translateY(-2px);
 }
 
+/* Disabled badge — vizuálne tlmený, zakázaný hover lift, cursor not-allowed.
+   Použité pre App Store dokým neprejde Apple review (1.0.4 build 64). */
+.lp-badge-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: auto; /* necháme klik aby title tooltip mohol fungovať na hover */
+}
+.lp-badge-disabled:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: none;
+}
+
 .lp-badge-icon {
   font-size: 28px;
 }

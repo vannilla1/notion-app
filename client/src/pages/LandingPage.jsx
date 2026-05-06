@@ -489,19 +489,35 @@ export default function LandingPage() {
           </div>
 
           <div className="lp-download-badges">
-            <a href="#" className="lp-badge" onClick={(e) => e.preventDefault()}>
+            {/* App Store: nechávame neaktívny dokým neprejde Apple review na
+                1.0.4 build 64 — zatiaľ vizuálne tlmený s "Pripravujeme" hint
+                aby user vedel že čoskoro príde. Po schválení stačí nahradiť
+                href + odstrániť aria-disabled. */}
+            <a
+              href="#"
+              className="lp-badge lp-badge-disabled"
+              onClick={(e) => e.preventDefault()}
+              aria-disabled="true"
+              title="App Store verzia je v Apple review — čoskoro k dispozícii"
+            >
               <span className="lp-badge-icon">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
                   <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 21.99 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 21.99C7.79 22.03 6.8 20.68 5.96 19.47C4.25 16.56 2.93 11.3 4.7 7.72C5.57 5.94 7.36 4.86 9.28 4.83C10.56 4.81 11.78 5.7 12.57 5.7C13.36 5.7 14.85 4.62 16.4 4.8C17.05 4.83 18.89 5.08 20.07 6.8C19.96 6.87 17.62 8.23 17.65 11.1C17.68 14.53 20.55 15.69 20.58 15.7C20.56 15.77 20.12 17.35 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z" />
                 </svg>
               </span>
               <span className="lp-badge-text">
-                <span className="lp-badge-label">Stiahnuť na</span>
+                <span className="lp-badge-label">Pripravujeme</span>
                 <span className="lp-badge-store">App Store</span>
               </span>
             </a>
 
-            <a href="#" className="lp-badge" onClick={(e) => e.preventDefault()}>
+            <a
+              href="https://play.google.com/store/apps/details?id=eu.prplcrm.app"
+              className="lp-badge"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Stiahnuť Prpl CRM na Google Play"
+            >
               <span className="lp-badge-icon">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
                   <path d="M3.18 23.68C2.76 23.48 2.5 23.05 2.5 22.5V1.5C2.5 0.95 2.76 0.52 3.18 0.32L13.04 11.5L3.18 23.68ZM16.68 15.32L5.4 22.34L14.14 12.78L16.68 15.32ZM20.4 10.36C20.82 10.64 21.1 11.06 21.1 11.5C21.1 11.94 20.82 12.36 20.48 12.58L18.1 13.94L15.3 11.5L18.1 9.06L20.4 10.36ZM5.4 0.66L16.68 7.68L14.14 10.22L5.4 0.66Z" />
