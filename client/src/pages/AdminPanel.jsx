@@ -2898,15 +2898,72 @@ function DiagnosticsTab() {
 
       <AdminHelpToggle title="Diagnostika">
         <p><strong>Čo tu vidíš:</strong> diagnostické centrum servera — chyby, výkon, zdravie subsystémov, aktívni užívatelia, využitie funkcionalít a príjmy. Každá sekcia má vlastný sub-tab hore.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🔴 Chyby</h4>
         <ul>
-          <li><strong>🐛 Chyby</strong> — zoznam zachytených 5xx server errorov (z DB cez serverErrorService). Auto-refresh každých 30s. Pri každej chybe vidíš stack trace, request URL, user-a (ak bol prihlásený), timestamp. Klik na riadok → expanded view s plným contextom.</li>
-          <li><strong>⚡ Výkon</strong> — top 10 najpomalších endpointov + 4xx/5xx error rate. Slúži na detekciu performance regresií.</li>
-          <li><strong>💚 Zdravie</strong> — stav externých subsystémov: MongoDB, SMTP (mailer), APNs (Apple Push), Google OAuth, Memory utilization. Health monitor každých 5 min skontroluje a pri 3× zlyhaní pošle email na support@prplcrm.eu.</li>
-          <li><strong>🟢 Aktívni</strong> — práve online používatelia (cez Socket.IO heartbeat) + posledné failed login pokusy (na detekciu brute-force útokov).</li>
-          <li><strong>📊 Využitie</strong> — agregované feature usage z AuditLogu — ktoré akcie sú najčastejšie (creating contacts, completing tasks atď.). Pomáha pri prioritizácii feature work.</li>
-          <li><strong>💰 Príjmy</strong> — MRR (Monthly Recurring Revenue) + breakdown po plánoch (počet active Tím / Pro user-ov, ich príspevok do MRR). Yearly subscriptions sa rátajú s 0.83× faktorom (12-mesačná zľava).</li>
+          <li>Zoznam zachytených 5xx server errorov (z Mongo kolekcie <code>servererrors</code> cez <code>serverErrorService</code>). Auto-refresh každých 30s, pause keď je tab schovaný alebo otvorený detail modal.</li>
+          <li>Pri každej chybe vidíš stack trace, request URL, user-a (ak bol prihlásený), timestamp, count (koľkokrát už nastala). Klik na riadok → expanded view s plným contextom.</li>
+          <li><strong>"Send to Claude"</strong> tlačidlo skopíruje structured prompt do clipboardu — vlož do Claude Code a opíš čo treba opraviť.</li>
+          <li>Filter: <em>resolved</em> (vyriešené / nevyriešené / všetko), <em>source</em> (typ erroru), <em>search</em> (substring v message).</li>
         </ul>
-        <p><strong>Tipy:</strong> Ak vidíš nárast chýb v <strong>Chyby</strong> → najprv pozri timestamp koreláciu s nedávnym deployom v <strong>Audit log</strong>. Pre persistnutie chýb mimo nášho UI máme aj Sentry-like in-house tracking — všetko je v Mongo kolekcii <code>servererrors</code>.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🟡 Výkon</h4>
+        <ul>
+          <li>Top 20 najpomalších endpointov podľa priemernej doby odozvy + breakdown stavových kódov + error rate. Auto-refresh 30s.</li>
+          <li><strong>Avg threshold:</strong> &lt; 500ms = OK (čierne), 500–1000ms = pomalšie (oranžové), &gt; 1000ms = problém (červené).</li>
+          <li>Header ukazuje <em>"Metriky zbierame od ..."</em> — admin vidí kontext (3 hodiny vs 30 dní = veľký rozdiel pri interpretácii priemerov).</li>
+          <li><strong>🗑️ Reset metrík</strong> tlačidlo vyčistí in-memory counters. Užitočné po deployi keď chceš vidieť čerstvé čísla bez historických request-ov.</li>
+          <li><strong>⚠️ Limitácia:</strong> apiMetrics je in-memory — server reštart (alebo crash) ho automaticky vymaže. Žiadna persistencia.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🟢 Zdravie</h4>
+        <ul>
+          <li>Stav externých subsystémov: MongoDB, SMTP (mailer), APNs (Apple Push), Google OAuth, Memory utilization. Health monitor cron beží na pozadí každých 5 min — UI auto-pollne každých 30s aby sa nové dáta objavili rýchlo.</li>
+          <li><strong>3 stavy:</strong> ✅ <em>OK</em> (zelená), ⚠️ <em>Watch</em> (oranžová, niečo na hrane), 🚨 <em>Error</em> (červená, zlyháva).</li>
+          <li>Pri 3 erroroch po sebe pošle health monitor email na support@prplcrm.eu (anti-flapping). Recovery email tiež príde keď sa služba vráti.</li>
+          <li><strong>"Re-check teraz"</strong> tlačidlo donúti okamžitý live check — užitočné keď ladíš SMTP / Google credentials a chceš vidieť výsledok hneď, nie čakať na ďalší cron tick.</li>
+          <li><strong>Warming-up state:</strong> ak server bol nedávno reštartovaný a prvý cron ešte nestihol bežať, UI ukáže "rozbieha sa" miesto žiadnych dát. Klik na "Spustiť kontrolu teraz" naštartuje cron force-fully.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🔵 Aktívni</h4>
+        <ul>
+          <li>Práve online používatelia cez Socket.IO heartbeat. Auto-refresh 15s.</li>
+          <li><strong>Online používatelia</strong> = unique userId-y, <strong>Aktívne sockety</strong> = celkový počet pripojení (1 user môže mať viac tabov / zariadení).</li>
+          <li>"Failed logins (24h)" + "Registrácie (24h)" stat counters z audit logu.</li>
+          <li><strong>🚫 Podozrivé IP adresy</strong> — IP-čky s viacerými neúspešnými login pokusmi za 24h. Top 10 podľa počtu. Pri &gt; 5 pokusoch z jednej IP zvážiť firewall block na úrovni Render / Cloudflare.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🟣 Využitie</h4>
+        <ul>
+          <li>Agregované feature usage z <code>AuditLog</code> kolekcie — ktoré akcie sú najčastejšie. Výberový filter 24h / 7d / 30d.</li>
+          <li>Sledované akcie: kontakty (created/updated/deleted), projekty (created/updated/<strong>completed</strong>/deleted), úlohy (created/completed), správy (created/approved/rejected), auth (register/login/<strong>login_failed</strong>), workspace.created, notification.read.</li>
+          <li><strong>Farebne odlíšené:</strong> 🟢 zelené = pozitívne akcie (created, completed), 🟠 oranžové = deletes, 🔴 červené = login_failed (security signal), 🟣 fialové = ostatné.</li>
+          <li>Denný trend graf zobrazuje aktivitu za posledných 7 dní pre rýchly pohľad na dynamiku.</li>
+          <li><strong>Použitie:</strong> sleduj <code>task.completed</code> ako kľúčovú KPI engagement — pomer completed:created &gt; 50% = zdravý workflow.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>💰 Príjmy</h4>
+        <ul>
+          <li><strong>MRR (Monthly Recurring Revenue)</strong> — mesačný príjem zo všetkých active platených userov. Yearly subscriptions sa rátajú ako <code>yearly_price / 12</code> (presný equivalent, predtým bola hrubá aproximácia 0.83× ktorá nadhodnocovala ~1%).</li>
+          <li><strong>ARR</strong> = MRR × 12 (Annual Recurring Revenue), ukázané pod MRR.</li>
+          <li><strong>💳 Stripe-managed</strong> vs <strong>🎁 Admin-granted</strong> — split active platených userov podľa zdroja predplatného. Stripe userovia majú real-money cashflow, admin-granted sú free upgrades / promo / freeMonths zľavy.</li>
+          <li><strong>Nové subs (30d)</strong> — počet upgrades / discount-applications za posledných 30 dní z audit logu (billing kategória).</li>
+          <li>Doughnut chart zobrazuje pomer free / team / pro / null. Hľadaj nárast paid podielu týždenne.</li>
+          <li><strong>Predplatné končiace v 7 dňoch</strong> — zoznam userov pred expirom. Email notifikácie im chodia automaticky cez subscription reminders cron (T-7, T-1) — viď Email tab.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🚦 Daily check rituál</h4>
+        <ol>
+          <li>Najprv <strong>Chyby</strong> → žiadne nové 5xx za posledných 24h?</li>
+          <li><strong>Zdravie</strong> → všetky bodky zelené?</li>
+          <li><strong>Aktívni</strong> → žiadne podozrivé IP-čky (&gt; 5 fail loginov)?</li>
+          <li><strong>Výkon</strong> → žiadny endpoint nad 1000ms avg?</li>
+          <li><strong>Príjmy</strong> → MRR rastie, alebo aspoň stabilný?</li>
+        </ol>
+
+        <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Tip:</em> Ak vidíš nárast chýb v Chyby → pozri timestamp koreláciu s nedávnym deployom v <strong>Audit log</strong> tabu. Pre persistnutie chýb mimo nášho UI je všetko v Mongo kolekcii <code>servererrors</code> + alerty cez health monitor email.
+        </p>
       </AdminHelpToggle>
     </div>
   );
@@ -3211,21 +3268,89 @@ function DiagPerformanceSection() {
   const [slowData, setSlowData] = useState(null);
   const [errData, setErrData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
-      adminApi.get('/api/admin/performance/slow'),
-      adminApi.get('/api/admin/performance/errors-by-route')
-    ])
-      .then(([s, e]) => { setSlowData(s.data); setErrData(e.data); })
-      .catch(err => console.error('Performance load', err))
-      .finally(() => setLoading(false));
+  // Performance load — môže bežať v "silent" mode (auto-refresh) bez full
+  // loading state-u, alebo v "loud" mode (initial / manual refresh) s
+  // klasickou "Načítavam..." spinerom.
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const [s, e] = await Promise.all([
+        adminApi.get('/api/admin/performance/slow'),
+        adminApi.get('/api/admin/performance/errors-by-route')
+      ]);
+      setSlowData(s.data);
+      setErrData(e.data);
+    } catch (err) {
+      console.error('Performance load', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh každých 30s s Page Visibility pause. Konzistentné so
+  // stratégiou Prehľadu — žiadny network traffic ak admin neaktívne pozerá.
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled || document.hidden) return;
+      load(true);
+    };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 30000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVisibility = () => document.hidden ? stop() : (load(true), start());
+
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [load]);
+
+  const handleReset = async () => {
+    if (!confirm('Naozaj resetovať performance metriky? Všetky aktuálne počty / priemery sa vymažú a začneme zbierať odznova.')) return;
+    try {
+      await adminApi.post('/api/admin/performance/reset');
+      await load();
+    } catch (err) {
+      alert('Reset zlyhal');
+    }
+  };
 
   if (loading) return <div className="sa-loading">Načítavam...</div>;
 
+  const startedAt = slowData?.startedAt ? new Date(slowData.startedAt) : null;
+  const trackingFor = startedAt
+    ? (() => {
+        const ms = Date.now() - startedAt.getTime();
+        const mins = Math.floor(ms / 60000);
+        if (mins < 60) return `${mins} min`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours} h ${mins % 60} min`;
+        const days = Math.floor(hours / 24);
+        return `${days} d ${hours % 24} h`;
+      })()
+    : '—';
+
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          Metriky zbierame od <strong>{startedAt ? startedAt.toLocaleString('sk-SK') : '—'}</strong>
+          {' '}({trackingFor}). Celkom requestov: <strong>{slowData?.totalRequests || 0}</strong>
+          {' '}• Req/min: <strong>{slowData?.requestsPerMinute || 0}</strong>
+          {' '}• Error rate: <strong style={{ color: (slowData?.errorRate || 0) > 5 ? '#ef4444' : 'inherit' }}>{slowData?.errorRate || 0}%</strong>
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● live</span>}
+        </div>
+        <button onClick={handleReset} className="btn btn-secondary" style={{ fontSize: 12 }}>
+          🗑️ Reset metrík
+        </button>
+      </div>
+
       <h3 style={{ marginTop: 0 }}>Najpomalšie endpointy</h3>
       <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -3241,7 +3366,7 @@ function DiagPerformanceSection() {
               <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
                 <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '12px' }}>{r.route || r.path || '—'}</td>
                 <td style={{ padding: '10px', textAlign: 'right', fontWeight: 600, color: (r.avgDuration > 1000 ? '#ef4444' : r.avgDuration > 500 ? '#f59e0b' : 'inherit') }}>{Math.round(r.avgDuration)}</td>
-                <td style={{ padding: '10px', textAlign: 'right' }}>{r.count}</td>
+                <td style={{ padding: '10px', textAlign: 'right' }}>{r.total ?? r.count ?? 0}</td>
               </tr>
             ))}
           </tbody>
@@ -3249,16 +3374,19 @@ function DiagPerformanceSection() {
         {(slowData?.routes || []).length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Nie sú dáta (apiMetrics je in-memory, reštart ho vymaže)</div>}
       </div>
 
-      {errData && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
-          {Object.entries(errData.statusCodes || {}).map(([code, count]) => (
-            <DiagStat key={code} label={`Status ${code}`} value={count} color={code.startsWith('5') ? '#ef4444' : code.startsWith('4') ? '#f59e0b' : '#10b981'} />
-          ))}
-        </div>
+      {/* Status codes breakdown — vizuálne stat-cards pre rýchly scan */}
+      {errData && Object.keys(errData.statusCodes || {}).length > 0 && (
+        <>
+          <h3>Stavové kódy</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+            {Object.entries(errData.statusCodes || {})
+              .sort((a, b) => b[1] - a[1])
+              .map(([code, count]) => (
+                <DiagStat key={code} label={`Status ${code}`} value={count} color={code.startsWith('5') ? '#ef4444' : code.startsWith('4') ? '#f59e0b' : '#10b981'} />
+              ))}
+          </div>
+        </>
       )}
-      <div style={{ marginTop: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
-        Celkom requestov: {slowData?.totalRequests || 0} • Error rate: {slowData?.errorRate || '0'}%
-      </div>
     </div>
   );
 }
@@ -3268,8 +3396,10 @@ function DiagHealthSection() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
+    if (silent) setAutoRefreshing(true); else setLoading(true);
     try {
       const res = await adminApi.get('/api/admin/health/full');
       setData(res.data);
@@ -3277,10 +3407,27 @@ function DiagHealthSection() {
       console.error('Health load', err);
     } finally {
       setLoading(false);
+      setAutoRefreshing(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh každých 30s — health monitor cron na pozadí beží každých
+  // 5 min, ale UI ho pollne častejšie aby admin videl aktualizáciu hneď
+  // ako cron dokončí (napr. recovery z error state). Page Visibility pause
+  // šetrí I/O ak admin neaktívne pozerá.
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 30000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : (load(true), start());
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -3295,6 +3442,20 @@ function DiagHealthSection() {
   };
 
   if (loading) return <div className="sa-loading">Načítavam...</div>;
+  if (data?.warmingUp) {
+    return (
+      <div className="sa-card" style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>⏳</div>
+        <h3 style={{ marginTop: 0 }}>Health monitor sa rozbieha</h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+          Server bol nedávno reštartovaný. Prvý cron beh kontroluje SMTP, APNs a Google API — to môže trvať pár sekúnd.
+        </p>
+        <button className="btn btn-primary" onClick={refresh} disabled={refreshing} style={{ marginTop: 12 }}>
+          {refreshing ? 'Kontrolujem…' : 'Spustiť kontrolu teraz'}
+        </button>
+      </div>
+    );
+  }
   if (!data?.checks) return <div className="sa-error">Žiadne dáta</div>;
 
   const statusColor = (s) => s === 'ok' ? '#10b981' : s === 'warn' ? '#f59e0b' : '#ef4444';
@@ -3303,10 +3464,12 @@ function DiagHealthSection() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          Posledná kontrola: {data.checkedAt ? new Date(data.checkedAt).toLocaleString('sk-SK') : '—'}
+          Posledná kontrola: <strong>{data.checkedAt ? new Date(data.checkedAt).toLocaleString('sk-SK') : '—'}</strong>
+          {autoRefreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● live</span>}
+          {!autoRefreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#94a3b8' }}>auto-refresh 30s</span>}
         </div>
         <button onClick={refresh} disabled={refreshing} className="btn btn-secondary" style={{ fontSize: '13px' }}>
-          {refreshing ? 'Kontrolujem...' : '🔄 Re-check'}
+          {refreshing ? 'Kontrolujem...' : '🔄 Re-check teraz'}
         </button>
       </div>
 
@@ -3426,6 +3589,29 @@ function DiagActiveSection() {
 }
 
 // ─── DIAG: USAGE ────────────────────────────────────────────────────
+
+// Slovenské labely pre USAGE_ACTIONS — v UI radšej hovorová formulácia ako
+// raw "contact.created". Mapa pokrýva všetky akcie z USAGE_ACTIONS na backende.
+const USAGE_ACTION_LABELS = {
+  'contact.created': '👤 Vytvorené kontakty',
+  'contact.updated': '👤 Upravené kontakty',
+  'contact.deleted': '👤 Vymazané kontakty',
+  'task.created': '📋 Vytvorené projekty',
+  'task.updated': '📋 Upravené projekty',
+  'task.completed': '✅ Dokončené projekty',
+  'task.deleted': '📋 Vymazané projekty',
+  'subtask.created': '📝 Vytvorené úlohy',
+  'subtask.completed': '📝 Dokončené úlohy',
+  'message.created': '✉️ Odoslané správy',
+  'message.approved': '✉️ Schválené správy',
+  'message.rejected': '✉️ Zamietnuté správy',
+  'auth.register': '🆕 Registrácie',
+  'auth.login': '🔓 Prihlásenia',
+  'auth.login_failed': '🚫 Neúspešné prihlásenia',
+  'notification.read': '🔔 Prečítané notifikácie',
+  'workspace.created': '🏢 Vytvorené workspaces'
+};
+
 function DiagUsageSection() {
   const [period, setPeriod] = useState('7d');
   const [data, setData] = useState(null);
@@ -3463,11 +3649,26 @@ function DiagUsageSection() {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
         {(data?.actions || []).map(a => (
-          <DiagStat key={a.action} label={a.action} value={a.count} color="#6366f1" />
+          <DiagStat
+            key={a.action}
+            label={USAGE_ACTION_LABELS[a.action] || a.action}
+            value={a.count}
+            color={
+              a.action === 'auth.login_failed' ? '#ef4444' :
+              a.action.endsWith('.completed') || a.action.endsWith('.created') ? '#10b981' :
+              a.action.endsWith('.deleted') ? '#f59e0b' :
+              '#6366f1'
+            }
+          />
         ))}
       </div>
+      {(data?.actions || []).length === 0 && (
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+          Za posledných {period} žiadna sledovaná aktivita.
+        </div>
+      )}
 
       {(data?.dailyTrend || []).length > 0 && (
         <div style={{ marginTop: '24px' }}>
@@ -3515,8 +3716,13 @@ function DiagRevenueSection() {
         <div style={{ padding: '24px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', borderRadius: 'var(--radius-md)', color: 'white' }}>
           <div style={{ fontSize: '13px', opacity: 0.9 }}>MRR (mesačný príjem)</div>
           <div style={{ fontSize: '32px', fontWeight: 700, marginTop: '8px' }}>{data.mrr.toFixed(2)} €</div>
+          <div style={{ fontSize: 11, opacity: 0.85, marginTop: 4 }}>
+            ARR: {(data.mrr * 12).toFixed(2)} €
+          </div>
         </div>
         <DiagStat label="Platení používatelia" value={data.activePaidCount} color="#10b981" />
+        <DiagStat label="💳 Stripe-managed" value={data.stripeManaged ?? 0} color="#6366f1" />
+        <DiagStat label="🎁 Admin-granted" value={data.adminGranted ?? 0} color="#8b5cf6" />
         <DiagStat label="Nové subs (30d)" value={data.newSubs30d} color="#f59e0b" />
       </div>
 
@@ -3556,7 +3762,19 @@ function DiagRevenueSection() {
                   <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
                     <td style={{ padding: '10px' }}>{u.username}</td>
                     <td style={{ padding: '10px' }}>{u.email}</td>
-                    <td style={{ padding: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{u.plan}</td>
+                    <td style={{ padding: '10px', textTransform: 'uppercase', fontWeight: 600 }}>
+                      {u.plan}
+                      {u.billingPeriod && (
+                        <span style={{
+                          marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                          background: u.billingPeriod === 'yearly' ? '#ddd6fe' : '#fef3c7',
+                          color: u.billingPeriod === 'yearly' ? '#6D28D9' : '#92400e',
+                          textTransform: 'uppercase'
+                        }}>
+                          {u.billingPeriod === 'yearly' ? 'ročne' : 'mes.'}
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: '10px', color: '#ef4444' }}>{new Date(u.paidUntil).toLocaleDateString('sk-SK')}</td>
                   </tr>
                 ))}

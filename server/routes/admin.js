@@ -1933,9 +1933,35 @@ router.get('/performance/slow', authenticateToken, requireAdmin, async (req, res
       .filter(r => r.avgDuration > 0)
       .sort((a, b) => b.avgDuration - a.avgDuration)
       .slice(0, 20);
-    res.json({ routes, totalRequests: metrics.totalRequests, errorRate: metrics.errorRate });
+    res.json({
+      routes,
+      totalRequests: metrics.totalRequests,
+      errorRate: metrics.errorRate,
+      // Timestamp od kedy sa metriky zbierajú — pre kontext "Avg za posledné X hodín".
+      // apiMetrics exportuje pole ako `trackingSince`.
+      startedAt: metrics.trackingSince || null,
+      requestsPerMinute: metrics.requestsPerMinute || 0
+    });
   } catch (error) {
     logger.error('Performance slow error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST /api/admin/performance/reset — vyčistí in-memory apiMetrics.
+// Užitočné pri performance debugovaní (po deployi alebo pri sledovaní efektu
+// optimizácie nechceme staré priemery skreslovať novšie merania).
+router.post('/performance/reset', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const apiMetricsModule = require('../services/apiMetrics');
+    if (typeof apiMetricsModule.resetMetrics === 'function') {
+      apiMetricsModule.resetMetrics();
+      logger.info('[Performance] Metrics reset by admin', { username: req.adminUser?.username || req.user?.username });
+      return res.json({ success: true, resetAt: new Date() });
+    }
+    return res.status(501).json({ message: 'apiMetrics nepodporuje reset' });
+  } catch (error) {
+    logger.error('Performance reset error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1957,12 +1983,21 @@ router.get('/performance/errors-by-route', authenticateToken, requireAdmin, asyn
 
 // ─── HEALTH (full snapshot) ────────────────────────────────────────
 
-// GET /api/admin/health/full — posledný snapshot z healthMonitor
+// GET /api/admin/health/full — posledný snapshot z healthMonitor.
+// Predtým: ak prvý cron ešte nebehol, synchronne čakal na runChecks (~3-5s
+// SMTP+Google ping) → UI zaseklé na "Načítavam...". Teraz: vrátime okamžite
+// to čo máme (môže byť čiastočne prázdny snapshot) + spustíme background
+// runChecks pre next request. Druhý refresh ukáže plné dáta.
 router.get('/health/full', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    let snapshot = healthMonitor.getLastSnapshot();
+    const snapshot = healthMonitor.getLastSnapshot();
     if (!snapshot.checkedAt) {
-      snapshot = await healthMonitor.runChecks();
+      // Background warmup — nečakáme. UI dostane prázdny snapshot a má
+      // tlačidlo "🔄 Re-check" ktoré vyrobí plný refresh keď user chce.
+      healthMonitor.runChecks().catch((err) =>
+        logger.error('[Health] background warmup failed', { error: err.message })
+      );
+      return res.json({ checks: {}, checkedAt: null, warmingUp: true });
     }
     res.json(snapshot);
   } catch (error) {
@@ -2048,11 +2083,18 @@ router.get('/usage', authenticateToken, requireAdmin, async (req, res) => {
     }[period] || 7 * 24 * 60 * 60 * 1000;
     const since = new Date(Date.now() - periodMs);
 
+    // Zoznam audit log akcií ktoré sledujeme ako "feature usage" metriky.
+    // Rozšírený o task.completed (kľúčová business KPI), task.updated,
+    // subtask.* (granularitu projektov), notification.read (engagement),
+    // auth.login_failed (security signal). Frontend renderuje ich
+    // human-readable labely cez translation map.
     const USAGE_ACTIONS = [
       'contact.created', 'contact.updated', 'contact.deleted',
-      'task.created', 'task.deleted',
+      'task.created', 'task.updated', 'task.completed', 'task.deleted',
+      'subtask.created', 'subtask.completed',
       'message.created', 'message.approved', 'message.rejected',
-      'auth.register', 'auth.login',
+      'auth.register', 'auth.login', 'auth.login_failed',
+      'notification.read',
       'workspace.created'
     ];
 
@@ -2089,8 +2131,15 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const excludeSuperAdmin = { email: { $ne: SUPER_ADMIN_EMAIL } };
 
-    // Plan prices (EUR/mes) — udržuj sync s BillingPage
-    const PRICES = { free: 0, team: 4.99, pro: 9.99 };
+    // Plan prices (EUR) — sync s BillingPage. Pre presný MRR pre yearly
+    // userov delíme yearly cenu /12 (predtým bol hrubý odhad price * 0.83
+    // ktorý nadhodnocoval ~1%). Schema field je `billingPeriod` (nie
+    // `period` — pôvodný bug spôsobil že yearly users sa rátali ako monthly).
+    const PRICES = {
+      free: { monthly: 0, yearly: 0 },
+      team: { monthly: 4.99, yearly: 49.00 },
+      pro: { monthly: 9.99, yearly: 99.00 }
+    };
 
     const now = new Date();
     const plans = await User.aggregate([
@@ -2103,21 +2152,32 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
       ...excludeSuperAdmin,
       'subscription.plan': { $in: ['team', 'pro'] },
       'subscription.paidUntil': { $gt: now }
-    }).select('subscription.plan subscription.period').lean();
+    }).select('subscription.plan subscription.billingPeriod subscription.stripeSubscriptionId').lean();
 
     let mrr = 0;
+    let stripeManaged = 0;
+    let adminGranted = 0;
     for (const u of activePaidUsers) {
       const plan = u.subscription?.plan;
-      const period = u.subscription?.period || 'monthly';
-      const price = PRICES[plan] || 0;
-      mrr += period === 'yearly' ? price * 0.83 : price;
+      const billingPeriod = u.subscription?.billingPeriod || 'monthly';
+      const priceConfig = PRICES[plan] || PRICES.free;
+      const monthlyEquiv = billingPeriod === 'yearly'
+        ? priceConfig.yearly / 12
+        : priceConfig.monthly;
+      mrr += monthlyEquiv;
+      if (u.subscription?.stripeSubscriptionId) stripeManaged++;
+      else adminGranted++;
     }
 
+    // Nové subscriptions za posledných 30d cez AuditLog (subscription.createdAt
+    // schéma nemá, takže User-count by vracal 0). Detekujeme cez billing
+    // category a relevantné akcie.
     const d30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const newSubs30d = await User.countDocuments({
-      ...excludeSuperAdmin,
-      'subscription.plan': { $in: ['team', 'pro'] },
-      'subscription.createdAt': { $gte: d30 }
+    const newSubs30d = await AuditLog.countDocuments({
+      category: 'billing',
+      action: { $in: ['user.plan_changed', 'user.subscription_updated', 'user.discount_applied'] },
+      createdAt: { $gte: d30 },
+      'details.newPlan': { $in: ['team', 'pro'] }
     });
 
     const in7d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -2125,18 +2185,21 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
       ...excludeSuperAdmin,
       'subscription.plan': { $in: ['team', 'pro'] },
       'subscription.paidUntil': { $gte: now, $lte: in7d }
-    }).select('username email subscription.plan subscription.paidUntil').limit(20).lean();
+    }).select('username email subscription.plan subscription.paidUntil subscription.billingPeriod').limit(20).lean();
 
     res.json({
       mrr: Math.round(mrr * 100) / 100,
       activePaidCount: activePaidUsers.length,
+      stripeManaged,
+      adminGranted,
       plansBreakdown: plansMap,
       newSubs30d,
       endingSoon: endingSoon.map(u => ({
         username: u.username,
         email: u.email,
         plan: u.subscription?.plan,
-        paidUntil: u.subscription?.paidUntil
+        paidUntil: u.subscription?.paidUntil,
+        billingPeriod: u.subscription?.billingPeriod || 'monthly'
       }))
     });
   } catch (error) {

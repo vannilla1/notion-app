@@ -93,4 +93,15 @@ const getMetrics = () => {
   };
 };
 
-module.exports = { trackRequest, getMetrics };
+// Reset všetkých counterov. Užitočné po deploy-i alebo pri performance
+// debugovaní — admin chce vidieť čerstvé čísla z aktuálnej zmeny, nie
+// staré priemery skreslené historickými request-mi.
+const resetMetrics = () => {
+  counters.routes = {};
+  counters.hourly = {};
+  counters.statusCodes = {};
+  counters.totalRequests = 0;
+  counters.startedAt = new Date();
+};
+
+module.exports = { trackRequest, getMetrics, resetMetrics };
