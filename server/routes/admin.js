@@ -1105,7 +1105,57 @@ router.get('/sync-diagnostics', authenticateToken, requireAdmin, async (req, res
       };
     });
 
-    res.json(diagnostics);
+    // Summary aggregate — slúži pre stat header v admin UI. Watch expiry
+    // warningy: <7d od teraz = soonExpiring, < teraz = expired (Google watch
+    // sa musí refreshovať každých 30 dní inak push notifikácie prestanú chodiť).
+    const now = new Date();
+    const week = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const summary = {
+      calendarUsers: 0,
+      tasksUsers: 0,
+      bothUsers: 0,
+      totalCalendarEvents: 0,
+      totalTaskItems: 0,
+      watchActive: 0,
+      watchSoonExpiring: 0,
+      watchExpired: 0,
+      quotaNearLimit: 0,    // > 80 dnes
+      quotaExceeded: 0,     // == 100 dnes
+      legacyCalendarUsers: 0, // majú legacyCount > 0
+      legacyTasksUsers: 0,
+      unattributedCalendarUsers: 0,
+      unattributedTasksUsers: 0
+    };
+    for (const d of diagnostics) {
+      const hasCal = d.calendar.enabled;
+      const hasTasks = d.tasks.enabled;
+      if (hasCal) summary.calendarUsers++;
+      if (hasTasks) summary.tasksUsers++;
+      if (hasCal && hasTasks) summary.bothUsers++;
+      if (hasCal) {
+        summary.totalCalendarEvents += d.calendar.syncedCount || 0;
+        if (d.calendar.legacyCount > 0) summary.legacyCalendarUsers++;
+        if (d.calendar.unattributedCount > 0) summary.unattributedCalendarUsers++;
+        if (d.calendar.watchExpiry) {
+          const exp = new Date(d.calendar.watchExpiry);
+          if (exp < now) summary.watchExpired++;
+          else if (exp < week) summary.watchSoonExpiring++;
+          else summary.watchActive++;
+        } else {
+          summary.watchExpired++; // no watch = same problem
+        }
+      }
+      if (hasTasks) {
+        summary.totalTaskItems += d.tasks.syncedCount || 0;
+        if (d.tasks.legacyCount > 0) summary.legacyTasksUsers++;
+        if (d.tasks.unattributedCount > 0) summary.unattributedTasksUsers++;
+        const q = d.tasks.quotaUsedToday || 0;
+        if (q >= 100) summary.quotaExceeded++;
+        else if (q > 80) summary.quotaNearLimit++;
+      }
+    }
+
+    res.json({ summary, users: diagnostics });
   } catch (error) {
     logger.error('Admin sync diagnostics error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri načítaní diagnostiky' });

@@ -2178,14 +2178,45 @@ function SyncFilterBar({ filter, onFilterChange }) {
 
 function SyncTab({ filter, onFilterChange }) {
   const [diagnostics, setDiagnostics] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('username'); // username | syncedCount | lastActivity
 
-  useEffect(() => {
-    adminApi.get('/api/admin/sync-diagnostics')
-      .then(res => setDiagnostics(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const res = await adminApi.get('/api/admin/sync-diagnostics');
+      // Backward-compatible: handle both new {summary, users} shape and legacy array
+      if (Array.isArray(res.data)) {
+        setDiagnostics(res.data);
+        setSummary(null);
+      } else {
+        setDiagnostics(res.data.users || []);
+        setSummary(res.data.summary || null);
+      }
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh každých 60s (sync data sa nemení často) s Page Visibility pause
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
 
   if (loading) return <div className="sa-loading">Načítavam diagnostiku...</div>;
 
@@ -2194,18 +2225,51 @@ function SyncTab({ filter, onFilterChange }) {
     return new Date(d).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  const watchStatus = (expiry) => {
+    if (!expiry) return { label: 'Nemá watch', color: '#dc2626', bg: '#fee2e2' };
+    const exp = new Date(expiry);
+    const now = new Date();
+    const days = Math.floor((exp - now) / (24 * 60 * 60 * 1000));
+    if (days < 0) return { label: `Expirovaný (${Math.abs(days)}d)`, color: '#dc2626', bg: '#fee2e2' };
+    if (days < 7) return { label: `Čoskoro expiruje (${days}d)`, color: '#92400e', bg: '#fef3c7' };
+    return { label: `Aktívny (${days}d)`, color: '#10b981', bg: '#d1fae5' };
+  };
+
   // Aplikuj filter z URL hash. `calendar` → zobraz iba usera s enabled Calendar
   // a skryj Tasks sekciu. `tasks` → zrkadlovo. `null` → všetko ako doteraz.
   const showCalendar = filter === null || filter === 'calendar';
   const showTasks = filter === null || filter === 'tasks';
 
-  const filtered = diagnostics.filter(d => {
+  let filtered = diagnostics.filter(d => {
     if (filter === 'calendar') return d.calendar.enabled;
     if (filter === 'tasks') return d.tasks.enabled;
     return true;
   });
 
-  if (filtered.length === 0) {
+  // Search filter
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    filtered = filtered.filter(d =>
+      d.username?.toLowerCase().includes(q) || d.email?.toLowerCase().includes(q)
+    );
+  }
+
+  // Sort
+  filtered = [...filtered].sort((a, b) => {
+    if (sortBy === 'syncedCount') {
+      const aTotal = (a.calendar.syncedCount || 0) + (a.tasks.syncedCount || 0);
+      const bTotal = (b.calendar.syncedCount || 0) + (b.tasks.syncedCount || 0);
+      return bTotal - aTotal;
+    }
+    if (sortBy === 'lastActivity') {
+      const aLast = a.tasks.lastSyncAt ? new Date(a.tasks.lastSyncAt).getTime() : 0;
+      const bLast = b.tasks.lastSyncAt ? new Date(b.tasks.lastSyncAt).getTime() : 0;
+      return bLast - aLast;
+    }
+    return (a.username || '').localeCompare(b.username || '');
+  });
+
+  if (filtered.length === 0 && !search.trim()) {
     const msg = filter === 'calendar'
       ? 'Žiadny používateľ nemá prepojený Google Calendar.'
       : filter === 'tasks'
@@ -2221,10 +2285,85 @@ function SyncTab({ filter, onFilterChange }) {
 
   return (
     <div className="sa-sync-diag">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Sync diagnostika
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981', fontWeight: 400 }}>● auto-refresh</span>}
+        </h2>
+      </div>
+
+      {/* SUMMARY STAT HEADER */}
+      {summary && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, fontSize: 12 }}>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: '#ede9fe', color: '#6D28D9' }}>
+            📅 Calendar: <strong>{summary.calendarUsers}</strong> userov · {summary.totalCalendarEvents} eventov
+          </span>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: '#dbeafe', color: '#1e40af' }}>
+            ✅ Tasks: <strong>{summary.tasksUsers}</strong> userov · {summary.totalTaskItems} úloh
+          </span>
+          {summary.bothUsers > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+              Obe: <strong>{summary.bothUsers}</strong>
+            </span>
+          )}
+          {summary.watchSoonExpiring > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }} title="Watch expiruje do 7 dní — Google prestane posielať push notifikácie">
+              ⏰ Čoskoro expiruje: <strong>{summary.watchSoonExpiring}</strong>
+            </span>
+          )}
+          {summary.watchExpired > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }} title="Watch už expiroval — okamžite refreshnúť">
+              ❌ Expirovaný watch: <strong>{summary.watchExpired}</strong>
+            </span>
+          )}
+          {summary.quotaNearLimit > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }} title="> 80/100 quota dnes">
+              📊 Quota >80: <strong>{summary.quotaNearLimit}</strong>
+            </span>
+          )}
+          {summary.quotaExceeded > 0 && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }} title="100/100 quota — sync zablokovaný do polnoci">
+              🚫 Quota 100/100: <strong>{summary.quotaExceeded}</strong>
+            </span>
+          )}
+          {(summary.legacyCalendarUsers > 0 || summary.legacyTasksUsers > 0) && (
+            <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)', color: 'var(--text-muted)' }} title="Legacy (pred-PR2) eventy v pôvodnom kalendári/liste">
+              🗂️ Legacy: {summary.legacyCalendarUsers} cal / {summary.legacyTasksUsers} tasks
+            </span>
+          )}
+        </div>
+      )}
+
       <SyncFilterBar filter={filter} onFilterChange={onFilterChange} />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 Hľadať používateľa..."
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13, flex: 1, minWidth: 180 }}
+        />
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13, background: 'var(--bg-primary)' }}
+        >
+          <option value="username">Zoradiť: meno</option>
+          <option value="syncedCount">Zoradiť: počet sync</option>
+          <option value="lastActivity">Zoradiť: posledná aktivita</option>
+        </select>
+        {search && (
+          <button onClick={() => setSearch('')} className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}>
+            ✕ Vymazať
+          </button>
+        )}
+      </div>
+
       <div className="sa-toolbar">
         <span className="sa-count">
           {filtered.length} {filter === 'calendar' ? 'používateľov s Google Calendar' : filter === 'tasks' ? 'používateľov s Google Tasks' : 'používateľov so synchronizáciou'}
+          {search && ` · vyhľadávanie: "${search}"`}
         </span>
       </div>
 
@@ -2246,18 +2385,31 @@ function SyncTab({ filter, onFilterChange }) {
                   </div>
                   <div className="sa-sync-detail">
                     <span>Synchronizovaných celkom:</span>
-                    <span>{d.calendar.syncedCount} udalostí</span>
+                    <span><strong>{d.calendar.syncedCount}</strong> udalostí</span>
                   </div>
                   <div className="sa-sync-detail">
-                    <span>Watch:</span>
-                    <span className={d.calendar.watchActive ? 'sa-status-ok' : 'sa-status-warn'}>
-                      {d.calendar.watchActive ? 'Aktívny' : 'Neaktívny'}
+                    <span>Watch stav:</span>
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: watchStatus(d.calendar.watchExpiry).bg,
+                      color: watchStatus(d.calendar.watchExpiry).color
+                    }}>
+                      {watchStatus(d.calendar.watchExpiry).label}
                     </span>
                   </div>
                   {d.calendar.watchExpiry && (
-                    <div className="sa-sync-detail">
-                      <span>Watch expiry:</span>
+                    <div className="sa-sync-detail" style={{ fontSize: 11, color: 'var(--text-muted, #6b7280)' }}>
+                      <span>Expiry:</span>
                       <span>{formatDate(d.calendar.watchExpiry)}</span>
+                    </div>
+                  )}
+                  {d.calendar.legacyCount > 0 && (
+                    <div className="sa-sync-detail" style={{ fontSize: 11 }}>
+                      <span style={{ color: '#92400e' }}>🗂️ Legacy kalendár:</span>
+                      <span style={{ color: '#92400e' }}>{d.calendar.legacyCount} eventov v pôvodnom</span>
                     </div>
                   )}
                   {/* PR2: per-workspace breakdown */}
@@ -2292,16 +2444,37 @@ function SyncTab({ filter, onFilterChange }) {
                   </div>
                   <div className="sa-sync-detail">
                     <span>Synchronizovaných celkom:</span>
-                    <span>{d.tasks.syncedCount} úloh</span>
+                    <span><strong>{d.tasks.syncedCount}</strong> úloh</span>
                   </div>
                   <div className="sa-sync-detail">
                     <span>Posledný sync:</span>
                     <span>{formatDate(d.tasks.lastSyncAt)}</span>
                   </div>
-                  <div className="sa-sync-detail">
-                    <span>Kvóta dnes:</span>
-                    <span>{d.tasks.quotaUsedToday}/100</span>
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                      <span>Kvóta dnes:</span>
+                      <span style={{
+                        fontWeight: 600,
+                        color: d.tasks.quotaUsedToday >= 100 ? '#dc2626' : d.tasks.quotaUsedToday > 80 ? '#92400e' : '#10b981'
+                      }}>
+                        {d.tasks.quotaUsedToday}/100
+                      </span>
+                    </div>
+                    <div style={{ height: 6, background: 'var(--bg-secondary, #f3f4f6)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min(100, d.tasks.quotaUsedToday)}%`,
+                        height: '100%',
+                        background: d.tasks.quotaUsedToday >= 100 ? '#dc2626' : d.tasks.quotaUsedToday > 80 ? '#f59e0b' : '#10b981',
+                        transition: 'width 0.3s'
+                      }} />
+                    </div>
                   </div>
+                  {d.tasks.legacyCount > 0 && (
+                    <div className="sa-sync-detail" style={{ fontSize: 11, marginTop: 6 }}>
+                      <span style={{ color: '#92400e' }}>🗂️ Legacy task list:</span>
+                      <span style={{ color: '#92400e' }}>{d.tasks.legacyCount} úloh v pôvodnom</span>
+                    </div>
+                  )}
                   {d.tasks.workspaces && d.tasks.workspaces.length > 0 && (
                     <div style={{ marginTop: '8px', borderTop: '1px solid var(--sa-border, #e5e7eb)', paddingTop: '8px' }}>
                       <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: 'var(--sa-muted, #6b7280)' }}>
@@ -2329,14 +2502,59 @@ function SyncTab({ filter, onFilterChange }) {
       </div>
 
       <AdminHelpToggle title="Sync (Google Calendar / Tasks)">
-        <p><strong>Čo tu vidíš:</strong> stav synchronizácie Google Calendar a Google Tasks pre každého používateľa, ktorý si pripojil Google účet.</p>
+        <p>
+          <strong>Čo tu vidíš:</strong> stav Google integrácií pre každého používateľa ktorý si pripojil
+          Google účet. Calendar (push notifikácie cez watch) a Tasks (polling 60s + write-throught).
+          Per-user a per-workspace breakdown s legacy migration warningmi.
+        </p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Stat header</h4>
         <ul>
-          <li><strong>Filter</strong> hore — prepínač Calendar / Tasks; URL hash <code>#sync/calendar</code> alebo <code>#sync/tasks</code> pamätá výber pri refreshi.</li>
-          <li><strong>Riadok usera</strong> — meno, email, počet sync-ovaných eventov / úloh, posledný sync timestamp.</li>
-          <li><strong>Workspace task listy</strong> — Google Tasks robí osobitný task list pre každý workspace (názov "Prpl CRM — &lt;workspace&gt;"). Tu vidíš koľko úloh je v ktorom liste.</li>
-          <li><strong>Unattributed</strong> — úlohy/eventy, ktoré nemajú priradený workspace (legacy alebo manuálne pridané do Google).</li>
+          <li><strong>Calendar / Tasks counters</strong> — počet userov + total events/úloh.</li>
+          <li><strong>Obe</strong> — počet userov ktorí majú pripojené aj Calendar aj Tasks (typicky 90%+).</li>
+          <li><strong>⏰ Čoskoro expiruje (oranžový)</strong> — Google watch expiruje do 7 dní; treba refreshnúť aby push notifikácie ďalej chodili.</li>
+          <li><strong>❌ Expirovaný watch (červený)</strong> — watch už neplatí, push notifikácie nechodia. Sync funguje len pri user-iniciated polling. Re-connect nutný.</li>
+          <li><strong>📊 Quota >80</strong> — počet userov v 80–99/100 dnešnej Google Tasks API quoty.</li>
+          <li><strong>🚫 Quota 100/100</strong> — sync zablokovaný do polnoci UTC. Po reset-e kvóty pôjde znovu.</li>
+          <li><strong>🗂️ Legacy</strong> — počet userov ktorí majú eventy/úlohy v pred-PR2 single-list strukture. Migration môže prebehnúť automaticky pri ďalšom sync-u.</li>
         </ul>
-        <p><strong>Tipy:</strong> Pripojenie/odpojenie Google účtu robí user sám v UserMenu → Synchronizácia kalendára. Tu len monitoruješ stav. Ak je sync zaseknutý → skontroluj Diagnostika → Errors, či OAuth token nevyexspiroval.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filtre</h4>
+        <ul>
+          <li><strong>Calendar / Tasks toggle</strong> — URL hash <code>#sync/calendar</code> alebo <code>#sync/tasks</code> pamätá výber pri refresh-i.</li>
+          <li><strong>Search</strong> — substring v username / email.</li>
+          <li><strong>Sort</strong> — meno (default) / počet sync (top-loaded users) / posledná aktivita (najaktívnejší top).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📅 Karta Google Calendar</h4>
+        <ul>
+          <li><strong>Pripojené</strong> — kedy user OAuth-oval Calendar scope.</li>
+          <li><strong>Synchronizovaných celkom</strong> — počet eventov v <code>syncedTaskIds</code> mape (Prpl-task → Google-event).</li>
+          <li><strong>Watch stav</strong> — farebne kódovaný badge (zelený/oranžový/červený).</li>
+          <li><strong>Workspace kalendáre</strong> — per-workspace breakdown (PR2 multi-workspace structure). Každý workspace = vlastný Google kalendár „Prpl CRM — &lt;workspace&gt;".</li>
+          <li><strong>🗂️ Legacy</strong> — eventy ešte v pôvodnom single-kalendári pred PR2 migráciou.</li>
+          <li><strong>⚠️ Nemigrovaných</strong> — eventy ktoré sú v <code>syncedTaskIds</code> ale nepriradené k žiadnemu workspace kalendáru.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>✅ Karta Google Tasks</h4>
+        <ul>
+          <li><strong>Posledný sync</strong> — kedy beh background pollu naposledy úspešne dotiahol Tasks zmeny.</li>
+          <li><strong>Quota progress bar</strong> — Google Tasks API limit je 100 requestov/deň/user. Po dosiahnutí 100 sa background sync zablokuje do polnoci UTC.</li>
+          <li><strong>Workspace task listy</strong> — per-workspace Google Tasks list (<code>workspaceTaskLists</code> map).</li>
+          <li><strong>🗂️ Legacy</strong> — úlohy ešte v pôvodnom single-task-liste pred PR2 migráciou.</li>
+          <li><strong>⚠️ Nemigrovaných</strong> — úlohy v <code>syncedTaskIds</code> ale nepriradené k žiadnemu workspace listu.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔄 Auto-refresh</h4>
+        <p>Diagnostika sa obnovuje každých 60s. Pause keď je tab v pozadí (Page Visibility).</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Best practice</h4>
+        <ul>
+          <li>Pripojenie/odpojenie Google účtu robí user sám v UserMenu → Synchronizácia. Admin tu len monitoruje.</li>
+          <li>Ak má user 🚫 Quota 100/100 a chce okamžite sync-ovať — počkať do polnoci UTC alebo manuálne pridať/odstrániť úlohy v Google Tasks.</li>
+          <li>Ak je watch expirovaný a user nedostáva push events → user musí re-connectnúť Google v UserMenu.</li>
+          <li>Ak sync zaseknutý dlhšie ako pár hodín → skontroluj <strong>Diagnostika → Errors</strong> tab pre OAuth token expiry alebo iné chyby.</li>
+        </ul>
       </AdminHelpToggle>
     </div>
   );
