@@ -4133,6 +4133,7 @@ function EmailTestSender() {
         <div>
           <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Typ</label>
           <select value={type} onChange={(e) => setType(e.target.value)} className="sa-input">
+            <option value="welcome">👋 Welcome (po registrácii)</option>
             <option value="welcome_pro">🎉 Welcome Pro</option>
             <option value="subscription_assigned">📦 Plán priradený</option>
             <option value="discount_assigned">🎁 Zľava priradená</option>
@@ -4140,6 +4141,7 @@ function EmailTestSender() {
             <option value="reminder_t1">⚠️ Reminder T-1</option>
             <option value="expired">🔚 Expirovaný</option>
             <option value="winback">💝 Winback</option>
+            <option value="mobile_app_launch">📱 Mobile app launch</option>
           </select>
         </div>
         <button

@@ -2446,7 +2446,7 @@ router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => 
     if (!toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
       return res.status(400).json({ message: 'Neplatný email' });
     }
-    const allowed = ['subscription_assigned', 'discount_assigned', 'welcome_pro', 'reminder_t7', 'reminder_t1', 'expired', 'winback'];
+    const allowed = ['subscription_assigned', 'discount_assigned', 'welcome_pro', 'reminder_t7', 'reminder_t1', 'expired', 'winback', 'welcome', 'mobile_app_launch'];
     const t = allowed.includes(type) ? type : 'welcome_pro';
 
     // Mock user — neukladá sa, len ako payload pre template render. _id je
@@ -2486,6 +2486,14 @@ router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => 
       result = await subEmail.sendExpired({ user: { ...mockUser, subscription: { ...mockUser.subscription, plan: 'free' } }, previousPlan: 'pro', triggeredBy });
     } else if (t === 'winback') {
       result = await subEmail.sendWinback({ user: { ...mockUser, subscription: { ...mockUser.subscription, plan: 'free' } }, triggeredBy });
+    } else if (t === 'mobile_app_launch') {
+      result = await subEmail.sendMobileAppLaunch({ user: mockUser, triggeredBy });
+    } else if (t === 'welcome') {
+      // Welcome email žije v adminEmailService (legacy flow), nie subscription
+      // service. Returns boolean true/false, normalizujeme na rovnaký shape.
+      const adminEmail = require('../services/adminEmailService');
+      const ok = await adminEmail.sendWelcomeEmail({ toEmail, username: mockUser.username });
+      result = { ok, status: ok ? 'sent' : 'failed' };
     }
 
     res.json({ success: result?.ok, status: result?.status, type: t, toEmail });
