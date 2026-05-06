@@ -2829,35 +2829,136 @@ function ChartsTab() {
 }
 
 // ─── P3: ACTIVITY FEED TAB ─────────────────────────────────────
+// Rozšírená mapa action → emoji ikona pre activity feed. Pokrýva všetky
+// existujúce audit log actions (vrátane novších task.priority_changed,
+// task.assigned, push.failed atď.). Bez záznamu vyzerá feed plný "📌"
+// fallback ikon.
+const ACTION_ICONS = {
+  // Auth
+  'auth.login': '🔓', 'auth.login_failed': '🚫',
+  'auth.register': '📝', 'auth.logout': '🚪',
+  'auth.oauth.login': '🔐', 'auth.oauth.register': '🆕', 'auth.oauth.connect': '🔗',
+  'auth.password_changed': '🔑', 'auth.password_reset_requested': '📧',
+  // Contact
+  'contact.created': '👤', 'contact.updated': '✏️', 'contact.deleted': '🗑️',
+  // Task / project
+  'task.created': '📋', 'task.updated': '✏️', 'task.completed': '✅',
+  'task.deleted': '🗑️', 'task.assigned': '🎯', 'task.priority_changed': '🚩',
+  'subtask.created': '📝', 'subtask.completed': '✓',
+  // Message
+  'message.created': '✉️', 'message.approved': '✅',
+  'message.rejected': '❌', 'message.deleted': '🗑️',
+  // Workspace
+  'workspace.created': '🏢', 'workspace.deleted': '🗑️',
+  'workspace.member_added': '👥', 'workspace.member_removed': '👋',
+  // User / billing
+  'user.role_changed': '🔑', 'user.plan_changed': '💳',
+  'user.subscription_updated': '💳', 'user.discount_applied': '🏷️',
+  'user.deleted': '🗑️', 'user.email_manual_send': '📤',
+  'user.plan_auto_expired': '⏰',
+  // Billing
+  'billing.checkout_completed': '💰',
+  'billing.subscription_created': '💳', 'billing.subscription_renewed': '🔄',
+  'billing.subscription_canceled': '🛑',
+  // Admin / security
+  'admin.migrate_encrypt_tokens': '🔐'
+};
+
 function ActivityFeedTab() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [paused, setPaused] = useState(false); // smart pause pri user scrolli
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterAction, setFilterAction] = useState('');
+  const [search, setSearch] = useState('');
+  const [hasMore, setHasMore] = useState(true);
+  const [userDetailId, setUserDetailId] = useState(null);
+  const [userDetail, setUserDetail] = useState(null);
   const timerRef = useRef(null);
+  const scrollRef = useRef(null);
 
-  const fetchEvents = useCallback((after) => {
-    const params = after ? `?after=${after}&limit=20` : '?limit=50';
-    return adminApi.get(`/api/admin/activity-feed${params}`).then(r => r.data).catch(() => []);
-  }, []);
+  const fetchEvents = useCallback((opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.after) params.set('after', opts.after);
+    if (opts.before) params.set('before', opts.before);
+    params.set('limit', opts.limit || 50);
+    if (filterCategory) params.set('category', filterCategory);
+    if (filterAction) params.set('action', filterAction);
+    if (search.trim()) params.set('search', search.trim());
+    return adminApi.get(`/api/admin/activity-feed?${params.toString()}`)
+      .then((r) => r.data)
+      .catch(() => []);
+  }, [filterCategory, filterAction, search]);
 
+  // Initial load + reload on filter change
   useEffect(() => {
-    fetchEvents().then(data => { setEvents(data); setLoading(false); });
+    setLoading(true);
+    fetchEvents({ limit: 50 }).then((data) => {
+      setEvents(data);
+      setHasMore(data.length === 50);
+      setLoading(false);
+    });
   }, [fetchEvents]);
 
-  // Auto-refresh every 10s
+  // Auto-refresh — polls new events každých 10s. Pauza pri:
+  //  - autoRefresh toggle = false
+  //  - admin user scrollol nadol (paused = true) — nový event by skočil pod ruky
+  //  - filter aktívny (search/category/action) — nemá zmysel polling-ovať
+  //    novšie eventy ktoré možno nepatria do filtra
   useEffect(() => {
-    if (!autoRefresh) { clearInterval(timerRef.current); return; }
+    if (!autoRefresh || paused || filterCategory || filterAction || search) {
+      clearInterval(timerRef.current);
+      return;
+    }
     timerRef.current = setInterval(async () => {
       if (events.length === 0) return;
       const latest = events[0]?.createdAt;
       if (!latest) return;
-      const newEvents = await fetchEvents(latest);
+      const newEvents = await fetchEvents({ after: latest, limit: 20 });
       if (newEvents.length > 0) {
-        setEvents(prev => [...newEvents, ...prev].slice(0, 200));
+        setEvents((prev) => [...newEvents, ...prev].slice(0, 500));
       }
     }, 10000);
     return () => clearInterval(timerRef.current);
-  }, [autoRefresh, events, fetchEvents]);
+  }, [autoRefresh, paused, events, fetchEvents, filterCategory, filterAction, search]);
+
+  // Detect manual scroll — keď je užívateľ ďaleko od top, pauznime auto-refresh
+  // aby mu nový event neskočil pod prst pri čítaní starších záznamov.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => setPaused(el.scrollTop > 100);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleLoadMore = async () => {
+    if (loadingMore || !hasMore || events.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = events[events.length - 1]?.createdAt;
+      const more = await fetchEvents({ before: oldest, limit: 50 });
+      if (more.length > 0) {
+        setEvents((prev) => [...prev, ...more]);
+        if (more.length < 50) setHasMore(false);
+      } else {
+        setHasMore(false);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleUsernameClick = (e, userId) => {
+    e.stopPropagation();
+    if (!userId) return;
+    setUserDetailId(userId);
+    adminApi.get(`/api/admin/users/${userId}`)
+      .then((res) => setUserDetail(res.data))
+      .catch(() => setUserDetail(null));
+  };
 
   const formatTime = (d) => {
     const date = new Date(d);
@@ -2869,62 +2970,257 @@ function ActivityFeedTab() {
     return date.toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
 
-  const actionIcons = {
-    'auth.login': '🔓', 'auth.register': '📝',
-    'contact.created': '➕', 'contact.updated': '✏️', 'contact.deleted': '🗑️',
-    'task.created': '📋', 'task.completed': '✅', 'task.deleted': '🗑️',
-    'message.created': '📨', 'message.approved': '✅', 'message.rejected': '❌',
-    'user.role_changed': '🔑', 'user.plan_changed': '💳', 'user.deleted': '🗑️',
-    'workspace.deleted': '🏢'
+  // Day-bucket separator: 'dnes' / 'včera' / formatted date.
+  // Vykresľuje sa ako sticky header pred prvým eventom daného dňa pre
+  // jasnejšiu časovú orientáciu pri scrollovaní.
+  const formatDayBucket = (d) => {
+    const date = new Date(d);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateOnly = new Date(date);
+    dateOnly.setHours(0, 0, 0, 0);
+    if (dateOnly.getTime() === today.getTime()) return '📅 Dnes';
+    if (dateOnly.getTime() === yesterday.getTime()) return '📅 Včera';
+    return `📅 ${date.toLocaleDateString('sk-SK', { weekday: 'long', day: 'numeric', month: 'long' })}`;
+  };
+
+  // Detail formatter — rozšírená verzia pôvodnej (mala iba oldRole/oldPlan/subject).
+  // Teraz pokrýva: role/plan zmeny, message subject, task title (priority,
+  // assignedTo), discount type/value, mailové akcie, atď.
+  const formatDetails = (e) => {
+    const d = e.details || {};
+    const parts = [];
+    if (d.oldRole && d.newRole) parts.push(`${d.oldRole} → ${d.newRole}`);
+    if (d.oldPlan && d.newPlan) parts.push(`${d.oldPlan} → ${d.newPlan}`);
+    if (d.newPriority && d.oldPriority) parts.push(`${d.oldPriority} → ${d.newPriority}`);
+    if (d.subject) parts.push(`„${d.subject}"`);
+    if (d.type && d.value !== undefined) parts.push(`${d.type}: ${d.value}`);
+    if (d.reason) parts.push(d.reason);
+    if (e.ipAddress && e.action === 'auth.login_failed') parts.push(`IP ${e.ipAddress}`);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  };
+
+  // Skupinové oddelovače dní — vytvoríme pole entries kde každý event je
+  // buď separator alebo log entry. Sticky div sa renderuje pred prvým
+  // event-om daného dňa.
+  const renderEntries = () => {
+    let lastDay = null;
+    const out = [];
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      const day = new Date(e.createdAt).toDateString();
+      if (day !== lastDay) {
+        out.push({ type: 'separator', key: `sep-${day}`, label: formatDayBucket(e.createdAt) });
+        lastDay = day;
+      }
+      out.push({ type: 'event', key: e.id || i, event: e, isFirst: i === 0 });
+    }
+    return out;
   };
 
   if (loading) return <div className="sa-loading">Načítavam aktivitu...</div>;
 
+  const filtersActive = !!(filterCategory || filterAction || search);
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
           Live aktivita
-          {autoRefresh && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#22C55E', marginLeft: '8px', animation: 'pulse 2s infinite' }}></span>}
+          {autoRefresh && !paused && !filtersActive && (
+            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22C55E', marginLeft: 8, animation: 'pulse 2s infinite' }} />
+          )}
+          {paused && <span style={{ marginLeft: 8, fontSize: 11, color: '#f59e0b' }}>⏸ pauza (scroll)</span>}
+          {filtersActive && <span style={{ marginLeft: 8, fontSize: 11, color: '#94a3b8' }}>auto-refresh vypnutý (filter aktívny)</span>}
         </h2>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
           Auto-refresh (10s)
         </label>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '70vh', overflow: 'auto' }}>
-        {events.length === 0 && <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadna aktivita</div>}
-        {events.map((e, i) => (
-          <div key={e.id || i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: i === 0 && events.length > 1 ? 'var(--primary-light, #EDE9FE)' : 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '13px', transition: 'background 0.3s' }}>
-            <span style={{ fontSize: '16px', flexShrink: 0 }}>{actionIcons[e.action] || '📌'}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div>
-                <strong>{e.username || '—'}</strong>
-                <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>{ACTION_LABELS[e.action] || e.action}</span>
-                {e.targetName && <span style={{ marginLeft: '4px' }}>— {e.targetName}</span>}
-              </div>
-              {e.details && (e.details.oldRole || e.details.oldPlan || e.details.subject) && (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  {e.details.oldRole && e.details.newRole && `${e.details.oldRole} → ${e.details.newRole}`}
-                  {e.details.oldPlan && e.details.newPlan && `${e.details.oldPlan} → ${e.details.newPlan}`}
-                  {e.details.subject && `"${e.details.subject}"`}
-                </div>
-              )}
-            </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{formatTime(e.createdAt)}</span>
-          </div>
-        ))}
+      {/* Filtre */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <input
+          type="text"
+          placeholder="🔍 Hľadať username / email / target..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="form-input"
+          style={{ flex: '1 1 200px', minWidth: 180, fontSize: 13 }}
+        />
+        <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setFilterAction(''); }}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13 }}>
+          <option value="">Všetky kategórie</option>
+          <option value="auth">🔓 Auth</option>
+          <option value="contact">👤 Contact</option>
+          <option value="task">📋 Task</option>
+          <option value="message">✉️ Message</option>
+          <option value="workspace">🏢 Workspace</option>
+          <option value="billing">💰 Billing</option>
+          <option value="user">👥 User</option>
+          <option value="security">🔐 Security</option>
+        </select>
+        <input
+          type="text"
+          placeholder="Action (napr. task.completed)"
+          value={filterAction}
+          onChange={(e) => setFilterAction(e.target.value)}
+          className="form-input"
+          style={{ width: 200, fontSize: 13, fontFamily: 'monospace' }}
+        />
+        {filtersActive && (
+          <button
+            className="btn btn-secondary"
+            onClick={() => { setSearch(''); setFilterCategory(''); setFilterAction(''); }}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+          >
+            ✕ Vymazať filtre
+          </button>
+        )}
       </div>
 
+      <div ref={scrollRef} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '65vh', overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 8, background: 'var(--bg-primary)' }}>
+        {events.length === 0 && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+            {filtersActive ? 'Žiadne výsledky pre tento filter' : 'Žiadna aktivita'}
+          </div>
+        )}
+        {renderEntries().map((entry) => {
+          if (entry.type === 'separator') {
+            return (
+              <div key={entry.key} style={{
+                position: 'sticky', top: 0, background: 'var(--bg-primary)', zIndex: 1,
+                padding: '6px 8px', fontSize: 12, fontWeight: 600,
+                color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)',
+                marginBottom: 4
+              }}>
+                {entry.label}
+              </div>
+            );
+          }
+          const e = entry.event;
+          const detailLine = formatDetails(e);
+          return (
+            <div key={entry.key} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px',
+              background: entry.isFirst && events.length > 1 ? 'var(--primary-light, #EDE9FE)' : 'var(--bg-secondary)',
+              borderRadius: 'var(--radius-sm)', fontSize: 13, transition: 'background 0.3s'
+            }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>{ACTION_ICONS[e.action] || '📌'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  {e.userId ? (
+                    <button
+                      onClick={(ev) => handleUsernameClick(ev, e.userId)}
+                      style={{
+                        background: 'none', border: 'none', padding: 0,
+                        fontWeight: 600, color: 'var(--accent-color, #6366f1)',
+                        cursor: 'pointer', fontSize: 13, fontFamily: 'inherit'
+                      }}
+                      title="Otvoriť detail užívateľa"
+                    >
+                      {e.username || '—'}
+                    </button>
+                  ) : (
+                    <strong>{e.username || 'systém'}</strong>
+                  )}
+                  <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{ACTION_LABELS[e.action] || e.action}</span>
+                  {e.targetName && <span style={{ marginLeft: 4 }}>— {e.targetName}</span>}
+                </div>
+                {detailLine && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {detailLine}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {formatTime(e.createdAt)}
+              </span>
+            </div>
+          );
+        })}
+        {/* Load-more — len keď nie je filter aktívny (pre filter ide nový query) */}
+        {events.length > 0 && hasMore && !filtersActive && (
+          <button
+            onClick={handleLoadMore}
+            disabled={loadingMore}
+            style={{
+              padding: '10px', fontSize: 12, background: 'transparent',
+              border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer', color: 'var(--text-muted)', marginTop: 8
+            }}
+          >
+            {loadingMore ? 'Načítavam...' : '↓ Zobraziť staršie'}
+          </button>
+        )}
+      </div>
+
+      {/* User detail modal — dovedie ho z events feed-u (klik na username) */}
+      {userDetailId && userDetail && (
+        <div className="modal-overlay" onClick={() => { setUserDetailId(null); setUserDetail(null); }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, padding: 20 }}>
+            <h3 style={{ marginTop: 0 }}>👤 {userDetail.user?.username}</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{userDetail.user?.email}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 12, fontSize: 13 }}>
+              <div><strong>Plán:</strong> {userDetail.user?.subscription?.plan || 'free'}</div>
+              <div><strong>Rola:</strong> {userDetail.user?.role || 'user'}</div>
+              <div><strong>Workspaces:</strong> {userDetail.memberships?.length || 0}</div>
+              <div><strong>Kontakty:</strong> {userDetail.stats?.contactCount || 0}</div>
+              <div><strong>Projekty:</strong> {userDetail.stats?.taskCount || 0}</div>
+              <div><strong>Registrácia:</strong> {userDetail.user?.createdAt ? new Date(userDetail.user.createdAt).toLocaleDateString('sk-SK') : '—'}</div>
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setUserDetailId(null); setUserDetail(null); }}
+              style={{ marginTop: 16, fontSize: 12 }}
+            >
+              Zavrieť
+            </button>
+          </div>
+        </div>
+      )}
+
       <AdminHelpToggle title="Aktivita">
-        <p><strong>Čo tu vidíš:</strong> live feed posledných akcií v aplikácii (auth.login, contact.created, task.completed atď.) — krátkejšia verzia Audit logu, určená na rýchly prehľad.</p>
+        <p><strong>Čo tu vidíš:</strong> live feed posledných akcií v aplikácii s ~10s polling latency. Krátkejšia a rýchlejšia verzia Audit logu, určená na monitoring v reálnom čase.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filtre</h4>
         <ul>
-          <li><strong>Real-time aktivita</strong> — zoznam najnovších akcií z AuditLog s timestampom a meno user-a.</li>
-          <li><strong>Detaily zmien</strong> — pri zmene plánu/role vidíš pred/po hodnoty (napr. <code>free → pro</code>).</li>
-          <li><strong>Subject</strong> — pri správach zobrazí predmet (subject) v úvodzovkách.</li>
+          <li><strong>Search</strong> — substring v <em>username / email / targetName</em>. Užitočné pre nájdenie všetkých akcií konkrétneho usera ("ako Ján používa appku").</li>
+          <li><strong>Kategória</strong> — Auth / Contact / Task / Message / Workspace / Billing / User / Security.</li>
+          <li><strong>Action</strong> — exact match na audit action (napr. <code>task.completed</code>, <code>auth.login_failed</code>). Pre konkrétny event type.</li>
+          <li><strong>Pri aktívnom filtri</strong> sa auto-refresh automaticky <strong>vypína</strong> aby sa nemiešali nové eventy s filtrovanou históriou.</li>
         </ul>
-        <p><strong>Tipy:</strong> Pre detailnejšie filtrovanie a stránkovanie použi tab <strong>Audit log</strong>. Tento tab je skôr "kuchynský" pohľad — vidíš tu dianie v aplikácii za uplynulé minúty/hodiny.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📅 Day separators</h4>
+        <p>Sticky header pre každý nový deň: <em>📅 Dnes / Včera / streda 7. máj</em>. Pri scrollovaní sa nadpis prilepí navrch — vždy vieš z ktorého dňa udalosť pochádza.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🟢 Auto-refresh + smart pause</h4>
+        <ul>
+          <li>Default 10s polling (toggle vpravo hore na vypnutie).</li>
+          <li><strong>Smart pause pri scrollovaní</strong> — keď scrollneš nadol viac ako 100px, polling sa zastaví aby ti nový event neskočil pod prst pri čítaní staršej položky. Po scroll-back nahor sa znova zapne.</li>
+          <li>Filter aktívny → auto-refresh vypnutý úplne.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>👤 Klik na username</h4>
+        <p>Otvorí mini-detail modal s kľúčovými údajmi (plán, rola, počty workspaces / kontaktov / projektov, dátum registrácie). Pre plnú správu užívateľa choď do tabu <strong>Používatelia</strong>.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📋 Detail riadku</h4>
+        <ul>
+          <li>Ikona action-u (rôzne emoji per typ — login, contact, task, billing atď.)</li>
+          <li><strong>Username</strong> (klikateľný) → action label → cieľ akcie ("— názov projektu / kontaktu / správy").</li>
+          <li>Druhý riadok ak má detail: <code>old → new</code> hodnoty (rola, plán, priority), subject správy, IP pri failed login, atď.</li>
+          <li>Časová značka vpravo: relatívna ("pred 5 min") alebo absolútna ({'>'} 24h).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>↓ Load more</h4>
+        <p>Tlačidlo „Zobraziť staršie" načíta ďalších 50 eventov. Funguje len bez aktívneho filtra (s filtrom by si mal použiť Audit log tab pre plnú pagináciu).</p>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Super admin akcie sa do feed-u nezarátavajú aby reflektoval skutočnú user-base aktivitu. Pre plný audit (vrátane svojich akcií) pozri tab <strong>Audit log</strong>.
+        </p>
       </AdminHelpToggle>
     </div>
   );

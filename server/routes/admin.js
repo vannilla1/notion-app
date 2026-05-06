@@ -1715,10 +1715,34 @@ router.get('/charts/summary', authenticateToken, requireAdmin, async (req, res) 
 router.get('/activity-feed', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const after = req.query.after; // ISO date — for polling new entries
+    const after = req.query.after; // ISO date — pre polling NOVÝCH eventov
+    const before = req.query.before; // ISO date — pre load-more (pagináciu nadol)
+    const { category, action, search } = req.query;
 
+    // Excludujeme super admin akcie aby feed reflektoval skutočnú user
+    // base aktivitu, nie naše testovanie. Konzistentné s Grafmi.
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
     const query = {};
+    if (superAdmin) {
+      query.userId = { $ne: superAdmin._id };
+    }
     if (after) query.createdAt = { $gt: new Date(after) };
+    if (before) query.createdAt = { ...(query.createdAt || {}), $lt: new Date(before) };
+    if (category && ['auth', 'contact', 'task', 'message', 'workspace', 'billing', 'user', 'security'].includes(category)) {
+      query.category = category;
+    }
+    if (action && action.trim()) {
+      // Action je presný string (e.g., "task.completed") — exact match
+      query.action = action;
+    }
+    if (search && search.trim()) {
+      const safe = escapeRegex(String(search).slice(0, 100));
+      query.$or = [
+        { username: { $regex: safe, $options: 'i' } },
+        { email: { $regex: safe, $options: 'i' } },
+        { targetName: { $regex: safe, $options: 'i' } }
+      ];
+    }
 
     const logs = await AuditLog.find(query)
       .sort({ createdAt: -1 })
@@ -1729,11 +1753,15 @@ router.get('/activity-feed', authenticateToken, requireAdmin, async (req, res) =
       id: l._id,
       action: l.action,
       category: l.category,
+      userId: l.userId, // pre klik-na-username navigáciu
       username: l.username,
       email: l.email,
       targetType: l.targetType,
+      targetId: l.targetId,
       targetName: l.targetName,
+      workspaceId: l.workspaceId,
       details: l.details,
+      ipAddress: l.ipAddress,
       createdAt: l.createdAt
     })));
   } catch (error) {
