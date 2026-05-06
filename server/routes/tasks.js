@@ -1310,6 +1310,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const task = contact.tasks[taskIndex];
             // Save original assignedTo before update
             const originalAssignedTo = task.assignedTo || [];
+            // Capture original priority BEFORE the array slot is replaced.
+            // Mongoose subdoc reference môže byť mutovaná po contact.save(),
+            // takže oldPriority čítame teraz na bezpečnú hodnotu pre porovnanie
+            // v notifyTaskPriorityChanged check-u nižšie.
+            const originalPriority = task.priority;
             // Auto-complete all subtasks when main task is completed
             const markAllSubtasksCompleted = (subtasks) => {
               if (!subtasks) return subtasks;
@@ -1415,11 +1420,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             // (frontend rozozná type='task.priority_changed' a vykreslí ho).
             // Posiela sa nad rámec generic task.updated keďže priority je
             // často kľúčová informácia pre tím (napr. eskalácia).
-            const oldPriority = task.priority;
-            const newPriority = priority !== undefined ? priority : task.priority;
-            if (priority !== undefined && newPriority !== oldPriority) {
+            // POZOR: originalPriority captured PRED contact.save() — viď komentár
+            // hore. taskData.priority obsahuje aktuálnu (po-save) hodnotu.
+            if (priority !== undefined && priority !== originalPriority) {
               await notificationService.notifyTaskPriorityChanged(
-                taskData, oldPriority, newPriority, req.user, req.workspaceId
+                taskData, originalPriority, priority, req.user, req.workspaceId
               );
             }
 
