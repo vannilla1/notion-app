@@ -160,7 +160,11 @@ function OverviewTab({ onNavigate }) {
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lastHealthRefresh, setLastHealthRefresh] = useState(null);
 
+  // Initial load — stats + health súčasne. Health má vlastný auto-refresh
+  // cyklus, stats sa načíta raz (bez auto-refresh, lebo pri každom načítaní
+  // robí ~12 DB queries — nadbytočné pre admin Prehľad).
   useEffect(() => {
     Promise.all([
       adminApi.get('/api/admin/stats').then(res => res.data).catch(() => null),
@@ -168,7 +172,54 @@ function OverviewTab({ onNavigate }) {
     ]).then(([s, h]) => {
       setStats(s);
       setHealth(h);
+      setLastHealthRefresh(new Date());
     }).finally(() => setLoading(false));
+  }, []);
+
+  // Auto-refresh health každých 30s. Pause keď je tab schovaný (Page
+  // Visibility API) — žiadny network traffic ak admin neaktívne pozerá.
+  // Po návrate na tab refresh okamžite pre čerstvé hodnoty.
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+
+    const refreshHealth = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        const res = await adminApi.get('/api/admin/health');
+        if (!cancelled) {
+          setHealth(res.data);
+          setLastHealthRefresh(new Date());
+        }
+      } catch { /* network glitch — try again next tick */ }
+    };
+
+    const startInterval = () => {
+      if (intervalId) return;
+      intervalId = setInterval(refreshHealth, 30000);
+    };
+    const stopInterval = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopInterval();
+      } else {
+        // okamžitý refresh + reštart interval
+        refreshHealth();
+        startInterval();
+      }
+    };
+
+    if (!document.hidden) startInterval();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelled = true;
+      stopInterval();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   if (loading) return <div className="sa-loading">Načítavam štatistiky...</div>;
@@ -196,7 +247,9 @@ function OverviewTab({ onNavigate }) {
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: health.database?.status === 'connected' ? '#22C55E' : '#EF4444' }}></span>
               Stav systému
             </h3>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{new Date(health.timestamp).toLocaleString('sk-SK')}</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }} title="Health sa auto-refreshuje každých 30s (pauza pri schovanom tabe)">
+              {new Date(health.timestamp).toLocaleString('sk-SK')} <span style={{ color: '#10b981', marginLeft: 4 }}>● live</span>
+            </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
             <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
@@ -224,13 +277,59 @@ function OverviewTab({ onNavigate }) {
               <div style={{ fontSize: '14px', fontWeight: 600 }}>{health.environment || '—'}</div>
             </div>
           </div>
+
+          {/* External services strip — SMTP, APNs, Google. FCM nemá vlastný
+              check (firebase-admin sa loaduje pri push send-e on-demand).
+              Hodnoty pochádzajú z healthMonitor cache (5 min TTL). */}
+          {health.externalServices && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 0.3 }}>EXTERNÉ SLUŽBY</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }} title="Posledná kontrola health monitorom">
+                  {health.externalServices.checkedAt ? `posledná kontrola: ${new Date(health.externalServices.checkedAt).toLocaleTimeString('sk-SK')}` : ''}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+                {[
+                  { key: 'smtp', label: 'SMTP', emoji: '📧' },
+                  { key: 'apns', label: 'APNs (iOS push)', emoji: '🍎' },
+                  { key: 'google', label: 'Google API', emoji: '🔑' }
+                ].map(({ key, label, emoji }) => {
+                  const svc = health.externalServices[key] || { status: 'unknown' };
+                  const color = svc.status === 'ok' ? '#10b981'
+                    : svc.status === 'warn' ? '#f59e0b'
+                    : svc.status === 'error' ? '#ef4444'
+                    : '#94a3b8';
+                  const label2 = svc.status === 'ok' ? 'OK'
+                    : svc.status === 'warn' ? 'Watch'
+                    : svc.status === 'error' ? 'Error'
+                    : 'Unknown';
+                  return (
+                    <div key={key} style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }} title={svc.message || ''}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{emoji} {label}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }}></span>
+                        {label2}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="sa-stats-grid">
         <StatCard icon="👥" label="Používatelia" value={stats.totalUsers} sub={`+${stats.recentRegistrations} za 30 dní`} onClick={() => onNavigate?.('users')} />
         <StatCard icon="🏢" label="Workspace-y" value={stats.totalWorkspaces} sub={`${stats.activeWorkspaces} aktívnych`} onClick={() => onNavigate?.('workspaces')} />
-        <StatCard icon="📋" label="Projekty" value={stats.totalTasks} onClick={() => onNavigate?.('comparison')} />
+        <StatCard
+          icon="📋"
+          label="Projekty"
+          value={stats.totalTasks}
+          sub={typeof stats.totalSubtasks === 'number' ? `+ ${stats.totalSubtasks} podúloh` : undefined}
+          onClick={() => onNavigate?.('comparison')}
+        />
         <StatCard icon="👤" label="Kontakty" value={stats.totalContacts} onClick={() => onNavigate?.('comparison')} />
         <StatCard icon="📅" label="Google Calendar" value={stats.usersWithGoogleCalendar} sub="pripojených" onClick={() => onNavigate?.('sync', 'calendar')} />
         <StatCard icon="✅" label="Google Tasks" value={stats.usersWithGoogleTasks} sub="pripojených" onClick={() => onNavigate?.('sync', 'tasks')} />

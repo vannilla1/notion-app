@@ -79,6 +79,20 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
     // Exclude super admin from all stats
     const excludeSuperAdmin = { email: { $ne: SUPER_ADMIN_EMAIL } };
 
+    // Pre Task/Contact/Workspace counts treba excludnúť aj workspaces ktoré
+    // patria super adminovi (jeho testovacie dáta by skreslovali produkčné
+    // metriky). Najprv nájdeme jeho user._id, potom workspaces ktoré vlastní.
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const superAdminWorkspaceIds = superAdmin
+      ? (await Workspace.find({ ownerId: superAdmin._id }).select('_id').lean()).map((w) => w._id)
+      : [];
+    const excludeSuperAdminWorkspaces = superAdminWorkspaceIds.length > 0
+      ? { workspaceId: { $nin: superAdminWorkspaceIds } }
+      : {};
+    const excludeSuperAdminWsForWorkspaces = superAdminWorkspaceIds.length > 0
+      ? { _id: { $nin: superAdminWorkspaceIds } }
+      : {};
+
     const [
       totalUsers,
       totalWorkspaces,
@@ -88,12 +102,45 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
       usersWithGoogleTasks
     ] = await Promise.all([
       User.countDocuments(excludeSuperAdmin),
-      Workspace.countDocuments(),
-      Task.countDocuments(),
-      Contact.countDocuments(),
+      Workspace.countDocuments(excludeSuperAdminWsForWorkspaces),
+      Task.countDocuments(excludeSuperAdminWorkspaces),
+      Contact.countDocuments(excludeSuperAdminWorkspaces),
       User.countDocuments({ ...excludeSuperAdmin, 'googleCalendar.enabled': true }),
       User.countDocuments({ ...excludeSuperAdmin, 'googleTasks.enabled': true })
     ]);
+
+    // Subtasks count — rekurzívne cez $reduce na embedded array. Top-level
+    // Task má pole subtasks[], každý subtask môže mať vlastné subtasks[].
+    // Mongoose aggregation $reduce nepodporuje rekurzívne descents, preto
+    // riešime cez $function (server-side JS) so simple recursive counter.
+    // Pri menšej DB (< 50k Task docs) je toto rýchlejšie ako $unwind chain.
+    const subtaskAggResult = await Task.aggregate([
+      { $match: excludeSuperAdminWorkspaces },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: {
+              $function: {
+                body: function countSubtasksRecursive(subtasks) {
+                  if (!subtasks || !subtasks.length) return 0;
+                  let count = subtasks.length;
+                  for (const s of subtasks) {
+                    if (s.subtasks && s.subtasks.length) {
+                      count += countSubtasksRecursive(s.subtasks);
+                    }
+                  }
+                  return count;
+                }.toString(),
+                args: ['$subtasks'],
+                lang: 'js'
+              }
+            }
+          }
+        }
+      }
+    ]);
+    const totalSubtasks = subtaskAggResult[0]?.total || 0;
 
     // Plan breakdown (exclude super admin)
     const planBreakdown = await User.aggregate([
@@ -115,9 +162,9 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
       createdAt: { $gte: thirtyDaysAgo }
     });
 
-    // Active workspaces (have at least 1 task or contact)
-    const activeWorkspaceIds = await Task.distinct('workspaceId');
-    const activeWorkspaceIdsContacts = await Contact.distinct('workspaceId');
+    // Active workspaces (have at least 1 task or contact, excluding super admin)
+    const activeWorkspaceIds = await Task.distinct('workspaceId', excludeSuperAdminWorkspaces);
+    const activeWorkspaceIdsContacts = await Contact.distinct('workspaceId', excludeSuperAdminWorkspaces);
     const allActiveIds = new Set([
       ...activeWorkspaceIds.map(id => id.toString()),
       ...activeWorkspaceIdsContacts.map(id => id.toString())
@@ -128,6 +175,7 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
       totalWorkspaces,
       activeWorkspaces: allActiveIds.size,
       totalTasks,
+      totalSubtasks,
       totalContacts,
       usersWithGoogleCalendar,
       usersWithGoogleTasks,
@@ -866,12 +914,34 @@ router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, re
 router.get('/health', authenticateToken, requireAdmin, async (req, res) => {
   const mem = process.memoryUsage();
   const stateMap = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+
+  // Externé service checks z health monitor cache (5 min TTL). Nezdržiavame
+  // request live ping-om Google/SMTP API — jednak by to každé otvorenie
+  // Prehľadu robilo I/O latency, jednak by sme museli držať timeouty. Cron
+  // beží na pozadí každých 5 min a držíme last snapshot.
+  let externalServices = null;
+  try {
+    const healthMonitor = require('../jobs/healthMonitor');
+    const snapshot = healthMonitor.getLastSnapshot();
+    if (snapshot?.checks) {
+      externalServices = {
+        smtp: snapshot.checks.smtp || { status: 'unknown' },
+        apns: snapshot.checks.apns || { status: 'unknown' },
+        google: snapshot.checks.google || { status: 'unknown' },
+        checkedAt: snapshot.checkedAt
+      };
+    }
+  } catch (err) {
+    logger.warn('Health snapshot read failed', { error: err.message });
+  }
+
   res.json({
     uptime: process.uptime(),
     memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
     database: { status: stateMap[mongoose.connection.readyState] || 'unknown' },
     nodeVersion: process.version,
     environment: process.env.NODE_ENV || 'development',
+    externalServices,
     timestamp: new Date().toISOString()
   });
 });
