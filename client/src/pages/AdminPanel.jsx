@@ -2944,12 +2944,15 @@ function DiagnosticsTab() {
 
         <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>💰 Príjmy</h4>
         <ul>
-          <li><strong>MRR (Monthly Recurring Revenue)</strong> — mesačný príjem zo všetkých active platených userov. Yearly subscriptions sa rátajú ako <code>yearly_price / 12</code> (presný equivalent, predtým bola hrubá aproximácia 0.83× ktorá nadhodnocovala ~1%).</li>
-          <li><strong>ARR</strong> = MRR × 12 (Annual Recurring Revenue), ukázané pod MRR.</li>
-          <li><strong>💳 Stripe-managed</strong> vs <strong>🎁 Admin-granted</strong> — split active platených userov podľa zdroja predplatného. Stripe userovia majú real-money cashflow, admin-granted sú free upgrades / promo / freeMonths zľavy.</li>
-          <li><strong>Nové subs (30d)</strong> — počet upgrades / discount-applications za posledných 30 dní z audit logu (billing kategória).</li>
-          <li>Doughnut chart zobrazuje pomer free / team / pro / null. Hľadaj nárast paid podielu týždenne.</li>
-          <li><strong>Predplatné končiace v 7 dňoch</strong> — zoznam userov pred expirom. Email notifikácie im chodia automaticky cez subscription reminders cron (T-7, T-1) — viď Email tab.</li>
+          <li><strong>MRR (Monthly Recurring Revenue)</strong> ráta <strong>iba reálne Stripe platby</strong> — admin-granted upgrades (free months, planUpgrade discount, manuálne plán prirídenia) nie sú reálny revenue, takže sa do MRR nezarátavajú. Bez tohto by graf falošne ukazoval príjem aj keby žiadna platba neprebehla. Yearly subscriptions sa rátajú ako <code>yearly_price / 12</code> (49 € / 12 = 4.083 €/mes pre Tím yearly).</li>
+          <li><strong>ARR</strong> = MRR × 12, ukázané pod MRR cardom.</li>
+          <li><strong>💳 Stripe-paying</strong> — počet active userov s reálnym Stripe predplatným (real-money cashflow).<br/>
+            <strong>🎁 Admin-granted</strong> — počet active "paid" userov bez Stripe (free upgrades / promo / freeMonths). Tento počet je <em>informatívny</em>, neovplyvňuje MRR.</li>
+          <li><strong>Nové Stripe (30d)</strong> — počet skutočných nových predplatných za posledných 30 dní (audit log: <code>billing.checkout_completed</code>, <code>billing.subscription_created</code>, <code>billing.subscription_renewed</code>).<br/>
+            <strong>Nové admin (30d)</strong> — počet admin-granted upgrade akcií za 30d, info-only.</li>
+          <li><strong>MRR = 0 € s admin-granted &gt; 0</strong> → zobrazí sa žltý info banner: žiadna reálna platba ešte neprebehla, ale máš X aktívnych free-upgrade userov. Bežný stav v early-stage SaaS.</li>
+          <li><strong>Doughnut chart</strong> — pomer free / team / pro plánov. Sleduj nárast paid podielu týždenne.</li>
+          <li><strong>Predplatné končiace v 7 dňoch</strong> — zoznam userov pred expirom. Každý riadok ukazuje plán + billing period (<em>mes./ročne</em>) + zdroj (<em>💳 stripe / 🎁 admin</em>). Email reminders im chodia automaticky cez subscription cron (T-7, T-1) — viď Email tab.</li>
         </ul>
 
         <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🚦 Daily check rituál</h4>
@@ -3717,14 +3720,25 @@ function DiagRevenueSection() {
           <div style={{ fontSize: '13px', opacity: 0.9 }}>MRR (mesačný príjem)</div>
           <div style={{ fontSize: '32px', fontWeight: 700, marginTop: '8px' }}>{data.mrr.toFixed(2)} €</div>
           <div style={{ fontSize: 11, opacity: 0.85, marginTop: 4 }}>
-            ARR: {(data.mrr * 12).toFixed(2)} €
+            ARR: {(data.mrr * 12).toFixed(2)} € · iba reálne Stripe platby
           </div>
         </div>
-        <DiagStat label="Platení používatelia" value={data.activePaidCount} color="#10b981" />
-        <DiagStat label="💳 Stripe-managed" value={data.stripeManaged ?? 0} color="#6366f1" />
-        <DiagStat label="🎁 Admin-granted" value={data.adminGranted ?? 0} color="#8b5cf6" />
-        <DiagStat label="Nové subs (30d)" value={data.newSubs30d} color="#f59e0b" />
+        <DiagStat label="💳 Stripe-paying" value={data.stripePaidCount ?? 0} color="#10b981" />
+        <DiagStat
+          label="🎁 Admin-granted"
+          value={data.adminGrantedCount ?? 0}
+          color="#8b5cf6"
+        />
+        <DiagStat label="Nové Stripe (30d)" value={data.newStripeSubs30d ?? 0} color="#10b981" />
+        <DiagStat label="Nové admin (30d)" value={data.newAdminGranted30d ?? 0} color="#f59e0b" />
       </div>
+
+      {/* Vysvetlenie pre prípady keď MRR = 0 — admin nech nepanikári */}
+      {data.mrr === 0 && data.adminGrantedCount > 0 && (
+        <div style={{ padding: 12, background: '#fef3c7', borderLeft: '4px solid #f59e0b', borderRadius: 'var(--radius-sm)', fontSize: 13, color: '#92400e', marginBottom: 16 }}>
+          <strong>ℹ️ MRR = 0 €</strong> — máte {data.adminGrantedCount} {data.adminGrantedCount === 1 ? 'aktívny admin-granted plán' : 'aktívnych admin-granted plánov'} (free upgrades / promo zľavy), ale žiadnu reálnu Stripe platbu. MRR sa ráta len z Stripe-managed predplatných, lebo admin-granted nie sú reálny revenue.
+        </div>
+      )}
 
       <h3>Rozdelenie plánov</h3>
       <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '24px' }}>
@@ -3774,6 +3788,14 @@ function DiagRevenueSection() {
                           {u.billingPeriod === 'yearly' ? 'ročne' : 'mes.'}
                         </span>
                       )}
+                      <span style={{
+                        marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                        background: u.isStripe ? '#d1fae5' : '#ede9fe',
+                        color: u.isStripe ? '#065f46' : '#6D28D9',
+                        textTransform: 'uppercase'
+                      }} title={u.isStripe ? 'Stripe-managed (reálna platba)' : 'Admin-granted (free upgrade)'}>
+                        {u.isStripe ? '💳 stripe' : '🎁 admin'}
+                      </span>
                     </td>
                     <td style={{ padding: '10px', color: '#ef4444' }}>{new Date(u.paidUntil).toLocaleDateString('sk-SK')}</td>
                   </tr>

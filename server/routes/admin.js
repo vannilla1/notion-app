@@ -2148,16 +2148,24 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
     ]);
     const plansMap = plans.reduce((acc, p) => ({ ...acc, [p._id || 'free']: p.count }), {});
 
-    const activePaidUsers = await User.find({
+    // Všetci active "paid plan" users (môžu byť Stripe aj admin-granted)
+    const allActivePaidUsers = await User.find({
       ...excludeSuperAdmin,
       'subscription.plan': { $in: ['team', 'pro'] },
       'subscription.paidUntil': { $gt: now }
     }).select('subscription.plan subscription.billingPeriod subscription.stripeSubscriptionId').lean();
 
+    // MRR ráta IBA Stripe-managed users — admin-granted upgrades (free
+    // months, planUpgrade discount, manuálne plán prirídenia) NIE sú reálny
+    // revenue, len business-courtesy. Bez tohto by graf MRR ukazoval falošné
+    // číslo aj keď žiadna reálna platba neprebehla. Stripe-managed identifier
+    // je `subscription.stripeSubscriptionId` (non-null = user má actívne sub
+    // s reálnym billing cyklom).
+    const stripePaidUsers = allActivePaidUsers.filter((u) => u.subscription?.stripeSubscriptionId);
+    const adminGrantedUsers = allActivePaidUsers.filter((u) => !u.subscription?.stripeSubscriptionId);
+
     let mrr = 0;
-    let stripeManaged = 0;
-    let adminGranted = 0;
-    for (const u of activePaidUsers) {
+    for (const u of stripePaidUsers) {
       const plan = u.subscription?.plan;
       const billingPeriod = u.subscription?.billingPeriod || 'monthly';
       const priceConfig = PRICES[plan] || PRICES.free;
@@ -2165,15 +2173,20 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
         ? priceConfig.yearly / 12
         : priceConfig.monthly;
       mrr += monthlyEquiv;
-      if (u.subscription?.stripeSubscriptionId) stripeManaged++;
-      else adminGranted++;
     }
 
-    // Nové subscriptions za posledných 30d cez AuditLog (subscription.createdAt
-    // schéma nemá, takže User-count by vracal 0). Detekujeme cez billing
-    // category a relevantné akcie.
+    // Nové Stripe subscriptions za posledných 30d. Filter na audit log
+    // billing kategóriu — admin-granted upgrades sa rátajú samostatne, sem
+    // ide len reálny Stripe checkout (action 'billing.checkout_completed'
+    // alebo 'billing.subscription_created' podľa nášho audit log namingu).
     const d30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const newSubs30d = await AuditLog.countDocuments({
+    const newStripeSubs30d = await AuditLog.countDocuments({
+      category: 'billing',
+      action: { $in: ['billing.checkout_completed', 'billing.subscription_created', 'billing.subscription_renewed'] },
+      createdAt: { $gte: d30 }
+    });
+    // Admin-granted za 30d — pre kontext (info-only, nie revenue)
+    const newAdminGranted30d = await AuditLog.countDocuments({
       category: 'billing',
       action: { $in: ['user.plan_changed', 'user.subscription_updated', 'user.discount_applied'] },
       createdAt: { $gte: d30 },
@@ -2185,21 +2198,27 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
       ...excludeSuperAdmin,
       'subscription.plan': { $in: ['team', 'pro'] },
       'subscription.paidUntil': { $gte: now, $lte: in7d }
-    }).select('username email subscription.plan subscription.paidUntil subscription.billingPeriod').limit(20).lean();
+    }).select('username email subscription.plan subscription.paidUntil subscription.billingPeriod subscription.stripeSubscriptionId').limit(20).lean();
 
     res.json({
       mrr: Math.round(mrr * 100) / 100,
-      activePaidCount: activePaidUsers.length,
-      stripeManaged,
-      adminGranted,
+      // Active Stripe-paying users — toto je real revenue base
+      stripePaidCount: stripePaidUsers.length,
+      // Admin-granted "paid plan" users — informatívne, bez vplyvu na MRR
+      adminGrantedCount: adminGrantedUsers.length,
+      // Total all active paid plans (Stripe + admin-granted)
+      activePaidCount: allActivePaidUsers.length,
       plansBreakdown: plansMap,
-      newSubs30d,
+      // Rozdiel medzi reálnymi novými platbami a admin akciami
+      newStripeSubs30d,
+      newAdminGranted30d,
       endingSoon: endingSoon.map(u => ({
         username: u.username,
         email: u.email,
         plan: u.subscription?.plan,
         paidUntil: u.subscription?.paidUntil,
-        billingPeriod: u.subscription?.billingPeriod || 'monthly'
+        billingPeriod: u.subscription?.billingPeriod || 'monthly',
+        isStripe: !!u.subscription?.stripeSubscriptionId
       }))
     });
   } catch (error) {
