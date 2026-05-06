@@ -2337,6 +2337,107 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
   }
 });
 
+/**
+ * MED-003 follow-up — bulk encrypt plaintext OAuth tokens.
+ *
+ * Problém: pre('save') hook šifruje iba modifikované polia (`isModified`).
+ * accessToken-y sa šifrujú prirodzene cez hodinový Google refresh cyklus,
+ * ale refreshToken-y sa pri OAuth nastavia raz, nikdy sa nemodifikujú →
+ * legacy záznamy z času pred MED-003 deployom ostávajú plaintext v DB.
+ *
+ * Tento endpoint prejde všetky users, deteguje plaintext (chýba `enc:v1:`
+ * prefix), zašifruje a uloží. Idempotentný — opakované volanie nemení
+ * už-zašifrované tokeny. Po prvom úspešnom run-e je migration hotová.
+ */
+router.post('/migrate-encrypt-tokens', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { encryptToken, isEncrypted } = require('../utils/cryptoHelpers');
+    const PATHS = [
+      'googleCalendar.accessToken',
+      'googleCalendar.refreshToken',
+      'googleTasks.accessToken',
+      'googleTasks.refreshToken'
+    ];
+
+    // Načítavame iba minimum potrebných polí — nepublikujeme celé heslá hashe
+    // ani avatary. dryRun mode vráti len počty bez zápisu.
+    const dryRun = req.body?.dryRun === true;
+    const users = await User.find({
+      $or: [
+        { 'googleCalendar.accessToken': { $exists: true, $ne: null } },
+        { 'googleCalendar.refreshToken': { $exists: true, $ne: null } },
+        { 'googleTasks.accessToken': { $exists: true, $ne: null } },
+        { 'googleTasks.refreshToken': { $exists: true, $ne: null } }
+      ]
+    }).select('googleCalendar.accessToken googleCalendar.refreshToken googleTasks.accessToken googleTasks.refreshToken');
+
+    const stats = {
+      usersScanned: users.length,
+      perPath: {}
+    };
+    PATHS.forEach((p) => { stats.perPath[p] = { plaintext: 0, encrypted: 0, migrated: 0 }; });
+
+    for (const user of users) {
+      // Skip post('init') hook — chceme raw hodnoty z DB, nie auto-decrypt-nuté.
+      // Najjednoduchšie: použijeme aggregation read alebo ťaháme znova lean.
+      const raw = await User.collection.findOne(
+        { _id: user._id },
+        {
+          projection: {
+            'googleCalendar.accessToken': 1,
+            'googleCalendar.refreshToken': 1,
+            'googleTasks.accessToken': 1,
+            'googleTasks.refreshToken': 1
+          }
+        }
+      );
+      if (!raw) continue;
+
+      const updates = {};
+      for (const path of PATHS) {
+        const [outer, inner] = path.split('.');
+        const value = raw[outer]?.[inner];
+        if (!value) continue;
+
+        if (isEncrypted(value)) {
+          stats.perPath[path].encrypted++;
+        } else {
+          stats.perPath[path].plaintext++;
+          if (!dryRun) {
+            const encrypted = encryptToken(value);
+            if (isEncrypted(encrypted)) {
+              updates[path] = encrypted;
+              stats.perPath[path].migrated++;
+            }
+          }
+        }
+      }
+
+      if (!dryRun && Object.keys(updates).length > 0) {
+        // Použijeme priamy updateOne (bypass pre('save') hook ktorý by
+        // detekoval že hodnota je už šifrovaná a nepokazil to, ale aj tak
+        // chceme rýchly direct write bez hook-ovania).
+        await User.updateOne({ _id: user._id }, { $set: updates });
+      }
+    }
+
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.adminUser?.username || req.user.username,
+      email: req.adminUser?.email || req.user.email,
+      action: 'admin.migrate_encrypt_tokens',
+      category: 'security',
+      details: { dryRun, stats },
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true, dryRun, stats });
+  } catch (err) {
+    logger.error('Migrate encrypt tokens error', { error: err.message });
+    res.status(500).json({ message: 'Chyba pri migrácii', error: err.message });
+  }
+});
+
 // Test email — pošle preview ľubovoľného typu na ľubovoľnú adresu (mock dáta).
 // Pre vizuálne testovanie šablón bez nutnosti meniť reálnemu userovi plán.
 router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => {

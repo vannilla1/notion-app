@@ -3831,6 +3831,9 @@ function EmailsTab() {
       {/* BROADCAST CAMPAIGNS — one-off announcement emails to all users */}
       <BroadcastSender />
 
+      {/* SECURITY MAINTENANCE — bulk migrate plaintext tokens (MED-003 follow-up) */}
+      <TokenMigrationCard />
+
       {/* CONFIG INFO */}
       {config && (
         <div className="sa-card" style={{ marginTop: 20 }}>
@@ -3897,6 +3900,87 @@ function EmailsTab() {
       </AdminHelpToggle>
 
       {previewLog && <EmailPreviewModal log={previewLog} onClose={() => setPreviewLog(null)} />}
+    </div>
+  );
+}
+
+/**
+ * TokenMigrationCard — MED-003 follow-up. Šifruje legacy plaintext OAuth
+ * refresh tokeny v DB. Idempotentné — opakované volanie neškodí.
+ */
+function TokenMigrationCard() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const run = async (dryRun) => {
+    if (!dryRun && !confirm('Naozaj zašifrovať plaintext tokeny v produkčnej DB? Operácia je idempotentná, ale dotkne sa všetkých userov s OAuth.')) return;
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await adminApi.post('/api/admin/migrate-encrypt-tokens', { dryRun });
+      setResult({ ok: true, ...r.data });
+    } catch (err) {
+      setResult({ ok: false, error: err.response?.data?.message || err.message });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const renderStats = (stats) => {
+    if (!stats?.perPath) return null;
+    return (
+      <table style={{ width: '100%', marginTop: 12, fontSize: 13, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+            <th style={{ textAlign: 'left', padding: '6px 8px' }}>Field</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px' }}>Plaintext</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px' }}>Encrypted</th>
+            <th style={{ textAlign: 'right', padding: '6px 8px' }}>Migrated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(stats.perPath).map(([path, s]) => (
+            <tr key={path} style={{ borderBottom: '1px solid #f3f4f6' }}>
+              <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 12 }}>{path}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', color: s.plaintext > 0 ? '#dc2626' : '#10b981' }}>{s.plaintext}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', color: '#10b981' }}>{s.encrypted}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', color: '#6D28D9', fontWeight: 600 }}>{s.migrated || 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  return (
+    <div className="sa-card" style={{ marginTop: 20, borderLeft: '4px solid #ef4444' }}>
+      <h3 style={{ marginTop: 0 }}>🔐 MED-003 — Encrypt legacy tokens</h3>
+      <p style={{ fontSize: 13, color: '#64748b', marginTop: 0, marginBottom: 12 }}>
+        Šifruje plaintext OAuth refresh tokeny v DB ktoré ostali z času pred MED-003 deployom. AccessToken-y sa šifrujú prirodzene cez hodinový Google refresh cyklus, ale refreshToken-y sa nemodifikujú a treba ich migrovať jednorazovo. Operácia je idempotentná.
+      </p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="btn btn-secondary" onClick={() => run(true)} disabled={running}>
+          {running ? 'Beží...' : '1. Náhľad (dry run)'}
+        </button>
+        <button className="btn btn-primary" onClick={() => run(false)} disabled={running} style={{ background: '#dc2626' }}>
+          {running ? 'Beží...' : '2. Spustiť migráciu'}
+        </button>
+      </div>
+      {result?.ok && (
+        <>
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: result.dryRun ? '#fef3c7' : '#d1fae5', color: result.dryRun ? '#92400e' : '#065f46', fontSize: 13 }}>
+            {result.dryRun
+              ? `📊 Dry run — ${result.stats.usersScanned} userov skenovaných. Reálne sa nezapísalo nič.`
+              : `✅ Migrácia hotová — ${result.stats.usersScanned} userov skenovaných.`}
+          </div>
+          {renderStats(result.stats)}
+        </>
+      )}
+      {result && !result.ok && (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: 13 }}>
+          ❌ {result.error}
+        </div>
+      )}
     </div>
   );
 }
