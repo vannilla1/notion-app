@@ -1538,8 +1538,16 @@ router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res)
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
+    // Excludujeme akcie super admina aby chart reflektoval skutočnú user
+    // base aktivitu, nie naše testovanie. Lookup userId-a a vyhodenie.
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const matchStage = { createdAt: { $gte: startDate } };
+    if (superAdmin) {
+      matchStage.userId = { $ne: superAdmin._id };
+    }
+
     const activity = await AuditLog.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
+      { $match: matchStage },
       { $group: {
         _id: {
           date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -1568,6 +1576,137 @@ router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res)
     res.json(result);
   } catch (error) {
     logger.error('Charts activity error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// Workspaces growth — analogicky k /charts/user-growth, ale ráta vznik
+// workspace dokumentov. Excluduje super admin workspaces aby čísla
+// odrážali produkčné metriky.
+router.get('/charts/workspaces-growth', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const excludeOwners = superAdmin ? { ownerId: { $ne: superAdmin._id } } : {};
+
+    const growth = await Workspace.aggregate([
+      { $match: { ...excludeOwners, createdAt: { $gte: startDate } } },
+      { $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        count: { $sum: 1 }
+      }},
+      { $sort: { _id: 1 } }
+    ]);
+
+    let cumulative = await Workspace.countDocuments({
+      ...excludeOwners,
+      createdAt: { $lt: startDate }
+    });
+    const dataMap = Object.fromEntries(growth.map((g) => [g._id, g.count]));
+
+    const result = [];
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const key = d.toISOString().slice(0, 10);
+      const daily = dataMap[key] || 0;
+      cumulative += daily;
+      result.push({ date: key, daily, cumulative });
+    }
+    res.json(result);
+  } catch (error) {
+    logger.error('Charts workspaces growth error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// Plans distribution v čase — pre každý deň v range vracia kumulatívny
+// snapshot rozdelenia plánov podľa user.subscription.plan. Logika:
+//  - berieme aktuálny stav user.subscription.plan
+//  - rátame len užívateľov ktorí už existovali k danému dňu (createdAt <= day)
+//  - približný — neberieme do úvahy historické plan zmeny (audit log by
+//    bol presnejší, ale ten by vyžadoval per-day reconstruction history)
+//  - pre PrplCRM scale je to akceptabilná aproximácia
+router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    const users = await User.find({ email: { $ne: SUPER_ADMIN_EMAIL } })
+      .select('createdAt subscription.plan')
+      .lean();
+
+    const result = [];
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+      const buckets = { free: 0, team: 0, pro: 0 };
+      for (const u of users) {
+        if (new Date(u.createdAt) <= dayEnd) {
+          const plan = u.subscription?.plan || 'free';
+          if (buckets[plan] !== undefined) buckets[plan]++;
+        }
+      }
+      result.push({
+        date: d.toISOString().slice(0, 10),
+        ...buckets,
+        total: buckets.free + buckets.team + buckets.pro
+      });
+    }
+    res.json(result);
+  } catch (error) {
+    logger.error('Charts plans distribution error', { error: error.message });
+    res.status(500).json({ message: 'Chyba' });
+  }
+});
+
+// Summary metrics pre stat cards na vrchu Grafy tabu — peak day, priemer,
+// total za obdobie. Beží sériovo s ostatnými chart endpoint-mi v UI.
+router.get('/charts/summary', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const daysBack = parseInt(req.query.days) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+
+    const [newUsers, newWorkspaces, totalActivity] = await Promise.all([
+      User.countDocuments({
+        email: { $ne: SUPER_ADMIN_EMAIL },
+        createdAt: { $gte: startDate }
+      }),
+      Workspace.countDocuments({
+        ...(superAdmin ? { ownerId: { $ne: superAdmin._id } } : {}),
+        createdAt: { $gte: startDate }
+      }),
+      AuditLog.countDocuments({
+        createdAt: { $gte: startDate },
+        ...(superAdmin ? { userId: { $ne: superAdmin._id } } : {})
+      })
+    ]);
+
+    // Peak registration day v rozsahu
+    const peakRegDayAgg = await User.aggregate([
+      { $match: { email: { $ne: SUPER_ADMIN_EMAIL }, createdAt: { $gte: startDate } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 1 }
+    ]);
+    const peakRegDay = peakRegDayAgg[0] || null;
+
+    res.json({
+      windowDays: daysBack,
+      newUsers,
+      newWorkspaces,
+      totalActivity,
+      avgRegPerDay: Math.round((newUsers / daysBack) * 100) / 100,
+      avgActivityPerDay: Math.round((totalActivity / daysBack) * 100) / 100,
+      peakRegDay: peakRegDay ? { date: peakRegDay._id, count: peakRegDay.count } : null
+    });
+  } catch (error) {
+    logger.error('Charts summary error', { error: error.message });
     res.status(500).json({ message: 'Chyba' });
   }
 });

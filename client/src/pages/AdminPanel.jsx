@@ -2523,20 +2523,49 @@ const chartColors = {
 
 function ChartsTab() {
   const [userGrowth, setUserGrowth] = useState(null);
+  const [wsGrowth, setWsGrowth] = useState(null);
   const [activity, setActivity] = useState(null);
+  const [plansDist, setPlansDist] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [days, setDays] = useState(30);
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      adminApi.get(`/api/admin/charts/user-growth?days=${days}`).then(r => r.data).catch(() => []),
-      adminApi.get(`/api/admin/charts/activity?days=${days}`).then(r => r.data).catch(() => [])
-    ]).then(([ug, act]) => {
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const [ug, wg, act, pd, sum] = await Promise.all([
+        adminApi.get(`/api/admin/charts/user-growth?days=${days}`).then(r => r.data).catch(() => []),
+        adminApi.get(`/api/admin/charts/workspaces-growth?days=${days}`).then(r => r.data).catch(() => []),
+        adminApi.get(`/api/admin/charts/activity?days=${days}`).then(r => r.data).catch(() => []),
+        adminApi.get(`/api/admin/charts/plans-distribution?days=${days}`).then(r => r.data).catch(() => []),
+        adminApi.get(`/api/admin/charts/summary?days=${days}`).then(r => r.data).catch(() => null)
+      ]);
       setUserGrowth(ug);
+      setWsGrowth(wg);
       setActivity(act);
-    }).finally(() => setLoading(false));
+      setPlansDist(pd);
+      setSummary(sum);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [days]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh 60s s Page Visibility pause
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
 
   if (loading) return <div className="sa-loading">Načítavam grafy...</div>;
 
@@ -2569,13 +2598,78 @@ function ChartsTab() {
     ]
   };
 
+  const wsGrowthData = wsGrowth && {
+    labels: wsGrowth.map(d => formatLabel(d.date)),
+    datasets: [
+      {
+        label: 'Celkovo workspace-ov',
+        data: wsGrowth.map(d => d.cumulative),
+        borderColor: '#06b6d4',
+        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y'
+      },
+      {
+        label: 'Nové workspace-y',
+        data: wsGrowth.map(d => d.daily),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        fill: true,
+        tension: 0.3,
+        yAxisID: 'y1'
+      }
+    ]
+  };
+
+  // Plans distribution — stacked area chart pre vizualizáciu zmeny pomeru
+  // free/team/pro v čase. Pri PrplCRM v early stage bude graf rovný (všetko
+  // free), ale po prvých Stripe plat-coch vidíme reálny shift.
+  const plansDistData = plansDist && {
+    labels: plansDist.map(d => formatLabel(d.date)),
+    datasets: [
+      {
+        label: 'Free',
+        data: plansDist.map(d => d.free || 0),
+        borderColor: '#94a3b8',
+        backgroundColor: 'rgba(148, 163, 184, 0.5)',
+        fill: true,
+        tension: 0.2,
+        stack: 'a'
+      },
+      {
+        label: 'Tím',
+        data: plansDist.map(d => d.team || 0),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.5)',
+        fill: true,
+        tension: 0.2,
+        stack: 'a'
+      },
+      {
+        label: 'Pro',
+        data: plansDist.map(d => d.pro || 0),
+        borderColor: '#8b5cf6',
+        backgroundColor: 'rgba(139, 92, 246, 0.5)',
+        fill: true,
+        tension: 0.2,
+        stack: 'a'
+      }
+    ]
+  };
+
+  // Activity — rozšírené o všetky 7 audit kategórií. Bez nich graf
+  // ukazoval len 4/7 events a vyzeral "chudobne".
   const activityData = activity && {
     labels: activity.map(d => formatLabel(d.date)),
     datasets: [
-      { label: 'Kontakty', data: activity.map(d => d.contact || 0), backgroundColor: chartColors.blue, stack: 'a' },
-      { label: 'Úlohy', data: activity.map(d => d.task || 0), backgroundColor: chartColors.green, stack: 'a' },
-      { label: 'Správy', data: activity.map(d => d.message || 0), backgroundColor: chartColors.orange, stack: 'a' },
-      { label: 'Auth', data: activity.map(d => d.auth || 0), backgroundColor: chartColors.gray, stack: 'a' }
+      { label: '👤 Kontakty', data: activity.map(d => d.contact || 0), backgroundColor: chartColors.blue, stack: 'a' },
+      { label: '📋 Projekty', data: activity.map(d => d.task || 0), backgroundColor: chartColors.green, stack: 'a' },
+      { label: '✉️ Správy', data: activity.map(d => d.message || 0), backgroundColor: chartColors.orange, stack: 'a' },
+      { label: '🏢 Workspace', data: activity.map(d => d.workspace || 0), backgroundColor: '#06b6d4', stack: 'a' },
+      { label: '💰 Billing', data: activity.map(d => d.billing || 0), backgroundColor: '#10b981', stack: 'a' },
+      { label: '👥 User', data: activity.map(d => d.user || 0), backgroundColor: '#ec4899', stack: 'a' },
+      { label: '🔓 Auth', data: activity.map(d => d.auth || 0), backgroundColor: chartColors.gray, stack: 'a' }
     ]
   };
 
@@ -2588,20 +2682,55 @@ function ChartsTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Grafy a analytika</h2>
-        <select value={days} onChange={e => setDays(Number(e.target.value))}
-          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px' }}>
-          <option value={7}>7 dní</option>
-          <option value={30}>30 dní</option>
-          <option value={90}>90 dní</option>
-        </select>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Grafy a analytika
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h2>
+        {/* Period button group — viditeľnejšie ako dropdown */}
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg-secondary)', padding: 4, borderRadius: 'var(--radius-md)' }}>
+          {[7, 30, 90, 365].map((d) => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              style={{
+                padding: '6px 14px',
+                background: days === d ? 'var(--accent-color, #6366f1)' : 'transparent',
+                color: days === d ? 'white' : 'var(--text-primary)',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 13,
+                cursor: 'pointer',
+                fontWeight: days === d ? 600 : 400
+              }}
+            >
+              {d === 365 ? '1 rok' : `${d} dní`}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Stat cards — peak day, average, total */}
+      {summary && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <DiagStat label={`Nové registrácie (${summary.windowDays}d)`} value={summary.newUsers} color="#10b981" />
+          <DiagStat label={`Nové workspace-y (${summary.windowDays}d)`} value={summary.newWorkspaces} color="#06b6d4" />
+          <DiagStat label="Priemer registrácií / deň" value={summary.avgRegPerDay} color="#8b5cf6" />
+          <DiagStat label="Priemer aktivity / deň" value={summary.avgActivityPerDay} color="#6366f1" />
+          {summary.peakRegDay && (
+            <DiagStat
+              label={`Peak deň: ${new Date(summary.peakRegDay.date).toLocaleDateString('sk-SK')}`}
+              value={`${summary.peakRegDay.count} reg.`}
+              color="#f59e0b"
+            />
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px' }}>
         {growthData && (
           <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>Rast používateľov</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>📈 Rast používateľov</h3>
             <div style={{ height: '300px' }}>
               <Line data={growthData} options={{
                 ...chartOpts,
@@ -2615,10 +2744,38 @@ function ChartsTab() {
           </div>
         )}
 
+        {wsGrowthData && (
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>🏢 Rast workspace-ov</h3>
+            <div style={{ height: '280px' }}>
+              <Line data={wsGrowthData} options={{
+                ...chartOpts,
+                scales: {
+                  ...chartOpts.scales,
+                  y: { position: 'left', title: { display: true, text: 'Celkovo', font: { size: 11 } } },
+                  y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Denne', font: { size: 11 } } }
+                }
+              }} />
+            </div>
+          </div>
+        )}
+
+        {plansDistData && (
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>💳 Rozdelenie plánov v čase (cumulative snapshot)</h3>
+            <div style={{ height: '300px' }}>
+              <Line data={plansDistData} options={{
+                ...chartOpts,
+                scales: { ...chartOpts.scales, y: { stacked: true } }
+              }} />
+            </div>
+          </div>
+        )}
+
         {activityData && (
           <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '20px', border: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>Aktivita podľa kategórie</h3>
-            <div style={{ height: '300px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px' }}>⚡ Aktivita podľa kategórie</h3>
+            <div style={{ height: '320px' }}>
               <Bar data={activityData} options={{
                 ...chartOpts,
                 scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, stacked: true }, y: { stacked: true } }
@@ -2629,14 +2786,43 @@ function ChartsTab() {
       </div>
 
       <AdminHelpToggle title="Grafy">
-        <p><strong>Čo tu vidíš:</strong> vizuálne trendy rastu aplikácie — registrácie, aktivita, plány v čase.</p>
+        <p><strong>Čo tu vidíš:</strong> vizuálne trendy rastu aplikácie — registrácie, workspaces, plány v čase, aktivita po kategóriách. Všetky dáta sú agregované server-side a vylučujú super admin akcie aby reflektovali skutočnú produkčnú metriku.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📅 Period selector</h4>
+        <p>Button group hore vpravo — <strong>7 dní / 30 dní / 90 dní / 1 rok</strong>. Všetky 5 grafov + stat cards sa prepočítajú podľa zvoleného obdobia. Auto-refresh každých 60s.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Stat cards (hore)</h4>
         <ul>
-          <li><strong>Registrácie podľa dní</strong> — line chart, koľko nových userov pribudlo za posledných N dní.</li>
-          <li><strong>Plány v čase</strong> — stacked bar chart, distribúcia Free/Tím/Pro užívateľov v jednotlivých dňoch.</li>
-          <li><strong>Aktivita</strong> — počet vytvorených kontaktov / projektov / správ za obdobie.</li>
-          <li><strong>Doughnut</strong> — aktuálny snapshot rozdelenia plánov / rolí.</li>
+          <li><strong>Nové registrácie</strong> — total nových userov za zvolené obdobie.</li>
+          <li><strong>Nové workspace-y</strong> — analogicky pre workspaces.</li>
+          <li><strong>Priemer registrácií / deň</strong> — total / N dní (užitočné pre porovnanie období).</li>
+          <li><strong>Priemer aktivity / deň</strong> — celkový počet audit log eventov / N dní.</li>
+          <li><strong>Peak deň</strong> — deň s najviac registráciami v období + počet.</li>
         </ul>
-        <p><strong>Tipy:</strong> Grafy fetchujú agregované dáta zo servera (žiadny per-user lookup), preto sú rýchle aj pri tisícoch userov. Hover na bod ukáže presnú hodnotu pre daný deň. Toto je read-only pohľad — pre úpravy choď do tabu Používatelia.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📈 Rast používateľov</h4>
+        <p>Dual-axis Line chart: <em>kumulatívny total</em> (ľavá os) + <em>denné nové registrácie</em> (pravá os). Healthy growth = stúpajúca cumulatívna krivka so stabilnými alebo rastúcimi dennými spike-mi.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🏢 Rast workspace-ov</h4>
+        <p>Analogický graf pre workspaces. Pomer workspace : user blízky 1:1 = každý user si vytvára vlastný workspace; pomer {'>'} 1.5 = power useri s viacerými projektmi.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💳 Rozdelenie plánov v čase</h4>
+        <p>Stacked Line chart kumulatívnej distribúcie Free/Tím/Pro. Aproximácia — berie aktuálny plán userov a aplikuje ho retroaktívne podľa createdAt (nereflektuje historické plan zmeny). Pre presný revenue tracking pozri <em>Diagnostika → Príjmy</em>.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>⚡ Aktivita podľa kategórie</h4>
+        <p>Stacked Bar chart denných audit log eventov rozdelených na 7 kategórií: 👤 Kontakty, 📋 Projekty, ✉️ Správy, 🏢 Workspace, 💰 Billing, 👥 User, 🔓 Auth. Zobrazuje skutočné používanie produktu — ktoré features sú najaktívnejšie.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Stat cards — pomer registrácií 7d vs predošlých 7d (otvor 7d a porovnaj).</li>
+          <li>Rast používateľov — krivka stúpa? Plat-eau alebo pokles = problém.</li>
+          <li>Plans distribution — pomer paid:free rastie? Ak rok-na-rok stagnuje, treba upgrade marketing alebo pricing tweak.</li>
+          <li>Aktivita — Auth + Contact dominantné? Ak Task/Message minimálne, engagement je slabý.</li>
+        </ol>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Všetky grafy fetchujú agregované dáta zo servera (žiadny per-user lookup), preto sú rýchle aj pri tisícoch userov. Hover na bod ukáže presnú hodnotu pre daný deň. Toto je read-only pohľad — pre úpravy choď do tabu Používatelia / Workspace-y.
+        </p>
       </AdminHelpToggle>
     </div>
   );
