@@ -4190,10 +4190,15 @@ const PROMO_TYPES = {
 function PromoCodesTab() {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedCode, setSelectedCode] = useState(null);
   const [stats, setStats] = useState(null);
+  // Filter + sort
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState(''); // '' | 'active' | 'inactive' | 'expired' | 'exhausted' | 'stripe'
+  const [sortBy, setSortBy] = useState('createdAt'); // createdAt | usedCount | value | expiresAt
 
   // Form state
   const [form, setForm] = useState({
@@ -4203,18 +4208,32 @@ function PromoCodesTab() {
     maxUses: '', maxUsesPerUser: '1', expiresAt: ''
   });
 
-  const fetchCodes = useCallback(async () => {
+  const fetchCodes = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
       const res = await adminApi.get('/api/admin/promo-codes');
       setCodes(res.data);
-    } catch {
-      // ignore
-    } finally {
+    } catch { /* ignore */ }
+    finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => { fetchCodes(); }, [fetchCodes]);
+
+  // Auto-refresh 60s s Page Visibility pause
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) fetchCodes(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [fetchCodes]);
 
   const resetForm = () => {
     setForm({ code: '', name: '', type: 'percentage', value: '', duration: 'once', durationInMonths: '3', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '' });
@@ -4315,13 +4334,114 @@ function PromoCodesTab() {
 
   if (loading) return <div className="sa-loading">Načítavam promo kódy...</div>;
 
+  // Stat header breakdown — kompletný overview promo kódov
+  const breakdown = {
+    total: codes.length,
+    active: codes.filter((c) => c.isActive && !isExpired(c.expiresAt) && !(c.maxUses > 0 && c.usedCount >= c.maxUses)).length,
+    inactive: codes.filter((c) => !c.isActive).length,
+    expired: codes.filter((c) => isExpired(c.expiresAt)).length,
+    exhausted: codes.filter((c) => c.maxUses > 0 && c.usedCount >= c.maxUses).length,
+    stripeSync: codes.filter((c) => c.stripeCouponId).length,
+    totalUses: codes.reduce((sum, c) => sum + (c.usedCount || 0), 0)
+  };
+
+  // Filter + sort
+  const filtered = codes
+    .filter((c) => {
+      if (search) {
+        const s = search.toLowerCase();
+        if (!(c.code || '').toLowerCase().includes(s) && !(c.name || '').toLowerCase().includes(s)) return false;
+      }
+      if (filterStatus === 'active') {
+        return c.isActive && !isExpired(c.expiresAt) && !(c.maxUses > 0 && c.usedCount >= c.maxUses);
+      }
+      if (filterStatus === 'inactive') return !c.isActive;
+      if (filterStatus === 'expired') return isExpired(c.expiresAt);
+      if (filterStatus === 'exhausted') return c.maxUses > 0 && c.usedCount >= c.maxUses;
+      if (filterStatus === 'stripe') return !!c.stripeCouponId;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'usedCount') return (b.usedCount || 0) - (a.usedCount || 0);
+      if (sortBy === 'value') return (b.value || 0) - (a.value || 0);
+      if (sortBy === 'expiresAt') {
+        const av = a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity;
+        const bv = b.expiresAt ? new Date(b.expiresAt).getTime() : Infinity;
+        return av - bv;
+      }
+      // default: createdAt desc
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Promo kódy ({codes.length})</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>
+          Promo kódy
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h3>
         {!showForm && (
           <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 16px' }} onClick={() => setShowForm(true)}>
             + Nový kód
+          </button>
+        )}
+      </div>
+
+      {/* Stat header */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+          Celkom: <strong>{breakdown.total}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#d1fae5', color: '#065f46' }}>
+          ✅ Aktívnych: <strong>{breakdown.active}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
+          ⏰ Expirovaných: <strong>{breakdown.expired}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }}>
+          🔚 Vyčerpaných: <strong>{breakdown.exhausted}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#dbeafe', color: '#1e40af' }}>
+          💳 Stripe sync: <strong>{breakdown.stripeSync}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#ede9fe', color: '#6D28D9' }}>
+          🎯 Celkom použití: <strong>{breakdown.totalUses}</strong>
+        </span>
+      </div>
+
+      {/* Filter toolbar */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="🔍 Hľadať kód alebo názov..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="form-input"
+          style={{ flex: '1 1 200px', minWidth: 180, fontSize: 13 }}
+        />
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13 }}>
+          <option value="">Všetky stavy</option>
+          <option value="active">✅ Aktívne</option>
+          <option value="inactive">⏸ Neaktívne</option>
+          <option value="expired">⏰ Expirované</option>
+          <option value="exhausted">🔚 Vyčerpané</option>
+          <option value="stripe">💳 So Stripe sync</option>
+        </select>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 13 }}>
+          <option value="createdAt">Najnovšie</option>
+          <option value="usedCount">Najpoužívanejšie</option>
+          <option value="value">Najvyššia hodnota</option>
+          <option value="expiresAt">Končiace najskôr</option>
+        </select>
+        {(search || filterStatus) && (
+          <button
+            className="btn btn-secondary"
+            onClick={() => { setSearch(''); setFilterStatus(''); }}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+          >
+            ✕ Vymazať filtre
           </button>
         )}
       </div>
@@ -4435,14 +4555,14 @@ function PromoCodesTab() {
       )}
 
       {/* Code list */}
-      {codes.length === 0 ? (
+      {filtered.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
           <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎟️</div>
-          <p>Žiadne promo kódy</p>
+          <p>{codes.length === 0 ? 'Žiadne promo kódy' : 'Žiadne výsledky pre filter'}</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '8px' }}>
-          {codes.map(c => {
+          {filtered.map(c => {
             const expired = isExpired(c.expiresAt);
             const exhausted = c.maxUses > 0 && c.usedCount >= c.maxUses;
             const inactive = !c.isActive || expired || exhausted;
@@ -4545,21 +4665,67 @@ function PromoCodesTab() {
       )}
 
       <AdminHelpToggle title="Promo kódy">
-        <p><strong>Čo tu vidíš:</strong> správa promo kódov, ktoré užívatelia môžu uplatniť pri checkoute v Stripe (alebo zobraziť v aplikácii).</p>
+        <p><strong>Čo tu vidíš:</strong> správa promo kódov, ktoré užívatelia môžu uplatniť pri checkoute v Stripe (alebo zobraziť v aplikácii). Kódy sa po vytvorení automaticky propagujú do Stripe ako Promotion Codes.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Stat header</h4>
         <ul>
-          <li><strong>Vytvorenie kódu</strong> — názov (napr. "WELCOME20"), typ:
+          <li><strong>Celkom</strong> — všetky kódy v DB.</li>
+          <li><strong>✅ Aktívne</strong> — kódy ktoré sa dajú práve teraz uplatniť (isActive && !expired && !exhausted).</li>
+          <li><strong>⏰ Expirované</strong> — expiresAt {'<'} now.</li>
+          <li><strong>🔚 Vyčerpané</strong> — usedCount {'>='} maxUses (ak je maxUses {'>'} 0).</li>
+          <li><strong>💳 Stripe sync</strong> — kódy ktoré majú stripeCouponId (úspešná Stripe propagácia).</li>
+          <li><strong>🎯 Celkom použití</strong> — sumár usedCount naprieč všetkými kódmi.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filtre + sort</h4>
+        <ul>
+          <li><strong>Search</strong> — substring v <em>kóde</em> alebo <em>internom názve</em>.</li>
+          <li><strong>Filter stavu</strong> — Aktívne / Neaktívne / Expirované / Vyčerpané / So Stripe sync.</li>
+          <li><strong>Sort</strong> — Najnovšie (default) / Najpoužívanejšie / Najvyššia hodnota / Končiace najskôr.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>➕ Vytvorenie kódu</h4>
+        <ul>
+          <li><strong>Kód</strong> (napr. "PRPL-AKCIA50") — generátor cez tlačidlo „Generovať" vytvorí náhodný 6-znak suffix.</li>
+          <li><strong>Typ zľavy</strong>:
             <ul>
-              <li><strong>Percentuálna zľava</strong> (napr. 20% zľava na prvý mesiac)</li>
-              <li><strong>Fixná zľava</strong> (napr. −5 € z faktúry)</li>
-              <li><strong>Voľné mesiace</strong> (napr. 2 mesiace zdarma)</li>
+              <li>🏷️ <strong>Percentuálna</strong> (napr. 20% zľava)</li>
+              <li>💶 <strong>Fixná</strong> (napr. −5 € z faktúry)</li>
+              <li>🎁 <strong>Voľné mesiace</strong> (napr. 2 mesiace zdarma)</li>
             </ul>
           </li>
-          <li><strong>Limit použití</strong> — maximálny počet užívateľov, ktorí môžu kód uplatniť (napr. prvých 100).</li>
-          <li><strong>Platnosť</strong> — od/do dátumy.</li>
-          <li><strong>Stripe sync</strong> — pri vytvorení sa kód propaguje aj do Stripe ako Promotion Code (aby fungoval v ich checkoute). Ak Stripe sync zlyhá, kód existuje len lokálne.</li>
-          <li><strong>História použití</strong> — pri každom kóde vidíš zoznam užívateľov, ktorí ho uplatnili + kedy.</li>
+          <li><strong>Platnosť zľavy</strong> (len pre percentage / fixed):
+            <ul>
+              <li>Len 1. platba — discount sa aplikuje raz</li>
+              <li>Opakovane X mesiacov — sleduje sa N billing cyklov</li>
+              <li>Navždy — celý lifetime predplatného</li>
+            </ul>
+            (freeMonths má implicitne „repeating" = X mesiacov, kde X = hodnota.)
+          </li>
+          <li><strong>Platné pre plány / obdobie</strong> — chip selector. Prázdne = platí pre všetky.</li>
+          <li><strong>Limit použití</strong> — globálny strop (0 = neobmedzené).</li>
+          <li><strong>Limit na užívateľa</strong> — koľkokrát môže ten istý user uplatniť (default 1).</li>
+          <li><strong>Platnosť do</strong> — datetime kedy kód expiruje.</li>
         </ul>
-        <p><strong>Tipy:</strong> Promo kódy sa od admin-applied zliav (DiscountEditor v Používateľoch) líšia tým, že ich uplatňuje user sám pri checkoute. Discount editor je ručný "darček od admina".</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📋 Zoznam kódov</h4>
+        <ul>
+          <li><strong>Status badges</strong>: NEAKTÍVNY (manual deaktivácia), EXPIROVANÝ (expiresAt past), VYČERPANÝ (usedCount {'>='} maxUses), STRIPE (úspešný sync).</li>
+          <li><strong>📊 Štatistiky</strong> — modal s históriou použití (user / plán / obdobie / dátum).</li>
+          <li><strong>⏸/▶</strong> — manuálne aktivovať/deaktivovať bez mazania.</li>
+          <li><strong>🗑️</strong> — natrvalo zmazať (ak je už použitý, history sa zachová).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Sort „Najpoužívanejšie" — top kódy ako conversion driver. Stagnujú? Skús iný discount.</li>
+          <li>Filter „Vyčerpané" — kandidáti na zvýšenie maxUses alebo nový kód s rovnakým tieži.</li>
+          <li>Filter „Expirované" — cleanup kandidáti pri DB raste (mazanie nezruší Stripe historickú prepojenosť).</li>
+        </ol>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Promo kódy sa od admin-applied zliav (Discount editor v Používateľoch) líšia tým, že ich uplatňuje user sám pri Stripe checkoute. Discount editor je ručný „darček od admina" priamo do user.subscription.discount poľa.
+        </p>
       </AdminHelpToggle>
     </div>
   );
