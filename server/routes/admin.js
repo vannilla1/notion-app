@@ -236,9 +236,23 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
 
     // Last login lookup z AuditLog. Robíme single aggregation (max createdAt)
     // na všetkých userov v poslednom rezultsete — efektívnejšie ako N+1.
-    // Pred filtrovaním podľa active musíme mať lastLogin tabuľku.
+    //
+    // Match obsahuje 4 typy autentifikačných akcií aby sme zachytili
+    // všetkých userov bez ohľadu na auth metódu:
+    //   auth.login           — klasický password login
+    //   auth.oauth.login     — Google / Apple existing user login
+    //   auth.register        — klasická signup (implicit login po creation)
+    //   auth.oauth.register  — OAuth signup (Google/Apple new user)
+    //
+    // Predtým match-oval len 'auth.login' → OAuth-only userovia mali
+    // "nikdy" status aj keď sa reálne nedávno prihlásili.
     const recentLogins = await AuditLog.aggregate([
-      { $match: { action: 'auth.login', userId: { $exists: true } } },
+      {
+        $match: {
+          action: { $in: ['auth.login', 'auth.oauth.login', 'auth.register', 'auth.oauth.register'] },
+          userId: { $exists: true }
+        }
+      },
       { $group: { _id: '$userId', lastLogin: { $max: '$createdAt' } } }
     ]);
     const lastLoginMap = new Map(recentLogins.map((r) => [String(r._id), r.lastLogin]));
