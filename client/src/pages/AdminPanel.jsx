@@ -1255,6 +1255,54 @@ function DeleteUserConfirmModal({ user, onCancel, onConfirm }) {
   );
 }
 
+// Typed-confirmation pre delete workspace — analogicky ako pri usere.
+// Workspace delete vymaže VŠETKY kontakty/úlohy/správy/členstvá v ňom,
+// preto silnejšia ochrana pred mis-clickom je nevyhnutná.
+function DeleteWorkspaceConfirmModal({ workspace, onCancel, onConfirm }) {
+  const [typed, setTyped] = useState('');
+  const matches = typed === workspace.name;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, padding: 24 }}>
+        <h3 style={{ marginTop: 0, color: '#dc2626' }}>⚠️ Vymazať workspace</h3>
+        <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+          <strong>Nevratná destrukčná akcia.</strong> Vymaže sa:
+        </p>
+        <ul style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, margin: '8px 0 16px' }}>
+          <li>Workspace <strong>{workspace.name}</strong> (/{workspace.slug})</li>
+          <li>Všetky kontakty, projekty (vrátane podúloh), správy</li>
+          <li>Všetky workspace memberships (členov)</li>
+          <li>Súvisiaca audit history a notifikácie</li>
+        </ul>
+        <p style={{ fontSize: 13, color: 'var(--text-primary)', marginBottom: 8 }}>
+          Pre potvrdenie napíš názov workspace-u <code style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{workspace.name}</code>:
+        </p>
+        <input
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder={workspace.name}
+          autoFocus
+          className="form-input"
+          style={{ width: '100%', marginBottom: 16, fontSize: 14 }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Zrušiť</button>
+          <button
+            className="btn btn-danger"
+            disabled={!matches}
+            onClick={onConfirm}
+            style={{ opacity: matches ? 1 : 0.5 }}
+          >
+            Natrvalo vymazať
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── DEVICES SUMMARY ────────────────────────────────────────────
 function DevicesSummary({ devices }) {
   const [expanded, setExpanded] = useState(false);
@@ -1328,19 +1376,74 @@ function DevicesSummary({ devices }) {
 }
 
 // ─── WORKSPACES TAB ─────────────────────────────────────────────
+const WS_STATUS_LABELS = {
+  active: { label: 'Aktívny', color: '#10b981', bg: '#d1fae5' },
+  inactive: { label: 'Inaktívny', color: '#92400e', bg: '#fef3c7' },
+  empty: { label: 'Prázdny', color: '#6b7280', bg: '#f3f4f6' }
+};
+
 function WorkspacesTab() {
   const [workspaces, setWorkspaces] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [breakdown, setBreakdown] = useState({});
+  const [page, setPage] = useState(1);
+  const [limit] = useState(50);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedWs, setSelectedWs] = useState(null);
   const [wsDetail, setWsDetail] = useState(null);
   const [wsDetailLoading, setWsDetailLoading] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
 
+  // Filter + sort
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterOwnerPlan, setFilterOwnerPlan] = useState('');
+  const [filterStripe, setFilterStripe] = useState('');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  const fetchWorkspaces = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const params = { page, limit, sort: sortBy, order: sortOrder };
+      if (search.trim()) params.search = search.trim();
+      if (filterStatus) params.status = filterStatus;
+      if (filterOwnerPlan) params.ownerPlan = filterOwnerPlan;
+      if (filterStripe) params.hasStripe = filterStripe;
+      const res = await adminApi.get('/api/admin/workspaces', { params });
+      setWorkspaces(res.data.workspaces || []);
+      setTotal(res.data.total || 0);
+      setBreakdown(res.data.breakdown || {});
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [page, limit, sortBy, sortOrder, search, filterStatus, filterOwnerPlan, filterStripe]);
+
+  useEffect(() => { fetchWorkspaces(); }, [fetchWorkspaces]);
+
+  // Auto-refresh 60s s Page Visibility pause
   useEffect(() => {
-    adminApi.get('/api/admin/workspaces')
-      .then(res => setWorkspaces(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) fetchWorkspaces(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [fetchWorkspaces]);
+
+  // Reset page pri zmene filtra/sortu
+  useEffect(() => { setPage(1); }, [search, filterStatus, filterOwnerPlan, filterStripe, sortBy, sortOrder]);
+
+  const handleSort = (column) => {
+    if (sortBy === column) setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(column); setSortOrder('desc'); }
+  };
 
   const openWsDetail = (wsId) => {
     setSelectedWs(wsId);
@@ -1351,26 +1454,85 @@ function WorkspacesTab() {
       .finally(() => setWsDetailLoading(false));
   };
 
-  const handleDeleteWorkspace = async () => {
+  const handleDeleteWorkspace = () => {
     if (!wsDetail) return;
-    const name = wsDetail.workspace.name;
-    if (!window.confirm(`Naozaj vymazať workspace "${name}"?\n\nToto vymaže VŠETKY kontakty, úlohy, správy a členstvá v tomto workspace. Táto akcia je NEVRATNÁ.`)) return;
+    setDeleteCandidate(wsDetail.workspace);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteCandidate) return;
     try {
       await adminApi.delete(`/api/admin/workspaces/${selectedWs}`);
       setWorkspaces(prev => prev.filter(w => w.id !== selectedWs));
       setSelectedWs(null);
       setWsDetail(null);
+      setDeleteCandidate(null);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri mazaní workspace');
     }
   };
 
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
   if (loading) return <div className="sa-loading">Načítavam workspace-y...</div>;
 
   return (
     <div className="sa-workspaces">
-      <div className="sa-toolbar">
-        <span className="sa-count">{workspaces.length} workspace-ov</span>
+      {/* Stat header */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+          Celkom: <strong>{breakdown.total ?? total}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#d1fae5', color: '#065f46' }}>
+          Aktívnych: <strong>{breakdown.active || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
+          Inaktívnych: <strong>{breakdown.inactive || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>
+          Prázdnych: <strong>{breakdown.empty || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#ede9fe', color: '#6D28D9' }}>
+          💳 So Stripe ownerom: <strong>{breakdown.withStripeOwner || 0}</strong>
+        </span>
+        {refreshing && <span style={{ padding: '4px 10px', color: '#10b981' }}>● auto-refresh</span>}
+      </div>
+
+      <div className="sa-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <input
+          type="text"
+          placeholder="🔍 Hľadať workspace podľa názvu..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="form-input sa-search"
+          style={{ flex: '1 1 220px', minWidth: 200 }}
+        />
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Všetky stavy</option>
+          <option value="active">Aktívne ({'<'}30d)</option>
+          <option value="inactive">Inaktívne ({'>'}30d)</option>
+          <option value="empty">Prázdne</option>
+        </select>
+        <select value={filterOwnerPlan} onChange={(e) => setFilterOwnerPlan(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Plán ownera</option>
+          <option value="free">Free</option>
+          <option value="team">Tím</option>
+          <option value="pro">Pro</option>
+        </select>
+        <select value={filterStripe} onChange={(e) => setFilterStripe(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Stripe owner ?</option>
+          <option value="true">💳 Má Stripe</option>
+          <option value="false">Bez Stripe</option>
+        </select>
+        {(search || filterStatus || filterOwnerPlan || filterStripe) && (
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => { setSearch(''); setFilterStatus(''); setFilterOwnerPlan(''); setFilterStripe(''); }}
+          >
+            ✕ Vymazať filtre
+          </button>
+        )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
           onClick={() => adminApi.get('/api/admin/export/workspaces', { responseType: 'blob' }).then(res => {
             const url = URL.createObjectURL(res.data);
@@ -1384,45 +1546,118 @@ function WorkspacesTab() {
         <table className="users-table">
           <thead>
             <tr>
-              <th>Workspace</th>
+              <th onClick={() => handleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Workspace {sortBy === 'name' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th>Stav</th>
               <th>Vlastník</th>
-              <th>Členovia</th>
-              <th>Kontakty</th>
-              <th>Projekty</th>
-              <th>Platené miesta</th>
-              <th>Vytvorený</th>
+              <th onClick={() => handleSort('memberCount')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Členovia {sortBy === 'memberCount' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th>Dáta</th>
+              <th onClick={() => handleSort('lastActivity')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Posledná aktivita {sortBy === 'lastActivity' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th onClick={() => handleSort('createdAt')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Vytvorený {sortBy === 'createdAt' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {workspaces.map(w => (
-              <tr key={w.id} onClick={() => openWsDetail(w.id)} style={{ cursor: 'pointer' }}>
-                <td>
-                  <div className="sa-ws-name">
-                    <span className="sa-ws-color" style={{ backgroundColor: w.color }}></span>
-                    <div>
-                      <div className="sa-ws-title">{w.name}</div>
-                      <div className="sa-ws-slug">/{w.slug}</div>
+            {workspaces.map(w => {
+              const statusMeta = WS_STATUS_LABELS[w.status] || WS_STATUS_LABELS.empty;
+              return (
+                <tr key={w.id} onClick={() => openWsDetail(w.id)} style={{ cursor: 'pointer' }}>
+                  <td>
+                    <div className="sa-ws-name">
+                      <span className="sa-ws-color" style={{ backgroundColor: w.color }}></span>
+                      <div>
+                        <div className="sa-ws-title">{w.name}</div>
+                        <div className="sa-ws-slug">/{w.slug}</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td>
-                  <div className="sa-owner-cell">
-                    <div>{w.owner.username}</div>
-                    <div className="sa-sub-text">{w.owner.email}</div>
-                  </div>
-                </td>
-                <td className="sa-center">{w.memberCount}</td>
-                <td className="sa-center">{w.contactCount}</td>
-                <td className="sa-center">{w.taskCount}</td>
-                <td className="sa-center">{w.paidSeats || 0}</td>
-                <td className="sa-date-cell">
-                  {new Date(w.createdAt).toLocaleDateString('sk-SK')}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td>
+                    <span style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 999,
+                      background: statusMeta.bg, color: statusMeta.color, fontWeight: 600
+                    }}>
+                      {statusMeta.label}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="sa-owner-cell">
+                      <div>
+                        {w.owner.username}
+                        {w.owner.hasStripe && (
+                          <span title="Owner má aktívny Stripe sub" style={{ marginLeft: 4, fontSize: 10 }}>💳</span>
+                        )}
+                        <span style={{
+                          marginLeft: 4, fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                          background: w.owner.plan === 'pro' ? '#ede9fe' : w.owner.plan === 'team' ? '#fef3c7' : '#f3f4f6',
+                          color: w.owner.plan === 'pro' ? '#6D28D9' : w.owner.plan === 'team' ? '#92400e' : '#6b7280',
+                          textTransform: 'uppercase', fontWeight: 600
+                        }}>
+                          {w.owner.plan}
+                        </span>
+                      </div>
+                      <div className="sa-sub-text">{w.owner.email}</div>
+                    </div>
+                  </td>
+                  <td className="sa-center" title={`${w.memberRoles?.owner || 0} ownerov · ${w.memberRoles?.manager || 0} manažérov · ${w.memberRoles?.member || 0} členov`}>
+                    {w.memberCount}
+                    {w.memberRoles && (w.memberRoles.manager > 0 || w.memberRoles.member > 0) && (
+                      <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        👑{w.memberRoles.owner || 0} · 👨‍💼{w.memberRoles.manager || 0} · 👤{w.memberRoles.member || 0}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    📋 {w.taskCount} · 👤 {w.contactCount}
+                    {w.messageCount > 0 && <span> · ✉️ {w.messageCount}</span>}
+                  </td>
+                  <td className="sa-date-cell" style={{ fontSize: 12 }}>
+                    {w.lastActivity
+                      ? <span style={{ color: w.status === 'active' ? 'inherit' : 'var(--text-muted)' }}>
+                          {new Date(w.lastActivity).toLocaleDateString('sk-SK')}
+                        </span>
+                      : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>žiadna</span>
+                    }
+                  </td>
+                  <td className="sa-date-cell">
+                    {new Date(w.createdAt).toLocaleDateString('sk-SK')}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderTop: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              Strana {page} z {totalPages} ({total} workspace-ov)
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ fontSize: 12 }}>
+                ← Predch.
+              </button>
+              <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} style={{ fontSize: 12 }}>
+                Ďalšia →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Typed-confirmation delete modal */}
+      {deleteCandidate && (
+        <DeleteWorkspaceConfirmModal
+          workspace={deleteCandidate}
+          onCancel={() => setDeleteCandidate(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
 
       {/* Workspace Detail Modal */}
       {selectedWs && (
@@ -1443,18 +1678,33 @@ function WorkspacesTab() {
                   </div>
                 </div>
 
-                {/* Stats grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                  {[
-                    { label: 'Kontakty', value: wsDetail.stats.contactCount },
-                    { label: 'Úlohy', value: `${wsDetail.stats.completedTasks}/${wsDetail.stats.taskCount}` },
-                    { label: 'Správy', value: wsDetail.stats.messageCount },
-                  ].map(s => (
-                    <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '10px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '20px', fontWeight: 700 }}>{s.value}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{s.label}</div>
+                {/* Stats grid + last activity timestamp */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 700 }}>{wsDetail.stats.contactCount}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>👤 Kontakty</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 700 }}>{wsDetail.stats.completedTasks}/{wsDetail.stats.taskCount}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>📋 Úlohy (✓/celkom)</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 700 }}>
+                      {wsDetail.stats.messageCount}
+                      {wsDetail.stats.pendingMessages > 0 && (
+                        <span style={{ fontSize: 12, color: '#f59e0b', marginLeft: 4 }}>({wsDetail.stats.pendingMessages} pending)</span>
+                      )}
                     </div>
-                  ))}
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>✉️ Správy</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                      {wsDetail.lastActivity
+                        ? new Date(wsDetail.lastActivity).toLocaleDateString('sk-SK')
+                        : 'žiadna'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>📅 Posledná aktivita</div>
+                  </div>
                 </div>
 
                 {/* Members */}
@@ -1473,15 +1723,86 @@ function WorkspacesTab() {
                   </div>
                 </div>
 
-                {/* Recent contacts */}
-                {wsDetail.recentContacts?.length > 0 && (
+                {/* Recent contacts / tasks / messages — 3-column layout pre kompaktnosť */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  {/* Recent contacts */}
                   <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Posledné kontakty</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {wsDetail.recentContacts.slice(0, 10).map(c => (
-                        <div key={c._id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '4px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                          <span>{c.name || '—'} {c.company ? `(${c.company})` : ''}</span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(c.createdAt).toLocaleDateString('sk-SK')}</span>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>👤 Posledné kontakty</h4>
+                    {wsDetail.recentContacts?.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: 220, overflow: 'auto' }}>
+                        {wsDetail.recentContacts.slice(0, 10).map(c => (
+                          <div key={c._id} style={{ fontSize: 12, padding: '5px 8px', background: 'var(--bg-secondary)', borderRadius: 4, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name || '—'}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(c.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit' })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>žiadne</div>
+                    )}
+                  </div>
+
+                  {/* Recent tasks */}
+                  <div>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>📋 Posledné projekty</h4>
+                    {wsDetail.recentTasks?.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: 220, overflow: 'auto' }}>
+                        {wsDetail.recentTasks.slice(0, 10).map(t => (
+                          <div key={t._id} style={{ fontSize: 12, padding: '5px 8px', background: 'var(--bg-secondary)', borderRadius: 4, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: t.completed ? 'line-through' : 'none', color: t.completed ? 'var(--text-muted)' : 'inherit' }}>
+                              {t.completed ? '✓ ' : ''}{t.title || '—'}
+                            </span>
+                            {t.priority && (
+                              <span style={{
+                                fontSize: 9, padding: '0 4px', borderRadius: 3,
+                                background: t.priority === 'high' ? '#fee2e2' : t.priority === 'medium' ? '#fef3c7' : '#f3f4f6',
+                                color: t.priority === 'high' ? '#991b1b' : t.priority === 'medium' ? '#92400e' : '#6b7280',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {t.priority === 'high' ? 'V' : t.priority === 'medium' ? 'S' : 'N'}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>žiadne</div>
+                    )}
+                  </div>
+
+                  {/* Recent messages */}
+                  <div>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>✉️ Posledné správy</h4>
+                    {wsDetail.recentMessages?.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: 220, overflow: 'auto' }}>
+                        {wsDetail.recentMessages.slice(0, 10).map(m => (
+                          <div key={m._id} style={{ fontSize: 12, padding: '5px 8px', background: 'var(--bg-secondary)', borderRadius: 4, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.subject || '(bez predmetu)'}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(m.createdAt).toLocaleDateString('sk-SK', { day: '2-digit', month: '2-digit' })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>žiadne</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Activity timeline z audit logu */}
+                {wsDetail.recentActivity?.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>⏱️ Posledná aktivita workspace-u</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: 200, overflow: 'auto' }}>
+                      {wsDetail.recentActivity.map((a, i) => (
+                        <div key={i} style={{ fontSize: 12, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 4, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <strong>{a.username || 'systém'}</strong>{' · '}
+                            {ACTION_LABELS[a.action] || a.action}
+                            {a.targetName ? ` — ${a.targetName}` : ''}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                            {new Date(a.createdAt).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1504,19 +1825,61 @@ function WorkspacesTab() {
       )}
 
       <AdminHelpToggle title="Workspace-y">
-        <p><strong>Čo tu vidíš:</strong> všetky workspace-y v systéme — vlastníci, počet členov, dáta vo vnútri.</p>
+        <p><strong>Čo tu vidíš:</strong> všetky produkčné workspace-y v systéme (super admin testovacie sú vylúčené) — vlastníci, počty členov, status aktivity, dáta vo vnútri. Tabuľka je <strong>server-side filtrovaná, sortovaná a stránkovaná</strong>.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>📊 Stat header (hore)</h4>
         <ul>
-          <li><strong>Vyhľadávanie</strong> hore — podľa názvu alebo emailu vlastníka.</li>
-          <li><strong>Riadok workspace-u</strong> — ukazuje názov, vlastníka, počet členov, počet kontaktov a projektov.</li>
-          <li><strong>Klik na workspace</strong> → otvorí detail panel:
-            <ul>
-              <li><strong>Členovia</strong> — kto je v workspace-u + ich rola (owner / manager / member).</li>
-              <li><strong>Posledné kontakty</strong> — výpis 10 najnovších pridaných kontaktov.</li>
-              <li><strong>Vymazať workspace</strong> — destructive akcia, kompletne odstráni workspace + všetky kontakty, úlohy, správy, členstvá.</li>
-            </ul>
-          </li>
+          <li><strong>Celkom / Aktívnych / Inaktívnych / Prázdnych</strong> — agregovaný breakdown podľa status detection.</li>
+          <li><strong>Aktívny</strong> = lastActivity (max z contact/task/message updatedAt) za posledných 30 dní.</li>
+          <li><strong>Inaktívny</strong> = má dáta ale lastActivity je staršia ako 30 dní → kandidát na cleanup, alebo nudge owner-a.</li>
+          <li><strong>Prázdny</strong> = workspace bez akýchkoľvek kontaktov/úloh/správ. Môže byť čerstvo vytvorený alebo opustený hneď po registrácii — sledovať trendy onboarding-u.</li>
+          <li><strong>💳 So Stripe ownerom</strong> — počet workspace-ov ktorých vlastník platí cez Stripe (priame revenue prínosné workspaces).</li>
+          <li>Auto-refresh 60s s Page Visibility pause.</li>
         </ul>
-        <p><strong>Tipy:</strong> Workspace môže existovať aj keď vlastník už nemá aktívne predplatné — limity sa kontrolujú podľa plánu majiteľa workspace-u (workspace owner). Pri vymazaní user-a sa jeho workspaces neodstránia automaticky — treba ich vymazať ručne tu.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🔍 Filtre</h4>
+        <ul>
+          <li><strong>Search</strong> — substring v názve workspace-u (case-insensitive).</li>
+          <li><strong>Stav</strong> — Aktívne ({'<'} 30d) / Inaktívne ({'>'} 30d) / Prázdne</li>
+          <li><strong>Plán ownera</strong> — Free / Tím / Pro</li>
+          <li><strong>Stripe owner</strong> — má/nemá reálne Stripe predplatné</li>
+          <li><strong>✕ Vymazať filtre</strong> — quick reset</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>↕️ Sort</h4>
+        <p>Klik na header column toggle-uje sort: <em>Workspace</em> (podľa názvu), <em>Členovia</em> (počet), <em>Posledná aktivita</em>, <em>Vytvorený</em>. Defaultne najnovší prvý.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>📋 Stĺpce v tabuľke</h4>
+        <ul>
+          <li><strong>Workspace</strong> — farebná bodka + meno + slug (URL part).</li>
+          <li><strong>Stav</strong> — farebný badge (Aktívny / Inaktívny / Prázdny) podľa lastActivity.</li>
+          <li><strong>Vlastník</strong> — username, email + plan badge (Free/Tím/Pro) + 💳 Stripe ikonka ak má reálne predplatné.</li>
+          <li><strong>Členovia</strong> — count + breakdown 👑 ownerov / 👨‍💼 manažérov / 👤 členov pod číslom.</li>
+          <li><strong>Dáta</strong> — 📋 počet projektov · 👤 kontaktov · ✉️ správ (ak sú).</li>
+          <li><strong>Posledná aktivita</strong> — kedy sa naposledy zmenil ľubovoľný objekt (contact / task / message updatedAt).</li>
+          <li><strong>Vytvorený</strong> — createdAt.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>👤 Detail modal (klik na riadok)</h4>
+        <ul>
+          <li><strong>Stats grid</strong> — kontakty, úlohy (completed/celkom), správy (s pending counter), posledná aktivita.</li>
+          <li><strong>Členovia</strong> — všetci s rolou badge (owner/manager/member), email + username.</li>
+          <li><strong>3-stĺpcové výpisy</strong> — posledné kontakty (10), posledné projekty (10) s priority badge V/S/N a strike-through pre completed, posledné správy (10).</li>
+          <li><strong>⏱️ Posledná aktivita workspace-u</strong> — audit log timeline (20 najnovších akcií filtrovaných na <code>workspaceId</code>) — kto/čo/kedy.</li>
+          <li><strong>Vymazať workspace</strong> — typed-confirmation modal (musíš napísať názov workspace-u). Vymaže VŠETKY kontakty / úlohy / správy / členstvá / audit history.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Stat header — koľko prázdnych workspace-ov si pribudlo? (signál onboarding-u)</li>
+          <li>Filter "Inaktívne {'>'} 30d" → kandidáti na re-engagement email kampaň.</li>
+          <li>Filter "Stripe owner: Áno" → tu je tvoj real revenue base — sleduj health týchto workspace-ov osobitne.</li>
+          <li>Klik na workspace s veľa članmi (top sortom Členovia DESC) → over že tam nie je niečo divné (admin-vytvorený workspace-y atď.)</li>
+        </ol>
+
+        <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Workspace môže existovať aj keď vlastník už nemá aktívne predplatné — limity sa kontrolujú podľa plánu majiteľa workspace-u. Pri vymazaní usera sa jeho workspaces (kde je sole owner) odstránia automaticky cez user delete cleanup. Manuálne mazanie tu je pre prípady keď admin chce odstrániť opustené alebo testovacie workspaces bez mazania samotného usera.
+        </p>
       </AdminHelpToggle>
     </div>
   );

@@ -650,62 +650,194 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
 });
 
 // ─── ALL WORKSPACES ─────────────────────────────────────────────
+// Query: ?search=&status=active|inactive|empty&ownerPlan=free|team|pro
+//        &hasStripe=true|false&sort=createdAt|name|memberCount|lastActivity
+//        &order=asc|desc&page=&limit=
 router.get('/workspaces', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const workspaces = await Workspace.find().sort({ createdAt: -1 }).lean();
+    const { search, status, ownerPlan, hasStripe } = req.query;
+    const sort = ['createdAt', 'name', 'memberCount', 'lastActivity'].includes(req.query.sort)
+      ? req.query.sort : 'createdAt';
+    const order = req.query.order === 'asc' ? 1 : -1;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
-    // Get member counts and owner info
-    const workspaceIds = workspaces.map(w => w._id);
-    const memberCounts = await WorkspaceMember.aggregate([
-      { $match: { workspaceId: { $in: workspaceIds } } },
-      { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+    // Excludneme super admin workspaces — testovacie dáta neskreslia produkčné
+    // metriky (rovnako ako v /stats endpointe).
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const superAdminWorkspaceIds = superAdmin
+      ? (await Workspace.find({ ownerId: superAdmin._id }).select('_id').lean()).map((w) => w._id)
+      : [];
+
+    const wsFilter = {};
+    if (superAdminWorkspaceIds.length > 0) {
+      wsFilter._id = { $nin: superAdminWorkspaceIds };
+    }
+    if (search && search.trim()) {
+      const safe = escapeRegex(String(search).slice(0, 100));
+      wsFilter.name = { $regex: safe, $options: 'i' };
+    }
+
+    // Načítame všetky workspaces (po super admin exclusion + search) — agregácie
+    // potrebujú vidieť celý relevantný set pred filter-om podľa status/ownerPlan
+    // (ktoré sú post-filter v JS, lebo závisia od join-ov).
+    const allMatchingWorkspaces = await Workspace.find(wsFilter).lean();
+    const allWsIds = allMatchingWorkspaces.map((w) => w._id);
+
+    // Súbeh agregátov — efektívne ak je workspace count mierny.
+    const [memberCounts, memberRoleBreakdowns, taskCounts, contactCounts, messageCounts,
+           contactLastActivity, taskLastActivity, messageLastActivity] = await Promise.all([
+      WorkspaceMember.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      // Per-role breakdown — owner / manager / member
+      WorkspaceMember.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: { ws: '$workspaceId', role: '$role' }, count: { $sum: 1 } } }
+      ]),
+      Task.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      Contact.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      Message.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
+      ]),
+      // lastActivity = max(updatedAt) z contact / task / message dokumentov
+      Contact.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', lastAt: { $max: '$updatedAt' } } }
+      ]),
+      Task.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', lastAt: { $max: '$updatedAt' } } }
+      ]),
+      Message.aggregate([
+        { $match: { workspaceId: { $in: allWsIds } } },
+        { $group: { _id: '$workspaceId', lastAt: { $max: '$updatedAt' } } }
+      ])
     ]);
-    const memberCountMap = {};
-    for (const mc of memberCounts) {
-      memberCountMap[mc._id.toString()] = mc.count;
+
+    const memberCountMap = Object.fromEntries(memberCounts.map((mc) => [String(mc._id), mc.count]));
+    const memberRolesMap = {};
+    for (const r of memberRoleBreakdowns) {
+      const wsId = String(r._id.ws);
+      if (!memberRolesMap[wsId]) memberRolesMap[wsId] = { owner: 0, manager: 0, member: 0 };
+      memberRolesMap[wsId][r._id.role] = r.count;
+    }
+    const taskCountMap = Object.fromEntries(taskCounts.map((tc) => [String(tc._id), tc.count]));
+    const contactCountMap = Object.fromEntries(contactCounts.map((cc) => [String(cc._id), cc.count]));
+    const messageCountMap = Object.fromEntries(messageCounts.map((mc) => [String(mc._id), mc.count]));
+
+    // Zlučujeme last activity z 3 zdrojov — vezmeme max z {contact, task, message}.
+    // Workspaces bez žiadnych dát majú lastActivity = null.
+    const lastActivityMap = {};
+    for (const arr of [contactLastActivity, taskLastActivity, messageLastActivity]) {
+      for (const item of arr) {
+        const wsId = String(item._id);
+        const current = lastActivityMap[wsId];
+        if (!current || item.lastAt > current) lastActivityMap[wsId] = item.lastAt;
+      }
     }
 
-    // Get task/contact counts per workspace
-    const taskCounts = await Task.aggregate([
-      { $match: { workspaceId: { $in: workspaceIds } } },
-      { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
-    ]);
-    const taskCountMap = {};
-    for (const tc of taskCounts) {
-      taskCountMap[tc._id.toString()] = tc.count;
+    // Owner info — username, email, plan, stripeSubscriptionId
+    const ownerIds = [...new Set(allMatchingWorkspaces.map((w) => w.ownerId.toString()))];
+    const owners = await User.find({ _id: { $in: ownerIds } }, 'username email subscription.plan subscription.stripeSubscriptionId').lean();
+    const ownerMap = Object.fromEntries(owners.map((o) => [String(o._id), {
+      _id: o._id,
+      username: o.username,
+      email: o.email,
+      plan: o.subscription?.plan || 'free',
+      hasStripe: !!o.subscription?.stripeSubscriptionId
+    }]));
+
+    // Status detection per workspace:
+    //   empty    — žiadne dáta (taskCount 0 + contactCount 0 + messageCount 0)
+    //   inactive — má dáta ale lastActivity < now-30d (alebo žiadna aktivita)
+    //   active   — lastActivity v posledných 30d
+    const INACTIVE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
+    const inactiveSince = new Date(Date.now() - INACTIVE_THRESHOLD_MS);
+
+    // Build enriched + apply post-filter (status, ownerPlan, hasStripe)
+    let enriched = allMatchingWorkspaces.map((w) => {
+      const wsId = String(w._id);
+      const tasks = taskCountMap[wsId] || 0;
+      const contacts = contactCountMap[wsId] || 0;
+      const messages = messageCountMap[wsId] || 0;
+      const lastAct = lastActivityMap[wsId] || null;
+      const isEmpty = tasks === 0 && contacts === 0 && messages === 0;
+      const wsStatus = isEmpty ? 'empty' : (lastAct && lastAct >= inactiveSince ? 'active' : 'inactive');
+      const owner = ownerMap[String(w.ownerId)] || { username: '?', email: '?', plan: 'free', hasStripe: false };
+
+      return {
+        id: w._id,
+        name: w.name,
+        slug: w.slug,
+        color: w.color,
+        owner,
+        memberCount: memberCountMap[wsId] || 0,
+        memberRoles: memberRolesMap[wsId] || { owner: 0, manager: 0, member: 0 },
+        taskCount: tasks,
+        contactCount: contacts,
+        messageCount: messages,
+        paidSeats: w.paidSeats || 0,
+        createdAt: w.createdAt,
+        lastActivity: lastAct,
+        status: wsStatus
+      };
+    });
+
+    // Post-filter
+    if (status && ['active', 'inactive', 'empty'].includes(status)) {
+      enriched = enriched.filter((w) => w.status === status);
+    }
+    if (ownerPlan && ['free', 'team', 'pro'].includes(ownerPlan)) {
+      enriched = enriched.filter((w) => w.owner.plan === ownerPlan);
+    }
+    if (hasStripe === 'true') {
+      enriched = enriched.filter((w) => w.owner.hasStripe);
+    } else if (hasStripe === 'false') {
+      enriched = enriched.filter((w) => !w.owner.hasStripe);
     }
 
-    const contactCounts = await Contact.aggregate([
-      { $match: { workspaceId: { $in: workspaceIds } } },
-      { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
-    ]);
-    const contactCountMap = {};
-    for (const cc of contactCounts) {
-      contactCountMap[cc._id.toString()] = cc.count;
-    }
+    // Breakdown stats — na enriched DRŽ pred sort/pagination
+    const breakdown = {
+      total: enriched.length,
+      active: enriched.filter((w) => w.status === 'active').length,
+      inactive: enriched.filter((w) => w.status === 'inactive').length,
+      empty: enriched.filter((w) => w.status === 'empty').length,
+      withStripeOwner: enriched.filter((w) => w.owner.hasStripe).length
+    };
 
-    // Get owner usernames
-    const ownerIds = [...new Set(workspaces.map(w => w.ownerId.toString()))];
-    const owners = await User.find({ _id: { $in: ownerIds } }, 'username email').lean();
-    const ownerMap = {};
-    for (const o of owners) {
-      ownerMap[o._id.toString()] = { username: o.username, email: o.email };
-    }
+    // Sort
+    const sortFns = {
+      createdAt: (a, b) => (new Date(a.createdAt) - new Date(b.createdAt)) * order,
+      name: (a, b) => a.name.localeCompare(b.name) * order,
+      memberCount: (a, b) => (a.memberCount - b.memberCount) * order,
+      lastActivity: (a, b) => {
+        const av = a.lastActivity ? new Date(a.lastActivity).getTime() : 0;
+        const bv = b.lastActivity ? new Date(b.lastActivity).getTime() : 0;
+        return (av - bv) * order;
+      }
+    };
+    enriched.sort(sortFns[sort]);
 
-    const result = workspaces.map(w => ({
-      id: w._id,
-      name: w.name,
-      slug: w.slug,
-      color: w.color,
-      owner: ownerMap[w.ownerId.toString()] || { username: '?', email: '?' },
-      memberCount: memberCountMap[w._id.toString()] || 0,
-      taskCount: taskCountMap[w._id.toString()] || 0,
-      contactCount: contactCountMap[w._id.toString()] || 0,
-      paidSeats: w.paidSeats || 0,
-      createdAt: w.createdAt
-    }));
+    // Pagination
+    const total = enriched.length;
+    const paged = enriched.slice((page - 1) * limit, page * limit);
 
-    res.json(result);
+    res.json({
+      workspaces: paged,
+      total,
+      page,
+      limit,
+      breakdown
+    });
   } catch (error) {
     logger.error('Admin get workspaces error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri načítaní workspace-ov' });
@@ -745,18 +877,50 @@ router.get('/workspaces/:id', authenticateToken, requireAdmin, async (req, res) 
       .select('name email company status createdAt')
       .sort({ createdAt: -1 }).limit(20).lean();
 
-    // Task stats
+    // Task stats — completed / pending split + recent
     const completedTasks = await Task.countDocuments({ workspaceId: id, completed: true });
     const pendingTasks = taskCount - completedTasks;
+    const recentTasks = await Task.find({ workspaceId: id })
+      .select('title completed priority dueDate createdAt')
+      .sort({ createdAt: -1 }).limit(10).lean();
 
     // Message stats
     const pendingMessages = await Message.countDocuments({ workspaceId: id, status: 'pending' });
+    const recentMessages = await Message.find({ workspaceId: id })
+      .select('subject type status createdAt')
+      .sort({ createdAt: -1 }).limit(10).lean();
+
+    // Activity timeline — kombinácia z audit logu pre tento workspace
+    // (posledné akcie členov v rámci workspace-u). Užitočné pre admina
+    // ktorý chce vidieť "kto čo kedy v tomto workspace robil".
+    const recentActivity = await AuditLog.find({ workspaceId: id })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select('action category username targetName createdAt')
+      .lean();
+
+    // Last activity timestamp — max z contact/task/message updatedAt
+    const [lastContactUpdate, lastTaskUpdate, lastMessageUpdate] = await Promise.all([
+      Contact.findOne({ workspaceId: id }).sort({ updatedAt: -1 }).select('updatedAt').lean(),
+      Task.findOne({ workspaceId: id }).sort({ updatedAt: -1 }).select('updatedAt').lean(),
+      Message.findOne({ workspaceId: id }).sort({ updatedAt: -1 }).select('updatedAt').lean()
+    ]);
+    const lastActivity = [lastContactUpdate?.updatedAt, lastTaskUpdate?.updatedAt, lastMessageUpdate?.updatedAt]
+      .filter(Boolean)
+      .sort((a, b) => new Date(b) - new Date(a))[0] || null;
 
     res.json({
       workspace,
       members: enrichedMembers,
-      stats: { contactCount, taskCount, completedTasks, pendingTasks, messageCount, pendingMessages },
-      recentContacts
+      stats: {
+        contactCount, taskCount, completedTasks, pendingTasks,
+        messageCount, pendingMessages
+      },
+      recentContacts,
+      recentTasks,
+      recentMessages,
+      recentActivity,
+      lastActivity
     });
   } catch (error) {
     res.status(500).json({ message: 'Chyba pri načítaní workspace detailu' });
