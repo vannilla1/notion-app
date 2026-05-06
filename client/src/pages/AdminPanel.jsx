@@ -384,7 +384,21 @@ function OverviewTab({ onNavigate }) {
           <li><strong>MongoDB</strong> — status DB konektivity. <strong>OK</strong> = connected, <strong>Offline</strong> = výpadok. Offline znamená, že žiadny user nedokáže nič načítať ani uložiť. Skontroluj DB provider (Render / Atlas), connection string v env vars, network connectivity.</li>
           <li><strong>Node.js</strong> — verzia runtime. Sleduj keď sa zmení po deploy-e (mohol byť zmenený engine). LTS verzie (18.x, 20.x, 22.x) sú stabilné, vyhýbať odd-number major (19, 21) v produkcii.</li>
           <li><strong>Prostredie</strong> — <code>production</code> / <code>staging</code> / <code>development</code>. Ak v admin paneli vidíš development, niečo je zle s deploy-om — hodnoty by si nemal brať vážne.</li>
-          <li><strong>Timestamp vpravo</strong> — kedy bol health check vykonaný. Stránka neauto-refreshuje, pre aktuálne hodnoty refresni browser.</li>
+          <li><strong>Timestamp vpravo + „● live" indikátor</strong> — kedy bol health check vykonaný. Stránka <strong>auto-refreshuje každých 30 sekúnd</strong>, pauza aktivovaná pri schovanom tabe (Page Visibility API → žiadny network traffic ak admin pozerá inde). Po návrate na tab sa health hneď refreshne.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>🔌 Externé služby (sekcia pod system metrikami)</h4>
+        <ul>
+          <li>Status badge-y pre <strong>SMTP</strong> (hostcreators.sk, posiela welcome / reminder / broadcast emaily), <strong>APNs</strong> (Apple Push Notification service pre iOS), <strong>Google API</strong> (Calendar + Tasks token health).</li>
+          <li>Hodnoty pochádzajú z <code>healthMonitor.js</code> cron-u (každých 5 min na pozadí). NIE live ping pri každom otvorení Prehľadu — to by každé otvorenie tabu robilo I/O latency.</li>
+          <li>Badge stavy:<br/>
+            ✅ <strong>OK</strong> — služba odpovedá normálne.<br/>
+            ⚠️ <strong>Watch</strong> — degradovaný stav, niečo pomalšie alebo blízko limitu (napr. RAM watch threshold).<br/>
+            🚨 <strong>Error</strong> — služba zlyháva. Pri 3 erroroch po sebe pošle health monitor automatický email na support@prplcrm.eu (anti-flapping).<br/>
+            <em>Unknown</em> — health monitor ešte nestihol prvý check (server-restart < 5 min) alebo cache expired.
+          </li>
+          <li><strong>Hover na badge</strong> ti ukáže detailnú správu (napr. SMTP "Connection accepted in 145ms").</li>
+          <li><strong>FCM (Android push)</strong> sa tu zámerne nezobrazuje — firebase-admin SDK sa loaduje on-demand pri push send-e a nemá samostatný health endpoint. Ak push nedoručí, vidno to v Audit log → push.failed.</li>
         </ul>
 
         <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px', color: 'var(--text-primary)' }}>📊 Karty štatistík (klikateľné)</h4>
@@ -399,9 +413,11 @@ function OverviewTab({ onNavigate }) {
             💡 Akcia: pošli reactivačný email, alebo cez <em>Storage</em> tab identifikuj prázdne workspace-y na cleanup.<br/>
             Klik → <em>Workspace-y</em> tab.
           </li>
-          <li><strong>📋 Projekty</strong> — počet Task dokumentov v DB (top-level projekty, nie úlohy v nich). Pre rozpis úloh aj projektov per workspace pozri <em>Porovnanie</em>.<br/>
+          <li><strong>📋 Projekty</strong> — počet Task dokumentov v DB (top-level projekty, nie úlohy v nich). <em>Sub-text "+ N podúloh"</em> ti dopĺňa kontext: rekurzívny súčet všetkých nested subtask-ov naprieč všetkými projektmi (subtasks sú embedded array v rámci Task docu, nie samostatné dokumenty).<br/>
+            ✅ Healthy: pomer podúloh / projektov &gt; 2 → ľudia rozdrobujú projekty na zmysluplne kroky.<br/>
+            ⚠️ Pomer ≤ 1 = užívatelia iba zakladajú projekty bez delenia na úlohy.<br/>
             ⚠️ Stagnujúci alebo klesajúci počet týždeň-na-týždeň pri raste user base = engagement problém.<br/>
-            Klik → <em>Porovnanie</em> tab.
+            Pre rozpis úloh per workspace pozri <em>Porovnanie</em>. Klik → <em>Porovnanie</em> tab.
           </li>
           <li><strong>👤 Kontakty</strong> — počet Contact dokumentov. Pri B2B CRM by malo byť v hrubom 3-10× viac kontaktov ako workspace-ov (každý tím má pár klientov).<br/>
             ⚠️ Pomer kontakty/workspace &lt; 1 = užívatelia sa zaregistrujú, ale nezačnú reálne používať produkt.<br/>
@@ -452,7 +468,13 @@ function OverviewTab({ onNavigate }) {
         </ol>
 
         <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-          <em>Pozn.:</em> Niektoré hodnoty (napr. recentRegistrations, activeWorkspaces) sa počítajú server-side z agregátnych Mongo queries. Pre real-time monitoring (každých 5 min) máme samostatný health monitor v <code>jobs/healthMonitor.js</code>, ktorý pri 3× zlyhaní pošle email na support@prplcrm.eu.
+          <em>Pozn. č. 1 (exclusion super admina):</em> Všetky čísla v Prehľade <strong>vylučujú dáta super admina</strong> (tvoj účet + workspaces ktoré vlastníš). Tým získavaš čistý pohľad na produkčné metriky bez tvojich testovacích dát. Filter je založený na <code>Workspace.ownerId</code> lookup — Tasks/Contacts vo workspaces ktoré vlastníš sa nepočítajú do totálov.
+        </p>
+        <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Pozn. č. 2 (background monitoring):</em> Niektoré hodnoty (napr. recentRegistrations, activeWorkspaces) sa počítajú server-side z agregátnych Mongo queries. Pre real-time external services monitoring (každých 5 min) máme samostatný <code>jobs/healthMonitor.js</code> cron, ktorý pri 3× zlyhaní za sebou pošle alert email na support@prplcrm.eu (anti-flapping). Recovery email tiež príde keď sa služba vráti.
+        </p>
+        <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Pozn. č. 3 (auto-refresh stratégia):</em> Stats karty (Používatelia, Workspace-y, Projekty…) sa <strong>nečinia auto-refresh</strong> lebo ich load vyžaduje ~12 DB queries — zbytočné pri každom otvorení Prehľadu. Health card auto-refreshuje každých 30s lebo je lacná (in-memory readout). Pre čerstvé stats refresh celej stránky.
         </p>
       </AdminHelpToggle>
     </div>
