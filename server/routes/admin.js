@@ -109,38 +109,26 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
       User.countDocuments({ ...excludeSuperAdmin, 'googleTasks.enabled': true })
     ]);
 
-    // Subtasks count — rekurzívne cez $reduce na embedded array. Top-level
-    // Task má pole subtasks[], každý subtask môže mať vlastné subtasks[].
-    // Mongoose aggregation $reduce nepodporuje rekurzívne descents, preto
-    // riešime cez $function (server-side JS) so simple recursive counter.
-    // Pri menšej DB (< 50k Task docs) je toto rýchlejšie ako $unwind chain.
-    const subtaskAggResult = await Task.aggregate([
-      { $match: excludeSuperAdminWorkspaces },
-      {
-        $group: {
-          _id: null,
-          total: {
-            $sum: {
-              $function: {
-                body: function countSubtasksRecursive(subtasks) {
-                  if (!subtasks || !subtasks.length) return 0;
-                  let count = subtasks.length;
-                  for (const s of subtasks) {
-                    if (s.subtasks && s.subtasks.length) {
-                      count += countSubtasksRecursive(s.subtasks);
-                    }
-                  }
-                  return count;
-                }.toString(),
-                args: ['$subtasks'],
-                lang: 'js'
-              }
-            }
-          }
-        }
+    // Subtasks count — rekurzívne cez JS po načítaní subtasks polí. Atlas má
+    // server-side $function disabled by default (security policy), takže
+    // aggregation $function nefunguje. Pre súčasnú škálu (~stovky Task docs)
+    // je JS counting po lean() projekcii rýchlejšie ako $unwind reťaz a má
+    // jasnú sémantiku. Pri raste > 50k Task docs zvážiť cache + denný recompute.
+    const taskSubtaskDocs = await Task.find(excludeSuperAdminWorkspaces)
+      .select('subtasks')
+      .lean();
+    const countSubtasksRecursive = (subtasks) => {
+      if (!subtasks?.length) return 0;
+      let count = subtasks.length;
+      for (const s of subtasks) {
+        if (s.subtasks?.length) count += countSubtasksRecursive(s.subtasks);
       }
-    ]);
-    const totalSubtasks = subtaskAggResult[0]?.total || 0;
+      return count;
+    };
+    const totalSubtasks = taskSubtaskDocs.reduce(
+      (sum, t) => sum + countSubtasksRecursive(t.subtasks || []),
+      0
+    );
 
     // Plan breakdown (exclude super admin)
     const planBreakdown = await User.aggregate([
