@@ -264,6 +264,27 @@ function Login() {
             3.1.1 / 3.1.3(d) zakazuje "account registration features for
             businesses and organizations" v Reader-app exception flow. Na webe
             a Androide ostáva normálne. */}
+        {/* iOS native — vysvetlenie kde sa registrovať (App Store 3.1.3(d)
+            Reader-app: registrácia musí byť mimo iOS appky). Bez tejto info
+            by user nemal ako pochopiť, prečo na iOS appke nie je signup
+            tlačidlo. Bordered card s ikonou aby vyčnieval z formulára. */}
+        {iosNative && !isRegister && (
+          <div className="ios-register-hint">
+            <div className="ios-register-hint-icon">ℹ️</div>
+            <div className="ios-register-hint-text">
+              <strong>Ešte nemáte účet?</strong>
+              <p>
+                Účet si vytvoríte zdarma na webe <a
+                  href="https://prplcrm.eu"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent-color, #6366f1)', fontWeight: 600 }}
+                >prplcrm.eu</a> a potom sa sem vráťte prihlásiť. Registrácia priamo v iOS aplikácii nie je dostupná.
+              </p>
+            </div>
+          </div>
+        )}
+
         {!iosNative && (
           <div className="login-footer">
             {isRegister ? (

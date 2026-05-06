@@ -501,6 +501,42 @@ body {
   text-decoration: underline;
 }
 
+/* iOS-only register hint card — vysvetľuje že registrácia musí prebehnúť
+   na webe (App Store 3.1.3(d) Reader exception). Bez tejto info by user
+   v iOS appke bez existujúceho účtu nevedel pochopiť prečo nie je tlačidlo
+   "Zaregistrujte sa" — Apple reviewer to môže vidieť ako matúce UX. */
+.ios-register-hint {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+}
+.ios-register-hint-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ios-register-hint-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ios-register-hint-text strong {
+  display: block;
+  color: var(--text-primary, #1f2937);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.ios-register-hint-text p {
+  margin: 0;
+  color: var(--text-muted, #64748b);
+}
+
 .error-message {
   background-color: var(--danger-light);
   color: var(--danger);

@@ -101,6 +101,11 @@ const dashboardHelpTips = [
     icon: '🗑️',
     title: 'Vymazanie účtu (GDPR)',
     description: 'V Môj profil dole je tlačidlo "Vymazať účet". Trvale zmaže váš účet, všetky vaše dáta a sole-owned workspaces (kde ste jediný owner). Vyžaduje napísanie "DELETE" + heslo. Postup je nevratný — Apple Guideline 5.1.1(v) compliance pre iOS.'
+  },
+  {
+    icon: '🍎',
+    title: 'Špecifiká iOS aplikácie',
+    description: 'V iOS aplikácii (z App Store) nájdete len prihlásenie — registráciu nového účtu, správu predplatného a cenník nájdete iba na webe prplcrm.eu. Postup pre nového užívateľa: (1) zaregistrujte sa zdarma na webe, (2) prihláste sa do iOS aplikácie tým istým účtom. Pozvánky do workspace prijaté z emailu sa otvárajú v Safari, kde sa môžete zaregistrovať aj prijať pozvánku v jednom kroku — potom v iOS aplikácii sa už len prihlásite. Toto rozdelenie vyžaduje Apple App Store guideline 3.1.3(d) (multiplatform "Reader" exception).'
   }
 ];
 

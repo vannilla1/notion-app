@@ -135,12 +135,23 @@ function AcceptInvite() {
             <div className="invite-actions">
               {/* App Store 3.1.1: na iOS native nezobrazujeme "Vytvoriť účet"
                   CTA — registrácia musí prebiehať na webe. Text inštrukcie
-                  upravený aby user vedel kam ísť. */}
-              <p className="invite-not-logged">
-                {isIosNativeApp()
-                  ? 'Pre prijatie pozvánky sa prihláste. Ak ešte nemáte účet, vytvorte si ho na webe prplcrm.eu a vráťte sa.'
-                  : 'Pre prijatie pozvánky sa musíte prihlásiť alebo zaregistrovať.'}
-              </p>
+                  upravený aby user vedel kam ísť. Pre lepšiu UX pri iOS
+                  appke pridáme číslovaný step-by-step namiesto jedného
+                  riadku — užívateľ jasne vidí 3 kroky čo má spraviť. */}
+              {isIosNativeApp() ? (
+                <div className="invite-ios-steps">
+                  <p className="invite-not-logged">Pre prijatie pozvánky postupujte podľa krokov:</p>
+                  <ol style={{ margin: '8px 0 0', paddingLeft: '20px', fontSize: '14px', lineHeight: 1.6, color: 'var(--text-muted, #64748b)' }}>
+                    <li>Otvorte vo Safari adresu <a href="https://prplcrm.eu" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-color, #6366f1)', fontWeight: 600 }}>prplcrm.eu</a> a vytvorte si zdarma účet.</li>
+                    <li>Vráťte sa do tejto aplikácie a prihláste sa.</li>
+                    <li>Pozvánka sa potom automaticky prijme — alebo ju otvorte z emailu znova.</li>
+                  </ol>
+                </div>
+              ) : (
+                <p className="invite-not-logged">
+                  Pre prijatie pozvánky sa musíte prihlásiť alebo zaregistrovať.
+                </p>
+              )}
               <div className="invite-auth-buttons">
                 <Link to={`/login?invite=${token}`} className="btn btn-primary">
                   Prihlásiť sa
