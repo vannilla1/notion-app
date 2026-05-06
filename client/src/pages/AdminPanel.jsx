@@ -6047,6 +6047,7 @@ const EMAIL_TYPE_LABELS = {
   welcome: { label: 'Welcome', icon: '👋', color: '#6366f1' },
   invitation: { label: 'Pozvánka', icon: '✉️', color: '#3b82f6' },
   password_reset: { label: 'Reset hesla', icon: '🔑', color: '#64748b' },
+  mobile_app_launch: { label: 'Mobile app launch', icon: '📱', color: '#8B5CF6' },
   admin_notify: { label: 'Admin notify', icon: '🛎️', color: '#94a3b8' }
 };
 
@@ -6066,61 +6067,170 @@ function EmailsTab() {
   const [page, setPage] = useState(1);
   const limit = 50;
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ type: '', status: '', search: '', days: '30' });
+  const [refreshing, setRefreshing] = useState(false);
+  // days: '' = custom range, '7'|'30'|'90' = preset; from/to override pri customRange
+  const [filters, setFilters] = useState({ type: '', status: '', search: '', days: '30', from: '', to: '' });
+  const [sort, setSort] = useState('sentAt');
+  const [order, setOrder] = useState('desc');
   const [previewLog, setPreviewLog] = useState(null);
+  const [statsDays, setStatsDays] = useState(30); // pre daily chart window
 
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(false);
     try {
-      const r = await adminApi.get('/api/admin/email-logs-stats?days=30');
+      const r = await adminApi.get(`/api/admin/email-logs-stats?days=${statsDays}`);
       setStats(r.data);
-    } catch (err) { /* ignore */ }
-  }, []);
+    } catch { /* ignore */ }
+  }, [statsDays]);
 
   const loadConfig = useCallback(async () => {
     try {
       const r = await adminApi.get('/api/admin/email-config');
       setConfig(r.data);
-    } catch (err) { /* ignore */ }
+    } catch { /* ignore */ }
   }, []);
 
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
+  const loadLogs = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = new URLSearchParams();
       if (filters.type) params.append('type', filters.type);
       if (filters.status) params.append('status', filters.status);
       if (filters.search) params.append('search', filters.search);
-      if (filters.days) {
+      // Custom date range má prednosť pred preset days
+      if (filters.from || filters.to) {
+        if (filters.from) params.append('from', new Date(filters.from).toISOString());
+        if (filters.to) params.append('to', new Date(filters.to + 'T23:59:59').toISOString());
+      } else if (filters.days) {
         const since = new Date(Date.now() - parseInt(filters.days) * 24 * 60 * 60 * 1000);
         params.append('from', since.toISOString());
       }
+      params.append('sort', sort);
+      params.append('order', order);
       params.append('page', String(page));
       params.append('limit', String(limit));
       const r = await adminApi.get(`/api/admin/email-logs?${params.toString()}`);
       setLogs(r.data.logs || []);
       setTotal(r.data.total || 0);
-    } catch (err) {
+    } catch {
       setLogs([]); setTotal(0);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [filters, page]);
+  }, [filters, page, sort, order]);
 
-  useEffect(() => { loadStats(); loadConfig(); }, [loadStats, loadConfig]);
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
+
+  // Auto-refresh logs + stats každých 30s. Pause keď je modal otvorený alebo
+  // tab v pozadí (Page Visibility API), aby sme neblokovali užívateľa pri čítaní.
+  useEffect(() => {
+    if (previewLog) return;
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.hidden) return;
+      loadLogs(true);
+      loadStats(true);
+    };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 30000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [loadLogs, loadStats, previewLog]);
 
   const updateFilter = (key, value) => {
     setFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
   };
 
+  const toggleSort = (field) => {
+    if (sort === field) {
+      setOrder(order === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSort(field);
+      setOrder('desc');
+    }
+    setPage(1);
+  };
+
+  const sortIcon = (field) => sort === field ? (order === 'desc' ? ' ↓' : ' ↑') : '';
+
+  const exportCsv = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.type) params.append('type', filters.type);
+      if (filters.status) params.append('status', filters.status);
+      if (filters.search) params.append('search', filters.search);
+      if (filters.from || filters.to) {
+        if (filters.from) params.append('from', new Date(filters.from).toISOString());
+        if (filters.to) params.append('to', new Date(filters.to + 'T23:59:59').toISOString());
+      } else if (filters.days) {
+        const since = new Date(Date.now() - parseInt(filters.days) * 24 * 60 * 60 * 1000);
+        params.append('from', since.toISOString());
+      }
+      params.append('page', '1');
+      params.append('limit', '1000');
+      const r = await adminApi.get(`/api/admin/email-logs?${params.toString()}`);
+      const rows = (r.data.logs || []).map((l) => [
+        new Date(l.sentAt).toISOString(),
+        l.toEmail || '',
+        l.user?.username || '',
+        l.type || '',
+        l.subject || '',
+        l.status || '',
+        l.error || '',
+        l.triggeredBy || ''
+      ]);
+      const header = ['SentAt', 'ToEmail', 'Username', 'Type', 'Subject', 'Status', 'Error', 'TriggeredBy'];
+      const csv = [header, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `email-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch { alert('Export zlyhal'); }
+  };
+
+  const clearFilters = () => {
+    setFilters({ type: '', status: '', search: '', days: '30', from: '', to: '' });
+    setPage(1);
+  };
+
+  const hasActiveFilters = filters.type || filters.status || filters.search || filters.from || filters.to || filters.days !== '30';
+
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
     <div className="sa-section sa-section-wide">
-      <div className="sa-section-head">
-        <h2>📧 Emaily</h2>
-        <p>Prehľad všetkých systémových mailov — transakčných (zmena plánu, zľava) a marketingových (pripomienky, winback).</p>
+      <div className="sa-section-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>
+            📧 Emaily
+            {refreshing && <span style={{ marginLeft: 10, fontSize: 11, color: '#10b981', fontWeight: 400 }}>● auto-refresh</span>}
+          </h2>
+          <p style={{ margin: '4px 0 0' }}>Prehľad všetkých systémových mailov — transakčných (zmena plánu, zľava) a marketingových (pripomienky, winback).</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select
+            value={statsDays}
+            onChange={(e) => setStatsDays(parseInt(e.target.value))}
+            className="sa-input"
+            style={{ width: 'auto', fontSize: 12 }}
+            title="Časové okno pre stat cards a daily chart"
+          >
+            <option value={7}>Stat: 7 dní</option>
+            <option value={30}>Stat: 30 dní</option>
+            <option value={90}>Stat: 90 dní</option>
+          </select>
+          <button onClick={exportCsv} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            📥 Export CSV
+          </button>
+        </div>
       </div>
 
       {/* HEADLINE STAT CARDS */}
@@ -6132,7 +6242,7 @@ function EmailsTab() {
         />
         <StatCard
           icon="📊"
-          label="Odoslaných za 30 dní"
+          label={`Odoslaných za ${statsDays} dní`}
           value={stats?.total30d ?? '—'}
         />
         <StatCard
@@ -6148,6 +6258,59 @@ function EmailsTab() {
           sub={config?.smtpHost || ''}
         />
       </div>
+
+      {/* DAILY VOLUME CHART */}
+      {stats?.daily?.length > 0 && (
+        <div className="sa-card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: 14 }}>📈 Denný objem ({statsDays} dní)</h3>
+          <div style={{ height: 180 }}>
+            <Line
+              data={{
+                labels: stats.daily.map((d) => {
+                  const dt = new Date(d.date);
+                  return `${dt.getDate()}.${dt.getMonth() + 1}.`;
+                }),
+                datasets: [
+                  {
+                    label: 'Odoslané',
+                    data: stats.daily.map((d) => d.sent),
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.10)',
+                    fill: true,
+                    tension: 0.3
+                  },
+                  {
+                    label: 'Zlyhané',
+                    data: stats.daily.map((d) => d.failed),
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239,68,68,0.10)',
+                    fill: true,
+                    tension: 0.3
+                  },
+                  {
+                    label: 'Skipped',
+                    data: stats.daily.map((d) => d.skipped),
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245,158,11,0.10)',
+                    fill: true,
+                    tension: 0.3
+                  }
+                ]
+              }}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+                scales: {
+                  y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                  x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkipPadding: 12 } }
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* TOP TYPES */}
       {stats?.topTypes7d?.length > 0 && (
@@ -6188,7 +6351,7 @@ function EmailsTab() {
 
       {/* FILTERS */}
       <div className="sa-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12, marginBottom: 8 }}>
           <input
             type="text"
             placeholder="🔍 Hľadať email alebo username..."
@@ -6208,12 +6371,46 @@ function EmailsTab() {
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
-          <select value={filters.days} onChange={(e) => updateFilter('days', e.target.value)} className="sa-input">
+          <select
+            value={filters.from || filters.to ? '' : filters.days}
+            onChange={(e) => setFilters((f) => ({ ...f, days: e.target.value, from: '', to: '' }))}
+            className="sa-input"
+            disabled={!!(filters.from || filters.to)}
+            title={(filters.from || filters.to) ? 'Custom range má prednosť' : ''}
+          >
             <option value="7">Posledných 7 dní</option>
             <option value="30">Posledných 30 dní</option>
             <option value="90">Posledných 90 dní</option>
             <option value="">Všetko</option>
           </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>Custom range:</span>
+          <input
+            type="date"
+            value={filters.from}
+            onChange={(e) => updateFilter('from', e.target.value)}
+            className="sa-input"
+            style={{ width: 'auto', fontSize: 12 }}
+            title="Od"
+          />
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
+          <input
+            type="date"
+            value={filters.to}
+            onChange={(e) => updateFilter('to', e.target.value)}
+            className="sa-input"
+            style={{ width: 'auto', fontSize: 12 }}
+            title="Do"
+          />
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px', marginLeft: 'auto' }}>
+              ✕ Vymazať filtre
+            </button>
+          )}
+          <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: hasActiveFilters ? 0 : 'auto' }}>
+            {total} záznamov
+          </span>
         </div>
       </div>
 
@@ -6227,11 +6424,11 @@ function EmailsTab() {
           <table className="sa-table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Čas</th>
-                <th>Príjemca</th>
-                <th>Typ</th>
+                <th onClick={() => toggleSort('sentAt')} style={{ cursor: 'pointer', userSelect: 'none' }} title="Klikni pre zoradenie">Čas{sortIcon('sentAt')}</th>
+                <th onClick={() => toggleSort('toEmail')} style={{ cursor: 'pointer', userSelect: 'none' }} title="Klikni pre zoradenie">Príjemca{sortIcon('toEmail')}</th>
+                <th onClick={() => toggleSort('type')} style={{ cursor: 'pointer', userSelect: 'none' }} title="Klikni pre zoradenie">Typ{sortIcon('type')}</th>
                 <th>Subject</th>
-                <th>Stav</th>
+                <th onClick={() => toggleSort('status')} style={{ cursor: 'pointer', userSelect: 'none' }} title="Klikni pre zoradenie">Stav{sortIcon('status')}</th>
                 <th>Trigger</th>
                 <th></th>
               </tr>
@@ -6326,42 +6523,92 @@ function EmailsTab() {
       )}
 
       <AdminHelpToggle title="Manuál — Emaily">
-        <h4>Čo je v tomto tabe</h4>
         <p>
-          Centrálny prehľad všetkých emailov ktoré systém poslal používateľom. Pokrýva transakčné maily
-          (zmena plánu, zľava, vymazanie účtu) aj marketingové (pripomienky pred expiráciou, winback).
+          <strong>Čo tu vidíš:</strong> centrálny audit všetkých emailov ktoré systém poslal —
+          transakčných (zmena plánu, zľava, vymazanie) a marketingových (reminders, winback, broadcast).
+          Všetko sa loguje cez <code>EmailLog</code> kolekciu vrátane HTML snapshotu.
         </p>
 
-        <h4>Typy mailov</h4>
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Stat header + denný graf</h4>
         <ul>
-          <li><strong>📦 Plán priradený</strong> — admin manuálne zmenil predplatné používateľa</li>
-          <li><strong>🎁 Zľava priradená</strong> — admin pridal zľavu / freeMonths / planUpgrade</li>
-          <li><strong>🎉 Welcome Pro</strong> — prvý upgrade na Tím/Pro plán (jednorazový)</li>
-          <li><strong>⏰ Reminder T-7</strong> — 7 dní pred expiráciou (so zľavou 20%)</li>
-          <li><strong>⚠️ Reminder T-1</strong> — deň pred expiráciou (so zľavou 30%, urgency copy)</li>
-          <li><strong>🔚 Expirovaný</strong> — po automatickom downgrade na Free (so zľavou 30%)</li>
-          <li><strong>💝 Winback</strong> — 14 dní po expirácii (50% posledná ponuka)</li>
+          <li><strong>Odoslaných za 7d / 30d</strong> — celkový volume.</li>
+          <li><strong>Úspešnosť</strong> — % zo súčtu sent + failed (skip akcie nezahrnuté).</li>
+          <li><strong>SMTP stav</strong> — či je transporter pripojený (zelené) alebo nie (červené).</li>
+          <li><strong>Denný graf</strong> — line chart sent / failed / skipped za zvolené okno (7/30/90 dní). Užitočné na detekciu výpadkov SMTP.</li>
+          <li><strong>Top typy</strong> — chip-y najčastejších typov za 7 dní.</li>
+          <li><strong>⚠️ Posledné zlyhania</strong> — quick alert sekcia s 5 posledných failed mailov + chyba (na detekciu issues bez čítania logov).</li>
         </ul>
 
-        <h4>Stavy</h4>
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filtre</h4>
         <ul>
-          <li><strong>Odoslané</strong> — SMTP úspešne prijal mail</li>
-          <li><strong>Zlyhalo</strong> — SMTP error (vidno detail v preview)</li>
-          <li><strong>Cooldown</strong> — rovnaký typ poslaný v posledných 24 h, skip</li>
-          <li><strong>Opt-out</strong> — user vypol marketingové maily v profile</li>
-          <li><strong>Bez SMTP</strong> — server nemá SMTP konfiguráciu</li>
+          <li><strong>Search</strong> — substring v <code>toEmail</code> alebo <code>username</code>.</li>
+          <li><strong>Typ / Stav</strong> — dropdowny pre exact match.</li>
+          <li><strong>Preset days</strong> — 7 / 30 / 90 / všetko.</li>
+          <li><strong>Custom range</strong> — Od / Do dátumy. Override-uje preset.</li>
+          <li><strong>Zoradenie</strong> — klik na header (Čas / Príjemca / Typ / Stav) toggluje asc/desc.</li>
+          <li><strong>Vymazať filtre</strong> — reset na default (30 dní, žiadny typ/stav/search).</li>
         </ul>
 
-        <h4>Klik na riadok</h4>
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📨 Typy mailov</h4>
+        <ul>
+          <li><strong>📦 subscription_assigned</strong> — admin manuálne zmenil predplatné používateľa</li>
+          <li><strong>🎁 discount_assigned</strong> — admin pridal zľavu / freeMonths / planUpgrade</li>
+          <li><strong>🎉 welcome_pro</strong> — prvý upgrade na Tím/Pro plán (jednorazový)</li>
+          <li><strong>👋 welcome</strong> — po registrácii nového účtu</li>
+          <li><strong>⏰ reminder_t7</strong> — 7 dní pred expiráciou (so zľavou 20%)</li>
+          <li><strong>⚠️ reminder_t1</strong> — deň pred expiráciou (so zľavou 30%, urgency copy)</li>
+          <li><strong>🔚 expired</strong> — po automatickom downgrade na Free (so zľavou 30%)</li>
+          <li><strong>💝 winback</strong> — 14 dní po expirácii (50% posledná ponuka)</li>
+          <li><strong>✉️ invitation</strong> — pozvánka do workspace</li>
+          <li><strong>🔑 password_reset</strong> — reset hesla token</li>
+          <li><strong>📱 mobile_app_launch</strong> — broadcast oznam o iOS/Android appke</li>
+          <li><strong>🛎️ admin_notify</strong> — interný error alert na <code>support@prplcrm.eu</code></li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🚦 Stavy</h4>
+        <ul>
+          <li><strong>Odoslané</strong> — SMTP úspešne prijal mail (200ms p95).</li>
+          <li><strong>Zlyhalo</strong> — SMTP error (timeout / auth / rejected). Detail v preview.</li>
+          <li><strong>Cooldown</strong> — rovnaký typ poslaný v posledných 24h, skip (anti-spam).</li>
+          <li><strong>Opt-out</strong> — user vypol <code>marketingEmails</code> v profile (len pre marketing typy).</li>
+          <li><strong>Bez SMTP</strong> — server nemá SMTP konfiguráciu (dev / misconfig).</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>👁️ Preview HTML</h4>
         <p>
-          Otvorí preview odoslaného HTML — presne to čo používateľ videl. Užitočné pre support
-          ("ako vyzerá ten email čo som dostal?") aj pre debug.
+          Klik na riadok otvorí modal s plným HTML snapshot — presne to čo user videl v inboxe.
+          Iframe je <code>sandbox=""</code> aby skripty nebežali. Užitočné pre support
+          („ako vyzerá ten email čo som dostal?") aj debug šablón.
         </p>
 
-        <h4>Manuálne odoslanie</h4>
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📥 Export CSV</h4>
+        <p>Exportuje aktuálne <em>filtrované</em> logy (max 1000 záznamov). Stĺpce: SentAt / ToEmail / Username / Type / Subject / Status / Error / TriggeredBy.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🧪 Test šablóny</h4>
         <p>
-          V tabe Používatelia → Predplatné je tlačidlo „📤 Poslať email" pre support workflow
-          (napr. user nedostal automatický reminder a admin chce ručne preposlať).
+          Pošle preview email s mock dátami na zadanú adresu — pre vizuálnu kontrolu šablóny bez nutnosti
+          meniť plán reálnemu užívateľovi. Tieto maily nepodliehajú cooldown ani opt-out.
+        </p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📣 Broadcast</h4>
+        <p>
+          One-off announcement na všetkých registrovaných (alebo aktívnych za N dní). Two-step UX
+          (dryRun → reálny send). Idempotentné — kto už dostal za 30 dní, sa preskočí.
+          Posielanie 5 mailov/sek aby ESP nehodnotil ako bulk spam.
+        </p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔄 Auto-refresh</h4>
+        <p>Logs + stats sa obnovujú každých 30s. Pause keď je tab v pozadí (Page Visibility) alebo otvorený preview modal.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📤 Manuálne odoslanie pre konkrétneho usera</h4>
+        <p>
+          V tabe <strong>Používatelia → Predplatné</strong> je tlačidlo „📤 Poslať email" pre support workflow
+          (napr. user nedostal automatický reminder a admin chce ručne preposlať konkrétny typ).
+        </p>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> EmailLog kolekcia momentálne neexpiruje. Ak presiahne 100k záznamov, odporúča sa
+          pridať TTL index na <code>sentAt</code> (90 dní) — viď komentár v <code>EmailLog.js</code> modeli.
         </p>
       </AdminHelpToggle>
 

@@ -2845,7 +2845,7 @@ router.get('/revenue', authenticateToken, requireAdmin, async (req, res) => {
 
 router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { type, status, search, from, to } = req.query;
+    const { type, status, search, from, to, sort, order } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
@@ -2871,10 +2871,14 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
       ];
     }
 
+    // Whitelist sort fields — bezpečne pred user-input do MongoDB
+    const sortField = ['sentAt', 'toEmail', 'type', 'status'].includes(sort) ? sort : 'sentAt';
+    const sortDir = order === 'asc' ? 1 : -1;
+
     const [total, logs] = await Promise.all([
       EmailLog.countDocuments(q),
       EmailLog.find(q)
-        .sort({ sentAt: -1 })
+        .sort({ [sortField]: sortDir })
         .skip((page - 1) * limit)
         .limit(limit)
         .populate('userId', 'username email avatar avatarData avatarMimetype color')
@@ -2924,7 +2928,10 @@ router.get('/email-logs-stats', authenticateToken, requireAdmin, async (req, res
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [byStatus, byType, total7d, total30d, recentFailed] = await Promise.all([
+    // Daily aggregation pre line-chart (volume + failure trend). Group by
+    // YYYY-MM-DD pomocou $dateToString — Atlas-friendly, žiadne JS post-processing
+    // potrebné.
+    const [byStatus, byType, total7d, total30d, recentFailed, daily] = await Promise.all([
       EmailLog.aggregate([
         { $match: { sentAt: { $gte: since } } },
         { $group: { _id: '$status', count: { $sum: 1 } } }
@@ -2941,7 +2948,19 @@ router.get('/email-logs-stats', authenticateToken, requireAdmin, async (req, res
         .sort({ sentAt: -1 })
         .limit(5)
         .select('toEmail type error sentAt')
-        .lean()
+        .lean(),
+      EmailLog.aggregate([
+        { $match: { sentAt: { $gte: since } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$sentAt' } },
+            sent: { $sum: { $cond: [{ $eq: ['$status', 'sent'] }, 1, 0] } },
+            failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+            skipped: { $sum: { $cond: [{ $regexMatch: { input: '$status', regex: /^skipped/ } }, 1, 0] } }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ])
     ]);
 
     const statusMap = byStatus.reduce((acc, r) => { acc[r._id] = r.count; return acc; }, {});
@@ -2951,6 +2970,16 @@ router.get('/email-logs-stats', authenticateToken, requireAdmin, async (req, res
       ? Math.round((failedTotal / (sentTotal + failedTotal)) * 1000) / 10
       : 0;
 
+    // Fill missing days s 0, aby chart neukazoval medzery
+    const dailyMap = daily.reduce((acc, d) => { acc[d._id] = d; return acc; }, {});
+    const dailyFilled = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      const entry = dailyMap[key] || { _id: key, sent: 0, failed: 0, skipped: 0 };
+      dailyFilled.push({ date: key, sent: entry.sent, failed: entry.failed, skipped: entry.skipped });
+    }
+
     res.json({
       windowDays: days,
       total7d,
@@ -2958,7 +2987,8 @@ router.get('/email-logs-stats', authenticateToken, requireAdmin, async (req, res
       byStatus: statusMap,
       failureRatePct: failureRate,
       topTypes7d: byType.map((t) => ({ type: t._id, count: t.count })),
-      recentFailed
+      recentFailed,
+      daily: dailyFilled
     });
   } catch (err) {
     logger.error('Email stats error', { error: err.message });
