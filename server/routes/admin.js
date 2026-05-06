@@ -2255,6 +2255,88 @@ router.get('/users/:userId/email-logs', authenticateToken, requireAdmin, async (
   }
 });
 
+/**
+ * Mobile app launch — broadcast email všetkým aktívnym userom.
+ * Cieľová skupina: users s `lastLogin` za posledných N dní (default 90).
+ * Sequenčné odosielanie 1 mail/200ms aby sme nezahltili SMTP frontu a
+ * neboli označení za bulk spam. Jeden run = ~5 min pre 1500 userov.
+ *
+ * Idempotency: EmailLog za posledných 30 dní pre `mobile_app_launch` type
+ * znamená že userovi sme už mail poslali (cooldown sa nestará pre
+ * non-marketing typy, ale tu si držíme vlastnú kontrolu).
+ *
+ * Mode `dryRun=true` len vráti počet cieľových userov bez reálneho
+ * odoslania — pre admin previewujúceho impact.
+ */
+router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    // activeWithinDays=null → všetci registrovaní userovia bez filtra.
+    // Default 365 dní pre safety (užší rozsah, ale dostatočne široký pre väčšinu use-case-ov).
+    // Filtrujeme cez createdAt — DB nemá lastLogin field, ale pre prvý broadcast
+    // o mobile appke chceme zacieliť aj userov ktorí sa registrovali pred dlhšou dobou.
+    const { activeWithinDays = null, dryRun = false } = req.body || {};
+    const filter = {};
+    if (activeWithinDays !== null) {
+      const since = new Date(Date.now() - parseInt(activeWithinDays) * 24 * 60 * 60 * 1000);
+      filter.createdAt = { $gte: since };
+    }
+
+    const targetUsers = await User.find(filter)
+      .select('_id username email subscription preferences')
+      .lean();
+
+    // Filter out users that already received this broadcast
+    const recentSentUserIds = await EmailLog.distinct('userId', {
+      type: 'mobile_app_launch',
+      status: 'sent',
+      sentAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+    });
+    const recentSentSet = new Set(recentSentUserIds.map((id) => String(id)));
+
+    const queue = targetUsers.filter((u) => !recentSentSet.has(String(u._id)));
+
+    if (dryRun) {
+      return res.json({
+        dryRun: true,
+        eligibleUsers: targetUsers.length,
+        alreadySent: targetUsers.length - queue.length,
+        toSend: queue.length
+      });
+    }
+
+    // Async background send — nemôžeme blokovať admin response na 5 min.
+    // Vraciame okamžite { started: true } a admin v Email tabe sleduje progress
+    // cez log-y / countdown stats endpoint.
+    res.json({
+      started: true,
+      eligibleUsers: targetUsers.length,
+      alreadySent: targetUsers.length - queue.length,
+      toSend: queue.length
+    });
+
+    // Fire-and-forget loop with rate limiting
+    const subEmail = require('../services/subscriptionEmailService');
+    const triggeredBy = `admin:${req.adminUser?.username || req.user.username}-broadcast`;
+    let sent = 0, failed = 0;
+    for (const u of queue) {
+      try {
+        const result = await subEmail.sendMobileAppLaunch({ user: u, triggeredBy });
+        if (result.ok) sent++;
+        else failed++;
+      } catch (err) {
+        failed++;
+        logger.error('[Broadcast] mobile_app_launch error', { userId: String(u._id), error: err.message });
+      }
+      // 200ms throttle — 5 mails/sec, well under hostcreators SMTP limits
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    logger.info('[Broadcast] mobile_app_launch complete', { sent, failed, total: queue.length });
+  } catch (err) {
+    logger.error('Broadcast mobile_app_launch error', { error: err.message });
+    res.status(500).json({ message: 'Chyba broadcast', error: err.message });
+  }
+});
+
 // Test email — pošle preview ľubovoľného typu na ľubovoľnú adresu (mock dáta).
 // Pre vizuálne testovanie šablón bez nutnosti meniť reálnemu userovi plán.
 router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => {

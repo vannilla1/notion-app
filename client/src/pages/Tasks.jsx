@@ -12,6 +12,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import AnnouncementBanner from '../components/AnnouncementBanner';
 import TimeRemindersPicker from '../components/TimeRemindersPicker';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -2378,6 +2379,7 @@ function Tasks() {
           >
             Správy
           </button>
+          <AnnouncementBanner />
           <NotificationBell />
           <UserMenu
             user={user}

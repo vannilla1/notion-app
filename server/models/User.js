@@ -144,7 +144,17 @@ const userSchema = new mongoose.Schema({
   // describe state changes the user requested or which legally must be
   // communicated. GDPR compliant under "legitimate interest" vs. consent.
   preferences: {
-    marketingEmails: { type: Boolean, default: true }
+    marketingEmails: { type: Boolean, default: true },
+    // Dismissed announcement banners (mobile app launch, new feature etc.).
+    // Map: announcement version key → dismissal timestamp.
+    // Univerzálna infraštruktúra — keď príde nový announcement (napr. mobile_app_v2
+    // po Apple iOS approval), userovia ktorí dismissli v1 ho znova uvidia ako v2,
+    // lebo kontrolujeme konkrétnu verziu, nie generic "dismissed all".
+    dismissedAnnouncements: {
+      type: Map,
+      of: Date,
+      default: () => new Map()
+    }
   },
   // Current active workspace
   currentWorkspaceId: {

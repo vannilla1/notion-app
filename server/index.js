@@ -34,6 +34,7 @@ const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/sub
 const { schedulePlanExpiration } = require('./services/planExpiration');
 const { scheduleSubscriptionReminders } = require('./services/subscriptionReminders');
 const emailUnsubscribeRoutes = require('./routes/emailUnsubscribe');
+const announcementsRoutes = require('./routes/announcements');
 const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
@@ -188,6 +189,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/errors', errorRoutes);
 app.use('/api/email', emailUnsubscribeRoutes);
+app.use('/api/announcements', announcementsRoutes);
 
 // Initialize notification service with Socket.IO
 notificationService.initialize(io);

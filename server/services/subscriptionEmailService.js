@@ -740,6 +740,63 @@ const verifyUnsubscribeToken = (token) => {
   }
 };
 
+/**
+ * One-off broadcast: launch oznam o mobilnej appke. Posielame všetkým
+ * registrovaným userom (alebo filtrované — len aktívnym za posledných N dní).
+ *
+ * Copy je úmyselne neutrálny pre obidve platformy — Android live, iOS
+ * čoskoro — aby iPhone userovia nevnímali ako spam ale ako pozitívnu
+ * správu o tom že iOS verzia tiež príde.
+ *
+ * Volá sa raz, manuálne z admin panelu cez `/api/admin/email-broadcast/...`.
+ * Na zopakovanie netreba — EmailLog cooldown nepúšťa pre marketing typ.
+ */
+const sendMobileAppLaunch = async ({ user, triggeredBy }) => {
+  const subject = `Prpl CRM je teraz aj ako mobilná aplikácia`;
+  const playStoreUrl = 'https://play.google.com/store/apps/details?id=eu.prplcrm.app';
+
+  const bodyHtml = `
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
+      máme pre vás dobrú správu — Prpl CRM si od dnešného dňa môžete stiahnuť aj ako mobilnú aplikáciu.
+    </p>
+    <p style="font-size:14px;color:#555;margin:0 0 16px;line-height:1.5;">
+      Tu je rýchly prehľad:
+    </p>
+    <ul style="font-size:14px;color:#444;margin:0 0 24px;padding-left:20px;line-height:1.7;">
+      <li><strong>Android verzia</strong> je k dispozícii na Google Play už dnes</li>
+      <li><strong>iOS verzia</strong> prechádza posledným kolom Apple App Store review a bude dostupná v najbližších dňoch</li>
+      <li>Prihlasujete sa do nej rovnakým účtom ako na webe — všetky vaše dáta sú okamžite tam</li>
+    </ul>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+      <tr><td align="center">
+        <a href="${playStoreUrl}" style="display:inline-block;background:#8B5CF6;color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:600;letter-spacing:0.3px;">
+          Stiahnuť na Google Play
+        </a>
+      </td></tr>
+    </table>
+    <p style="font-size:13px;color:#666;margin:0 0 16px;line-height:1.5;text-align:center;">
+      <em>Pre iPhone používateľov</em> — App Store verzia príde v najbližších dňoch a oznámime vám to ihneď.
+    </p>
+    <hr style="border:none;border-top:1px solid #eee;margin:24px 0;" />
+    <p style="font-size:13px;color:#666;margin:0;line-height:1.5;">
+      Web verzia funguje ďalej rovnako ako predtým — mobilná appka je doplnok pre situácie keď nie ste pri počítači. Vyskúšajte a dajte nám vedieť čo si myslíte.
+    </p>
+    <p style="font-size:12px;color:#999;margin:16px 0 0;line-height:1.5;">
+      Otázky? Píšte nám na <a href="mailto:support@prplcrm.eu" style="color:#8B5CF6;">support@prplcrm.eu</a>.
+    </p>`;
+
+  return sendAndLog({
+    user,
+    toEmail: user.email,
+    type: 'mobile_app_launch',
+    subject,
+    html: wrapEmail({ headerSubtitle: 'Mobilná aplikácia', bodyHtml }),
+    context: { plan: user.subscription?.plan },
+    triggeredBy: triggeredBy || 'admin-broadcast'
+  });
+};
+
 module.exports = {
   initTransporter,
   sendSubscriptionAssigned,
@@ -749,6 +806,7 @@ module.exports = {
   sendReminderT1,
   sendExpired,
   sendWinback,
+  sendMobileAppLaunch,
   resetReminderFlags,
   verifyUnsubscribeToken,
   PROMO,

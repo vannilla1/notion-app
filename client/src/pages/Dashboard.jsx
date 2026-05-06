@@ -9,6 +9,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import AnnouncementBanner from '../components/AnnouncementBanner';
 
 // Help tips for Dashboard
 const dashboardHelpTips = [
@@ -630,6 +631,7 @@ function Dashboard() {
           >
             Správy
           </button>
+          <AnnouncementBanner />
           <NotificationBell />
           <UserMenu
             user={user}

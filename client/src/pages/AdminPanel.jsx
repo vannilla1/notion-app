@@ -3828,6 +3828,9 @@ function EmailsTab() {
       {/* TEST EMAIL SENDER */}
       <EmailTestSender />
 
+      {/* BROADCAST CAMPAIGNS — one-off announcement emails to all users */}
+      <BroadcastSender />
+
       {/* CONFIG INFO */}
       {config && (
         <div className="sa-card" style={{ marginTop: 20 }}>
@@ -3894,6 +3897,109 @@ function EmailsTab() {
       </AdminHelpToggle>
 
       {previewLog && <EmailPreviewModal log={previewLog} onClose={() => setPreviewLog(null)} />}
+    </div>
+  );
+}
+
+/**
+ * BroadcastSender — UI pre one-off announcement broadcast (mobile app launch).
+ *
+ * Two-step UX: najprv dryRun (preview počtov), potom reálny send.
+ * Backend posiela mailom asynchrónne (200ms throttle) — admin response
+ * sa vráti okamžite, progress sledovať cez Email log table vyššie.
+ */
+function BroadcastSender() {
+  const [days, setDays] = useState('');
+  const [dryRunResult, setDryRunResult] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState(null);
+
+  const handleDryRun = async () => {
+    setDryRunResult(null);
+    setSendResult(null);
+    try {
+      const r = await adminApi.post('/api/admin/email-broadcast/mobile-app-launch', {
+        activeWithinDays: days ? parseInt(days) : null,
+        dryRun: true
+      });
+      setDryRunResult(r.data);
+    } catch (err) {
+      setDryRunResult({ error: err.response?.data?.message || err.message });
+    }
+  };
+
+  const handleSend = async () => {
+    if (!confirm(`Naozaj poslať broadcast email ${dryRunResult?.toSend || '?'} užívateľom? Toto sa nedá zastaviť.`)) return;
+    setSending(true);
+    setSendResult(null);
+    try {
+      const r = await adminApi.post('/api/admin/email-broadcast/mobile-app-launch', {
+        activeWithinDays: days ? parseInt(days) : null,
+        dryRun: false
+      });
+      setSendResult({ ok: true, ...r.data });
+      setDryRunResult(null);
+    } catch (err) {
+      setSendResult({ ok: false, error: err.response?.data?.message || err.message });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="sa-card" style={{ marginTop: 20, borderLeft: '4px solid #f59e0b' }}>
+      <h3 style={{ marginTop: 0 }}>📣 Broadcast — Mobilná appka oznam</h3>
+      <p style={{ fontSize: 13, color: '#64748b', marginTop: 0 }}>
+        Pošle email „Prpl CRM je teraz aj ako mobilná aplikácia" všetkým registrovaným užívateľom. Posielanie 5 mailov/sek (rate limit aby sme neboli označení za bulk spam). Idempotency: užívatelia, ktorí už mail dostali za posledných 30 dní, sa preskočia.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'end' }}>
+        <div>
+          <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>
+            Filter: registrovaní za posledných N dní (prázdne = všetci)
+          </label>
+          <input
+            type="number"
+            placeholder="napr. 365 (= rok)"
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+            className="sa-input"
+            min="1"
+          />
+        </div>
+        <button className="btn btn-secondary" onClick={handleDryRun} style={{ height: 40 }}>
+          1. Náhľad (dry run)
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={handleSend}
+          disabled={!dryRunResult?.toSend || sending}
+          style={{ height: 40 }}
+          title={!dryRunResult?.toSend ? 'Najprv urob dry run' : ''}
+        >
+          {sending ? 'Spúšťam...' : '2. Odoslať broadcast'}
+        </button>
+      </div>
+
+      {dryRunResult && !dryRunResult.error && (
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: '#fef3c7', fontSize: 13, color: '#92400e' }}>
+          📊 <strong>Náhľad:</strong> {dryRunResult.eligibleUsers} eligibilných užívateľov, {dryRunResult.alreadySent} už dostalo, <strong>{dryRunResult.toSend}</strong> sa odošle. Predpokladaný čas: {Math.ceil((dryRunResult.toSend || 0) * 0.2)} sekúnd.
+        </div>
+      )}
+      {dryRunResult?.error && (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: 13 }}>
+          ❌ {dryRunResult.error}
+        </div>
+      )}
+      {sendResult?.ok && (
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: '#d1fae5', color: '#065f46', fontSize: 13 }}>
+          ✅ Broadcast spustený na pozadí. Posielanie {sendResult.toSend} mailov beží — sledujte progress v Email log table vyššie (filter: typ „Mobile app launch"). Predpokladaný čas: {Math.ceil((sendResult.toSend || 0) * 0.2)} sekúnd.
+        </div>
+      )}
+      {sendResult && !sendResult.ok && (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: 13 }}>
+          ❌ {sendResult.error}
+        </div>
+      )}
     </div>
   );
 }

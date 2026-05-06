@@ -10,6 +10,7 @@ import HelpGuide from '../components/HelpGuide';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
+import AnnouncementBanner from '../components/AnnouncementBanner';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
@@ -1386,6 +1387,7 @@ function CRM() {
           >
             Správy
           </button>
+          <AnnouncementBanner />
           <NotificationBell />
           <UserMenu
             user={user}

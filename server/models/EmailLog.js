@@ -49,6 +49,8 @@ const emailLogSchema = new mongoose.Schema({
       'welcome',
       'invitation',
       'password_reset',
+      // One-off product announcements (broadcast emaily)
+      'mobile_app_launch',
       // Admin / system
       'admin_notify'
     ]

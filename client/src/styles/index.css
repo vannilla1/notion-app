@@ -12270,3 +12270,125 @@ body.ios-app {
 .sa-modal-body {
   padding: 22px;
 }
+
+/* ─── Announcement banner (pill v hlavičke + modal) ─────────────────── */
+
+.announcement-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #8B5CF6, #6D28D9);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+.announcement-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.5);
+}
+.announcement-pill-icon { font-size: 15px; line-height: 1; }
+.announcement-pill-label { line-height: 1; }
+
+@media (max-width: 600px) {
+  .announcement-pill-label { display: none; }
+  .announcement-pill { padding: 6px 8px; }
+}
+
+.announcement-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10001; padding: 20px;
+  animation: announcementFadeIn 0.2s ease;
+}
+@keyframes announcementFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.announcement-modal {
+  background: var(--bg-primary, #fff);
+  border-radius: 16px;
+  max-width: 480px; width: 100%;
+  padding: 32px 28px 24px;
+  position: relative;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  animation: announcementSlideUp 0.3s ease;
+}
+@keyframes announcementSlideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.announcement-modal-close {
+  position: absolute; top: 12px; right: 12px;
+  width: 32px; height: 32px;
+  background: transparent; border: none;
+  font-size: 24px; color: var(--text-muted, #64748b);
+  cursor: pointer; line-height: 1;
+}
+.announcement-modal-close:hover { color: var(--text-primary, #1f2937); }
+
+.announcement-modal-header {
+  text-align: center; margin-bottom: 16px;
+}
+.announcement-modal-icon { font-size: 48px; line-height: 1; margin-bottom: 8px; }
+.announcement-modal-title {
+  margin: 0; font-size: 22px; font-weight: 700;
+  color: var(--text-primary, #1f2937);
+}
+
+.announcement-modal-body {
+  font-size: 14px; line-height: 1.6;
+  color: var(--text-secondary, #475569);
+  margin: 0 0 24px; text-align: center;
+}
+
+.announcement-modal-cta {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 16px;
+}
+
+.announcement-cta-btn {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 14px;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+.announcement-cta-primary {
+  background: #1f2937; color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.announcement-cta-primary:hover {
+  background: #111827; transform: translateY(-1px);
+}
+.announcement-cta-secondary {
+  background: rgba(31, 41, 55, 0.06); color: #1f2937;
+  border-color: rgba(31, 41, 55, 0.1);
+}
+.announcement-cta-secondary:hover { background: rgba(31, 41, 55, 0.1); }
+.announcement-cta-disabled {
+  background: #f3f4f6; color: #9ca3af;
+  cursor: not-allowed;
+}
+.announcement-cta-icon { font-size: 22px; line-height: 1; min-width: 22px; }
+.announcement-cta-label { display: flex; flex-direction: column; line-height: 1.2; text-align: left; }
+.announcement-cta-label small { font-size: 10px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.5px; }
+.announcement-cta-label strong { font-size: 16px; font-weight: 600; }
+
+.announcement-modal-footer { text-align: center; }
+.announcement-modal-dismiss {
+  background: none; border: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px; cursor: pointer;
+  padding: 4px 8px; text-decoration: underline;
+}
+.announcement-modal-dismiss:hover { color: var(--text-secondary, #64748b); }
