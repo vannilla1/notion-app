@@ -33,13 +33,25 @@ const trackRequest = (req, res, next) => {
 
     // Route stats
     if (!counters.routes[route]) {
-      counters.routes[route] = { total: 0, methods: {}, avgDuration: 0, totalDuration: 0 };
+      counters.routes[route] = {
+        total: 0, methods: {}, avgDuration: 0, totalDuration: 0,
+        // Per-route status group counters — pre top-error-routes view.
+        // Bez nich sme nevedeli povedať "ktoré endpointy zlyhávajú najviac".
+        statusGroups: { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 },
+        errors: 0 // 4xx + 5xx
+      };
     }
     const r = counters.routes[route];
     r.total++;
     r.methods[method] = (r.methods[method] || 0) + 1;
     r.totalDuration += duration;
     r.avgDuration = Math.round(r.totalDuration / r.total);
+    // Status group bucket
+    const statusGroup = `${Math.floor(status / 100)}xx`;
+    if (r.statusGroups[statusGroup] !== undefined) {
+      r.statusGroups[statusGroup]++;
+    }
+    if (status >= 400) r.errors++;
 
     // Hourly
     counters.hourly[hourKey] = (counters.hourly[hourKey] || 0) + 1;
@@ -57,11 +69,20 @@ const trackRequest = (req, res, next) => {
 const getMetrics = () => {
   cleanOldData();
 
-  // Top routes by total requests
-  const topRoutes = Object.entries(counters.routes)
-    .map(([route, data]) => ({ route, ...data }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 20);
+  // Top routes by total requests + samostatné top-by-duration a top-by-errors
+  // pohľady. Admin si vyberie podľa toho čo lovi (najťažšie cesty / najpomalšie
+  // / najviac zlyhávajúce).
+  const allRoutes = Object.entries(counters.routes)
+    .map(([route, data]) => ({ route, ...data }));
+  const topRoutes = [...allRoutes].sort((a, b) => b.total - a.total).slice(0, 20);
+  const topSlowRoutes = [...allRoutes]
+    .filter((r) => r.total >= 5) // ignore one-off endpoints
+    .sort((a, b) => b.avgDuration - a.avgDuration)
+    .slice(0, 10);
+  const topErrorRoutes = [...allRoutes]
+    .filter((r) => r.errors > 0)
+    .sort((a, b) => b.errors - a.errors)
+    .slice(0, 10);
 
   // Hourly data for last 24h
   const now = new Date();
@@ -78,12 +99,22 @@ const getMetrics = () => {
     .filter(([code]) => parseInt(code) >= 400)
     .reduce((sum, [, count]) => sum + count, 0);
 
+  // Aggregate status groups z global statusCodes (2xx/3xx/4xx/5xx)
+  const statusGroups = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
+  for (const [code, count] of Object.entries(counters.statusCodes)) {
+    const group = `${Math.floor(parseInt(code) / 100)}xx`;
+    if (statusGroups[group] !== undefined) statusGroups[group] += count;
+  }
+
   return {
     totalRequests: counters.totalRequests,
     trackingSince: counters.startedAt,
     topRoutes,
+    topSlowRoutes,
+    topErrorRoutes,
     hourlyData,
     statusCodes: counters.statusCodes,
+    statusGroups,
     errorRate: counters.totalRequests > 0
       ? Math.round((errorCount / counters.totalRequests) * 10000) / 100
       : 0,

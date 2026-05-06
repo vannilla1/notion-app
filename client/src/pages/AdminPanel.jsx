@@ -3230,13 +3230,47 @@ function ActivityFeedTab() {
 function ApiMetricsTab() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [routesView, setRoutesView] = useState('top'); // 'top' | 'slow' | 'errors'
+  const [routeSearch, setRouteSearch] = useState('');
+  const [methodFilter, setMethodFilter] = useState('');
+  const [routeSort, setRouteSort] = useState('total'); // 'total' | 'avgDuration' | 'errors' | 'route'
+  const [routeOrder, setRouteOrder] = useState('desc');
 
-  useEffect(() => {
-    adminApi.get('/api/admin/api-metrics')
-      .then(r => setMetrics(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const r = await adminApi.get('/api/admin/api-metrics');
+      setMetrics(r.data);
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh 30s s Page Visibility pause
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 30000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
+
+  const handleReset = async () => {
+    if (!confirm('Resetovať všetky API metriky? Stratíš kompletnú históriu zberu od posledného reštartu.')) return;
+    try {
+      await adminApi.post('/api/admin/performance/reset');
+      await load();
+    } catch { alert('Reset zlyhal'); }
+  };
 
   if (loading) return <div className="sa-loading">Načítavam API metriky...</div>;
   if (!metrics) return <div className="sa-error">Nepodarilo sa načítať metriky</div>;
@@ -3261,23 +3295,81 @@ function ApiMetricsTab() {
     }]
   };
 
+  // Status groups summary
+  const groups = metrics.statusGroups || { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
+
+  // Routes view selection — top by total / slow / errors
+  const baseRoutes = routesView === 'slow' ? (metrics.topSlowRoutes || [])
+    : routesView === 'errors' ? (metrics.topErrorRoutes || [])
+    : (metrics.topRoutes || []);
+
+  // Filter + sort
+  const filteredRoutes = baseRoutes
+    .filter((r) => {
+      if (routeSearch && !r.route.toLowerCase().includes(routeSearch.toLowerCase())) return false;
+      if (methodFilter && !(r.methods || {})[methodFilter]) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      let av = a[routeSort] ?? 0;
+      let bv = b[routeSort] ?? 0;
+      if (routeSort === 'route') {
+        av = a.route; bv = b.route;
+        return routeOrder === 'asc' ? String(av).localeCompare(bv) : String(bv).localeCompare(av);
+      }
+      return routeOrder === 'asc' ? av - bv : bv - av;
+    });
+
+  const handleRouteSort = (col) => {
+    if (routeSort === col) setRouteOrder(routeOrder === 'asc' ? 'desc' : 'asc');
+    else { setRouteSort(col); setRouteOrder('desc'); }
+  };
+
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>API Metriky</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          API Metriky
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h2>
+        <button onClick={handleReset} className="btn btn-secondary" style={{ fontSize: 12 }}>
+          🗑️ Reset metrík
+        </button>
+      </div>
 
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {[
           { label: 'Celkom requestov', value: metrics.totalRequests.toLocaleString() },
           { label: 'Req/min (avg)', value: metrics.requestsPerMinute },
-          { label: 'Error rate', value: `${metrics.errorRate}%` },
+          { label: 'Error rate', value: `${metrics.errorRate}%`, color: metrics.errorRate > 5 ? '#ef4444' : metrics.errorRate > 1 ? '#f59e0b' : '#10b981' },
           { label: 'Tracking od', value: new Date(metrics.trackingSince).toLocaleString('sk-SK', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
         ].map(s => (
           <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '12px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '20px', fontWeight: 700 }}>{s.value}</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: s.color || 'inherit' }}>{s.value}</div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* Status groups summary cards — agregát z 2xx/3xx/4xx/5xx */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 24 }}>
+        <div style={{ padding: 10, background: '#d1fae5', borderRadius: 'var(--radius-sm)', textAlign: 'center', border: '1px solid #6ee7b7' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#065f46' }}>{groups['2xx'].toLocaleString()}</div>
+          <div style={{ fontSize: 11, color: '#047857' }}>2xx Success</div>
+        </div>
+        <div style={{ padding: 10, background: '#dbeafe', borderRadius: 'var(--radius-sm)', textAlign: 'center', border: '1px solid #93c5fd' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#1e40af' }}>{groups['3xx'].toLocaleString()}</div>
+          <div style={{ fontSize: 11, color: '#1d4ed8' }}>3xx Redirect</div>
+        </div>
+        <div style={{ padding: 10, background: '#fef3c7', borderRadius: 'var(--radius-sm)', textAlign: 'center', border: '1px solid #fcd34d' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#92400e' }}>{groups['4xx'].toLocaleString()}</div>
+          <div style={{ fontSize: 11, color: '#b45309' }}>4xx Client Error</div>
+        </div>
+        <div style={{ padding: 10, background: '#fee2e2', borderRadius: 'var(--radius-sm)', textAlign: 'center', border: '1px solid #fca5a5' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#991b1b' }}>{groups['5xx'].toLocaleString()}</div>
+          <div style={{ fontSize: 11, color: '#b91c1c' }}>5xx Server Error</div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '24px' }}>
@@ -3307,33 +3399,158 @@ function ApiMetricsTab() {
         </div>
       </div>
 
-      {/* Top routes */}
+      {/* Endpoints panel — view switcher + filter + table */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Top endpointy</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '400px', overflow: 'auto' }}>
-          {metrics.topRoutes.map((r, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontFamily: 'monospace' }}>
-              <span style={{ flex: 1 }}>{r.route}</span>
-              <div style={{ display: 'flex', gap: '16px', flexShrink: 0 }}>
-                <span style={{ color: 'var(--text-muted)' }}>{Object.entries(r.methods || {}).map(([m, c]) => `${m}:${c}`).join(' ')}</span>
-                <span style={{ fontWeight: 600, minWidth: '50px', textAlign: 'right' }}>{r.total}x</span>
-                <span style={{ color: 'var(--text-muted)', minWidth: '60px', textAlign: 'right' }}>{r.avgDuration}ms</span>
-              </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          {/* View tabs */}
+          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-primary)', padding: 4, borderRadius: 'var(--radius-sm)' }}>
+            {[
+              { id: 'top', label: '📊 Top podľa volaní' },
+              { id: 'slow', label: '🐢 Najpomalšie' },
+              { id: 'errors', label: '🚨 Najviac zlyháva' }
+            ].map((v) => (
+              <button
+                key={v.id}
+                onClick={() => setRoutesView(v.id)}
+                style={{
+                  padding: '6px 12px', fontSize: 12,
+                  background: routesView === v.id ? 'var(--accent-color, #6366f1)' : 'transparent',
+                  color: routesView === v.id ? 'white' : 'var(--text-primary)',
+                  border: 'none', borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer', fontWeight: routesView === v.id ? 600 : 400
+                }}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              placeholder="🔍 Hľadať endpoint..."
+              value={routeSearch}
+              onChange={(e) => setRouteSearch(e.target.value)}
+              className="form-input"
+              style={{ fontSize: 12, width: 200, fontFamily: 'monospace' }}
+            />
+            <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: 12 }}>
+              <option value="">Všetky metódy</option>
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+              <option value="PATCH">PATCH</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '450px', overflow: 'auto' }}>
+          {filteredRoutes.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+              {baseRoutes.length === 0 ? 'Žiadne dáta — metriky sa začnú zbierať po reštarte' : 'Žiadne výsledky pre filter'}
             </div>
-          ))}
-          {metrics.topRoutes.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadne dáta — metriky sa začnú zbierať po reštarte servera</div>}
+          )}
+          {filteredRoutes.length > 0 && (
+            <>
+              {/* Header row — clickable sort */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => handleRouteSort('route')}>
+                  Route {routeSort === 'route' && (routeOrder === 'asc' ? '▲' : '▼')}
+                </span>
+                <span style={{ width: 130, textAlign: 'right' }}>Methods</span>
+                <span style={{ width: 70, textAlign: 'right', cursor: 'pointer' }} onClick={() => handleRouteSort('total')}>
+                  Total {routeSort === 'total' && (routeOrder === 'asc' ? '▲' : '▼')}
+                </span>
+                <span style={{ width: 80, textAlign: 'right', cursor: 'pointer' }} onClick={() => handleRouteSort('avgDuration')}>
+                  Avg {routeSort === 'avgDuration' && (routeOrder === 'asc' ? '▲' : '▼')}
+                </span>
+                <span style={{ width: 70, textAlign: 'right', cursor: 'pointer' }} onClick={() => handleRouteSort('errors')}>
+                  Errors {routeSort === 'errors' && (routeOrder === 'asc' ? '▲' : '▼')}
+                </span>
+              </div>
+              {filteredRoutes.map((r, i) => {
+                const errorPct = r.total > 0 ? Math.round((r.errors / r.total) * 100) : 0;
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', fontSize: 12, fontFamily: 'monospace' }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.route}</span>
+                    <span style={{ width: 130, textAlign: 'right', color: 'var(--text-muted)', fontSize: 11 }}>
+                      {Object.entries(r.methods || {}).map(([m, c]) => `${m}:${c}`).join(' ')}
+                    </span>
+                    <span style={{ width: 70, textAlign: 'right', fontWeight: 600 }}>{r.total}</span>
+                    <span style={{
+                      width: 80, textAlign: 'right',
+                      color: r.avgDuration > 1000 ? '#ef4444' : r.avgDuration > 500 ? '#f59e0b' : 'var(--text-muted)',
+                      fontWeight: r.avgDuration > 500 ? 600 : 400
+                    }}>
+                      {r.avgDuration}ms
+                    </span>
+                    <span style={{
+                      width: 70, textAlign: 'right',
+                      color: r.errors > 0 ? (errorPct > 10 ? '#ef4444' : '#f59e0b') : 'var(--text-muted)',
+                      fontWeight: r.errors > 0 ? 600 : 400
+                    }}>
+                      {r.errors > 0 ? `${r.errors} (${errorPct}%)` : '0'}
+                    </span>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
 
       <AdminHelpToggle title="API metriky">
-        <p><strong>Čo tu vidíš:</strong> štatistiky výkonu serverového API — koľko requestov sa volá, ktoré endpointy sú najťažšie, error rate.</p>
+        <p><strong>Čo tu vidíš:</strong> štatistiky výkonu serverového API — koľko requestov sa volá, ktoré endpointy sú najťažšie, error rate, distribúcia status kódov.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Summary cards</h4>
         <ul>
-          <li><strong>Total requests</strong> — kumulatívny počet HTTP requestov za uplynulé obdobie.</li>
-          <li><strong>Error rate</strong> — % requestov s 4xx/5xx odpoveďou. Zdravé je &lt; 1%.</li>
-          <li><strong>Avg duration</strong> — priemerný čas odpovede v ms. Endpointy nad 500 ms sú kandidáti na optimalizáciu.</li>
-          <li><strong>Top routes</strong> — endpointy s najvyšším počtom volaní; ukazuje aj per-route avgDuration.</li>
+          <li><strong>Celkom requestov</strong> — kumulatívny počet HTTP requestov od posledného reštartu / resetu.</li>
+          <li><strong>Req/min (avg)</strong> — priemerná frekvencia volaní za sledované obdobie.</li>
+          <li><strong>Error rate</strong> — % requestov s 4xx/5xx odpoveďou. Farebné: zelená (≤1%), oranžová (1-5%), červená ({'>'}5%).</li>
+          <li><strong>Tracking od</strong> — kedy sa začalo zbieranie metrík (reštart servera alebo manual reset).</li>
         </ul>
-        <p><strong>Tipy:</strong> Metriky sa zbierajú in-memory v server procese (apiMetrics service) — pri reštarte servera sa vynulujú. Ak vidíš dlhý avg duration na konkrétnom endpointe → preplauj queries (Mongo indexy), pridaj caching, alebo presuni výpočet do background.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🎨 Status code groups</h4>
+        <p>4 farebné karty: <strong>2xx Success</strong> (zelená), <strong>3xx Redirect</strong> (modrá), <strong>4xx Client Error</strong> (oranžová), <strong>5xx Server Error</strong> (červená). Zdravý pomer: 2xx {'>'} 95%, 5xx {'<'} 1%.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📈 Grafy</h4>
+        <ul>
+          <li><strong>Requesty za posledných 24h</strong> — Line chart hourly volume. Sledovať peak hodiny aplikácie.</li>
+          <li><strong>Status kódy</strong> — Doughnut chart presnejších kódov (200, 401, 404, 500...). Healthy = dominantne zelená.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔀 3 view tabs (endpointy)</h4>
+        <ul>
+          <li><strong>📊 Top podľa volaní</strong> — endpointy s najvyšším počtom volaní (default). Tieto sú "hot path" — najdôležitejšie pre optimalizáciu.</li>
+          <li><strong>🐢 Najpomalšie</strong> — top 10 endpointov podľa avgDuration (s minimum 5 volaní aby sa neukázali one-off outlier-y). Cieľ: žiadny endpoint nad 1000ms.</li>
+          <li><strong>🚨 Najviac zlyháva</strong> — endpointy ktoré vrátili 4xx/5xx aspoň raz. Ukazuje tiež error % per route.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Filter + sort</h4>
+        <ul>
+          <li><strong>Search box</strong> — substring v ceste endpointu (napr. <code>/api/contacts</code>).</li>
+          <li><strong>Method filter</strong> — len GET / POST / PUT / DELETE / PATCH.</li>
+          <li><strong>Klik na header column</strong> (Route / Total / Avg / Errors) → sort + toggle order.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔄 Auto-refresh + reset</h4>
+        <ul>
+          <li>Auto-refresh každých 30s s Page Visibility pause.</li>
+          <li><strong>🗑️ Reset metrík</strong> — vyčistí in-memory counters. Užitočné po deployi alebo pri sledovaní efektu optimalizácie.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Error rate {'<'} 1%? Ak nie, otvor "🚨 Najviac zlyháva" view.</li>
+          <li>5xx counter pri zelenej (0)? Žiadne vážne servery erorroy?</li>
+          <li>"🐢 Najpomalšie" view — žiadny endpoint nad 1000ms?</li>
+          <li>Hourly chart — peak hodiny zhodné s očakávaním (pracovné hodiny SK 9-17h)?</li>
+        </ol>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Metriky sa zbierajú in-memory v server procese (apiMetrics service) — pri reštarte servera sa vynulujú. Žiadna persistencia v DB. Pre dlhodobý perf monitoring zvážiť APM (DataDog, New Relic, OpenTelemetry).
+        </p>
       </AdminHelpToggle>
     </div>
   );
