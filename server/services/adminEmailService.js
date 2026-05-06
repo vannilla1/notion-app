@@ -208,6 +208,34 @@ const sendWelcomeEmail = async ({ toEmail, username }) => {
         </a>
       </td></tr>
     </table>
+
+    <!-- Mobilné aplikácie — info že je Android live + iOS čoskoro. Konzistentné
+         s landing page badge-mi a in-app announcement bannerom. Po Apple iOS
+         schválení stačí prepnúť appStoreUrl na live App Store link a active
+         flag, ten istý banner vyriešime cez announcement v2. -->
+    <p style="font-size:14px;color:#444;margin:24px 0 12px;line-height:1.5;text-align:center;font-weight:600;">
+      Stiahnite si aj mobilnú aplikáciu
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td align="center" style="padding:0 8px;">
+          <a href="https://play.google.com/store/apps/details?id=eu.prplcrm.app" style="display:inline-block;background:#1f2937;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:13px;line-height:1.2;">
+            <span style="display:block;font-size:10px;opacity:0.85;letter-spacing:0.5px;text-transform:uppercase;">Dostupné na</span>
+            <span style="display:block;font-size:15px;font-weight:600;margin-top:2px;">Google Play</span>
+          </a>
+        </td>
+        <td align="center" style="padding:0 8px;">
+          <span style="display:inline-block;background:#f3f4f6;color:#9ca3af;padding:10px 20px;border-radius:8px;font-size:13px;line-height:1.2;border:1px solid #e5e7eb;">
+            <span style="display:block;font-size:10px;letter-spacing:0.5px;text-transform:uppercase;">Pripravujeme</span>
+            <span style="display:block;font-size:15px;font-weight:600;margin-top:2px;">App Store</span>
+          </span>
+        </td>
+      </tr>
+    </table>
+    <p style="font-size:12px;color:#888;margin:0 0 16px;line-height:1.5;text-align:center;">
+      iOS verzia prechádza posledným kolom Apple App Store review a bude k dispozícii v najbližších dňoch.
+    </p>
+
     <p style="font-size:13px;color:#666;margin:20px 0 0;line-height:1.5;">
       Ak by ste potrebovali pomoc, napíšte nám na <a href="mailto:support@prplcrm.eu" style="color:#8B5CF6;">support@prplcrm.eu</a>.
     </p>
