@@ -395,7 +395,7 @@ function OverviewTab({ onNavigate }) {
             ✅ <strong>OK</strong> — služba odpovedá normálne.<br/>
             ⚠️ <strong>Watch</strong> — degradovaný stav, niečo pomalšie alebo blízko limitu (napr. RAM watch threshold).<br/>
             🚨 <strong>Error</strong> — služba zlyháva. Pri 3 erroroch po sebe pošle health monitor automatický email na support@prplcrm.eu (anti-flapping).<br/>
-            <em>Unknown</em> — health monitor ešte nestihol prvý check (server-restart < 5 min) alebo cache expired.
+            <em>Unknown</em> — health monitor ešte nestihol prvý check (server-restart &lt; 5 min) alebo cache expired.
           </li>
           <li><strong>Hover na badge</strong> ti ukáže detailnú správu (napr. SMTP "Connection accepted in 145ms").</li>
           <li><strong>FCM (Android push)</strong> sa tu zámerne nezobrazuje — firebase-admin SDK sa loaduje on-demand pri push send-e a nemá samostatný health endpoint. Ak push nedoručí, vidno to v Audit log → push.failed.</li>
