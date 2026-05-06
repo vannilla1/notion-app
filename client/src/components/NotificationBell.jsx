@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { PRIORITY_COLORS, PRIORITY_LABELS } from '../utils/constants';
 import api from '../api/api';
 
 // Stránkovanie notifikácií v belli. Používame offset-based pagination
@@ -227,6 +228,7 @@ function NotificationBell() {
     if (type?.startsWith('contact')) return '👤';
     if (type === 'task.dueDate' || type === 'subtask.dueDate') return '⏰';
     if (type === 'task.overdue' || type === 'subtask.overdue') return '⚠️';
+    if (type === 'task.priority_changed') return '🚩';
     if (type?.startsWith('task')) return '🗂️';
     if (type?.startsWith('subtask')) return '📝';
     if (type?.startsWith('message')) return '📨';
@@ -341,11 +343,25 @@ function NotificationBell() {
             )}
             {notifications.map(notif => {
               const cat = notif.category || 'general';
+              // Priority change → farebný badge + colored left border zhodný
+              // s priority paletou v zvyšku appky (low=šedá, medium=oranžová,
+              // high=červená). Inline-style override surchargne `notif-cat-*`
+              // border pre tento typ notifikácie aby bol vizuálne dominantný.
+              const isPriorityNotif = notif.type === 'task.priority_changed';
+              const priorityKey = notif.data?.newPriority;
+              const priorityColor = isPriorityNotif && priorityKey
+                ? PRIORITY_COLORS[priorityKey]
+                : null;
+              const priorityLabel = isPriorityNotif && priorityKey
+                ? PRIORITY_LABELS[priorityKey]
+                : null;
+
               return (
                 <div
                   key={notif.id || notif._id}
                   data-notif-id={notif.id || notif._id}
                   className={`notif-item notif-cat-${cat} ${notif.read ? '' : 'unread'}`}
+                  style={priorityColor ? { borderLeft: `3px solid ${priorityColor}` } : undefined}
                   onClick={() => handleClick(notif)}
                 >
                   <span className="notif-item-icon">{getIcon(notif)}</span>
@@ -353,6 +369,14 @@ function NotificationBell() {
                     <div className="notif-item-title">{notif.title}</div>
                     {notif.message && (
                       <div className="notif-item-msg">{notif.message}</div>
+                    )}
+                    {isPriorityNotif && priorityLabel && (
+                      <span
+                        className="notif-priority-badge"
+                        style={{ backgroundColor: priorityColor }}
+                      >
+                        {priorityLabel.toUpperCase()}
+                      </span>
                     )}
                   </div>
                   <div className="notif-item-meta">

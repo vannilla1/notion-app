@@ -951,6 +951,8 @@ const getNotificationTitle = (type, actorName, relatedName) => {
       return `${actor} vymazal projekt${suffix}`;
     case 'task.assigned':
       return `${actor} vám priradil projekt${suffix}`;
+    case 'task.priority_changed':
+      return `${actor} upravil prioritu projektu${suffix}`;
     case 'subtask.created':
       return `${actor} pridal úlohu${suffix}`;
     case 'subtask.updated':
@@ -1006,6 +1008,17 @@ const getNotificationMessage = (type, actorName, data = {}) => {
       return contactName
         ? `${actor} vám priradil projekt v kontakte "${contactName}"`
         : `${actor} vám priradil tento projekt`;
+    case 'task.priority_changed': {
+      // data.newPriority preložené na slovenský label (low/medium/high
+      // → Nízku/Strednú/Vysokú v akuzatíve). Acc-pad dôležitý: "zmenená NA
+      // <prioritu-acc>". Pre fallback (chýbajúca data) vrátime generic vetu.
+      const labels = { low: 'Nízku', medium: 'Strednú', high: 'Vysokú' };
+      const label = labels[data.newPriority];
+      if (!label) return `${actor} zmenil prioritu projektu`;
+      return contactName
+        ? `${actor} zmenil prioritu projektu v kontakte "${contactName}" na ${label}`
+        : `${actor} zmenil prioritu projektu na ${label}`;
+    }
     case 'subtask.created':
       return taskTitle
         ? `${actor} pridal úlohu k projektu "${taskTitle}"`
@@ -1175,6 +1188,78 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
     if (n) out.push(n);
   }
   return out;
+};
+
+/**
+ * Notify about task priority change. Posiela všetkým členom workspace okrem
+ * actora (ktorý zmenu vykonal). Notifikácia obsahuje data.newPriority +
+ * data.oldPriority pre frontend rendering farebného badge-u.
+ *
+ * Kategória 'general' aj pre assignee — zmena priority je informačná, nie
+ * action item. Ak by sme to chceli spraviť 'direct' pre assignee, treba
+ * upraviť categoryForRecipient.
+ */
+const notifyTaskPriorityChanged = async (task, oldPriority, newPriority, actor, workspaceId = null) => {
+  const actorName = actor?.username || 'Systém';
+  const title = getNotificationTitle('task.priority_changed', actorName, task.title);
+  const message = getNotificationMessage('task.priority_changed', actorName, {
+    contactName: task.contactName,
+    oldPriority,
+    newPriority
+  });
+
+  logger.debug('[NotificationService] Priority changed', {
+    taskTitle: task.title, oldPriority, newPriority, actorName, workspaceId
+  });
+
+  const notificationData = {
+    type: 'task.priority_changed',
+    title,
+    message,
+    workspaceId,
+    actorId: actor?._id || actor?.id,
+    actorName,
+    relatedType: 'task',
+    relatedId: task._id?.toString() || task.id,
+    relatedName: task.title,
+    data: {
+      taskId: task._id?.toString() || task.id,
+      contactId: task.contactId,
+      contactName: task.contactName,
+      workspaceId: workspaceId ? workspaceId.toString() : undefined,
+      // Frontend NotificationBell použije newPriority na vykreslenie
+      // farebného badge-u (low=šedá, medium=oranžová, high=červená).
+      oldPriority,
+      newPriority
+    }
+  };
+
+  if (workspaceId) {
+    try {
+      const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const recipientIds = members
+        .map((m) => m.userId.toString())
+        .filter((id) => !actor || id !== (actor._id || actor.id).toString());
+
+      if (recipientIds.length === 0) return [];
+
+      const out = [];
+      for (const id of recipientIds) {
+        const n = await createNotification({
+          ...notificationData,
+          userId: id,
+          category: 'general'
+        });
+        if (n) out.push(n);
+      }
+      return out;
+    } catch (error) {
+      logger.error('[NotificationService] Error fetching workspace members for priority notification', { error: error.message });
+      return [];
+    }
+  }
+
+  return [];
 };
 
 /**
@@ -1444,6 +1529,7 @@ module.exports = {
   initialize,
   createNotification,
   notifyUsers,
+  notifyTaskPriorityChanged,
   notifyAllExcept,
   notifyContactChange,
   notifyTaskChange,
