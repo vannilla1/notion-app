@@ -8931,16 +8931,50 @@ body.ios-app {
   gap: 10px;
   padding: 10px 14px;
   background: linear-gradient(135deg, var(--accent-light, #ede9fe), #f5f3ff);
+  border: none;
   border-bottom: 1px solid var(--border-color);
   color: var(--accent-color);
   font-size: 13px;
   font-weight: 600;
   flex-shrink: 0;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.notif-panel-summary-clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.notif-panel-summary-clickable:hover {
+  background: linear-gradient(135deg, #e0d6fd, #ece8fb);
+}
+.notif-panel-summary-clickable:active {
+  background: linear-gradient(135deg, #d4c5fc, #e0d6fd);
 }
 
 .notif-summary-icon {
   font-size: 16px;
   line-height: 1;
+}
+
+.notif-summary-text {
+  flex: 1;
+}
+
+.notif-summary-arrow {
+  font-size: 14px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+/* Krátky highlight pulz keď user klikne summary a item sa zviditeľní */
+.notif-item-highlight {
+  animation: notifHighlightPulse 1.5s ease;
+}
+@keyframes notifHighlightPulse {
+  0%, 100% { background: var(--bg-card); }
+  30% { background: rgba(139, 92, 246, 0.18); }
 }
 
 /* Kategórie notifikácií —

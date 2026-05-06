@@ -280,18 +280,55 @@ function NotificationBell() {
               user na prvý pohľad videl, že má niečo na akciu, aj keby to
               bolo schované za hromadou general notifikácií. */}
           {(() => {
+            const firstUnreadDirect = notifications.find(
+              n => !n.read && (n.category || 'general') === 'direct'
+            );
             const unreadDirect = notifications.filter(
               n => !n.read && (n.category || 'general') === 'direct'
             ).length;
             if (unreadDirect === 0) return null;
-            const label = unreadDirect === 1
-              ? '1 nová notifikácia ti vyžaduje pozornosť'
-              : `${unreadDirect} nových notifikácií ti vyžaduje pozornosť`;
+
+            // Slovenská numerálna kongruencia:
+            //   1   → singular nominatív + sg sloveso ("1 notifikácia vyžaduje")
+            //   2-4 → plural nominatív + pl sloveso ("3 notifikácie vyžadujú")
+            //   5+  → plural genitív + sg sloveso ("5 notifikácií si vyžaduje")
+            // Posledná kategória používa "si vyžaduje" (zvratnú formu) ktorá
+            // znie prirodzenejšie pre vyššie čísla v slovenčine.
+            const label = (() => {
+              if (unreadDirect === 1) {
+                return '1 nová notifikácia vyžaduje tvoju pozornosť';
+              }
+              if (unreadDirect >= 2 && unreadDirect <= 4) {
+                return `${unreadDirect} nové notifikácie vyžadujú tvoju pozornosť`;
+              }
+              return `${unreadDirect} nových notifikácií si vyžaduje tvoju pozornosť`;
+            })();
+
+            // Klik scrollne na prvú nečítanú direct notifikáciu v paneli.
+            // ID elementu pripravené nižšie v notif-item rendri (data-notif-id).
+            const handleSummaryClick = () => {
+              if (!firstUnreadDirect) return;
+              const id = firstUnreadDirect.id || firstUnreadDirect._id;
+              const el = panelRef.current?.querySelector(`[data-notif-id="${id}"]`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Drobný highlight pulz aby user vedel kam pozerať
+                el.classList.add('notif-item-highlight');
+                setTimeout(() => el.classList.remove('notif-item-highlight'), 1500);
+              }
+            };
+
             return (
-              <div className="notif-panel-summary">
+              <button
+                type="button"
+                className="notif-panel-summary notif-panel-summary-clickable"
+                onClick={handleSummaryClick}
+                aria-label={`Skočiť na ${label}`}
+              >
                 <span className="notif-summary-icon">📌</span>
                 <span className="notif-summary-text">{label}</span>
-              </div>
+                <span className="notif-summary-arrow" aria-hidden="true">↓</span>
+              </button>
             );
           })()}
 
@@ -307,6 +344,7 @@ function NotificationBell() {
               return (
                 <div
                   key={notif.id || notif._id}
+                  data-notif-id={notif.id || notif._id}
                   className={`notif-item notif-cat-${cat} ${notif.read ? '' : 'unread'}`}
                   onClick={() => handleClick(notif)}
                 >
