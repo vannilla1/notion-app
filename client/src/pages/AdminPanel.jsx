@@ -3557,16 +3557,66 @@ function ApiMetricsTab() {
 }
 
 // ─── P3: STORAGE TAB ───────────────────────────────────────────
+// Slovenské labely pre Mongo kolekcie. Sync s collection list v
+// /api/admin/storage backende. Pri pridaní novej kolekcie treba upraviť
+// obe miesta.
+const STORAGE_COLL_LABELS = {
+  users: '👥 Používatelia',
+  workspaces: '🏢 Workspace-y',
+  workspacemembers: '🤝 Členstvá',
+  contacts: '👤 Kontakty',
+  tasks: '📋 Projekty',
+  messages: '✉️ Správy',
+  notifications: '🔔 Notifikácie',
+  pushsubscriptions: '🌐 Web push subs',
+  apnsdevices: '🍎 APNs zariadenia',
+  fcmdevices: '🤖 FCM zariadenia',
+  auditlogs: '📜 Audit log',
+  servererrors: '🔴 Server errory',
+  pages: '📄 Stránky',
+  emaillogs: '📧 Email log',
+  promocodes: '🎟️ Promo kódy',
+  invitations: '✉️ Pozvánky'
+};
+
 function StorageTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  // Per-workspace search + sort + paginácia
+  const [wsSearch, setWsSearch] = useState('');
+  const [wsSort, setWsSort] = useState('totalDocs');
+  const [wsOrder, setWsOrder] = useState('desc');
+  const [wsPage, setWsPage] = useState(1);
+  const wsPerPage = 50;
 
-  useEffect(() => {
-    adminApi.get('/api/admin/storage')
-      .then(r => setData(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const r = await adminApi.get('/api/admin/storage');
+      setData(r.data);
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh 60s s Page Visibility pause — storage sa zriedka
+  // dramaticky mení, 60s je primerané.
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
 
   if (loading) return <div className="sa-loading">Načítavam storage metriky...</div>;
   if (!data) return <div className="sa-error">Nepodarilo sa načítať storage</div>;
@@ -3579,22 +3629,56 @@ function StorageTab() {
     return `${(bytes / 1073741824).toFixed(2)} GB`;
   };
 
-  const collLabels = { users: 'Používatelia', contacts: 'Kontakty', tasks: 'Úlohy', messages: 'Správy', notifications: 'Notifikácie', auditlogs: 'Audit log', pages: 'Stránky', workspaces: 'Workspace-y', workspacemembers: 'Členstvá', pushsubscriptions: 'Push subs', apnsdevices: 'APNs zariadenia' };
-
+  // Doughnut iba top 8 kolekcií + ostatné — inak je legenda nečitateľná
+  // pri 16 položkách.
+  const topColls = data.collections.slice(0, 8);
+  const restColls = data.collections.slice(8);
+  const restSize = restColls.reduce((sum, c) => sum + c.size, 0);
   const collectionData = {
-    labels: data.collections.map(c => collLabels[c.name] || c.name),
+    labels: [
+      ...topColls.map(c => STORAGE_COLL_LABELS[c.name] || c.name),
+      ...(restColls.length > 0 ? [`+${restColls.length} ostatných`] : [])
+    ],
     datasets: [{
-      data: data.collections.map(c => c.size),
-      backgroundColor: [chartColors.primary, chartColors.blue, chartColors.green, chartColors.orange, chartColors.red, chartColors.gray, '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1']
+      data: [...topColls.map(c => c.size), ...(restColls.length > 0 ? [restSize] : [])],
+      backgroundColor: [chartColors.primary, chartColors.blue, chartColors.green, chartColors.orange, chartColors.red, chartColors.gray, '#EC4899', '#06B6D4', '#84CC16']
     }]
   };
 
+  // Per-workspace filter + sort + paginácia
+  const filteredWs = (data.perWorkspace || [])
+    .filter((w) => !wsSearch || (w.name || '').toLowerCase().includes(wsSearch.toLowerCase()))
+    .sort((a, b) => {
+      let av = a[wsSort] ?? 0; let bv = b[wsSort] ?? 0;
+      if (wsSort === 'name') {
+        av = a.name || ''; bv = b.name || '';
+        return wsOrder === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      return wsOrder === 'asc' ? av - bv : bv - av;
+    });
+  const wsTotalPages = Math.max(1, Math.ceil(filteredWs.length / wsPerPage));
+  const pagedWs = filteredWs.slice((wsPage - 1) * wsPerPage, wsPage * wsPerPage);
+
+  const handleWsSort = (col) => {
+    if (wsSort === col) setWsOrder(wsOrder === 'asc' ? 'desc' : 'asc');
+    else { setWsSort(col); setWsOrder('desc'); }
+  };
+
+  // Atlas tier usage warning gradient (zelená/oranžová/červená)
+  const usagePct = data.database.usagePct || 0;
+  const tierColor = usagePct < 60 ? '#10b981' : usagePct < 85 ? '#f59e0b' : '#ef4444';
+
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Storage metriky</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Storage metriky
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h2>
+      </div>
 
-      {/* DB overview */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      {/* DB overview cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '12px' }}>
         {[
           { label: 'Dáta', value: fmtSize(data.database.dataSize) },
           { label: 'Storage', value: fmtSize(data.database.storageSize) },
@@ -3608,10 +3692,39 @@ function StorageTab() {
         ))}
       </div>
 
+      {/* Atlas tier usage card s progress bar */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border-color)', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+            ☁️ MongoDB Atlas tier usage ({data.database.tierLimitMb} MB)
+          </h3>
+          <span style={{ fontSize: 13, fontWeight: 700, color: tierColor }}>
+            {usagePct}% využité
+          </span>
+        </div>
+        <div style={{ height: 12, background: 'var(--bg-primary)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+          <div style={{
+            width: `${Math.min(100, usagePct)}%`,
+            height: '100%',
+            background: tierColor,
+            transition: 'width 0.5s ease'
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+          <span>{fmtSize(data.database.storageSize)} z {data.database.tierLimitMb} MB</span>
+          <span>
+            {usagePct < 60 ? '✅ Healthy' : usagePct < 85 ? '⚠️ Watch — zvážte cleanup' : '🚨 Critical — upgrade tier alebo cleanup teraz'}
+          </span>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, margin: 0 }}>
+          Atlas tier limit sa nedá zistiť z dbStats. Aktuálna hodnota je z env var <code>ATLAS_TIER_LIMIT_MB</code> (default 512 = M0 Free).
+        </p>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
         {/* Collection breakdown chart */}
         <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Veľkosť kolekcií</h3>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Veľkosť kolekcií (top 8)</h3>
           <div style={{ height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Doughnut data={collectionData} options={{
               responsive: true, maintainAspectRatio: false,
@@ -3620,16 +3733,28 @@ function StorageTab() {
           </div>
         </div>
 
-        {/* Collection table */}
+        {/* Collection detail table */}
         <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
           <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Detaily kolekcií</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12, maxHeight: 320, overflow: 'auto' }}>
             {data.collections.map(c => (
-              <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ fontWeight: 500 }}>{collLabels[c.name] || c.name}</span>
-                <div style={{ display: 'flex', gap: '16px' }}>
-                  <span style={{ color: 'var(--text-muted)', minWidth: '50px', textAlign: 'right' }}>{c.count.toLocaleString()} dok.</span>
-                  <span style={{ fontWeight: 600, minWidth: '70px', textAlign: 'right' }}>{fmtSize(c.size)}</span>
+              <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500 }}>{STORAGE_COLL_LABELS[c.name] || c.name}</span>
+                  {c.growth7d != null && c.growth7d > 0 && (
+                    <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 8, background: '#d1fae5', color: '#065f46', fontWeight: 600 }}>
+                      +{c.growth7d.toLocaleString()} / 7d
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
+                  <span style={{ color: 'var(--text-muted)', minWidth: 80, textAlign: 'right', fontSize: 11 }}>
+                    {c.count.toLocaleString()} dok.
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', minWidth: 50, textAlign: 'right', fontSize: 11 }}>
+                    avg {fmtSize(c.avgObjSize)}
+                  </span>
+                  <span style={{ fontWeight: 600, minWidth: 70, textAlign: 'right' }}>{fmtSize(c.size)}</span>
                 </div>
               </div>
             ))}
@@ -3637,31 +3762,51 @@ function StorageTab() {
         </div>
       </div>
 
-      {/* Per workspace */}
+      {/* Per workspace storage table — search + sort + pagination */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Storage per workspace</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+            Storage per workspace ({filteredWs.length})
+          </h3>
+          <input
+            type="text"
+            placeholder="🔍 Hľadať workspace..."
+            value={wsSearch}
+            onChange={(e) => { setWsSearch(e.target.value); setWsPage(1); }}
+            className="form-input"
+            style={{ fontSize: 12, width: 220 }}
+          />
+        </div>
         <div className="sa-table-wrap" style={{ width: '100%' }}>
-          {/* width: 100% — bez tohto sa table autosizuje na šírku obsahu
-              (default <table> behavior) a pri 6 úzkych stĺpcoch zaberá len
-              ~40% šírky karty. Comparison tab to nemá lebo má 11 stĺpcov
-              ktoré sami zaplnia šírku. */}
-          <table className="sa-table" style={{ fontSize: '12px', width: '100%' }}>
+          <table className="sa-table" style={{ fontSize: 12, width: '100%' }}>
             <thead>
               <tr>
-                <th>Workspace</th>
-                <th style={{ textAlign: 'right' }}>Kontakty</th>
-                <th style={{ textAlign: 'right' }}>Úlohy</th>
-                <th style={{ textAlign: 'right' }}>Správy</th>
-                <th style={{ textAlign: 'right' }}>Celkom dok.</th>
-                <th style={{ textAlign: 'right' }}>Odhad veľkosti</th>
+                <th onClick={() => handleWsSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Workspace {wsSort === 'name' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleWsSort('contacts')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Kontakty {wsSort === 'contacts' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleWsSort('tasks')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Úlohy {wsSort === 'tasks' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleWsSort('messages')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Správy {wsSort === 'messages' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleWsSort('totalDocs')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Celkom dok. {wsSort === 'totalDocs' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleWsSort('estimatedSize')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Odhad veľkosti {wsSort === 'estimatedSize' && (wsOrder === 'asc' ? '▲' : '▼')}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {data.perWorkspace.map(w => (
+              {pagedWs.map(w => (
                 <tr key={w.id}>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: w.color, flexShrink: 0 }}></span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: w.color, flexShrink: 0 }}></span>
                       {w.name}
                     </div>
                   </td>
@@ -3672,18 +3817,79 @@ function StorageTab() {
                   <td style={{ textAlign: 'right' }}>{fmtSize(w.estimatedSize)}</td>
                 </tr>
               ))}
+              {pagedWs.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    Žiadne workspace-y pre tento filter
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+        {wsTotalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-muted)' }}>
+              Strana {wsPage} z {wsTotalPages} ({filteredWs.length} workspace-ov)
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" disabled={wsPage <= 1} onClick={() => setWsPage((p) => Math.max(1, p - 1))} style={{ fontSize: 11 }}>
+                ← Predch.
+              </button>
+              <button className="btn btn-secondary" disabled={wsPage >= wsTotalPages} onClick={() => setWsPage((p) => p + 1)} style={{ fontSize: 11 }}>
+                Ďalšia →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <AdminHelpToggle title="Storage">
-        <p><strong>Čo tu vidíš:</strong> využitie databázy MongoDB — koľko miesta zaberajú jednotlivé kolekcie a ktoré workspace-y ich najviac napĺňajú.</p>
+        <p><strong>Čo tu vidíš:</strong> využitie databázy MongoDB — koľko miesta zaberajú jednotlivé kolekcie, ktoré workspace-y ich najviac napĺňajú, a ako sa blížiš k limitu Atlas tier-u.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 DB overview cards</h4>
         <ul>
-          <li><strong>Kolekcie</strong> — zoznam všetkých Mongo kolekcií (users, contacts, tasks, messages, notifications, auditlogs, pages, workspaces, workspacemembers, pushsubscriptions, apnsdevices) s počtom dokumentov a estimated size.</li>
-          <li><strong>Top workspace-y</strong> — kto produkuje najviac dát (kontakty + úlohy + správy spolu).</li>
+          <li><strong>Dáta</strong> — celková veľkosť uložených dokumentov (bez indexov a paddingov).</li>
+          <li><strong>Storage</strong> — fyzické miesto na disku (vrátane indexov, paddingov, fragmentácie). <em>Toto je číslo ktoré ráta MongoDB Atlas pre tier limit.</em></li>
+          <li><strong>Indexy</strong> — koľko miesta zaberajú samotné indexy. Pri rastúcich kolekciách indexy môžu byť 30-50% storage.</li>
+          <li><strong>Kolekcie</strong> — počet existujúcich kolekcií v databáze.</li>
         </ul>
-        <p><strong>Tipy:</strong> Render Mongo (alebo váš poskytovateľ) má fixné limity — keď sa blížiš k stropu, treba buď pricovať vyšší tier, alebo cleanovať staré dáta. <strong>auditlogs</strong> kolekcia rastie najrýchlejšie — zvážiť TTL index na dokumenty staršie ako 1 rok ak treba šetriť priestor.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>☁️ Atlas tier usage</h4>
+        <ul>
+          <li>Progress bar ukazuje aktuálne <em>storageSize / tierLimit</em>.</li>
+          <li>Limit sa konfiguruje cez env var <code>ATLAS_TIER_LIMIT_MB</code>. Default 512 MB = M0 Free tier. M2 = 2048 MB, M5 = 5120 MB, M10+ vyššie.</li>
+          <li>Farby: ✅ zelená ({'<'}60%), ⚠️ oranžová (60-85%), 🚨 červená ({'>'}85%) → hladaj cleanup alebo plánuj upgrade.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🍩 Veľkosť kolekcií (top 8)</h4>
+        <p>Doughnut chart 8 najväčších kolekcií + agregát "ostatné". Pri 16 sledovaných kolekciách by individuálne legendy boli nečitateľné, preto top-N + remainder.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📋 Detaily kolekcií</h4>
+        <ul>
+          <li>Kompletný zoznam sledovaných kolekcií so labelmi v slovenčine + emoji.</li>
+          <li><strong>Growth badge</strong> — zelený "+ X / 7d" pri kolekciách kde za posledný týždeň pribudli záznamy. Užitočné pre identifikáciu rýchlo rastúcich tabuliek (typicky <code>auditlogs</code>, <code>emaillogs</code>).</li>
+          <li><strong>avg</strong> — priemerná veľkosť dokumentu. Veľké hodnoty ({'>'}10 KB) signalizujú že je tam veľa nested dát alebo embedded blob (avatary, page content).</li>
+          <li>Ak chceš nastaviť TTL (auto-cleanup) na <code>auditlogs</code> alebo <code>emaillogs</code>, treba pridať <code>auditLogSchema.index(&#123; createdAt: 1 &#125;, &#123; expireAfterSeconds: ... &#125;)</code> v príslušnom schema súbore.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🏢 Storage per workspace</h4>
+        <ul>
+          <li>Tabuľka kontakty / úlohy / správy / total / odhad veľkosti per produkčný workspace (super admin testovacie sú vylúčené).</li>
+          <li><strong>Search</strong> v reálnom čase + <strong>sort</strong> klikateľné header columns + <strong>paginácia</strong> 50 na stránku.</li>
+          <li>Odhad veľkosti = počet × avgObjSize danej kolekcie. Nie je to presný číslo (Mongo nezbiera per-document size per workspace), ale je to dobrý proxy.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Atlas tier usage progress bar — žiadny alarm? Healthy {'<'} 60%.</li>
+          <li>Detaily kolekcií — žiadna kolekcia s rastom +1000 / 7d ktorú by si nečakal? (typicky <code>auditlogs</code> a <code>servererrors</code>)</li>
+          <li>Per-workspace tabuľka — žiadny workspace s 100k+ dokumentov? (môže byť stress test alebo abuse).</li>
+        </ol>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Storage/dataSize čítame z Mongo <code>dbStats</code> a <code>collStats</code> commands. Tieto môžu byť o pár sekúnd staršie ako reálny stav (Mongo updatuje stats periodicky). Auto-refresh každých 60s.
+        </p>
       </AdminHelpToggle>
     </div>
   );

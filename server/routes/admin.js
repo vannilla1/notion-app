@@ -1786,35 +1786,66 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const db = mongoose.connection.db;
 
-    // Get collection stats
-    const collections = ['users', 'workspaces', 'contacts', 'tasks', 'messages', 'notifications', 'auditlogs', 'pushsubscriptions', 'apnsdevices', 'pages', 'workspacemembers'];
+    // Známe kolekcie ktoré sledujeme — postupne sme pridali nové (emaillogs,
+    // fcmdevices, servererrors, promocodes). Nediagnostikované kolekcie sa
+    // automaticky preskočia v try/catch ak nie sú vytvorené.
+    const collections = [
+      'users', 'workspaces', 'workspacemembers',
+      'contacts', 'tasks', 'messages',
+      'notifications', 'pushsubscriptions', 'apnsdevices', 'fcmdevices',
+      'auditlogs', 'servererrors', 'pages',
+      'emaillogs', 'promocodes', 'invitations'
+    ];
     const collectionStats = [];
+
+    // Pre growth trend potrebujeme týždeň starý cutoff. Per-collection
+    // count documents s createdAt > 7d back — len pre kolekcie s `createdAt`
+    // poľom (väčšina, ale niektoré legacy kolekcie ho nemusia mať).
+    const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     for (const name of collections) {
       try {
         const stats = await db.command({ collStats: name });
+        let last7d = null;
+        try {
+          last7d = await db.collection(name).countDocuments({ createdAt: { $gte: week } });
+        } catch { /* createdAt may not exist on this collection */ }
         collectionStats.push({
           name,
           count: stats.count,
           size: stats.size,
-          avgObjSize: stats.avgObjSize || 0,
+          avgObjSize: Math.round(stats.avgObjSize || 0),
           storageSize: stats.storageSize,
-          indexSize: stats.totalIndexSize
+          indexSize: stats.totalIndexSize,
+          // null = createdAt sa nepodarilo zistiť, 0 = žiadne nové, čísla > 0 sú growth
+          growth7d: last7d
         });
       } catch {
         // Collection might not exist yet
       }
     }
 
-    // Storage per workspace (contacts + tasks + messages)
+    // Storage per workspace (contacts + tasks + messages) — excludujeme
+    // workspaces super admina aby produkčné metriky neboli skreslené testovacími.
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const superAdminWsIds = superAdmin
+      ? (await Workspace.find({ ownerId: superAdmin._id }).select('_id').lean()).map((w) => w._id)
+      : [];
+    const wsExcludeMatch = superAdminWsIds.length > 0
+      ? { workspaceId: { $nin: superAdminWsIds } }
+      : {};
+
     const workspaceStorage = await Promise.all([
       Contact.aggregate([
+        { $match: wsExcludeMatch },
         { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
       ]),
       Task.aggregate([
+        { $match: wsExcludeMatch },
         { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
       ]),
       Message.aggregate([
+        { $match: wsExcludeMatch },
         { $group: { _id: '$workspaceId', count: { $sum: 1 } } }
       ])
     ]);
@@ -1864,12 +1895,21 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
     // Total DB size
     const dbStats = await db.command({ dbStats: 1 });
 
+    // Atlas tier hint — Free M0 má 512 MB limit, M2 2 GB, M5 5 GB. Hodnota
+    // sa nedá zistiť z dbStats, ale podľa storageSize odhadneme strop.
+    // Presný strop si admin nakonfiguruje cez ATLAS_TIER_LIMIT_MB env var.
+    const tierLimitMb = parseInt(process.env.ATLAS_TIER_LIMIT_MB) || 512;
+    const tierLimitBytes = tierLimitMb * 1024 * 1024;
+
     res.json({
       database: {
         dataSize: dbStats.dataSize,
         storageSize: dbStats.storageSize,
         indexSize: dbStats.indexSize,
-        collections: dbStats.collections
+        collections: dbStats.collections,
+        tierLimitMb,
+        tierLimitBytes,
+        usagePct: Math.round((dbStats.storageSize / tierLimitBytes) * 1000) / 10
       },
       collections: collectionStats.sort((a, b) => b.size - a.size),
       perWorkspace
