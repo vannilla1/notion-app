@@ -3899,22 +3899,86 @@ function StorageTab() {
 function WorkspaceComparisonTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState('activityScore');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const perPage = 50;
 
-  useEffect(() => {
-    adminApi.get('/api/admin/workspace-comparison')
-      .then(r => setData(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const r = await adminApi.get('/api/admin/workspace-comparison');
+      setData(r.data);
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh 60s s Page Visibility pause — workspace activity sa
+  // nemení tak často, 60s je primerané.
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) load(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
 
   if (loading) return <div className="sa-loading">Načítavam porovnanie...</div>;
   if (!data || data.length === 0) return <div className="sa-empty">Žiadne workspace-y</div>;
 
-  const sorted = [...data].sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0));
-  const maxScore = Math.max(...data.map(d => d.activityScore || 1));
+  // Filter + sort + paginácia (client-side — backend zatiaľ vracia celý zoznam)
+  const filtered = data.filter((w) => !search || (w.name || '').toLowerCase().includes(search.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => {
+    let av = a[sortBy] ?? 0;
+    let bv = b[sortBy] ?? 0;
+    if (sortBy === 'name' || sortBy === 'owner') {
+      return sortOrder === 'asc'
+        ? String(av).localeCompare(String(bv))
+        : String(bv).localeCompare(String(av));
+    }
+    return sortOrder === 'asc' ? av - bv : bv - av;
+  });
+  const totalPages = Math.max(1, Math.ceil(sorted.length / perPage));
+  const paged = sorted.slice((page - 1) * perPage, page * perPage);
 
+  const handleSort = (col) => {
+    if (sortBy === col) setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortOrder('desc'); }
+  };
+
+  // Reset page pri zmene filtra/sortu
+  if (page > totalPages) setPage(1);
+
+  const maxScore = Math.max(...data.map(d => d.activityScore || 1));
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('sk-SK') : '—';
+
+  const exportCsv = () => {
+    const header = ['#', 'Workspace', 'Vlastník', 'Členovia', 'Kontakty', 'Projekty', 'Úlohy', 'Dokončené %', 'Správy', 'Posledná aktivita', 'Skóre'];
+    const rows = sorted.map((w, i) => [
+      i + 1, w.name, w.owner, w.members, w.contacts,
+      w.projects ?? w.tasks ?? 0, w.subtasks ?? 0,
+      w.completionRate, w.messages,
+      w.lastActivity ? new Date(w.lastActivity).toISOString() : '',
+      w.activityScore
+    ]);
+    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
 
   // Chart agreguje "real work units" — kontakty, projekty + úlohy v nich,
   // a správy. Pred fixom rátal len projekty (top-level Task docs), takže
@@ -3932,7 +3996,17 @@ function WorkspaceComparisonTab() {
 
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Porovnanie workspace-ov</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Porovnanie workspace-ov
+          {refreshing && <span style={{ marginLeft: 8, fontSize: 11, color: '#10b981' }}>● auto-refresh</span>}
+        </h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportCsv} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            📥 Export CSV
+          </button>
+        </div>
+      </div>
 
       {/* Chart */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
@@ -3948,38 +4022,59 @@ function WorkspaceComparisonTab() {
 
       {/* Table */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--border-color)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Detailné porovnanie</h3>
-          <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-            <option value="activityScore">Podľa aktivity</option>
-            <option value="contacts">Podľa kontaktov</option>
-            <option value="projects">Podľa projektov</option>
-            <option value="subtasks">Podľa úloh</option>
-            <option value="messages">Podľa správ</option>
-            <option value="members">Podľa členov</option>
-            <option value="completionRate">Podľa dokončenia</option>
-          </select>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+            Detailné porovnanie ({filtered.length})
+          </h3>
+          <input
+            type="text"
+            placeholder="🔍 Hľadať workspace podľa názvu..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className="form-input"
+            style={{ fontSize: 12, width: 240 }}
+          />
         </div>
         <div className="sa-table-wrap">
           <table className="sa-table" style={{ fontSize: '12px' }}>
             <thead>
               <tr>
                 <th>#</th>
-                <th>Workspace</th>
-                <th>Vlastník</th>
-                <th style={{ textAlign: 'right' }}>Členovia</th>
-                <th style={{ textAlign: 'right' }}>Kontakty</th>
-                <th style={{ textAlign: 'right' }} title="Top-level projekty (Task dokumenty)">Projekty</th>
-                <th style={{ textAlign: 'right' }} title="Úlohy (subtasky) vrátane všetkých zanorených úrovní">Úlohy</th>
-                <th style={{ textAlign: 'right' }} title="% dokončených úloh (alebo projektov, ak workspace nemá úlohy)">Dokončené</th>
-                <th style={{ textAlign: 'right' }}>Správy</th>
-                <th>Posledná aktivita</th>
-                <th>Skóre</th>
+                <th onClick={() => handleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Workspace {sortBy === 'name' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('owner')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Vlastník {sortBy === 'owner' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('members')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Členovia {sortBy === 'members' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('contacts')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Kontakty {sortBy === 'contacts' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('projects')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }} title="Top-level projekty (Task dokumenty)">
+                  Projekty {sortBy === 'projects' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('subtasks')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }} title="Úlohy (subtasky) vrátane všetkých zanorených úrovní">
+                  Úlohy {sortBy === 'subtasks' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('completionRate')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }} title="% dokončených úloh (alebo projektov, ak workspace nemá úlohy)">
+                  Dokončené {sortBy === 'completionRate' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('messages')} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}>
+                  Správy {sortBy === 'messages' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('lastActivity')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Posledná aktivita {sortBy === 'lastActivity' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
+                <th onClick={() => handleSort('activityScore')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Skóre {sortBy === 'activityScore' && (sortOrder === 'asc' ? '▲' : '▼')}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((w, i) => {
+              {paged.map((w, i) => {
+                const idx = (page - 1) * perPage + i;
                 // Backward-compat: staré API verzie nemali projects/subtasks polia
                 // (vracali len `tasks` = projekty); zachováme rendering aj v tom
                 // prípade, len úlohy ukáže "—".
@@ -3988,7 +4083,7 @@ function WorkspaceComparisonTab() {
                 const subtasksCompleted = w.subtasksCompleted ?? null;
                 return (
                 <tr key={w.id}>
-                  <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{i + 1}</td>
+                  <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: w.color, flexShrink: 0 }}></span>
@@ -4025,22 +4120,61 @@ function WorkspaceComparisonTab() {
             </tbody>
           </table>
         </div>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-muted)' }}>
+              Strana {page} z {totalPages} ({sorted.length} workspace-ov)
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ fontSize: 11 }}>
+                ← Predch.
+              </button>
+              <button className="btn btn-secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} style={{ fontSize: 11 }}>
+                Ďalšia →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <AdminHelpToggle title="Porovnanie">
-        <p><strong>Čo tu vidíš:</strong> tabuľkové porovnanie všetkých workspace-ov — koľko kontaktov, projektov, úloh, správ a členov má každý.</p>
+        <p><strong>Čo tu vidíš:</strong> tabuľkové porovnanie všetkých produkčných workspace-ov (super admin testovacie sú vylúčené) — koľko kontaktov, projektov, úloh, správ a členov má každý + agregované activity score pre top-level pohľad.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📊 Top 10 chart</h4>
+        <p>Stacked horizontal Bar chart top 10 workspace-ov podľa skóre aktivity. Stacks (kontakty + projekty + úlohy + správy) ukazujú "tvar" workspace-u — dominantná modrá = kontaktovo orientovaný workspace, dominantná oranžová = chat-driven, atď.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔍 Search + sort</h4>
         <ul>
-          <li><strong>Stĺpce</strong>:
-            <ul>
-              <li><strong>Projekty</strong> — top-level Task dokumenty v DB (UI ich volá "Projekty").</li>
-              <li><strong>Úlohy</strong> — počet úloh (subtasks) vrátane všetkých zanorených úrovní. Zobrazené ako <code>{'<dokončené>'}/{'<celkom>'}</code> ak existuje aspoň jedna úloha.</li>
-              <li><strong>Dokončené</strong> — % dokončenosti počítané z úrovne úloh (ak workspace má aspoň jednu úlohu); inak fallback na úroveň projektov.</li>
-            </ul>
-          </li>
-          <li><strong>Sortovanie</strong> — selectbox vpravo, prepínač medzi metrikami (aktivita, kontakty, projekty, úlohy, správy, členovia, % dokončenia).</li>
-          <li><strong>Skóre aktivity</strong> — vážený metric: kontakty × 2 + projekty × 3 + úlohy × 1 + správy × 1. Po fixe reaguje aj na pridávanie úloh do existujúcich projektov (predtým rátalo len projekty).</li>
+          <li><strong>Search</strong> v reálnom čase — substring v názve workspace-u (case-insensitive).</li>
+          <li><strong>Klik na header</strong> column toggluje sort + smer (▲▼). Sortovateľné: Workspace, Vlastník, Členovia, Kontakty, Projekty, Úlohy, Dokončené, Správy, Posledná aktivita, Skóre.</li>
         </ul>
-        <p><strong>Pred fixom (do tohto deployu)</strong>: stĺpec "Úlohy" rátal len projekty (top-level Task dokumenty). Workspace s 1 projektom označeným ako dokončený a 50 nedokončenými úlohami vnútri ukazoval "Dokončené: 100%". Po fixe sa % počíta z úloh, takže reálne reflektuje koľko práce je hotovej.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📋 Stĺpce</h4>
+        <ul>
+          <li><strong>Projekty</strong> — top-level Task dokumenty v DB (UI ich volá "Projekty").</li>
+          <li><strong>Úlohy</strong> — počet úloh (subtasks) vrátane všetkých zanorených úrovní. Zobrazené ako <code>&lt;dokončené&gt;/&lt;celkom&gt;</code> ak existuje aspoň jedna úloha.</li>
+          <li><strong>Dokončené</strong> — % dokončenosti počítané z úrovne úloh (ak workspace má aspoň jednu úlohu); inak fallback na úroveň projektov. Farby: zelená ({'>'}50%), oranžová (20-50%), červená ({'<'}20%).</li>
+          <li><strong>Posledná aktivita</strong> — max(createdAt) z contact / task / message v danom workspace-e.</li>
+          <li><strong>Skóre</strong> — vážený metric: kontakty × 2 + projekty × 3 + úlohy × 1 + správy × 1. Vizualizovaný progress barom relatívne k najsilnejšiemu workspace.</li>
+        </ul>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>📥 Export CSV</h4>
+        <p>Tlačidlo vpravo hore exportuje aktuálne <em>filtrovaný a sortovaný</em> zoznam (nie celý dataset). Užitočné pre QBR analýzu, board reporty alebo offline prácu.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>🔄 Auto-refresh</h4>
+        <p>Stránka sa automaticky obnovuje každých 60s (pause pri schovanom tabe). Pre okamžitý refresh stačí prepnúť tab a vrátiť sa.</p>
+
+        <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14 }}>💡 Daily check rituál</h4>
+        <ol>
+          <li>Sortuj podľa <em>Skóre</em> DESC — top 5 najaktívnejších workspace-ov, sleduj rast.</li>
+          <li>Sortuj podľa <em>Dokončené</em> ASC — workspace-y s najnižším completion rate ({'<'}20%) sú signál že user "len zakladá projekty bez follow-throughu".</li>
+          <li>Sortuj podľa <em>Posledná aktivita</em> DESC — najnovšia aktivita v top tail.</li>
+        </ol>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <em>Pozn.:</em> Activity score je len váženy odhad a nie absolútna pravda — workspace s vysokým skóre môže byť "data hoarder" zatiaľ čo workspace s nízkym ale stálym tempom môže byť produkt-fit. Sleduj v kombinácii s lastActivity (sviežosť) a completionRate (efektivita).
+        </p>
       </AdminHelpToggle>
     </div>
   );

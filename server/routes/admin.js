@@ -1923,7 +1923,12 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
 // ─── P3: WORKSPACE COMPARISON ─────────────────────────────────
 router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const workspaces = await Workspace.find().select('name slug color ownerId createdAt').lean();
+    // Excludujeme workspaces super admina (jeho testovacie dáta skreslujú
+    // porovnanie aktivity reálnych užívateľov). Konzistentné s ostatnými tabmi.
+    const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
+    const wsFilter = superAdmin ? { ownerId: { $ne: superAdmin._id } } : {};
+
+    const workspaces = await Workspace.find(wsFilter).select('name slug color ownerId createdAt').lean();
     const wsIds = workspaces.map(w => w._id);
 
     // Pre Task: namiesto Mongo aggregation (ktorá by spočítala len top-level
