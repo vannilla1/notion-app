@@ -3955,16 +3955,22 @@ function BroadcastSender() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 12, alignItems: 'end' }}>
         <div>
           <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>
-            Filter: registrovaní za posledných N dní (prázdne = všetci)
+            Komu poslať
           </label>
-          <input
-            type="number"
-            placeholder="napr. 365 (= rok)"
+          <select
             value={days}
             onChange={(e) => setDays(e.target.value)}
             className="sa-input"
-            min="1"
-          />
+          >
+            <option value="">Všetkým registrovaným užívateľom</option>
+            <option value="30">Iba registrovaným za posledných 30 dní</option>
+            <option value="90">Iba registrovaným za posledné 3 mesiace</option>
+            <option value="180">Iba registrovaným za posledných 6 mesiacov</option>
+            <option value="365">Iba registrovaným za posledný rok</option>
+          </select>
+          <p style={{ fontSize: 11, color: '#94a3b8', margin: '4px 0 0' }}>
+            Filtrovaním sa vyhneš mŕtvym účtom (zlepší doručiteľnosť do Inboxu).
+          </p>
         </div>
         <button className="btn btn-secondary" onClick={handleDryRun} style={{ height: 40 }}>
           1. Náhľad (dry run)
