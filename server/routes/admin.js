@@ -183,22 +183,142 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// ─── ALL USERS (system-wide) ────────────────────────────────────
+// ─── ALL USERS (system-wide) — filter, sort, pagination, lastLogin ──
+//
+// Query params:
+//   ?plan=free|team|pro          — filter by subscription plan
+//   ?role=admin|manager|user     — filter by global role
+//   ?active=true|false           — true = lastLogin za posledných 30d, false = inaktívny
+//   ?hasStripe=true|false        — true = má Stripe sub (subscription.stripeSubscriptionId)
+//   ?hasDiscount=true|false      — true = má discount metadata
+//   ?search=…                    — substring search v username / email
+//   ?sort=createdAt|username|email|plan|lastLogin
+//   ?order=asc|desc              — default desc
+//   ?page=1&limit=50             — pagination, default 50/page (clamped 10..200)
+//
+// Response shape:
+//   { users: [...], total, page, limit, breakdown: { free, team, pro, admin } }
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    // Exclude super admin from the user list
-    const users = await User.find(
-      { email: { $ne: SUPER_ADMIN_EMAIL } },
-      'username email color avatar role subscription currentWorkspaceId googleCalendar.enabled googleTasks.enabled createdAt'
-    ).sort({ createdAt: -1 }).lean();
+    const { plan, role, active, hasStripe, hasDiscount, search } = req.query;
+    const sort = ['createdAt', 'username', 'email', 'plan', 'lastLogin'].includes(req.query.sort)
+      ? req.query.sort : 'createdAt';
+    const order = req.query.order === 'asc' ? 1 : -1;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
-    // Get workspace memberships for each user
+    // Base filter — vždy excludeneme super admina
+    const filter = { email: { $ne: SUPER_ADMIN_EMAIL } };
+    if (plan && ['free', 'team', 'pro'].includes(plan)) {
+      filter['subscription.plan'] = plan;
+    }
+    if (role && ['admin', 'manager', 'user'].includes(role)) {
+      filter.role = role;
+    }
+    if (hasStripe === 'true') {
+      filter['subscription.stripeSubscriptionId'] = { $exists: true, $ne: null };
+    } else if (hasStripe === 'false') {
+      filter.$or = [
+        { 'subscription.stripeSubscriptionId': { $exists: false } },
+        { 'subscription.stripeSubscriptionId': null }
+      ];
+    }
+    if (hasDiscount === 'true') {
+      filter['subscription.discount.type'] = { $exists: true, $ne: null };
+    }
+    if (search && search.trim()) {
+      const safe = escapeRegex(String(search).slice(0, 100));
+      filter.$or = [
+        { username: { $regex: safe, $options: 'i' } },
+        { email: { $regex: safe, $options: 'i' } }
+      ];
+    }
+
+    // Last login lookup z AuditLog. Robíme single aggregation (max createdAt)
+    // na všetkých userov v poslednom rezultsete — efektívnejšie ako N+1.
+    // Pred filtrovaním podľa active musíme mať lastLogin tabuľku.
+    const recentLogins = await AuditLog.aggregate([
+      { $match: { action: 'auth.login', userId: { $exists: true } } },
+      { $group: { _id: '$userId', lastLogin: { $max: '$createdAt' } } }
+    ]);
+    const lastLoginMap = new Map(recentLogins.map((r) => [String(r._id), r.lastLogin]));
+
+    // Active filter — aplikujeme post-query lebo je závislý na aggregate hore.
+    // Ak bolo `active` špecifikované, vyfiltrujeme query. Inak aplikujeme po
+    // pagination (žiadny problém — UI default zobrazuje všetkých).
+    const ACTIVE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
+    const activeSince = new Date(Date.now() - ACTIVE_THRESHOLD_MS);
+
+    if (active === 'true') {
+      const activeUserIds = recentLogins
+        .filter((r) => r.lastLogin >= activeSince)
+        .map((r) => r._id);
+      filter._id = { $in: activeUserIds };
+    } else if (active === 'false') {
+      const activeUserIds = recentLogins
+        .filter((r) => r.lastLogin >= activeSince)
+        .map((r) => r._id);
+      filter._id = { $nin: activeUserIds };
+    }
+
+    // Spočítame total pred pagination + získame breakdown
+    const [total, allMatchingUsers] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter, 'subscription.plan role').lean()
+    ]);
+    const breakdown = {
+      free: 0, team: 0, pro: 0,
+      admin: 0, manager: 0, user: 0,
+      active: 0, inactive: 0
+    };
+    for (const u of allMatchingUsers) {
+      const p = u.subscription?.plan || 'free';
+      breakdown[p] = (breakdown[p] || 0) + 1;
+      breakdown[u.role || 'user'] = (breakdown[u.role || 'user'] || 0) + 1;
+      const ll = lastLoginMap.get(String(u._id));
+      if (ll && ll >= activeSince) breakdown.active++;
+      else breakdown.inactive++;
+    }
+
+    // Sort prep
+    const sortMap = {
+      createdAt: { createdAt: order },
+      username: { username: order },
+      email: { email: order },
+      plan: { 'subscription.plan': order, createdAt: -1 }
+    };
+    // lastLogin sort sa nedá robiť priamo na User collection — riešime
+    // post-fetch JS sortom (akceptovateľné pri page-size 50).
+
+    let users;
+    if (sort === 'lastLogin') {
+      // fetch all matching, then JS sort, then slice
+      users = await User.find(
+        filter,
+        'username email color avatar role subscription currentWorkspaceId googleCalendar.enabled googleTasks.enabled createdAt'
+      ).lean();
+      users.sort((a, b) => {
+        const la = lastLoginMap.get(String(a._id))?.getTime() || 0;
+        const lb = lastLoginMap.get(String(b._id))?.getTime() || 0;
+        return order === 1 ? la - lb : lb - la;
+      });
+      users = users.slice((page - 1) * limit, page * limit);
+    } else {
+      users = await User.find(
+        filter,
+        'username email color avatar role subscription currentWorkspaceId googleCalendar.enabled googleTasks.enabled createdAt'
+      )
+        .sort(sortMap[sort] || sortMap.createdAt)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean();
+    }
+
+    // Workspace memberships pre aktuálnu page
     const userIds = users.map(u => u._id);
     const memberships = await WorkspaceMember.find({ userId: { $in: userIds } })
       .populate('workspaceId', 'name slug')
       .lean();
-
-    // Group memberships by userId
     const membershipMap = {};
     for (const m of memberships) {
       const uid = m.userId.toString();
@@ -213,27 +333,48 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
       }
     }
 
-    const result = users.map(u => ({
-      id: u._id,
-      username: u.username,
-      email: u.email,
-      color: u.color,
-      avatar: u.avatar,
-      role: u.role,
-      plan: u.subscription?.plan || 'free',
-      discount: u.subscription?.discount?.type ? {
+    const result = users.map(u => {
+      const lastLogin = lastLoginMap.get(String(u._id)) || null;
+      const isActive = lastLogin ? lastLogin >= activeSince : false;
+      const discount = u.subscription?.discount?.type ? {
         type: u.subscription.discount.type,
         value: u.subscription.discount.value,
         targetPlan: u.subscription.discount.targetPlan,
-        expiresAt: u.subscription.discount.expiresAt
-      } : null,
-      googleCalendar: u.googleCalendar?.enabled || false,
-      googleTasks: u.googleTasks?.enabled || false,
-      createdAt: u.createdAt,
-      workspaces: membershipMap[u._id.toString()] || []
-    }));
+        expiresAt: u.subscription.discount.expiresAt,
+        // Frontend label "vypršaná" pre discount-y kde expiresAt < now
+        isExpired: u.subscription.discount.expiresAt
+          ? new Date(u.subscription.discount.expiresAt) < new Date()
+          : false
+      } : null;
 
-    res.json(result);
+      return {
+        id: u._id,
+        username: u.username,
+        email: u.email,
+        color: u.color,
+        avatar: u.avatar,
+        role: u.role,
+        plan: u.subscription?.plan || 'free',
+        billingPeriod: u.subscription?.billingPeriod || null,
+        paidUntil: u.subscription?.paidUntil || null,
+        stripePaying: !!u.subscription?.stripeSubscriptionId,
+        discount,
+        googleCalendar: u.googleCalendar?.enabled || false,
+        googleTasks: u.googleTasks?.enabled || false,
+        createdAt: u.createdAt,
+        lastLogin,
+        isActive,
+        workspaces: membershipMap[u._id.toString()] || []
+      };
+    });
+
+    res.json({
+      users: result,
+      total,
+      page,
+      limit,
+      breakdown
+    });
   } catch (error) {
     logger.error('Admin get users error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri načítaní používateľov' });
@@ -303,6 +444,25 @@ router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, asy
     }
 
     const oldRole = membership.role;
+
+    // Owner demotion guard — workspace musí mať aspoň jedného ownera. Ak by
+    // sa user ktorého demotujeme bol jediným ownerom, blokujeme zmenu.
+    // Riešenie: admin musí najprv povýšiť iného člena na ownera, potom
+    // demotnúť pôvodného. Inak by workspace zostal "siroty" — žiadny user
+    // by nemal full kontrolu (delete, member-management).
+    if (oldRole === 'owner' && role !== 'owner') {
+      const otherOwners = await WorkspaceMember.countDocuments({
+        workspaceId,
+        role: 'owner',
+        userId: { $ne: req.params.userId }
+      });
+      if (otherOwners === 0) {
+        return res.status(400).json({
+          message: 'Nemôžete demotnúť jediného ownera workspace-u. Najprv povýšte iného člena na ownera.'
+        });
+      }
+    }
+
     membership.role = role;
     await membership.save();
 

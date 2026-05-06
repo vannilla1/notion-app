@@ -503,10 +503,23 @@ function StatCard({ icon, label, value, sub, onClick }) {
 }
 
 // ─── USERS TAB ──────────────────────────────────────────────────
+// Super admin email — single source of truth, používaný v UsersTab guard logike
+// (nedá sa selectnúť, mazať, hromadne meniť plán/role samému sebe).
+// Sync s `SUPER_ADMIN_EMAIL` v server/routes/admin.js.
+const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
+
+// Doby ktoré sa rátajú ako "aktívny user" (login za posledných X dní).
+// Konzistentné s backend `ACTIVE_THRESHOLD_MS` v /admin/users endpointe.
+const ACTIVE_THRESHOLD_DAYS = 30;
+
 function UsersTab() {
   const [users, setUsers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [breakdown, setBreakdown] = useState({});
+  const [page, setPage] = useState(1);
+  const [limit] = useState(50);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [updating, setUpdating] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [userDetail, setUserDetail] = useState(null);
@@ -515,10 +528,61 @@ function UsersTab() {
   const [bulkAction, setBulkAction] = useState('');
   const [bulkValue, setBulkValue] = useState('');
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState(null); // typed-confirmation delete
 
+  // Filter + sort state
+  const [search, setSearch] = useState('');
+  const [filterPlan, setFilterPlan] = useState('');
+  const [filterRole, setFilterRole] = useState('');
+  const [filterActive, setFilterActive] = useState(''); // '' | 'true' | 'false'
+  const [filterStripe, setFilterStripe] = useState(''); // '' | 'true' | 'false'
+  const [filterDiscount, setFilterDiscount] = useState('');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  const fetchUsers = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true); else setLoading(true);
+    try {
+      const params = { page, limit, sort: sortBy, order: sortOrder };
+      if (search.trim()) params.search = search.trim();
+      if (filterPlan) params.plan = filterPlan;
+      if (filterRole) params.role = filterRole;
+      if (filterActive) params.active = filterActive;
+      if (filterStripe) params.hasStripe = filterStripe;
+      if (filterDiscount) params.hasDiscount = filterDiscount;
+      const res = await adminApi.get('/api/admin/users', { params });
+      setUsers(res.data.users || []);
+      setTotal(res.data.total || 0);
+      setBreakdown(res.data.breakdown || {});
+    } catch { /* ignore */ }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [page, limit, sortBy, sortOrder, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount]);
+
+  // Initial + filter-driven reload
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  // Auto-refresh každých 60s. Slabší cyklus ako Diagnostika lebo users sa
+  // nezmenia tak často — Page Visibility pause aplikujeme rovnako.
   useEffect(() => {
-    fetchUsers();
-  }, []);
+    let intervalId = null;
+    let cancelled = false;
+    const tick = () => { if (!cancelled && !document.hidden) fetchUsers(true); };
+    const start = () => { if (!intervalId) intervalId = setInterval(tick, 60000); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    const onVis = () => document.hidden ? stop() : start();
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [fetchUsers]);
+
+  // Reset page na 1 keď sa zmení akýkoľvek filter / sort (inak by sme mohli
+  // skončiť na empty page po filter narrowingu).
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
 
   const openUserDetail = (userId) => {
     setSelectedUser(userId);
@@ -529,11 +593,13 @@ function UsersTab() {
       .finally(() => setUserDetailLoading(false));
   };
 
-  const fetchUsers = () => {
-    adminApi.get('/api/admin/users')
-      .then(res => setUsers(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('desc');
+    }
   };
 
   const handleWorkspaceRoleChange = async (userId, workspaceId, newRole) => {
@@ -568,11 +634,19 @@ function UsersTab() {
     }
   };
 
-  const handleDeleteUser = async (targetUser) => {
-    if (!window.confirm(`Naozaj vymazať "${targetUser.username}"? Táto akcia je nevratná.`)) return;
+  // Typed-confirmation delete — user musí napísať username pre potvrdenie.
+  // Predtým bol len `confirm()` ktorý sa dá kliknúť omylom (Enter na alert).
+  // Pre destrukčnú akciu potrebujeme silnejšiu safeguard.
+  const handleDeleteUser = (targetUser) => {
+    setDeleteCandidate(targetUser);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteCandidate) return;
     try {
-      await adminApi.delete(`/api/admin/users/${targetUser.id}`);
-      setUsers(prev => prev.filter(u => u.id !== targetUser.id));
+      await adminApi.delete(`/api/admin/users/${deleteCandidate.id}`);
+      setUsers(prev => prev.filter(u => u.id !== deleteCandidate.id));
+      setDeleteCandidate(null);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri mazaní');
     }
@@ -588,7 +662,7 @@ function UsersTab() {
   };
 
   const toggleAll = () => {
-    const selectableIds = filtered.filter(u => u.email !== 'support@prplcrm.eu').map(u => u.id);
+    const selectableIds = users.filter(u => u.email !== SUPER_ADMIN_EMAIL).map(u => u.id);
     setCheckedIds(prev => prev.size === selectableIds.length ? new Set() : new Set(selectableIds));
   };
 
@@ -614,24 +688,89 @@ function UsersTab() {
     }
   };
 
-  const filtered = users.filter(u =>
-    u.username.toLowerCase().includes(search.toLowerCase()) ||
-    u.email.toLowerCase().includes(search.toLowerCase())
-  );
+  // Filtrovanie aj sortovanie sa robí na serveri (efektívnejšie pri rastúcej
+  // DB) — `users` zo state je už hotový server-side filtered+sorted output.
+  const filtered = users;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   if (loading) return <div className="sa-loading">Načítavam používateľov...</div>;
 
   return (
     <div className="sa-users">
-      <div className="sa-toolbar">
+      {/* Stat header — breakdown podľa plánu / role / aktivity. Ukazuje
+          celkový obraz produkcie (vylučuje super admina cez backend filter). */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: 'var(--bg-secondary)' }}>
+          Celkom: <strong>{total}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#f3f4f6', color: '#374151' }}>
+          Free: <strong>{breakdown.free || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
+          Tím: <strong>{breakdown.team || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#ede9fe', color: '#6D28D9' }}>
+          Pro: <strong>{breakdown.pro || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }}>
+          Adminov: <strong>{breakdown.admin || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#d1fae5', color: '#065f46' }}>
+          Aktívnych ({ACTIVE_THRESHOLD_DAYS}d): <strong>{breakdown.active || 0}</strong>
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#f3f4f6', color: '#6b7280' }}>
+          Inaktívnych: <strong>{breakdown.inactive || 0}</strong>
+        </span>
+        {refreshing && <span style={{ padding: '4px 10px', color: '#10b981' }}>● auto-refresh</span>}
+      </div>
+
+      <div className="sa-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <input
           type="text"
-          placeholder="Hľadať používateľov..."
+          placeholder="🔍 Hľadať username / email..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="form-input sa-search"
+          style={{ flex: '1 1 200px', minWidth: 180 }}
         />
-        <span className="sa-count">{filtered.length} z {users.length}</span>
+        <select value={filterPlan} onChange={(e) => setFilterPlan(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Všetky plány</option>
+          <option value="free">Free</option>
+          <option value="team">Tím</option>
+          <option value="pro">Pro</option>
+        </select>
+        <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Všetky role</option>
+          <option value="admin">Admin</option>
+          <option value="manager">Manažér</option>
+          <option value="user">Používateľ</option>
+        </select>
+        <select value={filterActive} onChange={(e) => setFilterActive(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Všetci</option>
+          <option value="true">Aktívni (login {ACTIVE_THRESHOLD_DAYS}d)</option>
+          <option value="false">Inaktívni</option>
+        </select>
+        <select value={filterStripe} onChange={(e) => setFilterStripe(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Stripe ?</option>
+          <option value="true">💳 Má Stripe</option>
+          <option value="false">Bez Stripe</option>
+        </select>
+        <select value={filterDiscount} onChange={(e) => setFilterDiscount(e.target.value)} className="sa-select" style={{ fontSize: 13 }}>
+          <option value="">Zľava ?</option>
+          <option value="true">🏷️ Má zľavu</option>
+        </select>
+        {(search || filterPlan || filterRole || filterActive || filterStripe || filterDiscount) && (
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => {
+              setSearch(''); setFilterPlan(''); setFilterRole('');
+              setFilterActive(''); setFilterStripe(''); setFilterDiscount('');
+            }}
+          >
+            ✕ Vymazať filtre
+          </button>
+        )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
           onClick={() => adminApi.get('/api/admin/export/users', { responseType: 'blob' }).then(res => {
             const url = URL.createObjectURL(res.data);
@@ -687,22 +826,33 @@ function UsersTab() {
             <tr>
               <th style={{ width: '36px' }}>
                 <input type="checkbox" onChange={toggleAll}
-                  checked={filtered.filter(u => u.email !== 'support@prplcrm.eu').length > 0 && filtered.filter(u => u.email !== 'support@prplcrm.eu').every(u => checkedIds.has(u.id))} />
+                  checked={filtered.filter(u => u.email !== SUPER_ADMIN_EMAIL).length > 0 && filtered.filter(u => u.email !== SUPER_ADMIN_EMAIL).every(u => checkedIds.has(u.id))} />
               </th>
-              <th>Používateľ</th>
-              <th>Email</th>
-              <th>Plán</th>
+              <th onClick={() => handleSort('username')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Používateľ {sortBy === 'username' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th onClick={() => handleSort('email')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Email {sortBy === 'email' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th onClick={() => handleSort('plan')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Plán {sortBy === 'plan' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
               <th>Sync</th>
               <th>Workspace-y a role</th>
-              <th>Registrácia</th>
+              <th onClick={() => handleSort('lastLogin')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Posledný login {sortBy === 'lastLogin' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
+              <th onClick={() => handleSort('createdAt')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                Registrácia {sortBy === 'createdAt' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </th>
               <th>Akcie</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(u => (
-              <tr key={u.id} className={u.email === 'support@prplcrm.eu' ? 'current-user' : ''} onClick={() => openUserDetail(u.id)} style={{ cursor: 'pointer' }}>
+              <tr key={u.id} className={u.email === SUPER_ADMIN_EMAIL ? 'current-user' : ''} onClick={() => openUserDetail(u.id)} style={{ cursor: 'pointer' }}>
                 <td onClick={e => e.stopPropagation()}>
-                  {u.email !== 'support@prplcrm.eu' && (
+                  {u.email !== SUPER_ADMIN_EMAIL && (
                     <input type="checkbox" checked={checkedIds.has(u.id)} onChange={e => toggleCheck(u.id, e)} />
                   )}
                 </td>
@@ -721,7 +871,20 @@ function UsersTab() {
                     )}
                     <span className="user-name-cell">
                       {u.username}
-                      {u.email === 'support@prplcrm.eu' && <span className="you-badge">(vy)</span>}
+                      {u.email === SUPER_ADMIN_EMAIL && <span className="you-badge">(vy)</span>}
+                      {/* Aktivity indicator — bodka vedľa username pre rýchly scan */}
+                      {u.email !== SUPER_ADMIN_EMAIL && (
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: 8, height: 8,
+                            borderRadius: '50%',
+                            marginLeft: 6,
+                            background: u.isActive ? '#10b981' : '#94a3b8'
+                          }}
+                          title={u.isActive ? `Aktívny — login za posledných ${ACTIVE_THRESHOLD_DAYS} dní` : 'Inaktívny'}
+                        />
+                      )}
                     </span>
                   </div>
                 </td>
@@ -737,9 +900,29 @@ function UsersTab() {
                     <option value="team">Tím</option>
                     <option value="pro">Pro</option>
                   </select>
+                  {u.stripePaying && (
+                    <span title="Stripe-managed (reálna platba)"
+                      style={{ display: 'inline-block', marginLeft: 4, fontSize: 10, padding: '1px 5px', borderRadius: 8, background: '#d1fae5', color: '#065f46', fontWeight: 600 }}>
+                      💳
+                    </span>
+                  )}
                   {u.discount && (
-                    <span title={u.discount.type === 'percentage' ? `${u.discount.value}%` : u.discount.type === 'fixed' ? `−${u.discount.value}€` : u.discount.type === 'freeMonths' ? `${u.discount.value} mes.` : `→${u.discount.targetPlan?.toUpperCase()}`}
-                      style={{ display: 'inline-block', marginLeft: '4px', fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#FEF3C7', color: '#92400E', fontWeight: 600 }}>
+                    <span
+                      title={
+                        (u.discount.isExpired ? 'VYPRŠANÁ — ' : '') +
+                        (u.discount.type === 'percentage' ? `${u.discount.value}%` :
+                         u.discount.type === 'fixed' ? `−${u.discount.value}€` :
+                         u.discount.type === 'freeMonths' ? `${u.discount.value} mes.` :
+                         `→${u.discount.targetPlan?.toUpperCase()}`)
+                      }
+                      style={{
+                        display: 'inline-block', marginLeft: '4px', fontSize: '10px',
+                        padding: '1px 5px', borderRadius: '8px',
+                        background: u.discount.isExpired ? '#f3f4f6' : '#FEF3C7',
+                        color: u.discount.isExpired ? '#9ca3af' : '#92400E',
+                        fontWeight: 600,
+                        textDecoration: u.discount.isExpired ? 'line-through' : 'none'
+                      }}>
                       🏷️
                     </span>
                   )}
@@ -771,11 +954,19 @@ function UsersTab() {
                     ))}
                   </div>
                 </td>
+                <td className="sa-date-cell" title={u.lastLogin ? `Posledný login ${new Date(u.lastLogin).toLocaleString('sk-SK')}` : 'Bez záznamu'}>
+                  {u.lastLogin
+                    ? <span style={{ color: u.isActive ? 'inherit' : 'var(--text-muted)' }}>
+                        {new Date(u.lastLogin).toLocaleDateString('sk-SK')}
+                      </span>
+                    : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>nikdy</span>
+                  }
+                </td>
                 <td className="sa-date-cell">
                   {u.createdAt ? new Date(u.createdAt).toLocaleDateString('sk-SK') : '—'}
                 </td>
-                <td>
-                  {u.email !== 'support@prplcrm.eu' && (
+                <td onClick={e => e.stopPropagation()}>
+                  {u.email !== SUPER_ADMIN_EMAIL && (
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => handleDeleteUser(u)}
@@ -789,7 +980,42 @@ function UsersTab() {
             ))}
           </tbody>
         </table>
+        {/* Pagination — server-side, kontroluje totalPages aj page state */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderTop: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              Strana {page} z {totalPages} ({total} užívateľov)
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-secondary"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                style={{ fontSize: 12 }}
+              >
+                ← Predch.
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                style={{ fontSize: 12 }}
+              >
+                Ďalšia →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Typed-confirmation delete modal */}
+      {deleteCandidate && (
+        <DeleteUserConfirmModal
+          user={deleteCandidate}
+          onCancel={() => setDeleteCandidate(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
 
       {/* User Detail Modal */}
       {selectedUser && (
@@ -913,23 +1139,118 @@ function UsersTab() {
       )}
 
       <AdminHelpToggle title="Používatelia">
-        <p><strong>Čo tu vidíš:</strong> kompletný zoznam všetkých registrovaných užívateľov + nástroje na úpravu ich účtu, plánu a zliav.</p>
+        <p><strong>Čo tu vidíš:</strong> kompletný zoznam všetkých registrovaných užívateľov + nástroje na úpravu ich účtu, plánu a zliav. Tabuľka je <strong>server-side filtrovaná, sortovaná a stránkovaná</strong> — pri raste DB sa neslime načítaním tisíc užívateľov naraz.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>📊 Stat header (hore)</h4>
         <ul>
-          <li><strong>Vyhľadávanie a filtre</strong> hore — hľadanie podľa mena/emailu, filter podľa plánu, role, registrácie atď.</li>
-          <li><strong>Hromadné akcie</strong> — zaškrtni viacerých → hromadne zmeň plán alebo rolu (super admin je vždy vynechaný).</li>
-          <li><strong>Klik na riadok</strong> → otvorí detail panel vpravo so:
-            <ul>
-              <li><strong>Profil</strong> — meno, email, role, registračný dátum, posledné prihlásenie.</li>
-              <li><strong>Workspaces</strong> — kde je členom a v akej role.</li>
-              <li><strong>Zariadenia</strong> — zaregistrované iOS/Android/web push tokeny.</li>
-              <li><strong>Posledná aktivita</strong> — výňatok z Audit logu pre tohto usera.</li>
-              <li><strong>Predplatné — úprava</strong> — zmena plánu (Free/Tím/Pro) a "Platené do" dátumu. Po vypršaní paidUntil a bez Stripe sub sa plán automaticky vráti na Free (cez auto-expiry službu).</li>
-              <li><strong>Zľava</strong> — pridanie discount metadata: percentuálna, fixná, voľné mesiace, plán-upgrade zadarmo. <em>Pozor:</em> "voľné mesiace" predĺži paidUntil ale nezmení plán — pre "mesiac Pro zdarma" radšej použi "Predplatné — úprava" (plán Pro + dátum o mesiac).</li>
-            </ul>
-          </li>
+          <li><strong>Celkom / Free / Tím / Pro / Adminov</strong> — agregovaný breakdown produkčných užívateľov (super admin vylúčený).</li>
+          <li><strong>Aktívnych / Inaktívnych</strong> — aktívny = login za posledných {ACTIVE_THRESHOLD_DAYS} dní (z audit log <code>auth.login</code> eventov). Pomer aktívni/celkom je tvoj DAU/MAU proxy.</li>
+          <li>Stránka <strong>auto-refresh každých 60s</strong> (s pause pri schovanom tabe) — nové registrácie vidíš bez manuálneho refreshu.</li>
         </ul>
-        <p><strong>Tipy:</strong> mazanie usera je permanentné (DELETE z DB + GDPR cleanup). Pred zmenou role/plánu vždy skontroluj kontext — všetky zmeny sa logujú do Audit logu so záznamom kto/kedy/čo.</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🔍 Filtre</h4>
+        <ul>
+          <li><strong>Search</strong> — substring v username / email (case-insensitive, escape regex).</li>
+          <li><strong>Plán</strong> — Free / Tím / Pro</li>
+          <li><strong>Rola</strong> — Admin / Manažér / Používateľ</li>
+          <li><strong>Aktivita</strong> — Aktívni (login {ACTIVE_THRESHOLD_DAYS}d) / Inaktívni</li>
+          <li><strong>💳 Stripe</strong> — má/nemá reálne Stripe predplatné (na rozdiel od admin-granted)</li>
+          <li><strong>🏷️ Zľava</strong> — má aktívnu discount metadata</li>
+          <li><strong>✕ Vymazať filtre</strong> — quick reset všetkých filtrov</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>↕️ Sort</h4>
+        <p>Klik na header column toggle-uje ascending/descending sort. Sortujú sa: Používateľ, Email, Plán, Posledný login, Registrácia. Defaultne najnovší prvý (createdAt DESC).</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>📋 Stĺpce v tabuľke</h4>
+        <ul>
+          <li><strong>Používateľ</strong> — avatar + meno. Vedľa mena <strong>zelená/šedá bodka</strong> indicator: zelená = aktívny ({ACTIVE_THRESHOLD_DAYS}d), šedá = inaktívny.</li>
+          <li><strong>Plán</strong> — dropdown na rýchlu zmenu. Vedľa: <strong>💳</strong> badge ak má Stripe sub, <strong>🏷️</strong> badge ak má discount (prečiarknutý ak vypršaná).</li>
+          <li><strong>Sync</strong> — emoji indikátory pre Google Calendar / Tasks pripojené.</li>
+          <li><strong>Workspace-y a role</strong> — všetky workspace memberships per user. Owner role je <strong>chránená</strong> — ak je to jediný owner, demotion sa odmietne s message "Najprv povýšte iného člena".</li>
+          <li><strong>Posledný login</strong> — kedy sa user posledný raz prihlásil (z audit log). "nikdy" = žiadny záznam.</li>
+          <li><strong>Registrácia</strong> — createdAt timestamp.</li>
+          <li><strong>Akcie → Vymazať</strong> — destrukčná akcia. Otvorí <strong>typed-confirmation modal</strong> kde musíš napísať username pre potvrdenie.</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>☑️ Hromadné akcie</h4>
+        <p>Zaškrtni viacerých → bulk action bar sa objaví → zmeň plán alebo rolu hromadne. Super admin je vždy vynechaný (jeho checkbox sa nezobrazí).</p>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>👤 Detail modal (klik na riadok)</h4>
+        <p>Otvorí sa <strong>centered modal</strong> (nie panel vpravo) s plnými dátami:</p>
+        <ul>
+          <li><strong>Hlavička</strong> — avatar, meno, email, role badge, plán badge, registračný dátum.</li>
+          <li><strong>Stats</strong> — počet kontaktov, projektov, odoslaných/prijatých správ.</li>
+          <li><strong>Workspaces</strong> — kde je členom a v akej role (s farebným indikátorom workspace-u).</li>
+          <li><strong>Zariadenia</strong> — registrované APNs (iOS) + web push tokeny per browser. Klik "Detail" rozbalí konkrétne tokeny.</li>
+          <li><strong>Integrácie</strong> — Google Calendar / Tasks status badges.</li>
+          <li><strong>Posledná aktivita</strong> — výňatok z Audit logu (10 najnovších akcií).</li>
+          <li><strong>Predplatné — úprava</strong> — zmena plánu (Free/Tím/Pro) a "Platené do" dátumu. Po vypršaní paidUntil a bez Stripe sub sa plán automaticky vráti na Free (cez auto-expiry službu).</li>
+          <li><strong>Zľava</strong> — pridanie discount metadata: percentuálna, fixná, voľné mesiace, plán-upgrade zadarmo. <em>Pozor:</em> "voľné mesiace" predĺži paidUntil ale nezmení plán — pre "mesiac Pro zdarma" radšej použi "Predplatné — úprava" (plán Pro + dátum o mesiac).</li>
+        </ul>
+
+        <h4 style={{ marginTop: '16px', marginBottom: '8px', fontSize: '14px' }}>🛡️ Bezpečnostné guard-y</h4>
+        <ul>
+          <li><strong>Owner demotion</strong> — backend blokuje demote z owner ak by workspace zostal bez ownera. Najprv povýš iného člena, potom môžeš pôvodného demotnúť.</li>
+          <li><strong>Self-demotion admin role</strong> — admin nemôže odstrániť svoju vlastnú admin rolu (Inak by sa mohol uzamknúť von z panelu).</li>
+          <li><strong>Typed-confirmation delete</strong> — pri DELETE musíš napísať username. Ochrana pred mis-clickom.</li>
+          <li><strong>Super admin (support@prplcrm.eu)</strong> — nezobrazuje sa v zozname, nemá checkbox, nedá sa vymazať.</li>
+        </ul>
+
+        <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <em>Audit:</em> Všetky zmeny role / plánu / zliav / mazania sa logujú do Audit logu so záznamom kto/kedy/čo. Súbor zápisov je <code>auditService.logAction</code>.
+        </p>
       </AdminHelpToggle>
+    </div>
+  );
+}
+
+// Typed-confirmation delete modal — pre destrukčnú akciu user musí
+// vlastnoručne napísať username. Predtým bol len `confirm()` ktorý sa
+// dal kliknúť omylom (Enter na alert dialog). Pri delete usera sa zmaže
+// celý profil, jeho workspaces (ak je sole owner), všetky dáta — typed
+// confirmation je obvyklá best practice (GitHub, Stripe, AWS).
+function DeleteUserConfirmModal({ user, onCancel, onConfirm }) {
+  const [typed, setTyped] = useState('');
+  const matches = typed === user.username;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, padding: 24 }}>
+        <h3 style={{ marginTop: 0, color: '#dc2626' }}>⚠️ Vymazať používateľa</h3>
+        <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+          Toto je <strong>nevratná destrukčná akcia</strong>. Vymaže sa:
+        </p>
+        <ul style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, margin: '8px 0 16px' }}>
+          <li>Profil užívateľa <strong>{user.username}</strong> ({user.email})</li>
+          <li>Sole-owned workspaces (kde je user jediný vlastník)</li>
+          <li>Všetky kontakty, projekty, úlohy, správy v tých workspaces</li>
+          <li>Push subscriptions, FCM/APNs zariadenia, audit history</li>
+        </ul>
+        <p style={{ fontSize: 13, color: 'var(--text-primary)', marginBottom: 8 }}>
+          Pre potvrdenie napíš username <code style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{user.username}</code>:
+        </p>
+        <input
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder={user.username}
+          autoFocus
+          className="form-input"
+          style={{ width: '100%', marginBottom: 16, fontSize: 14 }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Zrušiť</button>
+          <button
+            className="btn btn-danger"
+            disabled={!matches}
+            onClick={onConfirm}
+            style={{ opacity: matches ? 1 : 0.5 }}
+          >
+            Natrvalo vymazať
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
