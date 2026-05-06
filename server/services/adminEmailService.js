@@ -246,14 +246,18 @@ const sendWelcomeEmail = async ({ toEmail, username }) => {
     </p>
   `;
 
+  // Definujeme html ako premennú aby sme ho vedeli použiť aj pre htmlToText
+  // alternatívu (multipart/alternative pre lepšiu deliverability).
+  const html = wrapEmail({ headerSubtitle: 'Vitajte na palube', bodyHtml });
+
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
       replyTo: process.env.SMTP_REPLY_TO || 'support@prplcrm.eu',
       text: htmlToText(html),
       to: toEmail,
-      subject: 'Vitajte v PrplCRM 👋',
-      html: wrapEmail({ headerSubtitle: 'Vitajte na palube', bodyHtml })
+      subject: 'Vitajte v PrplCRM',
+      html
     });
     logger.info('[AdminEmail] Welcome email sent', { toEmail });
     return true;
