@@ -116,8 +116,14 @@ const PLAN_LABELS = {
   pro: 'Pro'
 };
 
-// Marketing typy — gated by user.preferences.marketingEmails
-const MARKETING_TYPES = new Set(['reminder_t7', 'reminder_t1', 'winback']);
+// Marketing typy — gated by user.preferences.marketingEmails (skip ak user
+// opt-out cez unsubscribe link). Pridané `mobile_app_launch` — broadcast
+// announcement (one-off promo o iOS/Android appke), nie striktne transakčný
+// → musí rešpektovať user opt-out a obsahovať unsubscribe link v footri.
+// Transakčné emaily (subscription_assigned, welcome_pro, discount_assigned,
+// expired, password_reset, invitation, welcome) sa nepodliehajú gating-u
+// — sú nutné pre fungovanie účtu (CAN-SPAM / GDPR transactional exemption).
+const MARKETING_TYPES = new Set(['reminder_t7', 'reminder_t1', 'winback', 'mobile_app_launch']);
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -791,7 +797,13 @@ const sendMobileAppLaunch = async ({ user, triggeredBy }) => {
     toEmail: user.email,
     type: 'mobile_app_launch',
     subject,
-    html: wrapEmail({ headerSubtitle: 'Mobilná aplikácia', bodyHtml }),
+    html: wrapEmail({
+      headerSubtitle: 'Mobilná aplikácia',
+      bodyHtml,
+      // Marketing broadcast — povinný unsubscribe link v footri (CAN-SPAM /
+      // GDPR + List-Unsubscribe header v sendAndLog).
+      unsubscribeLink: buildUnsubscribeLink(user._id)
+    }),
     context: { plan: user.subscription?.plan },
     triggeredBy: triggeredBy || 'admin-broadcast'
   });
