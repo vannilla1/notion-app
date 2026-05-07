@@ -202,7 +202,12 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing — skryté v iOS native shell-e (Apple Guideline 3.1.1).
+          Web verzia ho ďalej zobrazuje normálne. Po skrytí v iOS appke nie
+          je odkaz "cennik" v navigácii dosiahnuteľný, čo je OK — Apple si
+          nepraje žiadne references na external payment / pricing pre
+          digital subscriptions konzumované v iOS appke. */}
+      {!isIosNativeApp() && (
       <section className="lp-pricing" id="cennik">
         <div className="lp-section">
           <div className="lp-section-header">
@@ -413,6 +418,7 @@ export default function LandingPage() {
           </p>
         </div>
       </section>
+      )}
 
       {/* FAQ */}
       <section className="lp-faq" id="faq">

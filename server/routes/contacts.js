@@ -6,6 +6,7 @@ const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/work
 const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
 const User = require('../models/User');
+const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
@@ -302,7 +303,14 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     if (maxContacts !== Infinity) {
       const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
       if (contactCount >= maxContacts) {
-        return res.status(403).json({ message: `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.` });
+        // Apple Guideline 3.1.1 — v iOS native shell-e nesmieme referencovať
+        // platený obsah / external upgrade flow. Vraciame neutrálnu správu
+        // bez zmienky o pláne / "vyšší plán" / cien. Web verzia ďalej dostane
+        // pôvodnú actionable správu.
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxContacts} kontaktov pre toto prostredie.`
+          : `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.`;
+        return res.status(403).json({ message });
       }
     }
 

@@ -3,6 +3,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const { isIosNativeApp } = require('../utils/platform');
 
 // In-memory cache for workspace validation (reduces 3 DB queries to 0 per request)
 // Kľúč: `${userId}:${workspaceId}` — per-device model, každý device môže mať iný
@@ -262,8 +263,12 @@ const enforceWorkspaceLimits = async (req, res, next) => {
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     if (memberCount > maxMembers) {
+      // Apple 3.1.1 — neutrálna správa pre iOS bez zmienky o pláne / upgrade.
+      const message = isIosNativeApp(req)
+        ? `Toto pracovné prostredie prekračuje limit členov (${memberCount}/${maxMembers}). Vytváranie nového obsahu je zablokované.`
+        : `Pracovné prostredie prekračuje limit členov pre plán "${ownerPlan}" (${memberCount}/${maxMembers}). Vytváranie nového obsahu je zablokované. Vlastník musí upgradovať plán alebo odstrániť členov.`;
       return res.status(403).json({
-        message: `Pracovné prostredie prekračuje limit členov pre plán "${ownerPlan}" (${memberCount}/${maxMembers}). Vytváranie nového obsahu je zablokované. Vlastník musí upgradovať plán alebo odstrániť členov.`,
+        message,
         code: 'WORKSPACE_OVER_LIMIT'
       });
     }

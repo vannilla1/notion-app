@@ -34,6 +34,7 @@ const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./google
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
+const { isIosNativeApp } = require('../utils/platform');
 const logger = require('../utils/logger');
 const { getCachedData, setCachedData, invalidateWorkspaceData } = require('../middleware/dataCache');
 
@@ -1158,7 +1159,11 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
       // Check plan limit: tasks per contact
       if (isLimited && contact.tasks && contact.tasks.length >= maxTasks) {
-        return res.status(403).json({ message: `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.` });
+        // Apple Guideline 3.1.1 — neutrálna správa pre iOS native shell.
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
+          : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
+        return res.status(403).json({ message });
       }
 
       // Create new embedded task for this contact
