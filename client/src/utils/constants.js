@@ -57,10 +57,12 @@ export const PRIORITY_LABELS = {
   high: 'Vysoká'
 };
 
-// Priority colors
+// Priority colors — zhodné s getPriorityColor() v Tasks.jsx / TaskList.jsx
+// (zdroj pravdy pre vizuál priority badge-ov v projektovom UI). Nízka = green
+// (relax / bez urgencie), Stredná = orange, Vysoká = red (urgent / eskalácia).
 export const PRIORITY_COLORS = {
-  low: '#6b7280',     // gray
-  medium: '#f59e0b',  // yellow/orange
+  low: '#10b981',     // green
+  medium: '#f59e0b',  // orange
   high: '#ef4444'     // red
 };
 

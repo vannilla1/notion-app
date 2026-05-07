@@ -1406,9 +1406,29 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               });
             }
 
+            // Detekcia "iba priorita sa zmenila" — ak ÁNO, generic task.updated
+            // notifikáciu skip-ujeme (dedikovaná priority notifikácia ju plne
+            // nahrádza, dva notify za jednu zmenu sú spam). Porovnávame všetky
+            // user-viditeľné polia oproti hodnotám pred contact.save().
+            const priorityChanged = priority !== undefined && priority !== originalPriority;
+            const titleChanged = title !== undefined && title !== originalTitle;
+            const descChanged = description !== undefined && description !== task.description;
+            const dueDateChanged = dueDate !== undefined && dueDate !== task.dueDate;
+            const dueTimeChanged = dueTime !== undefined && dueTime !== (task.dueTime || '');
+            const completedChanged = completed !== undefined && completed !== task.completed;
+            const assignedChanged = newlyAssigned.length > 0
+              || (assignedTo !== undefined && JSON.stringify(originalAssignedTo) !== JSON.stringify(assignedTo || []));
+            const subtasksChanged = req.body.subtasks !== undefined;
+            const reminderChangedField = reminder !== undefined && newReminder !== task.reminder;
+            const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
+              || completedChanged || assignedChanged || subtasksChanged || reminderChangedField;
+            const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
+
             // Send notification about task update (exclude newly assigned - they get assignment notification)
             const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
-            await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
+            if (!onlyPriorityChanged) {
+              await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
+            }
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
@@ -1418,11 +1438,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
             // Priority change → samostatná notifikácia s farebným badge-om
             // (frontend rozozná type='task.priority_changed' a vykreslí ho).
-            // Posiela sa nad rámec generic task.updated keďže priority je
-            // často kľúčová informácia pre tím (napr. eskalácia).
             // POZOR: originalPriority captured PRED contact.save() — viď komentár
             // hore. taskData.priority obsahuje aktuálnu (po-save) hodnotu.
-            if (priority !== undefined && priority !== originalPriority) {
+            if (priorityChanged) {
               await notificationService.notifyTaskPriorityChanged(
                 taskData, originalPriority, priority, req.user, req.workspaceId
               );
@@ -1477,6 +1495,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     if (task) {
       // Save original assignedTo before update
       const originalAssignedTo = (task.assignedTo || []).map(id => id.toString());
+      // Capture všetkých original hodnôt pre "iba priorita sa zmenila" detekciu
+      // nižšie. Mongoose doc reference sa vie mutovať pri save(), preto
+      // čítame TERAZ pred akýmkoľvek priradením do task.X.
+      const originalDescription = task.description;
+      const originalCompleted = task.completed;
+      const originalDueTime = task.dueTime || '';
 
       // Support both old contactId and new contactIds
       let finalContactIds = task.contactIds || [];
@@ -1610,10 +1634,29 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         });
       }
 
+      // Detekcia "iba priorita sa zmenila" — viď contact path pre rozsiahly
+      // komentár. Pri true skipneme generic task.updated aby user nedostal
+      // dva notifikácie za jeden act (priority notif sám stačí).
+      const priorityChanged = priority !== undefined && task.priority !== oldPriority;
+      const titleChanged = title !== undefined && title !== originalTitle;
+      const descChanged = description !== undefined && description !== originalDescription;
+      const dueDateChanged = dueDate !== undefined && dueDate !== oldDueDate;
+      const dueTimeChanged = dueTime !== undefined && (dueTime || '') !== originalDueTime;
+      const completedChanged = completed !== undefined && completed !== originalCompleted;
+      const assignedChanged = newlyAssigned.length > 0
+        || (assignedTo !== undefined && JSON.stringify(originalAssignedTo) !== JSON.stringify((assignedTo || []).map(String)));
+      const subtasksChanged = req.body.subtasks !== undefined;
+      const reminderChangedFlag = reminder !== undefined;
+      const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
+        || completedChanged || assignedChanged || subtasksChanged || reminderChangedFlag;
+      const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
+
       // Send notification about task update (exclude newly assigned - they get assignment notification)
-      const prevCompleted = task.completed;
+      const prevCompleted = originalCompleted;
       const taskType = completed === true && prevCompleted !== true ? 'task.completed' : 'task.updated';
-      await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
+      if (!onlyPriorityChanged) {
+        await notificationService.notifyTaskChange(taskType, taskData, req.user, newlyAssigned, req.workspaceId);
+      }
 
       // Notify newly assigned users with specific assignment notification
       if (newlyAssigned.length > 0) {
@@ -1624,7 +1667,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Priority change → samostatná farebná notifikácia (viď contact path
       // pre detailnejší komentár). oldPriority bolo zachytené pred zápisom
       // task.priority hore, takže tu už máme staré aj nové hodnoty.
-      if (priority !== undefined && task.priority !== oldPriority) {
+      if (priorityChanged) {
         await notificationService.notifyTaskPriorityChanged(
           taskData, oldPriority, task.priority, req.user, req.workspaceId
         );
@@ -1674,6 +1717,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const originalCtaskTitle = ctask.title;
         const originalCtaskAssignedTo = ctask.assignedTo || [];
         const originalCtaskPriority = ctask.priority;
+        const originalCtaskDescription = ctask.description;
+        const originalCtaskDueDate = ctask.dueDate;
+        const originalCtaskDueTime = ctask.dueTime || '';
+        const originalCtaskCompleted = ctask.completed;
         contact.tasks[taskIndex] = {
           ...ctask,
           id: ctask.id,
@@ -1730,9 +1777,27 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           });
         }
 
+        // Detekcia "iba priorita sa zmenila" (fallback path) — skip generic
+        // notif keď user iba menil prioritu.
+        const newCtaskPriority = priority !== undefined ? priority : originalCtaskPriority;
+        const fbPriorityChanged = priority !== undefined && newCtaskPriority !== originalCtaskPriority;
+        const fbTitleChanged = title !== undefined && title !== originalCtaskTitle;
+        const fbDescChanged = description !== undefined && description !== originalCtaskDescription;
+        const fbDueDateChanged = dueDate !== undefined && dueDate !== originalCtaskDueDate;
+        const fbDueTimeChanged = dueTime !== undefined && (dueTime || '') !== originalCtaskDueTime;
+        const fbCompletedChanged = completed !== undefined && completed !== originalCtaskCompleted;
+        const fbAssignedChanged = newlyAssigned.length > 0
+          || (assignedTo !== undefined && JSON.stringify(originalCtaskAssignedTo) !== JSON.stringify(assignedTo || []));
+        const fbSubtasksChanged = req.body.subtasks !== undefined;
+        const fbOtherChanged = fbTitleChanged || fbDescChanged || fbDueDateChanged || fbDueTimeChanged
+          || fbCompletedChanged || fbAssignedChanged || fbSubtasksChanged;
+        const fbOnlyPriorityChanged = fbPriorityChanged && !fbOtherChanged;
+
         // Send notification about task update (exclude newly assigned - they get assignment notification)
-        const fallbackTaskType = completed === true && ctask.completed !== true ? 'task.completed' : 'task.updated';
-        await notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned, req.workspaceId);
+        const fallbackTaskType = completed === true && originalCtaskCompleted !== true ? 'task.completed' : 'task.updated';
+        if (!fbOnlyPriorityChanged) {
+          await notificationService.notifyTaskChange(fallbackTaskType, taskData, req.user, newlyAssigned, req.workspaceId);
+        }
 
         // Notify newly assigned users with specific assignment notification
         if (newlyAssigned.length > 0) {
@@ -1742,8 +1807,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
         // Priority change → samostatná farebná notifikácia (fallback path
         // pre prípady kde sa Task hľadá v contact.tasks po neúspešnom global lookup).
-        const newCtaskPriority = priority !== undefined ? priority : originalCtaskPriority;
-        if (priority !== undefined && newCtaskPriority !== originalCtaskPriority) {
+        if (fbPriorityChanged) {
           await notificationService.notifyTaskPriorityChanged(
             taskData, originalCtaskPriority, newCtaskPriority, req.user, req.workspaceId
           );
