@@ -1310,11 +1310,15 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const task = contact.tasks[taskIndex];
             // Save original assignedTo before update
             const originalAssignedTo = task.assignedTo || [];
-            // Capture original priority BEFORE the array slot is replaced.
-            // Mongoose subdoc reference môže byť mutovaná po contact.save(),
-            // takže oldPriority čítame teraz na bezpečnú hodnotu pre porovnanie
-            // v notifyTaskPriorityChanged check-u nižšie.
+            // Capture VŠETKY original hodnoty PRED nahradením slotu v poli.
+            // Mongoose subdoc references sa môžu mutovať po contact.save(),
+            // takže každé pole čítame TERAZ na bezpečnú porovnanie základňu.
             const originalPriority = task.priority;
+            const originalDescriptionContact = task.description;
+            const originalDueDateContact = task.dueDate;
+            const originalDueTimeContact = task.dueTime || '';
+            const originalCompletedContact = task.completed;
+            const originalReminderContact = task.reminder;
             // Auto-complete all subtasks when main task is completed
             const markAllSubtasksCompleted = (subtasks) => {
               if (!subtasks) return subtasks;
@@ -1407,22 +1411,29 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             }
 
             // Detekcia "iba priorita sa zmenila" — ak ÁNO, generic task.updated
-            // notifikáciu skip-ujeme (dedikovaná priority notifikácia ju plne
-            // nahrádza, dva notify za jednu zmenu sú spam). Porovnávame všetky
-            // user-viditeľné polia oproti hodnotám pred contact.save().
+            // notifikáciu skip-ujeme. Porovnania normalizujú null/undefined/''
+            // ako rovnaké (frontend zvykne posielať '' pre prázdne polia, server
+            // v DB drží null — bez normalizácie by sme falošne hlásili zmenu).
+            const norm = (v) => (v == null || v === '' ? '' : v);
             const priorityChanged = priority !== undefined && priority !== originalPriority;
-            const titleChanged = title !== undefined && title !== originalTitle;
-            const descChanged = description !== undefined && description !== task.description;
-            const dueDateChanged = dueDate !== undefined && dueDate !== task.dueDate;
-            const dueTimeChanged = dueTime !== undefined && dueTime !== (task.dueTime || '');
-            const completedChanged = completed !== undefined && completed !== task.completed;
+            const titleChanged = title !== undefined && norm(title) !== norm(originalTitle);
+            const descChanged = description !== undefined && norm(description) !== norm(originalDescriptionContact);
+            const dueDateChanged = dueDate !== undefined && norm(dueDate) !== norm(originalDueDateContact);
+            const dueTimeChanged = dueTime !== undefined && norm(dueTime) !== norm(originalDueTimeContact);
+            const completedChanged = completed !== undefined && !!completed !== !!originalCompletedContact;
             const assignedChanged = newlyAssigned.length > 0
-              || (assignedTo !== undefined && JSON.stringify(originalAssignedTo) !== JSON.stringify(assignedTo || []));
+              || (assignedTo !== undefined && JSON.stringify((originalAssignedTo || []).map(String).sort()) !== JSON.stringify((assignedTo || []).map(String).sort()));
             const subtasksChanged = req.body.subtasks !== undefined;
-            const reminderChangedField = reminder !== undefined && newReminder !== task.reminder;
+            const reminderChangedField = reminder !== undefined && norm(newReminder) !== norm(originalReminderContact);
             const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
               || completedChanged || assignedChanged || subtasksChanged || reminderChangedField;
             const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
+            // Diagnostic — kým ladíme; po stabilizácii môžeme znížiť na debug.
+            logger.info('[Task PUT contact] priority-only check', {
+              taskId: req.params.id, priorityChanged, titleChanged, descChanged,
+              dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
+              subtasksChanged, reminderChangedField, onlyPriorityChanged
+            });
 
             // Send notification about task update (exclude newly assigned - they get assignment notification)
             const taskType = completed === true && task.completed !== true ? 'task.completed' : 'task.updated';
@@ -1501,6 +1512,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       const originalDescription = task.description;
       const originalCompleted = task.completed;
       const originalDueTime = task.dueTime || '';
+      const originalReminderGlobal = task.reminder;
 
       // Support both old contactId and new contactIds
       let finalContactIds = task.contactIds || [];
@@ -1635,21 +1647,30 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       }
 
       // Detekcia "iba priorita sa zmenila" — viď contact path pre rozsiahly
-      // komentár. Pri true skipneme generic task.updated aby user nedostal
-      // dva notifikácie za jeden act (priority notif sám stačí).
+      // komentár. Normalizácia null/undefined/'' aby frontend "" vs DB null
+      // nehlásili falošnú zmenu.
+      const normGlobal = (v) => (v == null || v === '' ? '' : v);
       const priorityChanged = priority !== undefined && task.priority !== oldPriority;
-      const titleChanged = title !== undefined && title !== originalTitle;
-      const descChanged = description !== undefined && description !== originalDescription;
-      const dueDateChanged = dueDate !== undefined && dueDate !== oldDueDate;
-      const dueTimeChanged = dueTime !== undefined && (dueTime || '') !== originalDueTime;
-      const completedChanged = completed !== undefined && completed !== originalCompleted;
+      const titleChanged = title !== undefined && normGlobal(title) !== normGlobal(originalTitle);
+      const descChanged = description !== undefined && normGlobal(description) !== normGlobal(originalDescription);
+      const dueDateChanged = dueDate !== undefined && normGlobal(dueDate) !== normGlobal(oldDueDate);
+      const dueTimeChanged = dueTime !== undefined && normGlobal(dueTime) !== normGlobal(originalDueTime);
+      const completedChanged = completed !== undefined && !!completed !== !!originalCompleted;
       const assignedChanged = newlyAssigned.length > 0
-        || (assignedTo !== undefined && JSON.stringify(originalAssignedTo) !== JSON.stringify((assignedTo || []).map(String)));
+        || (assignedTo !== undefined && JSON.stringify((originalAssignedTo || []).map(String).sort()) !== JSON.stringify((assignedTo || []).map(String).sort()));
       const subtasksChanged = req.body.subtasks !== undefined;
-      const reminderChangedFlag = reminder !== undefined;
+      // reminder: porovnaj normalizovaný request hodnotu voči pôvodnej DB hodnote.
+      // newReminder je scopovaný vyššie v if-bloku — tu počítame freshly.
+      const reminderNumeric = reminder === undefined ? undefined : (reminder === '' || reminder == null ? null : Number(reminder));
+      const reminderChangedFlag = reminder !== undefined && normGlobal(reminderNumeric) !== normGlobal(originalReminderGlobal);
       const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
         || completedChanged || assignedChanged || subtasksChanged || reminderChangedFlag;
       const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
+      logger.info('[Task PUT global] priority-only check', {
+        taskId: req.params.id, priorityChanged, titleChanged, descChanged,
+        dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
+        subtasksChanged, reminderChangedFlag, onlyPriorityChanged
+      });
 
       // Send notification about task update (exclude newly assigned - they get assignment notification)
       const prevCompleted = originalCompleted;
@@ -1778,20 +1799,26 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         }
 
         // Detekcia "iba priorita sa zmenila" (fallback path) — skip generic
-        // notif keď user iba menil prioritu.
+        // notif keď user iba menil prioritu. Normalizácia null/undefined/''.
+        const normFb = (v) => (v == null || v === '' ? '' : v);
         const newCtaskPriority = priority !== undefined ? priority : originalCtaskPriority;
         const fbPriorityChanged = priority !== undefined && newCtaskPriority !== originalCtaskPriority;
-        const fbTitleChanged = title !== undefined && title !== originalCtaskTitle;
-        const fbDescChanged = description !== undefined && description !== originalCtaskDescription;
-        const fbDueDateChanged = dueDate !== undefined && dueDate !== originalCtaskDueDate;
-        const fbDueTimeChanged = dueTime !== undefined && (dueTime || '') !== originalCtaskDueTime;
-        const fbCompletedChanged = completed !== undefined && completed !== originalCtaskCompleted;
+        const fbTitleChanged = title !== undefined && normFb(title) !== normFb(originalCtaskTitle);
+        const fbDescChanged = description !== undefined && normFb(description) !== normFb(originalCtaskDescription);
+        const fbDueDateChanged = dueDate !== undefined && normFb(dueDate) !== normFb(originalCtaskDueDate);
+        const fbDueTimeChanged = dueTime !== undefined && normFb(dueTime) !== normFb(originalCtaskDueTime);
+        const fbCompletedChanged = completed !== undefined && !!completed !== !!originalCtaskCompleted;
         const fbAssignedChanged = newlyAssigned.length > 0
-          || (assignedTo !== undefined && JSON.stringify(originalCtaskAssignedTo) !== JSON.stringify(assignedTo || []));
+          || (assignedTo !== undefined && JSON.stringify((originalCtaskAssignedTo || []).map(String).sort()) !== JSON.stringify((assignedTo || []).map(String).sort()));
         const fbSubtasksChanged = req.body.subtasks !== undefined;
         const fbOtherChanged = fbTitleChanged || fbDescChanged || fbDueDateChanged || fbDueTimeChanged
           || fbCompletedChanged || fbAssignedChanged || fbSubtasksChanged;
         const fbOnlyPriorityChanged = fbPriorityChanged && !fbOtherChanged;
+        logger.info('[Task PUT fallback] priority-only check', {
+          taskId: req.params.id, fbPriorityChanged, fbTitleChanged, fbDescChanged,
+          fbDueDateChanged, fbDueTimeChanged, fbCompletedChanged, fbAssignedChanged,
+          fbSubtasksChanged, fbOnlyPriorityChanged
+        });
 
         // Send notification about task update (exclude newly assigned - they get assignment notification)
         const fallbackTaskType = completed === true && originalCtaskCompleted !== true ? 'task.completed' : 'task.updated';
