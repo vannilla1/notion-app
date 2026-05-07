@@ -113,6 +113,10 @@ router.get('/status', authenticateToken, async (req, res) => {
 });
 
 // Get available plans and prices
+// Limits sú zhodné s backend enforcement v contacts.js / tasks.js / workspaces.js.
+// Features sú boolean flags ktoré frontend a backend gating používa pre
+// per-plan feature fence (Google sync, CSV export, file attachments).
+// storageMb=0 znamená že feature nie je dostupný (nie že má 0 GB).
 router.get('/plans', (req, res) => {
   res.json({
     plans: [
@@ -120,20 +124,63 @@ router.get('/plans', (req, res) => {
         id: 'free',
         name: 'Free',
         price: { monthly: 0, yearly: 0 },
-        limits: { contacts: 5, projectsPerContact: 10, members: 2, workspaces: 1 }
+        limits: {
+          contacts: 5,
+          projectsPerContact: 10,
+          subtasksPerProject: 10,
+          members: 2,            // zachované — existing Free workspace-y s 2 členmi
+                                 // by inak po zmene zlyhali na enforceWorkspaceLimits
+          workspaces: 1,
+          fileStorageMb: 0       // attachments nie sú dostupné
+        },
+        features: {
+          googleCalendarSync: false,
+          googleTasksSync: false,
+          csvExport: false,
+          fileAttachments: false,
+          prioritySupport: false
+        }
       },
       {
         id: 'team',
-        name: 'Tim',
+        name: 'Tím',
         price: { monthly: 4.99, yearly: 49.00 },
-        limits: { contacts: 25, projectsPerContact: 25, members: 10, workspaces: 2 },
+        limits: {
+          contacts: 25,
+          projectsPerContact: 25,
+          subtasksPerProject: 25,
+          members: 10,
+          workspaces: 2,
+          fileStorageMb: 1024    // 1 GB
+        },
+        features: {
+          googleCalendarSync: true,
+          googleTasksSync: true,
+          csvExport: true,
+          fileAttachments: true,
+          prioritySupport: false
+        },
         stripePrices: PLAN_PRICES.team
       },
       {
         id: 'pro',
         name: 'Pro',
         price: { monthly: 9.99, yearly: 99.00 },
-        limits: { contacts: -1, projectsPerContact: -1, members: -1, workspaces: -1 },
+        limits: {
+          contacts: -1,
+          projectsPerContact: -1,
+          subtasksPerProject: -1,
+          members: -1,
+          workspaces: -1,
+          fileStorageMb: 10240   // 10 GB
+        },
+        features: {
+          googleCalendarSync: true,
+          googleTasksSync: true,
+          csvExport: true,
+          fileAttachments: true,
+          prioritySupport: true
+        },
         stripePrices: PLAN_PRICES.pro
       }
     ],

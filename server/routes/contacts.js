@@ -224,6 +224,15 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
 // Export contacts to CSV
 router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // Plan-feature gate: CSV export je dostupný len pre Tím+.
+    const exporter = await User.findById(req.user.id).select('subscription').lean();
+    const exporterPlan = exporter?.subscription?.plan || 'free';
+    if (exporterPlan === 'free' || exporterPlan === 'trial') {
+      const message = isIosNativeApp(req)
+        ? 'Export do CSV nie je dostupný v tomto pláne.'
+        : 'Export do CSV je dostupný v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+    }
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
       EXCLUDE_FILE_DATA
@@ -897,6 +906,17 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
       }
 
+      // Plan-feature gate: file attachments len pre Tím+. Plus per-plan
+      // celková storage kvóta (Tím=1GB, Pro=10GB).
+      const uploader = await User.findById(req.user.id).select('subscription').lean();
+      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
+        const message = isIosNativeApp(req)
+          ? 'Pripájanie súborov nie je dostupné v tomto pláne.'
+          : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+        return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+      }
+
       const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
       if (!contact) {
         return res.status(404).json({ message: 'Contact not found' });
@@ -904,6 +924,24 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      // Per-plan total storage quota check (workspace-scope). Tím = 1 GB,
+      // Pro = 10 GB. Sčítame size existujúcich files všetkých kontaktov vo
+      // workspace + chystaný upload size.
+      const storageLimits = { team: 1024 * 1024 * 1024, pro: 10 * 1024 * 1024 * 1024 };
+      const storageBytes = storageLimits[uploaderPlan];
+      if (storageBytes) {
+        const wsContacts = await Contact.find({ workspaceId: req.workspaceId }, 'files.size').lean();
+        const usedBytes = wsContacts.reduce((sum, c) => sum + (c.files || []).reduce((s, f) => s + (f.size || 0), 0), 0);
+        if (usedBytes + req.file.size > storageBytes) {
+          const usedMb = Math.round(usedBytes / (1024 * 1024));
+          const limitMb = Math.round(storageBytes / (1024 * 1024));
+          const message = isIosNativeApp(req)
+            ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
+            : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
+          return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
+        }
       }
 
       // Convert file buffer to Base64

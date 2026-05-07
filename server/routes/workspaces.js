@@ -6,6 +6,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
+const { isIosNativeApp } = require('../utils/platform');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
@@ -92,6 +93,24 @@ router.post('/', authenticateToken, async (req, res) => {
 
     if (name.length > 100) {
       return res.status(400).json({ message: 'Názov môže mať maximálne 100 znakov' });
+    }
+
+    // Plan-based workspace ownership limit. Predtým bolo enforcement úplne
+    // vypnuté (bug — UI cenník inzeroval 1/2/∞ ale backend povolil ∞ pre
+    // všetkých). Teraz blokujeme vytvorenie pri prekročení.
+    const ownerUser = await User.findById(req.user.id).select('subscription').lean();
+    const ownerPlan = ownerUser?.subscription?.plan || 'free';
+    const workspaceCountLimits = { free: 1, trial: 1, team: 2, pro: Infinity };
+    const maxOwnedWorkspaces = workspaceCountLimits[ownerPlan] ?? 1;
+    if (maxOwnedWorkspaces !== Infinity) {
+      const ownedCount = await Workspace.countDocuments({ ownerId: req.user.id });
+      if (ownedCount >= maxOwnedWorkspaces) {
+        // iOS-aware neutrálna správa pre Apple 3.1.1 compliance
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxOwnedWorkspaces} pracovných prostredí.`
+          : `Váš plán umožňuje vlastniť max. ${maxOwnedWorkspaces} pracovných prostredí. Pre viac prejdite na vyšší plán.`;
+        return res.status(403).json({ message, code: 'WORKSPACE_OWNERSHIP_LIMIT' });
+      }
     }
 
     // Generate slug and invite code

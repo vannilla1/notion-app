@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const User = require('../models/User');
+const { isIosNativeApp } = require('../utils/platform');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
@@ -208,12 +209,23 @@ const getTasksClient = async (user, forceRefresh = false) => {
 };
 
 // Get Google Tasks authorization URL
-router.get('/auth-url', authenticateToken, (req, res) => {
+router.get('/auth-url', authenticateToken, async (req, res) => {
   try {
     // Validate Google OAuth configuration
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       logger.error('[Google Tasks] OAuth not configured');
       return res.status(503).json({ message: 'Google Tasks integrácia nie je nakonfigurovaná' });
+    }
+
+    // Plan-feature gate: Google Tasks sync je dostupný len pre Tím+ (rovnako
+    // ako Google Calendar). iOS-aware neutrálna správa pre Apple compliance.
+    const userDoc = await User.findById(req.user.id).select('subscription').lean();
+    const plan = userDoc?.subscription?.plan || 'free';
+    if (plan === 'free' || plan === 'trial') {
+      const message = isIosNativeApp(req)
+        ? 'Synchronizácia s Google Tasks nie je dostupná v tomto pláne.'
+        : 'Synchronizácia s Google Tasks je dostupná v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
     const state = req.user.id.toString();

@@ -324,6 +324,15 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
 // Export tasks to CSV - MUST be before /:id route
 router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // Plan-feature gate: CSV export je dostupný len pre Tím+.
+    const exporter = await User.findById(req.user.id).select('subscription').lean();
+    const exporterPlan = exporter?.subscription?.plan || 'free';
+    if (exporterPlan === 'free' || exporterPlan === 'trial') {
+      const message = isIosNativeApp(req)
+        ? 'Export do CSV nie je dostupný v tomto pláne.'
+        : 'Export do CSV je dostupný v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+    }
     // Get global tasks
     const globalTasks = await Task.find({ workspaceId: req.workspaceId }).sort({ createdAt: -1 }).lean();
 

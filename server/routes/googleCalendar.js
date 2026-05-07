@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const User = require('../models/User');
+const { isIosNativeApp } = require('../utils/platform');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
@@ -184,11 +185,23 @@ const getCalendarClient = async (user, forceRefresh = false) => {
 };
 
 // Get Google Calendar authorization URL
-router.get('/auth-url', authenticateToken, (req, res) => {
+router.get('/auth-url', authenticateToken, async (req, res) => {
   try {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       logger.error('[Google Calendar] OAuth not configured');
       return res.status(503).json({ message: 'Google Calendar integrácia nie je nakonfigurovaná' });
+    }
+
+    // Plan-feature gate: Google Calendar sync je dostupný len pre Tím+. Free
+    // plán dostane 403 s informačnou správou. Pri iOS shell-e neutralizujeme
+    // odkaz na "vyšší plán" (Apple 3.1.1).
+    const userDoc = await User.findById(req.user.id).select('subscription').lean();
+    const plan = userDoc?.subscription?.plan || 'free';
+    if (plan === 'free' || plan === 'trial') {
+      const message = isIosNativeApp(req)
+        ? 'Synchronizácia s Google Calendar nie je dostupná v tomto pláne.'
+        : 'Synchronizácia s Google Calendar je dostupná v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
     const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
