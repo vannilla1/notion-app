@@ -49,12 +49,24 @@ export default function AnnouncementBanner() {
     if (activeId === id) setActiveId(null);
   };
 
-  if (announcements.length === 0) return null;
+  // V iOS native shell-e filtrujeme announcementy ktorých kind/id naznačuje
+  // Android/Google Play promo (Apple Guideline 2.3.10 — žiadne references na
+  // tretie platformy v iOS binary). Heuristika je defensívna: detekujeme
+  // typické markery v kind / id / title.
+  const inIosShell = isIosNativeApp();
+  const visibleAnnouncements = inIosShell
+    ? announcements.filter((a) => {
+        const blob = `${a.kind || ''} ${a.id || ''} ${a.title || ''} ${a.body || ''}`.toLowerCase();
+        return !/google.?play|android|play\.google\.com/.test(blob);
+      })
+    : announcements;
+
+  if (visibleAnnouncements.length === 0) return null;
 
   // Pre jednoduchosť ukazujeme len 1 najnovší announcement v pille (prvý v poli).
   // Ak ich bude v budúcnosti viac aktívnych naraz, dá sa rozšíriť do "n nových"
   // counter-u s dropdown listom.
-  const current = announcements[0];
+  const current = visibleAnnouncements[0];
 
   return (
     <>
@@ -70,7 +82,7 @@ export default function AnnouncementBanner() {
 
       {activeId && (
         <AnnouncementModal
-          announcement={announcements.find((a) => a.id === activeId) || current}
+          announcement={visibleAnnouncements.find((a) => a.id === activeId) || current}
           onClose={() => setActiveId(null)}
           onDismiss={() => handleDismiss(activeId)}
         />

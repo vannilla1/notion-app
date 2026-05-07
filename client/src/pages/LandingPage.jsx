@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/api/api';
+import { isIosNativeApp } from '@/utils/platform';
 import './LandingPage.css';
 
 export default function LandingPage() {
@@ -192,7 +193,9 @@ export default function LandingPage() {
               </div>
               <h3 className="lp-feature-title">Mobilná aplikácia</h3>
               <p className="lp-feature-desc">
-                Pristupujte k CRM odkiaľkoľvek — natívna aplikácia pre Android aj iOS vždy po ruke.
+                {isIosNativeApp()
+                  ? 'Pristupujte k CRM odkiaľkoľvek — natívna iOS aplikácia vždy po ruke.'
+                  : 'Pristupujte k CRM odkiaľkoľvek — natívna aplikácia pre Android aj iOS vždy po ruke.'}
               </p>
             </div>
           </div>
@@ -511,23 +514,29 @@ export default function LandingPage() {
               </span>
             </a>
 
-            <a
-              href="https://play.google.com/store/apps/details?id=eu.prplcrm.app"
-              className="lp-badge"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Stiahnuť Prpl CRM na Google Play"
-            >
-              <span className="lp-badge-icon">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-                  <path d="M3.18 23.68C2.76 23.48 2.5 23.05 2.5 22.5V1.5C2.5 0.95 2.76 0.52 3.18 0.32L13.04 11.5L3.18 23.68ZM16.68 15.32L5.4 22.34L14.14 12.78L16.68 15.32ZM20.4 10.36C20.82 10.64 21.1 11.06 21.1 11.5C21.1 11.94 20.82 12.36 20.48 12.58L18.1 13.94L15.3 11.5L18.1 9.06L20.4 10.36ZM5.4 0.66L16.68 7.68L14.14 10.22L5.4 0.66Z" />
-                </svg>
-              </span>
-              <span className="lp-badge-text">
-                <span className="lp-badge-label">Dostupné na</span>
-                <span className="lp-badge-store">Google Play</span>
-              </span>
-            </a>
+            {/* Google Play badge skrytý v iOS native shell-e — Apple
+                Guideline 2.3.10 zakazuje references na konkurenčné platformy
+                v iOS binary. Web verzia (Safari, Chrome desktop, Android web)
+                ho ďalej zobrazuje. */}
+            {!isIosNativeApp() && (
+              <a
+                href="https://play.google.com/store/apps/details?id=eu.prplcrm.app"
+                className="lp-badge"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Stiahnuť Prpl CRM na Google Play"
+              >
+                <span className="lp-badge-icon">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+                    <path d="M3.18 23.68C2.76 23.48 2.5 23.05 2.5 22.5V1.5C2.5 0.95 2.76 0.52 3.18 0.32L13.04 11.5L3.18 23.68ZM16.68 15.32L5.4 22.34L14.14 12.78L16.68 15.32ZM20.4 10.36C20.82 10.64 21.1 11.06 21.1 11.5C21.1 11.94 20.82 12.36 20.48 12.58L18.1 13.94L15.3 11.5L18.1 9.06L20.4 10.36ZM5.4 0.66L16.68 7.68L14.14 10.22L5.4 0.66Z" />
+                  </svg>
+                </span>
+                <span className="lp-badge-text">
+                  <span className="lp-badge-label">Dostupné na</span>
+                  <span className="lp-badge-store">Google Play</span>
+                </span>
+              </a>
+            )}
           </div>
         </div>
       </section>
