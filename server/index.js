@@ -152,6 +152,23 @@ app.get('/health', (req, res) => {
   res.json({ status: dbReady ? 'ok' : 'starting', db: dbReady, timestamp: new Date().toISOString() });
 });
 
+// Version endpoint — verejný, bez autentifikácie. Slúži na rýchle overenie
+// "ktorý commit beží na produkcii" pri deploy verifikácii. Render automaticky
+// expose-uje RENDER_GIT_COMMIT (full SHA) + RENDER_GIT_BRANCH ako env vars.
+// Použitie:
+//   curl https://prplcrm.eu/api/version
+//   → { commit: "2c01620...", branch: "main", deployedAt: "..." }
+const SERVER_BOOT_TIME = new Date().toISOString();
+app.get('/api/version', (req, res) => {
+  res.json({
+    commit: process.env.RENDER_GIT_COMMIT || 'unknown',
+    commitShort: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || 'unknown',
+    branch: process.env.RENDER_GIT_BRANCH || 'unknown',
+    deployedAt: SERVER_BOOT_TIME, // server start = deploy time on Render
+    nodeEnv: process.env.NODE_ENV || 'development'
+  });
+});
+
 // DB readiness check - return 503 if DB not connected yet (frontend will retry)
 const mongoose = require('mongoose');
 app.use('/api', (req, res, next) => {
