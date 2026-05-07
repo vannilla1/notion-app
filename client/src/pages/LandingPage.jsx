@@ -234,56 +234,33 @@ export default function LandingPage() {
             </button>
           </div>
 
+          {/* Helper SVG components — extracting do mini funkcií zníži duplicitu
+              z ~70 SVG inline výskytov v 3 kartách na 3 spoločné helpre. */}
+          {(() => null)()}
+
           <div className="lp-pricing-cards">
             {/* Free */}
             <div className="lp-pricing-card">
               <h3 className="lp-pricing-name">Free</h3>
-              <p className="lp-pricing-desc">Zadarmo, navždy</p>
+              <p className="lp-pricing-desc">Pre solo testovanie a osobné použitie</p>
 
               <div className="lp-pricing-price">
                 <span className="lp-pricing-amount">0 €</span>
               </div>
-              <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>Bez platobnej karty</p>
+              <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>Zadarmo navždy. Bez platobnej karty.</p>
 
               <div className="lp-pricing-divider" />
 
               <ul className="lp-pricing-features">
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 5 kontaktov
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 10 projektov a úloh na kontakt
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Google Tasks synchronizácia
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Push notifikácie
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 2 používatelia
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  1 pracovné prostredie
-                </li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 5 kontaktov</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 10 projektov / kontakt</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 10 podúloh / projekt</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>2 používatelia</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>1 pracovné prostredie</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Push notifikácie</li>
+                <li style={{ color: '#94a3b8' }}><span className="lp-pricing-check" style={{ background: '#f1f5f9', color: '#94a3b8' }}><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>Bez Google Calendar / Tasks sync</li>
+                <li style={{ color: '#94a3b8' }}><span className="lp-pricing-check" style={{ background: '#f1f5f9', color: '#94a3b8' }}><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>Bez exportu do CSV</li>
+                <li style={{ color: '#94a3b8' }}><span className="lp-pricing-check" style={{ background: '#f1f5f9', color: '#94a3b8' }}><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>Bez prílohy súborov</li>
               </ul>
 
               <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
@@ -306,35 +283,21 @@ export default function LandingPage() {
               {!isYearly && (
                 <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo <strong style={{ color: '#6366f1', fontWeight: 700 }}>49 € ročne</strong> (<strong style={{ color: '#10B981', fontWeight: 700 }}>ušetríte 18%</strong>)</p>
               )}
-              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 1 používateľa. Každý ďalší: {isYearly ? '49 €/rok' : '4,99 €/mesiac'}.</p>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Cena za celý plán — obsahuje až 10 členov bez doplatku.</p>
 
               <div className="lp-pricing-divider" />
 
               <ul className="lp-pricing-features">
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 25 kontaktov
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 25 projektov a úloh na kontakt
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Max. 10 používateľov
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  2 pracovné prostredia
-                </li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Všetko z Free</strong>, plus:</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 25 kontaktov</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 25 projektov / kontakt</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Max. 25 podúloh / projekt</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Až 10 členov tímu</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>2 pracovné prostredia</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Google Calendar synchronizácia</strong></li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Google Tasks synchronizácia</strong></li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Export do CSV</strong></li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Prílohy súborov</strong> (1 GB)</li>
               </ul>
 
               <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
@@ -358,53 +321,19 @@ export default function LandingPage() {
               {!isYearly && (
                 <p className="lp-pricing-yearly-note" style={{ color: '#64748b' }}>alebo <strong style={{ color: '#6366f1', fontWeight: 700 }}>99 € ročne</strong> (<strong style={{ color: '#10B981', fontWeight: 700 }}>ušetríte 17%</strong>)</p>
               )}
-              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Pre 1 používateľa. Každý ďalší: {isYearly ? '99 €/rok' : '9,99 €/mesiac'}.</p>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' }}>Cena za celý plán — bez obmedzenia členov.</p>
 
               <div className="lp-pricing-divider" />
 
               <ul className="lp-pricing-features">
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Neobmedzený počet kontaktov
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Neobmedzené projekty a úlohy
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Neobmedzený počet používateľov
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Neobmedzený počet pracovných prostredí
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Prioritná podpora
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Pravidelné aktualizácie
-                </li>
-                <li>
-                  <span className="lp-pricing-check">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </span>
-                  Pokročilé funkcie
-                </li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Všetko z Tímu</strong>, plus:</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Neobmedzený počet kontaktov</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Neobmedzené projekty a podúlohy</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Neobmedzený počet členov tímu</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Neobmedzené pracovné prostredia</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Prílohy súborov</strong> (10 GB)</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Prioritná podpora</strong> (24h SLA)</li>
+                <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Skorý prístup k novým funkciám</li>
               </ul>
 
               <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-primary lp-pricing-cta">

@@ -11480,6 +11480,17 @@ body.ios-app {
   font-weight: 700;
 }
 
+/* Disabled feature row (Bez Google sync, Bez CSV, atď.) — preferences cez ✗
+   namiesto ✓ + tlmená šedá farba textu, aby kontrast s aktívnymi feature
+   položkami bol okamžite čitateľný. */
+.plan-features li.plan-feature-disabled {
+  color: #94a3b8;
+}
+.plan-features li.plan-feature-disabled::before {
+  content: '\2715';
+  color: #cbd5e1;
+}
+
 .plan-action {
   margin-top: auto;
 }

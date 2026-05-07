@@ -388,10 +388,28 @@ function BillingPage() {
                     <ul className="plan-features">
                       <li>{plan.limits.contacts === -1 ? 'Neobmedzené kontakty' : `${plan.limits.contacts} kontaktov`}</li>
                       <li>{plan.limits.projectsPerContact === -1 ? 'Neobmedzené projekty' : `${plan.limits.projectsPerContact} projektov/kontakt`}</li>
+                      {plan.limits.subtasksPerProject !== undefined && (
+                        <li>{plan.limits.subtasksPerProject === -1 ? 'Neobmedzené podúlohy' : `${plan.limits.subtasksPerProject} podúloh/projekt`}</li>
+                      )}
                       <li>{plan.limits.members === -1 ? 'Neobmedzení členovia' : `${plan.limits.members} členov`}</li>
                       <li>{plan.limits.workspaces === -1 ? 'Neobmedzené prostredia' : `${plan.limits.workspaces === 1 ? '1 prostredie' : `${plan.limits.workspaces} prostredia`}`}</li>
-                      {plan.id !== 'free' && <li>Prioritná podpora</li>}
-                      {plan.id === 'pro' && <li>Export dát (CSV/Excel)</li>}
+                      {/* Feature flags z backend /plans — true => render s default ✓ (cez CSS ::before),
+                          false => className="plan-feature-disabled" prepíše check na ✗ a stlmí farbu. */}
+                      {plan.features?.googleCalendarSync
+                        ? <li>Google Calendar synchronizácia</li>
+                        : <li className="plan-feature-disabled">Bez Google Calendar sync</li>}
+                      {plan.features?.googleTasksSync
+                        ? <li>Google Tasks synchronizácia</li>
+                        : <li className="plan-feature-disabled">Bez Google Tasks sync</li>}
+                      {plan.features?.csvExport
+                        ? <li>Export do CSV</li>
+                        : <li className="plan-feature-disabled">Bez exportu CSV</li>}
+                      {plan.features?.fileAttachments ? (
+                        <li>Prílohy súborov ({plan.limits?.fileStorageMb >= 1024 ? `${(plan.limits.fileStorageMb / 1024).toFixed(0)} GB` : `${plan.limits?.fileStorageMb || 0} MB`})</li>
+                      ) : (
+                        <li className="plan-feature-disabled">Bez prílohy súborov</li>
+                      )}
+                      {plan.features?.prioritySupport && <li>Prioritná podpora (24h SLA)</li>}
                     </ul>
 
                     <div className="plan-action">
