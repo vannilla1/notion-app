@@ -1009,15 +1009,21 @@ const getNotificationMessage = (type, actorName, data = {}) => {
         ? `${actor} vám priradil projekt v kontakte "${contactName}"`
         : `${actor} vám priradil tento projekt`;
     case 'task.priority_changed': {
-      // data.newPriority preložené na slovenský label (low/medium/high
-      // → Nízku/Strednú/Vysokú v akuzatíve). Acc-pad dôležitý: "zmenená NA
-      // <prioritu-acc>". Pre fallback (chýbajúca data) vrátime generic vetu.
-      const labels = { low: 'Nízku', medium: 'Strednú', high: 'Vysokú' };
-      const label = labels[data.newPriority];
-      if (!label) return `${actor} zmenil prioritu projektu`;
+      // Vykreslíme transition z STAREJ na NOVÚ prioritu (genitív → akuzatív)
+      // aby user videl ZMENU, nie len finálnu hodnotu. Slovenská gramatika:
+      // "z Strednej na Vysokú" (gen. fem./mask. → acc. fem.).
+      const accLabels = { low: 'Nízku', medium: 'Strednú', high: 'Vysokú' };
+      const genLabels = { low: 'Nízkej', medium: 'Strednej', high: 'Vysokej' };
+      const newLabel = accLabels[data.newPriority];
+      const oldLabel = genLabels[data.oldPriority];
+      if (!newLabel) return `${actor} zmenil prioritu projektu`;
+      // Ak nemáme oldPriority, fallback na pôvodnú formu "na X".
+      const transition = oldLabel
+        ? `z ${oldLabel} na ${newLabel}`
+        : `na ${newLabel}`;
       return contactName
-        ? `${actor} zmenil prioritu projektu v kontakte "${contactName}" na ${label}`
-        : `${actor} zmenil prioritu projektu na ${label}`;
+        ? `${actor} zmenil prioritu projektu v kontakte "${contactName}" ${transition}`
+        : `${actor} zmenil prioritu projektu ${transition}`;
     }
     case 'subtask.created':
       return taskTitle

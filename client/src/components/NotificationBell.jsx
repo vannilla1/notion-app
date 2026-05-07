@@ -349,11 +349,18 @@ function NotificationBell() {
               // border pre tento typ notifikácie aby bol vizuálne dominantný.
               const isPriorityNotif = notif.type === 'task.priority_changed';
               const priorityKey = notif.data?.newPriority;
+              const oldPriorityKey = notif.data?.oldPriority;
               const priorityColor = isPriorityNotif && priorityKey
                 ? PRIORITY_COLORS[priorityKey]
                 : null;
+              const oldPriorityColor = isPriorityNotif && oldPriorityKey
+                ? PRIORITY_COLORS[oldPriorityKey]
+                : null;
               const priorityLabel = isPriorityNotif && priorityKey
                 ? PRIORITY_LABELS[priorityKey]
+                : null;
+              const oldPriorityLabel = isPriorityNotif && oldPriorityKey
+                ? PRIORITY_LABELS[oldPriorityKey]
                 : null;
 
               return (
@@ -371,11 +378,24 @@ function NotificationBell() {
                       <div className="notif-item-msg">{notif.message}</div>
                     )}
                     {isPriorityNotif && priorityLabel && (
-                      <span
-                        className="notif-priority-badge"
-                        style={{ backgroundColor: priorityColor }}
-                      >
-                        {priorityLabel.toUpperCase()}
+                      <span className="notif-priority-transition" aria-label={`Priorita ${oldPriorityLabel || ''} zmenená na ${priorityLabel}`}>
+                        {oldPriorityLabel && oldPriorityColor && (
+                          <>
+                            <span
+                              className="notif-priority-badge notif-priority-badge-old"
+                              style={{ backgroundColor: oldPriorityColor }}
+                            >
+                              {oldPriorityLabel.toUpperCase()}
+                            </span>
+                            <span className="notif-priority-arrow" aria-hidden="true">→</span>
+                          </>
+                        )}
+                        <span
+                          className="notif-priority-badge"
+                          style={{ backgroundColor: priorityColor }}
+                        >
+                          {priorityLabel.toUpperCase()}
+                        </span>
                       </span>
                     )}
                   </div>
