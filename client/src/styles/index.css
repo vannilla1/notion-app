@@ -2171,6 +2171,16 @@ body {
   flex: 1;
 }
 
+/* DateInput a TimeInput sú zabalené v .dt-input-wrapper s width:100% — bez
+   explicitneho flex:1 by im flex-basis:auto reservoval príliš veľa miesta a
+   tretí súrodenec (priority select) by sa stlačil na nulu / vypadol z layoutu.
+   Nastavujeme všetkým priamym potomkom rovnaký flex share. min-width:0 navyše
+   povolí shrink pod intrinsic min-width sticka šíku. */
+.task-edit-row > .dt-input-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
 .task-edit-actions {
   display: flex;
   gap: 10px;

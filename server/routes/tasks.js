@@ -1426,6 +1426,23 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               await notificationService.notifyTaskPriorityChanged(
                 taskData, originalPriority, priority, req.user, req.workspaceId
               );
+              // Dedikovaný audit log entry — admin v Audit log paneli uvidí
+              // 🎯 zmenu priority s old → new transitions (CATEGORY_LABELS +
+              // renderDetails ich už vykresľujú cez oldPriority/newPriority).
+              auditService.logAction({
+                userId: req.user.id,
+                username: req.user.username,
+                email: req.user.email,
+                action: 'task.priority_changed',
+                category: 'task',
+                targetType: 'task',
+                targetId: taskData.id,
+                targetName: taskData.title,
+                details: { oldPriority: originalPriority, newPriority: priority, source: 'contact' },
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                workspaceId: req.workspaceId || null
+              });
             }
 
             res.json(taskData);
@@ -1611,6 +1628,20 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         await notificationService.notifyTaskPriorityChanged(
           taskData, oldPriority, task.priority, req.user, req.workspaceId
         );
+        auditService.logAction({
+          userId: req.user.id,
+          username: req.user.username,
+          email: req.user.email,
+          action: 'task.priority_changed',
+          category: 'task',
+          targetType: 'task',
+          targetId: taskData.id,
+          targetName: taskData.title,
+          details: { oldPriority, newPriority: task.priority, source: 'global' },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          workspaceId: req.workspaceId || null
+        });
       }
 
       res.json(taskData);
@@ -1716,6 +1747,20 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           await notificationService.notifyTaskPriorityChanged(
             taskData, originalCtaskPriority, newCtaskPriority, req.user, req.workspaceId
           );
+          auditService.logAction({
+            userId: req.user.id,
+            username: req.user.username,
+            email: req.user.email,
+            action: 'task.priority_changed',
+            category: 'task',
+            targetType: 'task',
+            targetId: taskData.id,
+            targetName: taskData.title,
+            details: { oldPriority: originalCtaskPriority, newPriority: newCtaskPriority, source: 'fallback' },
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            workspaceId: req.workspaceId || null
+          });
         }
 
         res.json(taskData);

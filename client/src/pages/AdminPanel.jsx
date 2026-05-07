@@ -2568,6 +2568,7 @@ const ACTION_LABELS = {
   'auth.login': '🔓 Prihlásenie', 'auth.register': '📝 Registrácia',
   'contact.created': '➕ Nový kontakt', 'contact.updated': '✏️ Úprava kontaktu', 'contact.deleted': '🗑️ Vymazaný kontakt',
   'task.created': '➕ Nová úloha', 'task.completed': '✅ Dokončená úloha', 'task.deleted': '🗑️ Vymazaná úloha',
+  'task.priority_changed': '🎯 Zmena priority projektu',
   'message.created': '📨 Nová správa', 'message.approved': '✅ Schválená správa', 'message.rejected': '❌ Zamietnutá správa',
 };
 
