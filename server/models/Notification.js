@@ -27,6 +27,7 @@ const notificationSchema = new mongoose.Schema({
       'task.completed',
       'task.deleted',
       'task.assigned',
+      'task.priority_changed',
       'subtask.created',
       'subtask.updated',
       'subtask.completed',
