@@ -1251,9 +1251,23 @@ const notifyTaskPriorityChanged = async (task, oldPriority, newPriority, actor, 
   if (workspaceId) {
     try {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
+      const actorId = actor?._id?.toString() || actor?.id?.toString();
       const recipientIds = members
         .map((m) => m.userId.toString())
-        .filter((id) => !actor || id !== (actor._id || actor.id).toString());
+        .filter((id) => !actorId || id !== actorId);
+
+      // Diagnostic — tracking presne kto dostane priority notif a koho
+      // sme vyfiltrovali. Pomáha rozlíšiť "user nedostal notifikáciu lebo
+      // nebol vo workspace" vs "frontend ju nezobrazuje" bugy.
+      logger.info('[NotificationService] Priority notif fanout', {
+        workspaceId: workspaceId?.toString(),
+        actorId,
+        memberCount: members.length,
+        recipientCount: recipientIds.length,
+        recipientIds,
+        oldPriority: notificationData.data.oldPriority,
+        newPriority: notificationData.data.newPriority
+      });
 
       if (recipientIds.length === 0) return [];
 
@@ -1266,13 +1280,15 @@ const notifyTaskPriorityChanged = async (task, oldPriority, newPriority, actor, 
         });
         if (n) out.push(n);
       }
+      logger.info('[NotificationService] Priority notif created', { count: out.length, userIds: out.map((n) => n.userId?.toString()) });
       return out;
     } catch (error) {
-      logger.error('[NotificationService] Error fetching workspace members for priority notification', { error: error.message });
+      logger.error('[NotificationService] Error fetching workspace members for priority notification', { error: error.message, stack: error.stack });
       return [];
     }
   }
 
+  logger.warn('[NotificationService] Priority notif skipped — no workspaceId provided', { taskTitle: task.title });
   return [];
 };
 
