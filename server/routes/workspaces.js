@@ -357,7 +357,9 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
   }
 });
 
-// Update workspace (admin only)
+// Update workspace (admin can change description/color/invite, but iba OWNER
+// môže meniť názov — ide o identitu prostredia a prevenuje zmätok keď admin
+// premenuje workspace bez vedomia vlastníka).
 router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res) => {
   try {
     const { name, description, color, inviteCodeEnabled } = req.body;
@@ -366,6 +368,23 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
     if (name !== undefined) {
       if (!name || name.trim().length === 0) {
         return res.status(400).json({ message: 'Názov je povinný' });
+      }
+      if (name.length > 100) {
+        return res.status(400).json({ message: 'Názov môže mať maximálne 100 znakov' });
+      }
+      // Owner-only kontrola pre zmenu názvu. requireWorkspaceAdmin už pustil
+      // owner aj admin role — tu navyše požadujeme ownership výlučne pre
+      // name change. Iné polia (description, color, inviteCodeEnabled) admin
+      // ďalej môže meniť bez tejto reštrikcie.
+      const requesterMembership = await WorkspaceMember.findOne({
+        workspaceId: req.workspace._id,
+        userId: req.user.id
+      }).select('role').lean();
+      if (!requesterMembership || requesterMembership.role !== 'owner') {
+        return res.status(403).json({
+          message: 'Iba vlastník prostredia môže zmeniť jeho názov.',
+          code: 'OWNER_ONLY'
+        });
       }
       updates.name = name.trim();
     }

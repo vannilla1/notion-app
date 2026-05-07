@@ -30,6 +30,14 @@ function WorkspaceMembers() {
   const [transferring, setTransferring] = useState(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
+  // Owner-only inline rename — chip pri názve workspace má pencil ikonku
+  // (visible iba ak isOwner). Klik prepne do edit módu, save volá
+  // PUT /api/workspaces/current. Server enforuje OWNER_ONLY check
+  // pre name change, takže ne-owner ani s manuálnym DOM zásahom by neprešiel.
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState('');
   // Delete workspace flow — owner-only. Vyžaduje typed-in confirmation
   // (názov workspace) aby sa zabránilo náhodnému kliku v tomto destruktívnom
   // toku — všetky kontakty, projekty, úlohy, správy a členstvá sa zmažú,
@@ -60,6 +68,45 @@ function WorkspaceMembers() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // ===== Workspace rename (owner only) =====
+  const startRename = () => {
+    setNameInput(currentWorkspace?.name || '');
+    setNameError('');
+    setEditingName(true);
+  };
+  const cancelRename = () => {
+    setEditingName(false);
+    setNameInput('');
+    setNameError('');
+  };
+  const saveRename = async () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed) {
+      setNameError('Názov je povinný');
+      return;
+    }
+    if (trimmed.length > 100) {
+      setNameError('Maximálne 100 znakov');
+      return;
+    }
+    if (trimmed === currentWorkspace?.name) {
+      cancelRename();
+      return;
+    }
+    setSavingName(true);
+    setNameError('');
+    try {
+      await api.put('/api/workspaces/current', { name: trimmed });
+      await refreshCurrentWorkspace();
+      setEditingName(false);
+      setNameInput('');
+    } catch (err) {
+      setNameError(err.response?.data?.message || 'Nepodarilo sa premenovať prostredie');
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   // ===== Invitation handlers =====
   const handleSendInvite = async (e) => {
@@ -189,9 +236,56 @@ function WorkspaceMembers() {
         <div className="wm-header-info">
           <h2 className="wm-title">Členovia prostredia</h2>
           <div className="wm-stats-row">
-            <span className="wm-stat-chip">
-              {currentWorkspace?.name || '—'}
-            </span>
+            {editingName ? (
+              <span className="wm-stat-chip wm-stat-chip-editing" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', padding: '2px 6px' }}>
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveRename();
+                    if (e.key === 'Escape') cancelRename();
+                  }}
+                  maxLength={100}
+                  autoFocus
+                  disabled={savingName}
+                  style={{ border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 4, padding: '2px 6px', fontSize: 13, width: 180 }}
+                />
+                <button
+                  onClick={saveRename}
+                  disabled={savingName}
+                  className="btn btn-primary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: 12 }}
+                  title="Uložiť (Enter)"
+                >
+                  {savingName ? '…' : '✓'}
+                </button>
+                <button
+                  onClick={cancelRename}
+                  disabled={savingName}
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: 12 }}
+                  title="Zrušiť (Esc)"
+                >
+                  ✕
+                </button>
+              </span>
+            ) : (
+              <span className="wm-stat-chip" style={isOwner ? { display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' } : undefined}
+                onClick={isOwner ? startRename : undefined}
+                title={isOwner ? 'Klikni pre premenovanie prostredia (iba vlastník)' : undefined}
+              >
+                {currentWorkspace?.name || '—'}
+                {isOwner && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted, #6b7280)' }} aria-label="Premenovať">✏️</span>
+                )}
+              </span>
+            )}
+            {nameError && (
+              <span className="wm-stat-chip" style={{ background: '#fee2e2', color: '#991b1b' }}>
+                {nameError}
+              </span>
+            )}
             <span className="wm-stat-chip">
               👥 {members.length} {members.length === 1 ? 'člen' : members.length < 5 ? 'členovia' : 'členov'}
             </span>
