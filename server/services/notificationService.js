@@ -1011,16 +1011,24 @@ const getNotificationMessage = (type, actorName, data = {}) => {
     case 'task.priority_changed': {
       // Vykreslíme transition z STAREJ na NOVÚ prioritu (genitív → akuzatív)
       // aby user videl ZMENU, nie len finálnu hodnotu. Slovenská gramatika:
-      // "z Strednej na Vysokú" (gen. fem./mask. → acc. fem.).
+      // - akuzatív (cieľ): Nízku / Strednú / Vysokú
+      // - genitív (zdroj): Nízkej / Strednej / Vysokej
+      // - vokalizácia predložky "z/zo": pred slovom začínajúcim na s-/z-/š-/ž-
+      //   používame "zo" (zo Strednej), inak "z" (z Nízkej, z Vysokej).
       const accLabels = { low: 'Nízku', medium: 'Strednú', high: 'Vysokú' };
       const genLabels = { low: 'Nízkej', medium: 'Strednej', high: 'Vysokej' };
       const newLabel = accLabels[data.newPriority];
       const oldLabel = genLabels[data.oldPriority];
       if (!newLabel) return `${actor} zmenil prioritu projektu`;
       // Ak nemáme oldPriority, fallback na pôvodnú formu "na X".
-      const transition = oldLabel
-        ? `z ${oldLabel} na ${newLabel}`
-        : `na ${newLabel}`;
+      let transition;
+      if (oldLabel) {
+        const firstLetter = oldLabel[0].toLowerCase();
+        const prep = ['s', 'z', 'š', 'ž'].includes(firstLetter) ? 'zo' : 'z';
+        transition = `${prep} ${oldLabel} na ${newLabel}`;
+      } else {
+        transition = `na ${newLabel}`;
+      }
       return contactName
         ? `${actor} zmenil prioritu projektu v kontakte "${contactName}" ${transition}`
         : `${actor} zmenil prioritu projektu ${transition}`;
