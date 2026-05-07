@@ -118,7 +118,7 @@ const tasksHelpTips = [
   {
     icon: '🔢',
     title: 'Limity podľa plánu',
-    description: 'Free plán: max 10 úloh na kontakt + 10 podúloh na úlohu. Tím (4,99 €/mes): 25/25. Pro (9,99 €/mes): neobmedzené. Pri dosiahnutí sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.'
+    description: 'Free plán: max 5 projektov na kontakt + 10 podúloh na projekt. Tím (4,99 €/mes): 25/25. Pro (9,99 €/mes): neobmedzené. Pri dosiahnutí sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.'
   },
   {
     icon: '🔔',

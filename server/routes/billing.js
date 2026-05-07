@@ -126,7 +126,8 @@ router.get('/plans', (req, res) => {
         price: { monthly: 0, yearly: 0 },
         limits: {
           contacts: 5,
-          projectsPerContact: 10,
+          projectsPerContact: 5,  // znížené 10→5 (2026-05-07) — backwards-safe,
+                                  // žiaden živý Free user nemal viac ako 5
           subtasksPerProject: 10,
           members: 2,            // zachované — existing Free workspace-y s 2 členmi
                                  // by inak po zmene zlyhali na enforceWorkspaceLimits

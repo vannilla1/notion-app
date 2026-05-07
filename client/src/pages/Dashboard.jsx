@@ -96,7 +96,7 @@ const dashboardHelpTips = [
   {
     icon: '💳',
     title: 'Plán a fakturácia',
-    description: 'Avatar → Predplatné (Free / Tím / Pro). Free má limity (5 kontaktov, 10 úloh na kontakt). Tím a Pro odomykajú vyššie limity a tímové funkcie. Tu môžete promo kódom uplatniť zľavu, prepnúť plán, stiahnuť faktúru.'
+    description: 'Avatar → Predplatné (Free / Tím / Pro). Free má limity (5 kontaktov, 5 projektov / kontakt). Tím a Pro odomykajú vyššie limity, Google sync, CSV export a prílohy súborov. Tu môžete promo kódom uplatniť zľavu, prepnúť plán, stiahnuť faktúru.'
   },
   {
     icon: '🗑️',

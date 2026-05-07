@@ -1082,8 +1082,11 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     // Check plan limits
     const user = await User.findById(req.user.id);
     const plan = user?.subscription?.plan || 'free';
-    const taskLimits = { free: 10, team: 25, pro: Infinity };
-    const maxTasks = taskLimits[plan] || 10;
+    // Free: 5 projektov/kontakt (znížené z 10 — overené že žiadny živý Free user
+    // 2026-05-07 nemal > 5 projektov na kontakt, takže táto zmena nezablokuje
+    // existujúcich userov pri pridávaní). Tím a Pro bez zmeny.
+    const taskLimits = { free: 5, team: 25, pro: Infinity };
+    const maxTasks = taskLimits[plan] || 5;
     const isLimited = maxTasks !== Infinity;
 
     // If no contacts selected, create as global task
