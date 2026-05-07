@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api/api';
+import PushNotificationToggle from './PushNotificationToggle';
+import { isMobileDevice, isIosNativeApp } from '../utils/platform';
 
 /**
  * Modal pre nastavenie push notifikácií.
@@ -82,6 +84,20 @@ export default function NotificationPreferences({ onClose }) {
         </div>
 
         <div className="notif-prefs-body">
+          {/* Browser power switch — desktop only. Mobile zariadenia majú
+              vlastné OS-level povolenia (iOS APNs, Android FCM). */}
+          {!isMobileDevice() && !isIosNativeApp() && (
+            <div className="notif-prefs-section">
+              <h3>🌐 Browser push</h3>
+              <p className="notif-prefs-section-desc">
+                Dostávajte push notifikácie v prehliadači aj keď máte appku
+                zatvorenú. Bez tohto budú notifikácie chodiť len do zvončeka
+                pri otvorenej appke.
+              </p>
+              <PushNotificationToggle />
+            </div>
+          )}
+
           {/* Direct sekcia — informačná, nedá sa vypnúť */}
           <div className="notif-prefs-section">
             <h3>📌 Priradené mne</h3>

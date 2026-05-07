@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import api, { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
-import PushNotificationToggle from './PushNotificationToggle';
 import NotificationPreferences from './NotificationPreferences';
 import ConnectedAccounts from './ConnectedAccounts';
 import { isMobileDevice, isIosNativeApp } from '../utils/platform';
@@ -1734,20 +1733,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 </div>
               </details>
 
-              {/* Web Push toggle — desktop-only.
-                  Hidden on all mobile (iOS native → APNs, Android native → FCM,
-                  iOS Safari → no Web Push outside PWA, Android Chrome → native app
-                  is the recommended path). Also keeps the legacy ios-app body-class
-                  gate for older WebView shells. */}
-              {!isMobileDevice() && !document.body.classList.contains('ios-app') && (
-              <div className="calendar-section push-notifications-section">
-                <h3>🔔 Push notifikácie</h3>
-                <p className="section-description">
-                  Dostávajte notifikácie aj keď máte aplikáciu zatvorenú.
-                </p>
-                <PushNotificationToggle />
-              </div>
-              )}
+              {/* POZN: Push notification toggle bol presunutý do
+                  „Nastavenia notifikácií" (NotificationPreferences modal) —
+                  browser permission + on/off + per-kategória prefs sú teraz
+                  v jednom mieste. Tu by to bola duplicita s NotificationPreferences. */}
 
               <div className="calendar-section google-calendar-section">
                 <h3>🚀 Google Calendar (Okamžitá synchronizácia)</h3>
