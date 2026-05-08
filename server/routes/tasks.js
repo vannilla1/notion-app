@@ -1091,6 +1091,19 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     // If no contacts selected, create as global task
     if (finalContactIds.length === 0) {
+      // Plan-limit aj pre globálne projekty (bez kontaktu). Predtým chýbal —
+      // user mohol obísť limit kontaktných projektov vytváraním "voľných"
+      // projektov bez priradenia. Treat global ako vlastný bucket s rovnakým
+      // limitom ako per-kontakt bucket.
+      if (isLimited) {
+        const globalCount = await Task.countDocuments({ workspaceId: req.workspaceId });
+        if (globalCount >= maxTasks) {
+          const message = isIosNativeApp(req)
+            ? `Dosiahli ste limit ${maxTasks} projektov bez priradenia ku kontaktu.`
+            : `Váš plán umožňuje max. ${maxTasks} projektov bez priradenia ku kontaktu. Pre viac prejdite na vyšší plán.`;
+          return res.status(403).json({ message, code: 'GLOBAL_TASK_LIMIT' });
+        }
+      }
       const task = new Task({
         workspaceId: req.workspaceId,
         userId: req.user.id,
@@ -2181,6 +2194,19 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
+    // Plan-limit pre podúlohy (subtasks). Limit platí pre celkový počet
+    // podúloh v projekte (rekurzívne — vrátane vnorených). Predtým limit
+    // existoval iba pre contact-path (POST /api/contacts/.../subtasks),
+    // ale pre global path (POST /api/tasks/:taskId/subtasks) chýbal —
+    // user mohol obísť limit cez global projekt.
+    const subtaskUser = await User.findById(req.user.id).select('subscription').lean();
+    const subtaskPlan = subtaskUser?.subscription?.plan || 'free';
+    const subtaskLimitsMap = { free: 10, team: 25, pro: Infinity };
+    const maxSubtasks = subtaskLimitsMap[subtaskPlan] || 10;
+    const isSubtaskLimited = maxSubtasks !== Infinity;
+    const countSubtasksRecursive = (subs) =>
+      (subs || []).reduce((sum, s) => sum + 1 + countSubtasksRecursive(s.subtasks), 0);
+
     const now = new Date().toISOString();
     const subtask = {
       id: uuidv4(),
@@ -2228,6 +2254,13 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
+          // Plan-limit pre subtasks v contact projektu
+          if (isSubtaskLimited && countSubtasksRecursive(contact.tasks[taskIndex].subtasks) >= maxSubtasks) {
+            const message = isIosNativeApp(req)
+              ? `Dosiahli ste limit ${maxSubtasks} podúloh na projekt.`
+              : `Váš plán umožňuje max. ${maxSubtasks} podúloh na projekt. Pre viac prejdite na vyšší plán.`;
+            return res.status(403).json({ message, code: 'SUBTASK_LIMIT' });
+          }
           if (addToParent(contact.tasks[taskIndex])) {
             // Update parent task's modifiedAt when subtask is added
             contact.tasks[taskIndex].modifiedAt = now;
@@ -2271,6 +2304,13 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     // Try global tasks
     const task = await Task.findById(req.params.taskId);
     if (task) {
+      // Plan-limit pre subtasks v global projektu
+      if (isSubtaskLimited && countSubtasksRecursive(task.subtasks) >= maxSubtasks) {
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxSubtasks} podúloh na projekt.`
+          : `Váš plán umožňuje max. ${maxSubtasks} podúloh na projekt. Pre viac prejdite na vyšší plán.`;
+        return res.status(403).json({ message, code: 'SUBTASK_LIMIT' });
+      }
       if (addToParent(task)) {
         // Update parent task's modifiedAt when subtask is added
         task.modifiedAt = now;
