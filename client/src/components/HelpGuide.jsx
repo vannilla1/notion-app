@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { isIosNativeApp } from '../utils/platform';
 
 const hasSeenHelp = (section) => {
   const seen = localStorage.getItem(`help_seen_${section}`);
@@ -51,19 +52,26 @@ const HelpGuide = ({ section, tips, title, children }) => {
               <button className="help-guide-close" onClick={handleClose}>×</button>
             </div>
             <div className="help-guide-content">
-              {tips && tips.length > 0 ? (
-                <ul className="help-guide-tips">
-                  {tips.map((tip, index) => (
-                    <li key={index} className="help-guide-tip">
-                      <span className="tip-icon">{tip.icon || '💡'}</span>
-                      <div className="tip-content">
-                        <strong>{tip.title}</strong>
-                        <p>{tip.description}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : children}
+              {/* Filtrujeme tipy s hideOnIos=true pri behu v iOS native shell-e
+                  (Apple Guideline 3.1.1 — žiadna zmienka o pláne, cene,
+                  subscription manage flow). Web verzia tipy zachová. */}
+              {(() => {
+                const inIos = isIosNativeApp();
+                const visibleTips = (tips || []).filter((t) => !(inIos && t.hideOnIos));
+                return visibleTips.length > 0 ? (
+                  <ul className="help-guide-tips">
+                    {visibleTips.map((tip, index) => (
+                      <li key={index} className="help-guide-tip">
+                        <span className="tip-icon">{tip.icon || '💡'}</span>
+                        <div className="tip-content">
+                          <strong>{tip.title}</strong>
+                          <p>{tip.description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : children;
+              })()}
             </div>
             <div className="help-guide-footer">
               <button className="help-guide-got-it" onClick={handleClose}>

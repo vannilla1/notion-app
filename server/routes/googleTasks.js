@@ -222,8 +222,9 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
     const userDoc = await User.findById(req.user.id).select('subscription').lean();
     const plan = userDoc?.subscription?.plan || 'free';
     if (plan === 'free' || plan === 'trial') {
+      // Apple 3.1.1 — neutrálna formulácia bez akejkoľvek zmienky o pláne.
       const message = isIosNativeApp(req)
-        ? 'Synchronizácia s Google Tasks nie je dostupná v tomto pláne.'
+        ? 'Táto funkcia nie je dostupná.'
         : 'Synchronizácia s Google Tasks je dostupná v plánoch Tím a Pro. Upgradujte plán pre prístup.';
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }

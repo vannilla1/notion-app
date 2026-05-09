@@ -228,8 +228,9 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     const exporter = await User.findById(req.user.id).select('subscription').lean();
     const exporterPlan = exporter?.subscription?.plan || 'free';
     if (exporterPlan === 'free' || exporterPlan === 'trial') {
+      // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
       const message = isIosNativeApp(req)
-        ? 'Export do CSV nie je dostupný v tomto pláne.'
+        ? 'Táto funkcia nie je dostupná.'
         : 'Export do CSV je dostupný v plánoch Tím a Pro. Upgradujte plán pre prístup.';
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
@@ -312,10 +313,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     if (maxContacts !== Infinity) {
       const contactCount = await Contact.countDocuments({ workspaceId: req.workspaceId });
       if (contactCount >= maxContacts) {
-        // Apple Guideline 3.1.1 — v iOS native shell-e nesmieme referencovať
-        // platený obsah / external upgrade flow. Vraciame neutrálnu správu
-        // bez zmienky o pláne / "vyšší plán" / cien. Web verzia ďalej dostane
-        // pôvodnú actionable správu.
+        // Apple 3.1.1 — iOS message NIESMIE spomínať plán / tier / subscription.
+        // Web variant zostáva actionable.
         const message = isIosNativeApp(req)
           ? `Dosiahli ste limit ${maxContacts} kontaktov pre toto prostredie.`
           : `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.`;
@@ -912,7 +911,8 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       const uploaderPlan = uploader?.subscription?.plan || 'free';
       if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
         const message = isIosNativeApp(req)
-          ? 'Pripájanie súborov nie je dostupné v tomto pláne.'
+          // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
+          ? 'Táto funkcia nie je dostupná.'
           : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
         return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
       }

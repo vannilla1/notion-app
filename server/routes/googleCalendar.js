@@ -198,8 +198,11 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
     const userDoc = await User.findById(req.user.id).select('subscription').lean();
     const plan = userDoc?.subscription?.plan || 'free';
     if (plan === 'free' || plan === 'trial') {
+      // Apple Guideline 3.1.1 — iOS variant nesmie spomínať "plán" / "tier" /
+      // "subscription" v žiadnej forme (Apple to čita ako reference na external
+      // paid content). Web variant info-text môže odkázať na upgrade flow.
       const message = isIosNativeApp(req)
-        ? 'Synchronizácia s Google Calendar nie je dostupná v tomto pláne.'
+        ? 'Táto funkcia nie je dostupná.'
         : 'Synchronizácia s Google Calendar je dostupná v plánoch Tím a Pro. Upgradujte plán pre prístup.';
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }

@@ -95,7 +95,8 @@ const crmHelpTips = [
   {
     icon: '🔢',
     title: 'Limity podľa plánu',
-    description: 'Free plán má limit 5 kontaktov a 5 projektov na kontakt. Tím (4,99 €/mes) — 25 kontaktov, 25 projektov. Pro (9,99 €/mes) — neobmedzené. Pri dosiahnutí limitu sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.'
+    description: 'Free plán má limit 5 kontaktov a 5 projektov na kontakt. Tím (4,99 €/mes) — 25 kontaktov, 25 projektov. Pro (9,99 €/mes) — neobmedzené. Pri dosiahnutí limitu sa zobrazí UpgradePrompt. Plán zmeníte v Avatar → Predplatné.',
+    hideOnIos: true  // Apple 3.1.1 — text spomína plány, ceny a subscription manage flow
   },
   {
     icon: '🔔',

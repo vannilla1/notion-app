@@ -328,8 +328,9 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     const exporter = await User.findById(req.user.id).select('subscription').lean();
     const exporterPlan = exporter?.subscription?.plan || 'free';
     if (exporterPlan === 'free' || exporterPlan === 'trial') {
+      // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
       const message = isIosNativeApp(req)
-        ? 'Export do CSV nie je dostupný v tomto pláne.'
+        ? 'Táto funkcia nie je dostupná.'
         : 'Export do CSV je dostupný v plánoch Tím a Pro. Upgradujte plán pre prístup.';
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }

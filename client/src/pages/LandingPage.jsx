@@ -349,7 +349,9 @@ export default function LandingPage() {
       </section>
       )}
 
-      {/* FAQ */}
+      {/* FAQ — skryté v iOS shell-e (FAQ obsahuje detailný popis všetkých
+          plánov, cien a upgrade/downgrade flow → Apple Guideline 3.1.1). */}
+      {!isIosNativeApp() && (
       <section className="lp-faq" id="faq">
         <div className="lp-section">
           <div className="lp-section-header">
@@ -414,6 +416,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      )}
 
       {/* Download */}
       <section className="lp-download" id="stiahnut">
