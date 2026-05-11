@@ -419,6 +419,46 @@ process.on('unhandledRejection', (reason) => {
   recordError(err, null).catch(() => {});
 });
 
+// Graceful shutdown — Render posiela SIGTERM pri každom deploy / scale-down /
+// reštart-e a dáva proces ~15s pred SIGKILL. Bez tohto handlera by:
+//  - in-flight HTTP requesty dostali ECONNRESET namiesto odpovede
+//  - Mongoose save/update operácie mohli skončiť uprostred (atomic ops sú OK,
+//    multi-step transactions nie sú)
+//  - Socket.io klienty nedostali disconnect signal a vidia "stuck" stav
+// Postup: 1) stop accepting nové requesty (server.close), 2) počkať na
+// existujúce, 3) zavrieť Mongo, 4) exit. Force-exit po 10s aby SIGKILL nemal
+// čo robiť — Render má 15s window, 10s nám necháva 5s rezervu.
+let shutdownInProgress = false;
+const gracefulShutdown = (signal) => {
+  if (shutdownInProgress) return; // dvojnásobný SIGTERM ignorujeme
+  shutdownInProgress = true;
+  logger.info(`${signal} received — starting graceful shutdown`);
+
+  // Stop accepting new connections; čaká kým in-flight requesty doskončia
+  server.close(async () => {
+    logger.info('[Shutdown] HTTP server closed (no more new connections)');
+    try {
+      await mongoose.connection.close();
+      logger.info('[Shutdown] MongoDB connection closed');
+    } catch (err) {
+      logger.error('[Shutdown] MongoDB close error', { error: err.message });
+    }
+    logger.info('[Shutdown] Exit 0');
+    process.exit(0);
+  });
+
+  // Force-exit po 10s ak server.close visí na pomalých keep-alive connections
+  // alebo zaseknutom DB query. .unref() aby tento timer nedržal event loop živý
+  // ak by predošlé close-y skončili rýchlejšie.
+  setTimeout(() => {
+    logger.error('[Shutdown] Graceful shutdown timeout (10s) — forcing exit');
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 // Start server FIRST (so Render sees it's alive), then connect DB in background
 server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`, {

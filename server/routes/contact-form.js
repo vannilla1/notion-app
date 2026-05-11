@@ -33,6 +33,16 @@ router.post('/', contactLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Neplatný formát emailu.' });
     }
 
+    // Length cap-y proti payload-injection / DoS — predtým iba `message` mal limit.
+    // `name` a `email` boli bez horného obmedzenia — útočník mohol poslať
+    // megabyte-veľký string v `name`. Email má štandardný limit 320 znakov
+    // (RFC 5321), name je dosť 200 znakov pre reálne ľudské mená.
+    if (name.length > 200) {
+      return res.status(400).json({ message: 'Meno je príliš dlhé (max 200 znakov).' });
+    }
+    if (email.length > 320) {
+      return res.status(400).json({ message: 'Email je príliš dlhý.' });
+    }
     if (message.length > 5000) {
       return res.status(400).json({ message: 'Správa je príliš dlhá (max 5000 znakov).' });
     }

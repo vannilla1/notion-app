@@ -24,8 +24,23 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://perun-crm-api.onrender.com/api/google-calendar/callback';
 
-// Webhook verification secret (used as x-goog-channel-token)
-const WEBHOOK_TOKEN_SECRET = process.env.GOOGLE_WEBHOOK_SECRET || process.env.JWT_SECRET || GOOGLE_CLIENT_SECRET || 'prplcrm-webhook-fallback';
+// Webhook verification secret (used as x-goog-channel-token).
+//
+// Predtým bola fallback reťaz: GOOGLE_WEBHOOK_SECRET || JWT_SECRET || GOOGLE_CLIENT_SECRET
+// || 'prplcrm-webhook-fallback'. To bolo nebezpečné z dvoch dôvodov:
+//  1) Hardcoded string 'prplcrm-webhook-fallback' v zdrojáku = predvídateľný
+//     secret. Útočník s vedomosťou tohto stringu môže forge-ovať Google
+//     webhook eventy a triggerovať sync logiku.
+//  2) Fallback na JWT_SECRET miesi zodpovednosti — kompromitovaný Google
+//     webhook by odhalil hodnotu auth signing secret-u.
+// Aktuálne: explicitne vyžadujeme GOOGLE_WEBHOOK_SECRET env var. Ak nie je
+// nastavený, webhook verifikácia sa fail-open zlogguje (sync stále funguje
+// cez polling, takže žiadny outage), ale signatúry sa neoveria — vidíme to
+// v logoch a vieme to opraviť na Renderi.
+const WEBHOOK_TOKEN_SECRET = process.env.GOOGLE_WEBHOOK_SECRET || null;
+if (!WEBHOOK_TOKEN_SECRET) {
+  logger.warn('[GoogleCalendar] GOOGLE_WEBHOOK_SECRET not set — webhook signature verification disabled. Sync continues via polling fallback. Set env var on Render to re-enable.');
+}
 
 /**
  * Create a fresh OAuth2Client for each request.
@@ -94,8 +109,11 @@ const createEventHash = (task, targetCalendarId) => {
 /**
  * Compute a deterministic HMAC token for a watch channel.
  * Used as x-goog-channel-token so we can verify webhook POSTs really came from Google.
+ * Vracia null ak nie je nastavený GOOGLE_WEBHOOK_SECRET — caller (watch
+ * creation alebo webhook verification) sa rozhodne ako tomu vyriešiť.
  */
 const computeWatchToken = (userId, channelId) => {
+  if (!WEBHOOK_TOKEN_SECRET) return null;
   return crypto
     .createHmac('sha256', WEBHOOK_TOKEN_SECRET)
     .update(`${userId}:${channelId}`)
@@ -1113,18 +1131,24 @@ router.post('/webhook', async (req, res) => {
       return;
     }
 
-    // Verify HMAC token so random attackers can't trigger sync for arbitrary users
+    // Verify HMAC token so random attackers can't trigger sync for arbitrary users.
+    // expectedToken je null ak GOOGLE_WEBHOOK_SECRET nie je nastavený — vtedy
+    // fail-open s warning (sync stále funguje cez polling).
     const expectedToken = computeWatchToken(user._id.toString(), channelId);
-    if (!channelToken) {
-      logger.warn('[Calendar Webhook] Missing channel token', { channelId, userId: user._id });
-      return;
-    }
-    // Use timingSafeEqual to prevent timing attacks
-    const a = Buffer.from(channelToken);
-    const b = Buffer.from(expectedToken);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      logger.warn('[Calendar Webhook] Invalid channel token', { channelId, userId: user._id });
-      return;
+    if (!expectedToken) {
+      logger.warn('[Calendar Webhook] Signature verification disabled (GOOGLE_WEBHOOK_SECRET missing) — accepting via channelId match only', { channelId, userId: user._id });
+    } else {
+      if (!channelToken) {
+        logger.warn('[Calendar Webhook] Missing channel token', { channelId, userId: user._id });
+        return;
+      }
+      // Use timingSafeEqual to prevent timing attacks
+      const a = Buffer.from(channelToken);
+      const b = Buffer.from(expectedToken);
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        logger.warn('[Calendar Webhook] Invalid channel token', { channelId, userId: user._id });
+        return;
+      }
     }
 
     await processCalendarChanges(user);

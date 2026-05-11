@@ -29,13 +29,20 @@ const getCachedUser = async (userId) => {
   const redis = getRedis();
   const idStr = String(userId);
 
+  // KRITICKÝ PERF: vylučujeme avatarData (Base64 blob, max ~6.7MB per user)
+  // z auth cache load-u. Bez tohto by každý authenticated request:
+  //  1) načítaval celý blob z MongoDB (~6MB read)
+  //  2) serializoval ho do JSON pre Redis SET (Redis pamäť rastie lineárne)
+  //  3) deserializoval pri každom cache GET
+  // req.user.avatar (filename pointer) zostáva — UI ho používa na zostavenie
+  // <img src="/api/auth/avatar/:userId"> ktorý ide cez samostatný stream endpoint.
   if (redis) {
     try {
       const cached = await redis.get(KEY(idStr));
       if (cached) {
         try { return JSON.parse(cached); } catch { /* fall through on corrupt cache */ }
       }
-      const user = await User.findById(idStr).lean();
+      const user = await User.findById(idStr).select('-avatarData').lean();
       if (user) {
         // SET with EX in a single call (atomic) — avoids the race between
         // SET + EXPIRE. setex is the ioredis convenience.
@@ -51,14 +58,14 @@ const getCachedUser = async (userId) => {
       // Redis blipped — degrade to DB read (no mem fallback writes to avoid
       // coherence issues once Redis is back).
       logger.warn('[Auth] Redis get failed, bypassing cache', { error: redisErr.message });
-      return User.findById(idStr).lean();
+      return User.findById(idStr).select('-avatarData').lean();
     }
   }
 
   // No Redis configured → in-process fallback (dev single-instance only)
   const entry = memCache.get(idStr);
   if (entry && Date.now() - entry.ts < USER_CACHE_TTL_SEC * 1000) return entry.user;
-  const user = await User.findById(idStr).lean();
+  const user = await User.findById(idStr).select('-avatarData').lean();
   if (user) memCache.set(idStr, { user, ts: Date.now() });
   return user;
 };

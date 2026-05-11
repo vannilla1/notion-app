@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const User = require('../models/User');
-const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
+const { JWT_SECRET, authenticateToken, invalidateUserCache } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const {
   loginLimiter,
@@ -487,6 +487,10 @@ router.put('/notification-preferences', authenticateToken, async (req, res) => {
       { new: true, projection: 'notificationPreferences preferences' }
     ).lean();
 
+    // Invalidate Redis user cache — middleware/auth cachuje User na 30s,
+    // bez tohto by ostatné requesty v okne stále videli staré preferences.
+    await invalidateUserCache(req.user.id);
+
     res.json({
       ...DEFAULT_NOTIFICATION_PREFS,
       ...(user?.notificationPreferences || {}),
@@ -549,6 +553,11 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true });
 
+    // Invalidate Redis user cache — username/email/color sa môžu zmeniť, bez
+    // invalidation by ostatné requesty 30s ďalej videli staré hodnoty (auth
+    // middleware cachuje User po každom token validate).
+    await invalidateUserCache(userId);
+
     logger.info('Profile updated', { userId, updates: Object.keys(updates) });
 
     res.json({
@@ -596,6 +605,10 @@ router.post('/avatar', authenticateToken, (req, res) => {
 
       // Invalidate avatar cache so next request gets fresh image
       _avatarCache.delete(userId);
+      // Invalidate Redis user cache — user.avatar field (filename pointer)
+      // sa zmenil, ostatné requesty by inak vrátili stale starý filename
+      // počas 30s TTL window.
+      await invalidateUserCache(userId);
 
       logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
 
@@ -661,8 +674,9 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
       avatarData: null,
       avatarMimetype: null
     });
-    // Invalidate avatar cache
+    // Invalidate avatar cache + Redis user cache (analogicky k POST /avatar)
     _avatarCache.delete(userId);
+    await invalidateUserCache(userId);
     logger.info('Avatar deleted', { userId });
 
     res.json({ message: 'Avatar bol odstránený' });
