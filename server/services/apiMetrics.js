@@ -19,6 +19,14 @@ const cleanOldData = () => {
   }
 };
 
+// Startup grace window — počas prvých STARTUP_GRACE_MS po boot-e ignorujeme
+// 503 responses. Sú to typicky requesty ktoré prišli kým ešte Mongoose
+// connectovala na MongoDB — DB readiness middleware vracia 503 a admin
+// panel ich potom ukazoval ako "100% error rate" čo mätie. Reálne to nie
+// sú aplikačné chyby, len normálne startup okno.
+const STARTUP_GRACE_MS = 30_000;
+const SERVER_BOOT_TIME = Date.now();
+
 const trackRequest = (req, res, next) => {
   const start = Date.now();
 
@@ -30,6 +38,10 @@ const trackRequest = (req, res, next) => {
     const method = req.method;
     const status = res.statusCode;
     const hourKey = new Date().toISOString().slice(0, 13);
+
+    // Skip startup-window 503s — nie sú to bug-y, len boot artifacts
+    const isStartup503 = status === 503 && (Date.now() - SERVER_BOOT_TIME) < STARTUP_GRACE_MS;
+    if (isStartup503) return;
 
     // Route stats
     if (!counters.routes[route]) {
