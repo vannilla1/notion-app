@@ -170,7 +170,14 @@ router.put('/read-for-related', authenticateToken, requireWorkspace, async (req,
     if (!relatedType || !relatedId) {
       return res.status(400).json({ message: 'relatedType a relatedId sú povinné' });
     }
-    if (!/^[0-9a-fA-F]{24}$/.test(relatedId)) {
+    // relatedId môže byť BUĎ MongoDB ObjectId (24 hex znakov — pre globálne
+    // Task / Contact / Message), ALEBO UUID v4 (pre contact-embedded subtasks
+    // a tasks v rámci Contact.tasks array). Predtým regex prijal iba ObjectId,
+    // takže 88% expand-ov contact-tasks padalo na 400 — fix tým že akceptujeme
+    // oba formáty. Limit dĺžky 64 znakov chráni pred payload-injection.
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(relatedId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(relatedId);
+    if (!isObjectId && !isUuid) {
       return res.status(400).json({ message: 'Neplatné relatedId' });
     }
     // Match by relatedId directly OR by data.messageId/taskId/contactId
