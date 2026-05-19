@@ -606,8 +606,12 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     }
 
     const task = contact.tasks[taskIndex];
+    // KRITICKÝ FIX: Mongoose subdoc spread {...task} nepreserve schema fields
+    // (vracia interné _doc/$__ properties). Bez .toObject() by sa stratili
+    // files, notes, lastUrgencyLevel pri každom edit-e tasku cez tento route.
+    const taskPlain = typeof task.toObject === 'function' ? task.toObject() : task;
     contact.tasks[taskIndex] = {
-      ...task,
+      ...taskPlain,
       id: task.id,
       title: title !== undefined ? title : task.title,
       description: description !== undefined ? description : task.description,

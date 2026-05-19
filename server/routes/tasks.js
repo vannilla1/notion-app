@@ -1378,8 +1378,17 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               (dueTime !== undefined && dueTime !== (task.dueTime || '')) ||
               JSON.stringify(newTimeReminders) !== JSON.stringify(oldTimeReminders);
 
+            // KRITICKÝ FIX: spread Mongoose subdocumentu cez {...task} vracia
+            // interné _doc/$__/__parentArray properties, NIE schema fields.
+            // Empiricky overené: {...subdoc}.files === undefined, hoci subdoc.files
+            // priamo funguje. Bez tohto fix-u sa pri každom PUT strácali ne-overrid-ované
+            // polia (files, notes, lastUrgencyLevel, atď.) — user reportoval že fotky
+            // pripojené k projektom Kapišová, Nová Sedlica, Breznica, Vyšné Remety
+            // zmizli po edit-e. .toObject() vracia plain JS object so všetkými
+            // schema fields, čo spread spracuje korektne.
+            const taskPlain = typeof task.toObject === 'function' ? task.toObject() : task;
             contact.tasks[taskIndex] = {
-              ...task,
+              ...taskPlain,
               id: task.id,
               title: title !== undefined ? title : task.title,
               description: description !== undefined ? description : task.description,
@@ -1773,8 +1782,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const originalCtaskDueDate = ctask.dueDate;
         const originalCtaskDueTime = ctask.dueTime || '';
         const originalCtaskCompleted = ctask.completed;
+        // Rovnaký fix ako v contact path (line 1381) — Mongoose subdoc spread
+        // nepreserve schema fields. Bez .toObject() by sa pri každom PUT
+        // stratili files, notes, lastUrgencyLevel, atď.
+        const ctaskPlain = typeof ctask.toObject === 'function' ? ctask.toObject() : ctask;
         contact.tasks[taskIndex] = {
-          ...ctask,
+          ...ctaskPlain,
           id: ctask.id,
           title: title !== undefined ? title : ctask.title,
           description: description !== undefined ? description : ctask.description,
