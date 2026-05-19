@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApi, { API_BASE_URL } from '@/api/adminApi';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
@@ -18,6 +18,7 @@ const TABS = [
   { id: 'storage', label: 'Storage', icon: '💾' },
   { id: 'comparison', label: 'Porovnanie', icon: '⚖️' },
   { id: 'promo', label: 'Promo kódy', icon: '🎟️' },
+  { id: 'affiliate', label: 'Affiliate', icon: '🤝' },
   { id: 'audit', label: 'Audit log', icon: '📋' },
   { id: 'emails', label: 'Emaily', icon: '📧' },
   { id: 'sync', label: 'Sync', icon: '🔄' }
@@ -27,7 +28,7 @@ const TABS = [
 // s URL (napr. ?foo=bar#fake) nenastavila neznámy tab a render nepadol.
 const VALID_TAB_IDS = new Set([
   'overview', 'diagnostics', 'users', 'workspaces', 'charts', 'activity',
-  'api', 'storage', 'comparison', 'promo', 'audit', 'emails', 'sync'
+  'api', 'storage', 'comparison', 'promo', 'affiliate', 'audit', 'emails', 'sync'
 ]);
 
 // Povolené sub-filtre pre Sync tab. Rozlišujú, ktorú Google službu chceme
@@ -147,6 +148,7 @@ function AdminPanel() {
         {activeTab === 'storage' && <StorageTab />}
         {activeTab === 'comparison' && <WorkspaceComparisonTab />}
         {activeTab === 'promo' && <PromoCodesTab />}
+        {activeTab === 'affiliate' && <AffiliateTab />}
         {activeTab === 'audit' && <AuditLogTab />}
         {activeTab === 'emails' && <EmailsTab />}
         {activeTab === 'sync' && <SyncTab filter={syncFilter} onFilterChange={setSyncFilter} />}
@@ -4611,6 +4613,491 @@ function WorkspaceComparisonTab() {
           <em>Pozn.:</em> Activity score je len váženy odhad a nie absolútna pravda — workspace s vysokým skóre môže byť "data hoarder" zatiaľ čo workspace s nízkym ale stálym tempom môže byť produkt-fit. Sleduj v kombinácii s lastActivity (sviežosť) a completionRate (efektivita).
         </p>
       </AdminHelpToggle>
+    </div>
+  );
+}
+
+// ─── AFFILIATE TAB ──────────────────────────────────────────
+// 3 podzáložky: Affiliates (zoznam userov), Codes (per-code štatistika),
+// Commissions (payout table + bulk pay + CSV export).
+const COMMISSION_STATUS_META = {
+  pending:  { label: '⏳ Čaká (refund window)', color: '#92400e', bg: '#fef3c7' },
+  eligible: { label: '✅ Pripravené na výplatu', color: '#065f46', bg: '#d1fae5' },
+  paid:     { label: '💳 Vyplatené', color: '#1e40af', bg: '#dbeafe' },
+  revoked:  { label: '❌ Zrušené (refund)', color: '#991b1b', bg: '#fee2e2' }
+};
+const MIN_PAYOUT_EUR = 20;
+const fmtEur = (n) => `€${(n || 0).toFixed(2)}`;
+
+function AffiliateTab() {
+  const [subTab, setSubTab] = useState('affiliates'); // affiliates | commissions
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border-color, #e5e7eb)' }}>
+        <button onClick={() => setSubTab('affiliates')}
+          className={subTab === 'affiliates' ? 'btn btn-primary' : 'btn btn-secondary'}
+          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none', fontSize: 13 }}
+        >👥 Affiliateovia</button>
+        <button onClick={() => setSubTab('commissions')}
+          className={subTab === 'commissions' ? 'btn btn-primary' : 'btn btn-secondary'}
+          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none', fontSize: 13 }}
+        >💰 Provízie</button>
+      </div>
+      {subTab === 'affiliates' && <AffiliatesSubTab />}
+      {subTab === 'commissions' && <CommissionsSubTab />}
+    </div>
+  );
+}
+
+// ─── Affiliate Tab: Sub-tab 1 — Affiliates list ─────────────────
+function AffiliatesSubTab() {
+  const [affiliates, setAffiliates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showEnrollForm, setShowEnrollForm] = useState(false);
+  const [enrollEmail, setEnrollEmail] = useState('');
+  const [enrollIban, setEnrollIban] = useState('');
+  const [enrollBank, setEnrollBank] = useState('');
+  const [enrollNote, setEnrollNote] = useState('');
+  const [enrollError, setEnrollError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editPayload, setEditPayload] = useState({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await adminApi.get('/api/admin/affiliates');
+      setAffiliates(r.data.affiliates || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const handleEnroll = async (e) => {
+    e.preventDefault();
+    setEnrollError('');
+    try {
+      await adminApi.post('/api/admin/affiliates/enroll', {
+        email: enrollEmail.trim(),
+        payoutIban: enrollIban.trim(),
+        payoutBankName: enrollBank.trim(),
+        payoutNote: enrollNote.trim()
+      });
+      setShowEnrollForm(false);
+      setEnrollEmail(''); setEnrollIban(''); setEnrollBank(''); setEnrollNote('');
+      await load();
+    } catch (err) {
+      setEnrollError(err.response?.data?.message || 'Chyba pri pridávaní');
+    }
+  };
+
+  const startEdit = (a) => {
+    setEditingId(a.id);
+    setEditPayload({
+      payoutIban: a.payoutIban || '',
+      payoutBankName: a.payoutBankName || '',
+      payoutNote: a.payoutNote || '',
+      status: a.status || 'active'
+    });
+  };
+  const saveEdit = async (userId) => {
+    try {
+      await adminApi.put(`/api/admin/affiliates/${userId}`, editPayload);
+      setEditingId(null);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba pri uložení');
+    }
+  };
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 16 }}>Affiliate program — {affiliates.length} členov</h3>
+        <button onClick={() => setShowEnrollForm(!showEnrollForm)} className="btn btn-primary" style={{ fontSize: 12 }}>
+          {showEnrollForm ? '✕ Zrušiť' : '+ Pridať affiliateho'}
+        </button>
+      </div>
+
+      {showEnrollForm && (
+        <form onSubmit={handleEnroll} style={{ padding: 16, background: 'var(--bg-secondary)', borderRadius: 8, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            <input type="email" required placeholder="Email užívateľa (musí existovať)"
+              value={enrollEmail} onChange={(e) => setEnrollEmail(e.target.value)}
+              className="form-input" />
+            <input type="text" placeholder="IBAN (voliteľné)"
+              value={enrollIban} onChange={(e) => setEnrollIban(e.target.value)}
+              className="form-input" />
+            <input type="text" placeholder="Názov banky"
+              value={enrollBank} onChange={(e) => setEnrollBank(e.target.value)}
+              className="form-input" />
+            <input type="text" placeholder="Poznámka (DIČ, IČO, kontakt...)"
+              value={enrollNote} onChange={(e) => setEnrollNote(e.target.value)}
+              className="form-input" />
+          </div>
+          {enrollError && <div style={{ color: '#dc2626', marginTop: 8, fontSize: 13 }}>{enrollError}</div>}
+          <div style={{ marginTop: 8 }}>
+            <button type="submit" className="btn btn-primary" style={{ fontSize: 12 }}>Prihlásiť</button>
+          </div>
+        </form>
+      )}
+
+      <div className="sa-table-wrap">
+        <table className="sa-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Status</th>
+              <th>IBAN / Banka</th>
+              <th>Kódy</th>
+              <th>Signups</th>
+              <th>Pending</th>
+              <th>Eligible</th>
+              <th>Paid</th>
+              <th>Akcie</th>
+            </tr>
+          </thead>
+          <tbody>
+            {affiliates.length === 0 && (
+              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Žiadni affiliateovia</td></tr>
+            )}
+            {affiliates.map((a) => {
+              const isEditing = editingId === a.id;
+              return (
+                <tr key={a.id}>
+                  <td>
+                    <div style={{ fontWeight: 500 }}>{a.username}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.email}</div>
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <select value={editPayload.status}
+                        onChange={(e) => setEditPayload((p) => ({ ...p, status: e.target.value }))}
+                        style={{ fontSize: 11, padding: '2px 4px' }}>
+                        <option value="active">Aktívny</option>
+                        <option value="pending">Čaká</option>
+                        <option value="disabled">Zakázaný</option>
+                      </select>
+                    ) : (
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 11,
+                        background: a.status === 'active' ? '#d1fae5' : a.status === 'pending' ? '#fef3c7' : '#fee2e2',
+                        color: a.status === 'active' ? '#065f46' : a.status === 'pending' ? '#92400e' : '#991b1b'
+                      }}>{a.status}</span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 11 }}>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <input type="text" value={editPayload.payoutIban}
+                          onChange={(e) => setEditPayload((p) => ({ ...p, payoutIban: e.target.value }))}
+                          placeholder="IBAN" className="form-input" style={{ fontSize: 11, padding: '2px 4px' }} />
+                        <input type="text" value={editPayload.payoutBankName}
+                          onChange={(e) => setEditPayload((p) => ({ ...p, payoutBankName: e.target.value }))}
+                          placeholder="Banka" className="form-input" style={{ fontSize: 11, padding: '2px 4px' }} />
+                      </div>
+                    ) : (
+                      <>
+                        <div>{a.payoutIban || '—'}</div>
+                        <div style={{ color: 'var(--text-muted)' }}>{a.payoutBankName}</div>
+                      </>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{a.codesCount}</td>
+                  <td style={{ textAlign: 'center' }}>{a.totals.signups}</td>
+                  <td style={{ fontSize: 12 }}>{fmtEur(a.totals.pending)}</td>
+                  <td style={{ fontSize: 12, fontWeight: 600, color: '#10b981' }}>{fmtEur(a.totals.eligible)}</td>
+                  <td style={{ fontSize: 12 }}>{fmtEur(a.totals.paid)}</td>
+                  <td>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => saveEdit(a.id)} className="btn btn-primary" style={{ padding: '2px 8px', fontSize: 11 }}>✓</button>
+                        <button onClick={() => setEditingId(null)} className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: 11 }}>✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => startEdit(a)} className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: 11 }}>Upraviť</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <AdminHelpToggle title="Affiliate program — manuál">
+        <p><strong>Affiliate program</strong> — partneri propagujú Prpl CRM a dostávajú províziu z každej platby pod ich kódom (recurring model).</p>
+        <h4>Ako pridať affiliateho:</h4>
+        <ol>
+          <li>User musí byť už registrovaný v Prpl CRM</li>
+          <li>Klikni „+ Pridať affiliateho", zadaj jeho email + IBAN + banku</li>
+          <li>Vytvor mu promo kód v záložke <strong>Promo kódy</strong> (set referrerId = tento user, commissionPercent = napr. 10)</li>
+          <li>Affiliate svoj kód zdieľa s potenciálnymi zákazníkmi</li>
+        </ol>
+        <h4>Životný cyklus provízie:</h4>
+        <ul>
+          <li><strong>Pending</strong> — platba prebehla, ale ešte je v 30-day refund window. Nevyplácame.</li>
+          <li><strong>Eligible</strong> — refund window uplynul, daily cron prepol stav. Pripravené na bank prevod.</li>
+          <li><strong>Paid</strong> — admin označil ako vyplatené po reálnom bank prevode.</li>
+          <li><strong>Revoked</strong> — Stripe customer žiadal refund pred eligible — provízia sa anuluje.</li>
+        </ul>
+        <h4>Minimum payout: €{MIN_PAYOUT_EUR}</h4>
+        <p>Aby si neplatil malé sumy bankovým prevodom (poplatok by bol vyšší než provízia), bulk-pay endpoint enforuje min sumu eligible €{MIN_PAYOUT_EUR}. Provízie kumulujú do dosiahnutia threshold-u.</p>
+      </AdminHelpToggle>
+    </div>
+  );
+}
+
+// ─── Affiliate Tab: Sub-tab 2 — Commissions ─────────────────
+function CommissionsSubTab() {
+  const [commissions, setCommissions] = useState([]);
+  const [totals, setTotals] = useState({ pending: 0, eligible: 0, paid: 0, revoked: 0 });
+  const [counts, setCounts] = useState({ pending: 0, eligible: 0, paid: 0, revoked: 0 });
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('eligible');
+  const [referrerFilter, setReferrerFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [affiliates, setAffiliates] = useState([]);
+  const [showBulkPay, setShowBulkPay] = useState(null); // referrerId or null
+  const [bulkRef, setBulkRef] = useState('');
+  const [bulkNotes, setBulkNotes] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (statusFilter) params.status = statusFilter;
+      if (referrerFilter) params.referrerId = referrerFilter;
+      if (from) params.from = from;
+      if (to) params.to = to;
+      if (search) params.search = search;
+      const r = await adminApi.get('/api/admin/commissions', { params });
+      setCommissions(r.data.commissions || []);
+      setTotals(r.data.totals || {});
+      setCounts(r.data.counts || {});
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [statusFilter, referrerFilter, from, to, search]);
+  useEffect(() => { load(); }, [load]);
+
+  // Affiliate list pre bulk-pay dropdown
+  useEffect(() => {
+    adminApi.get('/api/admin/affiliates').then((r) => setAffiliates(r.data.affiliates || [])).catch(() => {});
+  }, []);
+
+  const markPaid = async (c) => {
+    const reference = prompt(`Číslo bank prevodu pre €${c.commissionAmount.toFixed(2)} (${c.referrerId?.username})?`);
+    if (!reference) return;
+    try {
+      await adminApi.post(`/api/admin/commissions/${c._id}/mark-paid`, {
+        paidMethod: 'bank',
+        paidReference: reference
+      });
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba');
+    }
+  };
+
+  const doBulkPay = async () => {
+    if (!bulkRef.trim()) { alert('Zadaj číslo bank prevodu'); return; }
+    setBulkLoading(true);
+    try {
+      const r = await adminApi.post('/api/admin/commissions/bulk-pay', {
+        referrerId: showBulkPay,
+        paidMethod: 'bank',
+        paidReference: bulkRef.trim(),
+        notes: bulkNotes.trim()
+      });
+      alert(`✅ Vyplatené ${r.data.paidCount} provízií, suma €${r.data.paidAmount.toFixed(2)}`);
+      setShowBulkPay(null); setBulkRef(''); setBulkNotes('');
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Chyba');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const exportCsv = () => {
+    const params = new URLSearchParams();
+    if (statusFilter) params.append('status', statusFilter);
+    if (referrerFilter) params.append('referrerId', referrerFilter);
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    window.open(`${API_BASE_URL}/api/admin/commissions/export.csv?${params.toString()}`, '_blank');
+  };
+
+  // Eligible per-referrer (na zobrazenie tlačidiel bulk-pay vedľa každého affiliateho)
+  const eligiblePerReferrer = useMemo(() => {
+    const map = new Map();
+    for (const a of affiliates) {
+      if (a.totals.eligible >= MIN_PAYOUT_EUR) {
+        map.set(a.id, { username: a.username, email: a.email, amount: a.totals.eligible });
+      }
+    }
+    return map;
+  }, [affiliates]);
+
+  if (loading) return <div className="sa-loading">Načítavam...</div>;
+
+  return (
+    <div>
+      {/* Stat header */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
+          ⏳ Pending: <strong>{fmtEur(totals.pending)}</strong> ({counts.pending}×)
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#d1fae5', color: '#065f46' }}>
+          ✅ Eligible: <strong>{fmtEur(totals.eligible)}</strong> ({counts.eligible}×)
+        </span>
+        <span style={{ padding: '4px 10px', borderRadius: 999, background: '#dbeafe', color: '#1e40af' }}>
+          💳 Paid: <strong>{fmtEur(totals.paid)}</strong> ({counts.paid}×)
+        </span>
+        {counts.revoked > 0 && (
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }}>
+            ❌ Revoked: <strong>{fmtEur(totals.revoked)}</strong> ({counts.revoked}×)
+          </span>
+        )}
+      </div>
+
+      {/* Bulk pay panel — affiliate s eligible ≥ 20€ */}
+      {eligiblePerReferrer.size > 0 && (
+        <div style={{ padding: 12, background: '#f0fdf4', borderRadius: 8, marginBottom: 12, border: '1px solid #86efac' }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, color: '#065f46' }}>💰 Pripravené na bulk payout (≥ €{MIN_PAYOUT_EUR}):</div>
+          {Array.from(eligiblePerReferrer.entries()).map(([refId, info]) => (
+            <div key={refId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 13 }}>
+              <span>{info.username}</span>
+              <span style={{ color: 'var(--text-muted)' }}>({info.email})</span>
+              <span style={{ fontWeight: 700, color: '#10b981', marginLeft: 'auto' }}>{fmtEur(info.amount)}</span>
+              <button onClick={() => setShowBulkPay(refId)} className="btn btn-primary" style={{ fontSize: 11, padding: '4px 12px' }}>
+                Vyplatiť
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Bulk pay confirmation modal */}
+      {showBulkPay && (
+        <div className="sa-modal-overlay" onClick={() => setShowBulkPay(null)}>
+          <div className="sa-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="sa-modal-head">
+              <h3>Bulk payout — {eligiblePerReferrer.get(showBulkPay)?.username}</h3>
+              <button className="sa-modal-close" onClick={() => setShowBulkPay(null)}>×</button>
+            </div>
+            <div className="sa-modal-body" style={{ padding: 16 }}>
+              <p>Suma: <strong>{fmtEur(eligiblePerReferrer.get(showBulkPay)?.amount)}</strong></p>
+              <label>Číslo bank prevodu (povinné):
+                <input type="text" value={bulkRef} onChange={(e) => setBulkRef(e.target.value)}
+                  className="form-input" placeholder="napr. 20260519-001" />
+              </label>
+              <label style={{ marginTop: 8, display: 'block' }}>Poznámka (voliteľné):
+                <input type="text" value={bulkNotes} onChange={(e) => setBulkNotes(e.target.value)}
+                  className="form-input" placeholder="napr. Provízia za 5/2026" />
+              </label>
+              <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+                <button onClick={doBulkPay} disabled={bulkLoading || !bulkRef.trim()} className="btn btn-primary">
+                  {bulkLoading ? 'Spúšťam...' : 'Potvrdiť výplatu'}
+                </button>
+                <button onClick={() => setShowBulkPay(null)} className="btn btn-secondary">Zrušiť</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filtre */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', fontSize: 12 }}>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="form-input" style={{ width: 'auto' }}>
+          <option value="">Všetky stavy</option>
+          <option value="pending">⏳ Pending</option>
+          <option value="eligible">✅ Eligible</option>
+          <option value="paid">💳 Paid</option>
+          <option value="revoked">❌ Revoked</option>
+        </select>
+        <select value={referrerFilter} onChange={(e) => setReferrerFilter(e.target.value)} className="form-input" style={{ width: 'auto' }}>
+          <option value="">Všetci affiliateovia</option>
+          {affiliates.map((a) => <option key={a.id} value={a.id}>{a.username}</option>)}
+        </select>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="form-input" style={{ width: 'auto' }} title="Od" />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="form-input" style={{ width: 'auto' }} title="Do" />
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 affiliate / customer / code"
+          className="form-input" style={{ flex: 1, minWidth: 180 }} />
+        <button onClick={exportCsv} className="btn btn-secondary" style={{ fontSize: 11 }}>📥 CSV</button>
+      </div>
+
+      {/* Tabuľka commissions */}
+      <div className="sa-table-wrap">
+        <table className="sa-table">
+          <thead>
+            <tr>
+              <th>Dátum platby</th>
+              <th>Affiliate</th>
+              <th>Kód</th>
+              <th>Customer</th>
+              <th>Plán</th>
+              <th>Platba</th>
+              <th>%</th>
+              <th>Provízia</th>
+              <th>Status</th>
+              <th>Eligible od</th>
+              <th>Akcie</th>
+            </tr>
+          </thead>
+          <tbody>
+            {commissions.length === 0 && (
+              <tr><td colSpan={11} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Žiadne provízie</td></tr>
+            )}
+            {commissions.map((c) => {
+              const meta = COMMISSION_STATUS_META[c.status] || { label: c.status, color: '#64748b', bg: '#f3f4f6' };
+              return (
+                <tr key={c._id}>
+                  <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {new Date(c.paymentDate).toLocaleDateString('sk-SK')}
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{c.referrerId?.username || '—'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.referrerId?.email}</div>
+                  </td>
+                  <td><code style={{ fontSize: 11, background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: 4 }}>{c.promoCodeId?.code || '—'}</code></td>
+                  <td>
+                    <div style={{ fontSize: 13 }}>{c.referredUserId?.username || '—'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.referredUserId?.email}</div>
+                  </td>
+                  <td style={{ fontSize: 12 }}>{c.plan} {c.period}</td>
+                  <td style={{ fontSize: 12 }}>{fmtEur(c.paymentAmount)}</td>
+                  <td style={{ fontSize: 12 }}>{c.commissionPercent}%</td>
+                  <td style={{ fontSize: 13, fontWeight: 600, color: '#10b981' }}>{fmtEur(c.commissionAmount)}</td>
+                  <td>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 11, background: meta.bg, color: meta.color }}>
+                      {meta.label}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 12 }}>
+                    {c.status === 'paid' ? (c.paidAt ? `Vypl. ${new Date(c.paidAt).toLocaleDateString('sk-SK')}` : '—')
+                      : c.eligibleAfter ? new Date(c.eligibleAfter).toLocaleDateString('sk-SK') : '—'}
+                  </td>
+                  <td>
+                    {c.status === 'eligible' && (
+                      <button onClick={() => markPaid(c)} className="btn btn-primary" style={{ padding: '2px 8px', fontSize: 11 }}>
+                        Vyplatiť
+                      </button>
+                    )}
+                    {c.status === 'paid' && c.paidReference && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title={c.paidReference}>ref: {c.paidReference.slice(0, 10)}...</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
