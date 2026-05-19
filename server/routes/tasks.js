@@ -2774,9 +2774,12 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
             source: 'contact'
           }));
 
-          // Build parent task object with contact info
+          // Build parent task object with contact info.
+          // .toObject() pred spread — bez toho by parentTask.title bol undefined
+          // a notifikácie by mali prázdny názov projektu (cf. 729cf67).
+          const parentTaskRaw = contact.tasks[taskIndex];
           const parentTask = {
-            ...contact.tasks[taskIndex],
+            ...(typeof parentTaskRaw.toObject === 'function' ? parentTaskRaw.toObject() : parentTaskRaw),
             contactId: contact._id.toString(),
             contactName: contact.name
           };

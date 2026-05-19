@@ -136,7 +136,22 @@ describe('/api/google-tasks route', () => {
       expect(res.status).toBe(401);
     });
 
-    it('vráti authUrl', async () => {
+    it('403 FEATURE_NOT_IN_PLAN pre Free usera (gating v b480662)', async () => {
+      // Default user vytvorený cez createUserWithWorkspace má Free plán →
+      // Google Tasks sync je za plan-feature gateom.
+      const res = await request(app)
+        .get('/api/google-tasks/auth-url')
+        .set(authHeader(ctx.token));
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FEATURE_NOT_IN_PLAN');
+    });
+
+    it('vráti authUrl pre Tím usera', async () => {
+      // Upgrade user na Tím aby prešiel plan-feature gate (b480662).
+      await User.findByIdAndUpdate(ctx.user._id, {
+        'subscription.plan': 'team'
+      });
+
       const res = await request(app)
         .get('/api/google-tasks/auth-url')
         .set(authHeader(ctx.token));

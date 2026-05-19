@@ -1399,7 +1399,9 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
               completedFromGoogle++;
               if (io && contact.workspaceId) {
                 io.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
-                io.to(`workspace-${contact.workspaceId}`).emit('task-updated', { ...contact.tasks[taskIndex], contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
+                // .toObject() pred spread — Mongoose subdoc {...subdoc} vracia
+                // interné _doc fields, NIE schema fields (cf. 729cf67).
+                io.to(`workspace-${contact.workspaceId}`).emit('task-updated', { ...contact.tasks[taskIndex].toObject(), contactId: contact._id.toString(), contactName: contact.name, source: 'contact' });
               }
               break;
             }
@@ -2067,8 +2069,10 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
           // Emit socket events
           if (io && contact.workspaceId) {
             io.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+            // .toObject() pred spread (cf. 729cf67) — bez toho frontend dostal
+            // _doc/$__ namiesto schema fields → task-updated nezahral UI update.
             io.to(`workspace-${contact.workspaceId}`).emit('task-updated', {
-              ...contact.tasks[taskIndex],
+              ...contact.tasks[taskIndex].toObject(),
               contactId: contact._id.toString(),
               contactName: contact.name,
               source: 'contact'
@@ -2590,8 +2594,9 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
       }
       if (pollingIo && contact.workspaceId) {
         pollingIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+        // .toObject() pred spread (cf. 729cf67).
         pollingIo.to(`workspace-${contact.workspaceId}`).emit('task-updated', {
-          ...contact.tasks[taskIndex],
+          ...contact.tasks[taskIndex].toObject(),
           contactId: contact._id.toString(),
           contactName: contact.name,
           source: 'contact'

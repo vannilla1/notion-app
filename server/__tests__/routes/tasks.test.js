@@ -261,12 +261,11 @@ describe('/api/tasks route', () => {
       expect(res.body.subtasks[0].id).not.toBe(res.body.subtasks[1].id);
     });
 
-    it('DOCUMENTED LIMITATION: task plan limit v POST nie je skutočne enforced', async () => {
-      // POZOR: `isLimited` / `maxTasks` premenné sa v POST handleri počítajú,
-      // ale count check CHÝBA — task sa vytvorí aj pri prekročení free plánu.
-      // Porovnaj s contacts.js kde plan limit funguje. Toto zostáva ako known
-      // gap — pridanie enforcement by bolo samostatná feature PR.
-      const docs = Array.from({ length: 10 }, (_, i) => ({
+    it('Free plan: 6. globálny task → 403 (limit enforced v b480662 + 737dd3f)', async () => {
+      // Predtým: task plan limit v POST nebol enforced — gap fixnutý v
+      // 737dd3f (global task bucket limit, Task.countDocuments check pred
+      // new Task save). Free limit je 5 globálnych tasks per workspace.
+      const docs = Array.from({ length: 5 }, (_, i) => ({
         workspaceId: ownerCtx.workspace._id,
         userId: ownerCtx.user._id,
         title: `Task ${i}`
@@ -276,11 +275,12 @@ describe('/api/tasks route', () => {
       const res = await request(app)
         .post('/api/tasks')
         .set(authHeader(ownerCtx.token))
-        .send({ title: 'Eleventh' });
+        .send({ title: 'Sixth' });
 
-      // Aktuálne správanie: task sa vytvorí. Dokumentujeme cez test.
-      expect(res.status).toBe(201);
-      expect(await Task.countDocuments({ workspaceId: ownerCtx.workspace._id })).toBe(11);
+      // Aktuálne správanie: 6. task blocked s 403 GLOBAL_TASK_LIMIT.
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('GLOBAL_TASK_LIMIT');
+      expect(await Task.countDocuments({ workspaceId: ownerCtx.workspace._id })).toBe(5);
     });
   });
 
@@ -349,6 +349,54 @@ describe('/api/tasks route', () => {
       const untouched = await Task.findById(foreign._id);
       expect(untouched.title).toBe('Stranger task');
       expect(untouched.priority).toBe('low');
+    });
+
+    /**
+     * REGRESSION TEST pre 729cf67 — Mongoose subdoc spread bug.
+     *
+     * Bug: `{...mongooseSubdoc}` enumeruje len interné _doc/$__ properties,
+     * NIE schema fields. Pri PUT /api/tasks/:id (contact path) sa kontakt
+     * tasky prepisovali cez `contact.tasks[i] = {...task, ...overrides}` —
+     * polia ako `files` a `notes` ktoré frontend NEPOSIELA v PUT body sa
+     * strácali pri každom edit-e.
+     *
+     * Tento test simuluje scenár: contact-embedded task má files[], PUT
+     * upraví iba title, files MUSIA zostať zachované. Bez .toObject() pred
+     * spread-om test zlyhá (files.length = 0 po update-e).
+     */
+    it('🐛 729cf67 regression: PUT contact task zachová files[] po edit-e (Mongoose subdoc spread bug)', async () => {
+      const taskId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const contact = await Contact.create({
+        workspaceId: ownerCtx.workspace._id,
+        userId: ownerCtx.user._id,
+        name: 'Test Contact',
+        tasks: [{
+          id: taskId,
+          title: 'Original Title',
+          priority: 'medium',
+          files: [
+            { id: 'file-uuid-1', originalName: 'photo1.jpg', mimetype: 'image/jpeg', size: 12345, uploadedAt: new Date() },
+            { id: 'file-uuid-2', originalName: 'photo2.jpg', mimetype: 'image/jpeg', size: 67890, uploadedAt: new Date() }
+          ]
+        }]
+      });
+
+      // PUT upraví IBA title — frontend neposiela files v body (typicky)
+      const res = await request(app)
+        .put(`/api/tasks/${taskId}`)
+        .set(authHeader(ownerCtx.token))
+        .send({ title: 'Updated Title', source: 'contact', contactId: contact._id.toString() });
+
+      expect(res.status).toBe(200);
+
+      // VERIFIKÁCIA: files[] MUSIA zostať zachované
+      const updated = await Contact.findById(contact._id);
+      const updatedTask = updated.tasks.find(t => t.id === taskId);
+      expect(updatedTask).toBeTruthy();
+      expect(updatedTask.title).toBe('Updated Title');
+      expect(updatedTask.files).toHaveLength(2);
+      expect(updatedTask.files[0].originalName).toBe('photo1.jpg');
+      expect(updatedTask.files[1].originalName).toBe('photo2.jpg');
     });
   });
 
