@@ -3375,4 +3375,169 @@ router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async 
   }
 });
 
+/**
+ * Recovery script pre stratenú metadata referenciu na orphaned ContactFile docs.
+ *
+ * Pozadie:
+ * Bug v PUT /api/tasks/:id (commit 729cf67 ho fixol) — Mongoose subdoc spread
+ * cez {...task} nevracal schema fields, takže pri každom edit-e tasku sa
+ * stratil files[] array. Binary data ostala v ContactFile collection (orphaned),
+ * len metadata link zmizla z Contact.tasks[].files[].
+ *
+ * Tento endpoint dokáže RE-LINKNUŤ orphaned ContactFile docs späť do task.files[]
+ * cez heuristiku: contactName + taskTitle regex + createdAt date window.
+ *
+ * Použitie:
+ *   POST /api/admin/recover-task-files
+ *   Body: { dryRun: true }   → vypíše čo by spravil, nemení nič
+ *   Body: { dryRun: false }  → reálne re-linkuje
+ *
+ * Recovery map je hardcoded pre user-reportovaný incident 2026-05-13. Pre iné
+ * incidenty treba endpoint upraviť alebo parametrizovať cez body.
+ */
+router.post('/recover-task-files', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Contact = require('../models/Contact');
+    const ContactFile = require('../models/ContactFile');
+    const dryRun = req.body?.dryRun !== false; // default true (safe)
+
+    // Mapovanie kontakt → task title regex (user incident 2026-05-13)
+    const RECOVERY_MAP = [
+      { contactName: 'Svidník',  taskTitleRegex: /SK\s*Kapišová/i,         label: 'Projekt SK Kapišová' },
+      { contactName: 'Snina',    taskTitleRegex: /SV\s*Nová\s*Sedlica/i,   label: 'Projekt SV Nová Sedlica' },
+      { contactName: 'Stropkov', taskTitleRegex: /SP\s*Breznica/i,         label: 'Projekt SP Breznica' },
+      { contactName: 'Sobrance', taskTitleRegex: /SO\s*Vyšné\s*Remety/i,   label: 'Projekt SO Vyšné Remety' }
+    ];
+
+    // Date window: 2026-05-13 ± 2 dni (incident reported on 13.5.2026)
+    const targetDate = new Date('2026-05-13T00:00:00Z');
+    const rangeMs = 2 * 24 * 60 * 60 * 1000;
+    const fromDate = new Date(targetDate.getTime() - rangeMs);
+    const toDate = new Date(targetDate.getTime() + rangeMs);
+
+    // Helper: detect mimetype z prvých Base64 bytes (magic numbers)
+    const detectMimetype = (base64) => {
+      const prefix = base64.slice(0, 12);
+      if (prefix.startsWith('/9j/')) return 'image/jpeg';        // FFD8FF
+      if (prefix.startsWith('iVBORw0KGgo')) return 'image/png';   // 89504E47
+      if (prefix.startsWith('R0lGOD')) return 'image/gif';        // GIF87/89
+      if (prefix.startsWith('UklGR')) return 'image/webp';        // RIFF WebP
+      if (prefix.startsWith('JVBERi0')) return 'application/pdf'; // %PDF
+      return 'application/octet-stream';
+    };
+    const extensionFor = (mime) => ({
+      'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+      'image/webp': 'webp', 'application/pdf': 'pdf'
+    }[mime] || 'bin');
+
+    const results = [];
+    let totalRelinkable = 0;
+
+    for (const mapping of RECOVERY_MAP) {
+      const result = {
+        ...mapping,
+        contactFound: false,
+        taskFound: false,
+        orphanedFiles: 0,
+        relinked: 0,
+        errors: []
+      };
+
+      // 1. Nájdi kontakt po mene (cross-workspace — admin endpoint má prístup k všetkým)
+      const contact = await Contact.findOne({ name: mapping.contactName });
+      if (!contact) {
+        result.errors.push(`Contact "${mapping.contactName}" not found in DB`);
+        results.push(result);
+        continue;
+      }
+      result.contactFound = true;
+      result.contactId = contact._id.toString();
+      result.workspaceId = contact.workspaceId.toString();
+
+      // 2. Nájdi task v contact.tasks podľa title regex
+      const task = (contact.tasks || []).find((t) => mapping.taskTitleRegex.test(t.title || ''));
+      if (!task) {
+        result.errors.push(`Task matching ${mapping.taskTitleRegex} not found in contact "${mapping.contactName}"`);
+        results.push(result);
+        continue;
+      }
+      result.taskFound = true;
+      result.taskId = task.id;
+      result.taskTitle = task.title;
+      result.currentFiles = (task.files || []).length;
+
+      // 3. Nájdi orphaned ContactFiles pre tento contact v dátumovom okne
+      const currentFileIds = new Set((task.files || []).map((f) => f.id));
+      const candidateContactFiles = await ContactFile.find({
+        contactId: contact._id,
+        createdAt: { $gte: fromDate, $lte: toDate }
+      }).select('fileId data createdAt').lean();
+
+      const orphaned = candidateContactFiles.filter((cf) => !currentFileIds.has(cf.fileId));
+      result.orphanedFiles = orphaned.length;
+
+      if (orphaned.length === 0) {
+        results.push(result);
+        continue;
+      }
+
+      // 4. Generuj metadata pre orphaned files
+      const newFileEntries = orphaned.map((cf, idx) => {
+        const mime = detectMimetype(cf.data || '');
+        const ext = extensionFor(mime);
+        // Approximate size: Base64 length × 0.75 (Base64 overhead = 33%)
+        const approxSize = Math.round((cf.data?.length || 0) * 0.75);
+        return {
+          id: cf.fileId,
+          originalName: `recovered-photo-${idx + 1}.${ext}`,
+          mimetype: mime,
+          size: approxSize,
+          uploadedAt: cf.createdAt
+        };
+      });
+
+      result.relinkable = newFileEntries.map((f) => ({
+        id: f.id,
+        originalName: f.originalName,
+        mimetype: f.mimetype,
+        size: f.size
+      }));
+      totalRelinkable += newFileEntries.length;
+
+      // 5. Apply (ak nie dryRun)
+      if (!dryRun) {
+        const taskIndex = contact.tasks.findIndex((t) => t.id === task.id);
+        if (taskIndex >= 0) {
+          if (!contact.tasks[taskIndex].files) contact.tasks[taskIndex].files = [];
+          contact.tasks[taskIndex].files.push(...newFileEntries);
+          contact.markModified('tasks');
+          await contact.save();
+          result.relinked = newFileEntries.length;
+          logger.info('[Recovery] Re-linked orphaned files', {
+            contactName: mapping.contactName,
+            taskTitle: task.title,
+            count: newFileEntries.length
+          });
+        }
+      }
+
+      results.push(result);
+    }
+
+    res.json({
+      dryRun,
+      targetDate: targetDate.toISOString(),
+      window: `${fromDate.toISOString()} → ${toDate.toISOString()}`,
+      totalRelinkable,
+      results,
+      message: dryRun
+        ? `Dry-run: nájdených ${totalRelinkable} orphaned files. Spusti znova s dryRun:false pre reálnu obnovu.`
+        : `Recovery dokončené: ${totalRelinkable} files re-linknutých späť do projektov.`
+    });
+  } catch (error) {
+    logger.error('[Recovery] Error', { error: error.message, stack: error.stack });
+    res.status(500).json({ message: 'Chyba pri recovery', error: error.message });
+  }
+});
+
 module.exports = router;
