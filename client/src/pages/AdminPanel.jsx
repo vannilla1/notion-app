@@ -4655,6 +4655,7 @@ function AffiliatesSubTab() {
   const [loading, setLoading] = useState(true);
   const [showEnrollForm, setShowEnrollForm] = useState(false);
   const [enrollEmail, setEnrollEmail] = useState('');
+  const [enrollName, setEnrollName] = useState('');   // voliteľné — pre externých affiliateov bez CRM účtu
   const [enrollIban, setEnrollIban] = useState('');
   const [enrollBank, setEnrollBank] = useState('');
   const [enrollNote, setEnrollNote] = useState('');
@@ -4676,14 +4677,18 @@ function AffiliatesSubTab() {
     e.preventDefault();
     setEnrollError('');
     try {
-      await adminApi.post('/api/admin/affiliates/enroll', {
+      const r = await adminApi.post('/api/admin/affiliates/enroll', {
         email: enrollEmail.trim(),
+        name: enrollName.trim() || undefined,  // backend si vyžiada iba pri vytváraní externého
         payoutIban: enrollIban.trim(),
         payoutBankName: enrollBank.trim(),
         payoutNote: enrollNote.trim()
       });
+      if (r.data?.createdNew) {
+        alert(`✅ Externý affiliate "${enrollEmail}" bol vytvorený (bez CRM účtu). Provízie môžeš normálne sledovať.`);
+      }
       setShowEnrollForm(false);
-      setEnrollEmail(''); setEnrollIban(''); setEnrollBank(''); setEnrollNote('');
+      setEnrollEmail(''); setEnrollName(''); setEnrollIban(''); setEnrollBank(''); setEnrollNote('');
       await load();
     } catch (err) {
       setEnrollError(err.response?.data?.message || 'Chyba pri pridávaní');
@@ -4722,9 +4727,18 @@ function AffiliatesSubTab() {
 
       {showEnrollForm && (
         <form onSubmit={handleEnroll} style={{ padding: 16, background: 'var(--bg-secondary)', borderRadius: 8, marginBottom: 16 }}>
+          <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+            <strong>Tip:</strong> Ak má užívateľ účet v Prpl CRM, stačí vyplniť <em>Email</em>.
+            Ak je to externý partner bez účtu, vyplň aj <em>Meno</em> — vytvoríme mu „shadow" účet
+            (bez prihlásenia). Keď si neskôr nastaví heslo cez „Zabudnuté heslo" alebo sa prihlási
+            cez Google/Apple, účet sa automaticky prepojí.
+          </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            <input type="email" required placeholder="Email užívateľa (musí existovať)"
+            <input type="email" required placeholder="Email užívateľa (povinné)"
               value={enrollEmail} onChange={(e) => setEnrollEmail(e.target.value)}
+              className="form-input" />
+            <input type="text" placeholder="Meno (povinné iba ak nemá CRM účet)"
+              value={enrollName} onChange={(e) => setEnrollName(e.target.value)}
               className="form-input" />
             <input type="text" placeholder="IBAN (voliteľné)"
               value={enrollIban} onChange={(e) => setEnrollIban(e.target.value)}
@@ -4734,7 +4748,7 @@ function AffiliatesSubTab() {
               className="form-input" />
             <input type="text" placeholder="Poznámka (DIČ, IČO, kontakt...)"
               value={enrollNote} onChange={(e) => setEnrollNote(e.target.value)}
-              className="form-input" />
+              className="form-input" style={{ gridColumn: '1 / 3' }} />
           </div>
           {enrollError && <div style={{ color: '#dc2626', marginTop: 8, fontSize: 13 }}>{enrollError}</div>}
           <div style={{ marginTop: 8 }}>
@@ -4829,10 +4843,10 @@ function AffiliatesSubTab() {
         <p><strong>Affiliate program</strong> — partneri propagujú Prpl CRM a dostávajú províziu z každej platby pod ich kódom (recurring model).</p>
         <h4>Ako pridať affiliateho:</h4>
         <ol>
-          <li>User musí byť už registrovaný v Prpl CRM</li>
-          <li>Klikni „+ Pridať affiliateho", zadaj jeho email + IBAN + banku</li>
+          <li><strong>Existujúci CRM user</strong> — klikni „+ Pridať affiliateho", zadaj jeho <em>email</em> + IBAN + banku. Meno môžeš nechať prázdne.</li>
+          <li><strong>Externý partner bez CRM účtu</strong> — zadaj <em>email + meno</em>. Systém mu vytvorí „shadow" účet (bez hesla, nemôže sa prihlásiť). Keď si neskôr nastaví heslo cez „Zabudnuté heslo" flow alebo sa prihlási cez Google/Apple, účet sa automaticky prepojí.</li>
           <li>Vytvor mu promo kód v záložke <strong>Promo kódy</strong> (set referrerId = tento user, commissionPercent = napr. 10)</li>
-          <li>Affiliate svoj kód zdieľa s potenciálnymi zákazníkmi</li>
+          <li>Affiliate svoj kód zdieľa s potenciálnymi zákazníkmi (cez LinkedIn / email / blog)</li>
         </ol>
         <h4>Životný cyklus provízie:</h4>
         <ul>

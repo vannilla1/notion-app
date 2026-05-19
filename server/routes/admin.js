@@ -3645,14 +3645,55 @@ router.get('/affiliates', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // POST enroll usera do affiliate programu (admin akcia).
-// Body: { email | userId, payoutIban?, payoutBankName?, payoutNote? }
+// Dva režimy:
+//   1) Existujúci CRM user — nájde sa podľa email/userId, len sa flag-uje
+//      ako affiliate.
+//   2) Externý affiliate (nemá účet v CRM) — vytvorí sa nový User doc bez
+//      password (analógia s OAuth-only userov). Tento User sa nemôže
+//      prihlásiť, kým si nenastaví heslo cez „Zabudnuté heslo" flow alebo
+//      sa neprihlási cez OAuth (Google/Apple) — vtedy sa automaticky
+//      „skonvertuje" na plnohodnotného usera.
+// Body: { email, name?, userId?, payoutIban?, payoutBankName?, payoutNote? }
+//   - email povinné vo všetkých prípadoch
+//   - name povinné pri vytváraní externého affiliateho (slúži ako username)
+//   - userId voliteľné — ak chceš targetovať konkrétny existujúci User._id
 router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { email, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
-    const user = userId
+    const { email, name, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
+    let user = userId
       ? await User.findById(userId)
       : await User.findOne({ email: (email || '').toLowerCase().trim() });
-    if (!user) return res.status(404).json({ message: 'User nenájdený' });
+
+    let createdNew = false;
+    if (!user) {
+      // Externý affiliate — neexistujúci v CRM. Potrebujeme aspoň name a email.
+      const cleanEmail = (email || '').toLowerCase().trim();
+      const cleanName = (name || '').trim();
+      if (!cleanEmail) return res.status(400).json({ message: 'Email je povinný' });
+      if (!cleanName) {
+        return res.status(400).json({
+          message: 'User s týmto emailom neexistuje v CRM. Pre vytvorenie externého affiliateho zadaj aj „Meno" (name).',
+          code: 'NEED_NAME_FOR_EXTERNAL'
+        });
+      }
+      // Generuj unique username z mena (handle duplicates)
+      const baseUsername = cleanName.replace(/\s+/g, '_').slice(0, 40) || cleanEmail.split('@')[0];
+      let candidateUsername = baseUsername;
+      let suffix = 1;
+      while (await User.findOne({ username: candidateUsername }).select('_id').lean()) {
+        candidateUsername = `${baseUsername}_${suffix++}`;
+        if (suffix > 100) throw new Error('Username collision unresolvable');
+      }
+      user = new User({
+        username: candidateUsername,
+        email: cleanEmail,
+        password: null, // bez hesla — nemôže sa prihlásiť cez password flow
+        // Random color z palette (pre konzistenciu s register flow)
+        color: '#6D28D9'
+      });
+      createdNew = true;
+      logger.info('[Admin] Created external affiliate user', { email: cleanEmail, username: candidateUsername });
+    }
 
     user.affiliate = user.affiliate || {};
     user.affiliate.enrolled = true;
@@ -3663,19 +3704,22 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
     if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote;
     await user.save();
 
-    logger.info('[Admin] Affiliate enrolled', { userId: user._id.toString(), email: user.email });
+    logger.info('[Admin] Affiliate enrolled', { userId: user._id.toString(), email: user.email, createdNew });
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
       action: 'admin.affiliate_enrolled', category: 'admin',
       targetType: 'user', targetId: user._id.toString(), targetName: user.username,
-      details: { email: user.email },
+      details: { email: user.email, createdNew },
       ipAddress: req.ip, userAgent: req.get('user-agent')
     });
 
-    res.json({ success: true, affiliate: user.affiliate });
+    res.json({ success: true, affiliate: user.affiliate, userId: user._id, createdNew });
   } catch (error) {
-    logger.error('[Admin] Affiliate enroll error', { error: error.message });
-    res.status(500).json({ message: 'Chyba servera' });
+    logger.error('[Admin] Affiliate enroll error', { error: error.message, stack: error.stack });
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'User s týmto emailom alebo username už existuje', code: 'DUPLICATE' });
+    }
+    res.status(500).json({ message: 'Chyba servera', error: error.message });
   }
 });
 
