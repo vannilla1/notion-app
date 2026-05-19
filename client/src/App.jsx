@@ -26,6 +26,7 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const Messages = lazy(() => import('./pages/Messages'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
+const UserAffiliate = lazy(() => import('./pages/UserAffiliate'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminPanel = lazy(() => import('./pages/AdminPanel'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
@@ -486,6 +487,13 @@ function AppContent() {
               ? (isIosNativeApp() ? <Navigate to="/app" replace /> : <BillingPage />)
               : <Navigate to="/login" />
           }
+        />
+        {/* Affiliate dashboard — visible iba pre prihlásených CRM userov.
+            UserAffiliate sám checkuje cez /api/affiliate/me či je enrolled,
+            inak ukáže CTA na kontakt support@. */}
+        <Route
+          path="/app/affiliate"
+          element={isAuthenticated ? <UserAffiliate /> : <Navigate to="/login" />}
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />

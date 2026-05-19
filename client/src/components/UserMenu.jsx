@@ -1456,6 +1456,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             promo kódy) pre digital subscriptions konzumované v iOS appke. User v iOS
             appke spravuje plán cez webovú verziu na prplcrm.eu.
           */}
+          {/* Affiliate dashboard — visible iba ak user.affiliate.enrolled.
+              Externý affiliate (shadow user bez prihlásenia) toto nikdy nevidí
+              lebo nemôže byť prihlásený. CRM-affiliate userovi sa zobrazí. */}
+          {user?.affiliate?.enrolled && (
+            <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/affiliate'); }}>
+              <span className="menu-icon">🤝</span>
+              Affiliate program
+            </button>
+          )}
           {!isIosNativeApp() && (
             <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
               <span className="menu-icon">💳</span>
