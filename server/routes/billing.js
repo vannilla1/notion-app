@@ -524,6 +524,14 @@ module.exports.handleWebhook = async (req, res) => {
         break;
       }
 
+      // Affiliate commission revocation — keď customer refundoval platbu,
+      // provízia ktorú affiliate dostal sa zruší (ak ešte nebola paid).
+      case 'charge.refunded': {
+        const charge = event.data.object;
+        await handleChargeRefunded(charge);
+        break;
+      }
+
       default:
         logger.debug('[Stripe Webhook] Unhandled event type', { type: event.type });
     }
@@ -668,6 +676,149 @@ async function handleInvoicePaid(invoice) {
   logger.info('[Stripe Webhook] Invoice paid — paidUntil updated', {
     userId: user._id.toString(),
     paidUntil: user.subscription.paidUntil
+  });
+
+  // ─── Affiliate commission creation ───────────────────────────────────
+  // Recurring commission model: pre KAŽDÚ úspešnú platbu pod affiliate
+  // kódom vznikne nový Commission row. User decision 2026-05-19.
+  await createCommissionIfReferred(invoice, stripeSub, user).catch((err) => {
+    // Commission creation chyby nesmú zlomiť invoice processing (paidUntil
+    // update už úspešne prebehol). Logujeme, ďalej posúvame.
+    logger.error('[Affiliate] createCommissionIfReferred failed', {
+      error: err.message,
+      invoiceId: invoice.id,
+      userId: user._id.toString()
+    });
+  });
+}
+
+/**
+ * Vytvorí Commission doc pre referrera, ak je subscription pod promo kódom
+ * s commissionPercent > 0. Idempotentné cez stripeInvoiceId UNIQUE index —
+ * Stripe webhook retries nezduplikujú províziu.
+ */
+async function createCommissionIfReferred(invoice, stripeSub, payer) {
+  // Stripe API: subscription.discount.promotion_code je ID promotion codu
+  // (formát 'promo_...'), alebo subscription.discount.coupon.id ('coupon_...').
+  // Promotion code je high-level wrapper okolo Couponu — preferujeme ho lebo
+  // promotion code je customer-facing 'JOHN10' string, coupon je vnútorný.
+  const discount = stripeSub.discount;
+  if (!discount) return; // žiadny kód aplikovaný → žiadna provízia
+
+  const promotionCodeId = discount.promotion_code || discount.coupon?.id;
+  if (!promotionCodeId) return;
+
+  // Lookup nášho PromoCode podľa Stripe promotion code / coupon ID
+  const PromoCode = require('../models/PromoCode');
+  const promo = await PromoCode.findOne({
+    $or: [
+      { stripePromotionCodeId: promotionCodeId },
+      { stripeCouponId: promotionCodeId }
+    ]
+  });
+  if (!promo) {
+    logger.warn('[Affiliate] No PromoCode matching Stripe discount', { promotionCodeId });
+    return;
+  }
+
+  // Referrer + percentuálna provízia musia byť obe nastavené
+  if (!promo.referrerId || !promo.commissionPercent || promo.commissionPercent <= 0) {
+    return; // regular admin discount code, žiadna provízia
+  }
+
+  // Anti self-referral: payer nesmie byť referrer
+  if (promo.referrerId.toString() === payer._id.toString()) {
+    logger.warn('[Affiliate] Self-referral blocked', {
+      userId: payer._id.toString(),
+      promoCode: promo.code
+    });
+    return;
+  }
+
+  // Stripe invoice amounts sú v centoch. amount_paid = už po zľave, čo presne
+  // chceme (provízia z platby po zľave, user decision 2026-05-19).
+  const paymentAmount = (invoice.amount_paid || 0) / 100;
+  if (paymentAmount <= 0) return; // skip 0€ platby (trials, atď.)
+
+  const commissionAmount = Math.round(paymentAmount * (promo.commissionPercent / 100) * 100) / 100;
+
+  // 30-day refund window pred eligible-to-pay statusom
+  const REFUND_WINDOW_DAYS = 30;
+  const paymentDate = new Date(invoice.status_transitions?.paid_at
+    ? invoice.status_transitions.paid_at * 1000
+    : Date.now());
+  const eligibleAfter = new Date(paymentDate.getTime() + REFUND_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+  const Commission = require('../models/Commission');
+  try {
+    const commission = await Commission.create({
+      promoCodeId: promo._id,
+      referrerId: promo.referrerId,
+      referredUserId: payer._id,
+      stripeInvoiceId: invoice.id,
+      stripeSubscriptionId: invoice.subscription,
+      paymentAmount,
+      commissionAmount,
+      commissionPercent: promo.commissionPercent,
+      status: 'pending',
+      paymentDate,
+      eligibleAfter,
+      plan: payer.subscription?.plan || null,
+      period: payer.subscription?.billingPeriod || null
+    });
+    logger.info('[Affiliate] Commission created', {
+      commissionId: commission._id.toString(),
+      referrerId: promo.referrerId.toString(),
+      amount: commissionAmount,
+      eligibleAfter
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      // Duplicate stripeInvoiceId — webhook retry, idempotentne ignorujeme
+      logger.debug('[Affiliate] Commission already exists for invoice (idempotent skip)', {
+        invoiceId: invoice.id
+      });
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Stripe refund webhook handler. Ak existuje Commission pre refundovanú
+ * platbu, prepneme jej status na 'revoked' (pokiaľ ešte nebola 'paid').
+ * Eligible/pending commissions sa anulujú — affiliate dostal províziu z
+ * platby ktorá sa stornovala.
+ */
+async function handleChargeRefunded(charge) {
+  // charge.invoice obsahuje invoice ID (ak charge bol pre invoice).
+  // Pri subscription invoice refunde to máme — pri ad-hoc charge refunde nie.
+  if (!charge.invoice) return;
+
+  const Commission = require('../models/Commission');
+  const commission = await Commission.findOne({ stripeInvoiceId: charge.invoice });
+  if (!commission) return; // žiadna commission pre tento invoice
+
+  if (commission.status === 'paid') {
+    // Provízia už bola vyplatená affiliateovi — manual claw-back treba spraviť
+    // mimo Stripe. Logujeme warning aby admin vedel.
+    logger.warn('[Affiliate] Refund of already-paid commission — manual claw-back needed', {
+      commissionId: commission._id.toString(),
+      referrerId: commission.referrerId.toString(),
+      amount: commission.commissionAmount,
+      invoiceId: charge.invoice
+    });
+    return;
+  }
+
+  if (commission.status === 'revoked') return; // už revoked
+
+  commission.status = 'revoked';
+  commission.notes = (commission.notes || '') + `\n[${new Date().toISOString()}] Auto-revoked: Stripe charge ${charge.id} refunded`;
+  await commission.save();
+  logger.info('[Affiliate] Commission revoked due to refund', {
+    commissionId: commission._id.toString(),
+    chargeId: charge.id
   });
 }
 

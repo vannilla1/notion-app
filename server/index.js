@@ -549,6 +549,13 @@ server.listen(PORT, () => {
         } catch (err) {
           logger.error('Failed to start health monitor', { error: err.message });
         }
+        // Commission scheduler — denný job, prepína affiliate commissions
+        // zo stavu 'pending' → 'eligible' po uplynutí 30-day refund window.
+        try {
+          require('./jobs/commissionScheduler').start();
+        } catch (err) {
+          logger.error('Failed to start commission scheduler', { error: err.message });
+        }
       }, 60000);
 
     }
