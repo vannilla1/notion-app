@@ -104,7 +104,28 @@ const promoCodeSchema = new mongoose.Schema({
     redeemedAt: { type: Date, default: Date.now },
     plan: String,
     period: String
-  }]
+  }],
+  // ───────────────────────────────────────────────────────────────────
+  // AFFILIATE FIELDS (referral program)
+  // ───────────────────────────────────────────────────────────────────
+  // Owner of this code in affiliate program. Pri každej Stripe payment
+  // pod týmto kódom (recurring → každá platba) vznikne Commission row
+  // pre tohto usera. Ak null → admin-created code (regular discount,
+  // žiadna provízia).
+  referrerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+    index: true
+  },
+  // % provízie z platby (po zľave) pre referrera. 0 = no commission
+  // (regular discount code). Typicky 10%.
+  commissionPercent: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100
+  }
 }, {
   timestamps: true,
   toJSON: {

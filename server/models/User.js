@@ -180,6 +180,28 @@ const userSchema = new mongoose.Schema({
     pushOverdue:      { type: Boolean, default: false }, // po termíne
     pushNewMember:    { type: Boolean, default: false }  // nový člen workspace
   },
+  // ─────────────────────────────────────────────────────────────────────
+  // Affiliate program — referral commission system (2026-05-19)
+  // User môže byť prihlásený do affiliate programu (manuálne adminom alebo
+  // self-signup). Admin mu vytvára PromoCode-y s referrerId = tento user.
+  // Pri každej Stripe platbe pod kódom (RECURRING) vznikne Commission doc.
+  // Vyplácanie: manuálne bank prevody, min threshold 20 EUR per payout.
+  // ─────────────────────────────────────────────────────────────────────
+  affiliate: {
+    enrolled:       { type: Boolean, default: false, index: true },
+    enrolledAt:     { type: Date, default: null },
+    // Self-signup → pending → admin approves → enrolled=true
+    status:         { type: String, enum: ['none', 'pending', 'active', 'disabled'], default: 'none' },
+    // Bank info pre vyplácanie provízií. IBAN format validation v route handli.
+    payoutIban:     { type: String, default: '' },
+    payoutBankName: { type: String, default: '' },
+    payoutNote:     { type: String, default: '' }, // poznámka pre admin (DIČ, IČO, kontakt)
+    // Snapshot total earnings — denormalizovaný counter, updatuje sa pri
+    // Commission status changes. Slúži pre rýchle dashboard renderovanie
+    // bez aggregations. Authoritative zdroj je vždy Commission collection.
+    totalEarnedEur: { type: Number, default: 0 },
+    totalPaidEur:   { type: Number, default: 0 }
+  },
   // Password reset flow — token sa v DB ukladá ako SHA-256 hash, nie plain.
   // Plain token vidí len user v emaili a v URL query stringu.
   resetPasswordTokenHash: {
