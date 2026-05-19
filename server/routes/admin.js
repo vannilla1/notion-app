@@ -2169,6 +2169,7 @@ router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => 
   try {
     const codes = await PromoCode.find()
       .sort({ createdAt: -1 })
+      .populate('referrerId', 'username email') // affiliate enrich (NEW)
       .lean();
     res.json(codes);
   } catch (error) {
@@ -2184,7 +2185,11 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       code, name, type, value,
       duration, durationInMonths,
       validForPlans, validForPeriods,
-      maxUses, maxUsesPerUser, expiresAt
+      maxUses, maxUsesPerUser, expiresAt,
+      // Affiliate fields (NEW 2026-05-19): ak je referrerId set, kód funguje
+      // ako affiliate kód → každá Stripe platba s týmto kódom generuje
+      // Commission row pre tohto usera (recurring model).
+      referrerId, commissionPercent
     } = req.body;
 
     // Validate required fields
@@ -2309,6 +2314,25 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       }
     }
 
+    // Validácia affiliate polí — ak je referrerId set, user musí byť enrolled
+    // v affiliate programe (User.affiliate.enrolled = true). commissionPercent
+    // musí byť 1-100 (0 = "ignore affiliate fields"). Anti-fraud check.
+    let validReferrerId = null;
+    let validCommissionPercent = 0;
+    if (referrerId) {
+      const refUser = await User.findById(referrerId).select('affiliate.enrolled').lean();
+      if (!refUser) return res.status(400).json({ message: 'Referrer user nenájdený' });
+      if (!refUser.affiliate?.enrolled) {
+        return res.status(400).json({ message: 'Referrer nie je prihlásený v affiliate programe (User.affiliate.enrolled=false)' });
+      }
+      validReferrerId = referrerId;
+      const cp = Number(commissionPercent);
+      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
+        return res.status(400).json({ message: 'commissionPercent musí byť 1-100 pri affiliate kódoch' });
+      }
+      validCommissionPercent = cp;
+    }
+
     const promoCode = new PromoCode({
       code: code.toUpperCase(),
       name,
@@ -2323,7 +2347,9 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       stripeCouponId,
       stripePromotionCodeId,
-      createdBy: req.adminUser.username
+      createdBy: req.adminUser.username,
+      referrerId: validReferrerId,
+      commissionPercent: validCommissionPercent
     });
 
     await promoCode.save();
@@ -3537,6 +3563,323 @@ router.post('/recover-task-files', authenticateToken, requireAdmin, async (req, 
   } catch (error) {
     logger.error('[Recovery] Error', { error: error.message, stack: error.stack });
     res.status(500).json({ message: 'Chyba pri recovery', error: error.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// AFFILIATE PROGRAM (Fáza 4-6: 2026-05-19)
+// ════════════════════════════════════════════════════════════════════
+// 9 endpointov pre 3 admin tab-y:
+//   /affiliates           — Tab 1: zoznam affiliateov + enroll/disable
+//   /affiliates/:userId   — detail + update payout info
+//   /promo-codes-affiliate— Tab 2 (rozšírenie existujúcich PromoCode endpointov)
+//   /commissions          — Tab 3: payout table + mark-paid + bulk pay
+//   /commissions/export   — CSV export pre účtovníctvo
+
+// ─── Tab 1: AFFILIATES ──────────────────────────────────────────────
+// GET zoznam affiliateov + aggregované totals z Commission collection.
+router.get('/affiliates', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Commission = require('../models/Commission');
+    // Affiliate = User s affiliate.enrolled=true ALEBO s pending status (na approve)
+    const users = await User.find({
+      $or: [
+        { 'affiliate.enrolled': true },
+        { 'affiliate.status': { $in: ['pending', 'active', 'disabled'] } }
+      ]
+    }).select('username email affiliate createdAt').lean();
+
+    // Per-user totals z Commission collection (authoritative — User.affiliate
+    // counters sú denormalized, môžu byť mierne neaktuálne)
+    const userIds = users.map((u) => u._id);
+    const totalsAgg = await Commission.aggregate([
+      { $match: { referrerId: { $in: userIds } } },
+      { $group: {
+          _id: { referrerId: '$referrerId', status: '$status' },
+          total: { $sum: '$commissionAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Tiež počet kódov per user
+    const PromoCode = require('../models/PromoCode');
+    const codesAgg = await PromoCode.aggregate([
+      { $match: { referrerId: { $in: userIds } } },
+      { $group: { _id: '$referrerId', count: { $sum: 1 } } }
+    ]);
+    const codesMap = new Map(codesAgg.map((c) => [c._id.toString(), c.count]));
+
+    const totalsMap = new Map(); // userId → { pending, eligible, paid, revoked, signups }
+    for (const t of totalsAgg) {
+      const uid = t._id.referrerId.toString();
+      if (!totalsMap.has(uid)) {
+        totalsMap.set(uid, { pending: 0, eligible: 0, paid: 0, revoked: 0, signups: 0 });
+      }
+      totalsMap.get(uid)[t._id.status] = Math.round(t.total * 100) / 100;
+      totalsMap.get(uid).signups += t.count;
+    }
+
+    const affiliates = users.map((u) => {
+      const totals = totalsMap.get(u._id.toString()) || { pending: 0, eligible: 0, paid: 0, revoked: 0, signups: 0 };
+      return {
+        id: u._id.toString(),
+        username: u.username,
+        email: u.email,
+        status: u.affiliate?.status || 'none',
+        enrolled: !!u.affiliate?.enrolled,
+        enrolledAt: u.affiliate?.enrolledAt,
+        payoutIban: u.affiliate?.payoutIban || '',
+        payoutBankName: u.affiliate?.payoutBankName || '',
+        payoutNote: u.affiliate?.payoutNote || '',
+        codesCount: codesMap.get(u._id.toString()) || 0,
+        totals
+      };
+    });
+
+    res.json({ affiliates });
+  } catch (error) {
+    logger.error('[Admin Affiliates] List error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST enroll usera do affiliate programu (admin akcia).
+// Body: { email | userId, payoutIban?, payoutBankName?, payoutNote? }
+router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
+    const user = userId
+      ? await User.findById(userId)
+      : await User.findOne({ email: (email || '').toLowerCase().trim() });
+    if (!user) return res.status(404).json({ message: 'User nenájdený' });
+
+    user.affiliate = user.affiliate || {};
+    user.affiliate.enrolled = true;
+    user.affiliate.status = 'active';
+    user.affiliate.enrolledAt = user.affiliate.enrolledAt || new Date();
+    if (payoutIban !== undefined) user.affiliate.payoutIban = payoutIban;
+    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName;
+    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote;
+    await user.save();
+
+    logger.info('[Admin] Affiliate enrolled', { userId: user._id.toString(), email: user.email });
+    auditService.logAction({
+      userId: req.user.id, username: req.user.username, email: req.user.email,
+      action: 'admin.affiliate_enrolled', category: 'admin',
+      targetType: 'user', targetId: user._id.toString(), targetName: user.username,
+      details: { email: user.email },
+      ipAddress: req.ip, userAgent: req.get('user-agent')
+    });
+
+    res.json({ success: true, affiliate: user.affiliate });
+  } catch (error) {
+    logger.error('[Admin] Affiliate enroll error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// PUT update affiliate payout info + status (admin akcia)
+router.put('/affiliates/:userId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { payoutIban, payoutBankName, payoutNote, status } = req.body || {};
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'User nenájdený' });
+    user.affiliate = user.affiliate || {};
+    if (payoutIban !== undefined) user.affiliate.payoutIban = payoutIban;
+    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName;
+    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote;
+    if (status && ['active', 'pending', 'disabled'].includes(status)) {
+      user.affiliate.status = status;
+      user.affiliate.enrolled = (status === 'active');
+    }
+    await user.save();
+    res.json({ success: true, affiliate: user.affiliate });
+  } catch (error) {
+    logger.error('[Admin] Affiliate update error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─── Tab 3: COMMISSIONS ─────────────────────────────────────────────
+// GET filtrovaný zoznam commissions s populate užívateľov a kódov.
+router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Commission = require('../models/Commission');
+    const PromoCode = require('../models/PromoCode');
+    const { status, referrerId, from, to, search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
+
+    const q = {};
+    if (status) q.status = status;
+    if (referrerId) q.referrerId = referrerId;
+    if (from || to) {
+      q.paymentDate = {};
+      if (from) q.paymentDate.$gte = new Date(from);
+      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    }
+
+    let commissions = await Commission.find(q)
+      .sort({ paymentDate: -1 })
+      .populate('referrerId', 'username email')
+      .populate('referredUserId', 'username email')
+      .populate('promoCodeId', 'code name')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+    const total = await Commission.countDocuments(q);
+
+    // Search filter (post-fetch — small dataset, akceptovateľné)
+    if (search) {
+      const s = String(search).toLowerCase();
+      commissions = commissions.filter((c) =>
+        (c.referrerId?.username || '').toLowerCase().includes(s) ||
+        (c.referredUserId?.username || '').toLowerCase().includes(s) ||
+        (c.promoCodeId?.code || '').toLowerCase().includes(s)
+      );
+    }
+
+    // Aggregated summary pre header (nezávislé od page-u)
+    const summary = await Commission.aggregate([
+      { $match: q },
+      { $group: { _id: '$status', total: { $sum: '$commissionAmount' }, count: { $sum: 1 } } }
+    ]);
+    const totals = { pending: 0, eligible: 0, paid: 0, revoked: 0 };
+    const counts = { pending: 0, eligible: 0, paid: 0, revoked: 0 };
+    for (const s of summary) {
+      totals[s._id] = Math.round(s.total * 100) / 100;
+      counts[s._id] = s.count;
+    }
+
+    res.json({ commissions, total, page, limit, totals, counts });
+  } catch (error) {
+    logger.error('[Admin Commissions] List error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST mark single commission as paid
+router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Commission = require('../models/Commission');
+    const { paidMethod, paidReference, notes } = req.body || {};
+    const c = await Commission.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: 'Commission nenájdené' });
+    if (c.status !== 'eligible') {
+      return res.status(400).json({ message: `Commission je v stave "${c.status}" — možno označiť ako paid iba stav "eligible"` });
+    }
+    c.status = 'paid';
+    c.paidAt = new Date();
+    c.paidMethod = paidMethod || 'bank';
+    c.paidReference = paidReference || '';
+    if (notes) c.notes = (c.notes || '') + `\n[${new Date().toISOString()}] ${notes}`;
+    await c.save();
+
+    // Aktualizuj User.affiliate denormalized counter
+    await User.findByIdAndUpdate(c.referrerId, {
+      $inc: { 'affiliate.totalPaidEur': c.commissionAmount }
+    });
+
+    res.json({ success: true, commission: c });
+  } catch (error) {
+    logger.error('[Admin] Mark paid error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// POST bulk pay — pre konkrétneho affiliateho označí všetky eligible
+// commissions ako paid. Min threshold 20 EUR (user decision 2026-05-19).
+router.post('/commissions/bulk-pay', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Commission = require('../models/Commission');
+    const { referrerId, paidReference, paidMethod, notes } = req.body || {};
+    if (!referrerId) return res.status(400).json({ message: 'referrerId je povinné' });
+
+    const eligible = await Commission.find({ referrerId, status: 'eligible' });
+    const totalAmount = eligible.reduce((sum, c) => sum + c.commissionAmount, 0);
+
+    const MIN_PAYOUT_EUR = 20;
+    if (totalAmount < MIN_PAYOUT_EUR) {
+      return res.status(400).json({
+        message: `Eligible suma €${totalAmount.toFixed(2)} je pod minimom €${MIN_PAYOUT_EUR}. Počkajte na ďalšie commissions.`,
+        eligibleAmount: totalAmount,
+        minRequired: MIN_PAYOUT_EUR
+      });
+    }
+
+    const now = new Date();
+    await Commission.updateMany(
+      { _id: { $in: eligible.map((c) => c._id) } },
+      {
+        $set: {
+          status: 'paid',
+          paidAt: now,
+          paidMethod: paidMethod || 'bank',
+          paidReference: paidReference || '',
+          notes: notes ? `\n[${now.toISOString()}] ${notes}` : ''
+        }
+      }
+    );
+
+    await User.findByIdAndUpdate(referrerId, {
+      $inc: { 'affiliate.totalPaidEur': Math.round(totalAmount * 100) / 100 }
+    });
+
+    res.json({ success: true, paidCount: eligible.length, paidAmount: Math.round(totalAmount * 100) / 100 });
+  } catch (error) {
+    logger.error('[Admin] Bulk pay error', { error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// GET CSV export pre účtovníctvo
+router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Commission = require('../models/Commission');
+    const { status, referrerId, from, to } = req.query;
+    const q = {};
+    if (status) q.status = status;
+    if (referrerId) q.referrerId = referrerId;
+    if (from || to) {
+      q.paymentDate = {};
+      if (from) q.paymentDate.$gte = new Date(from);
+      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    }
+    const rows = await Commission.find(q)
+      .sort({ paymentDate: -1 })
+      .populate('referrerId', 'username email')
+      .populate('referredUserId', 'username email')
+      .populate('promoCodeId', 'code')
+      .lean();
+
+    const esc = (v) => {
+      if (v == null) return '';
+      const s = String(v);
+      if (/^[=+\-@\t\r]/.test(s)) return `'${s.replace(/"/g, '""')}"`; // CSV injection protection
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const header = ['PaymentDate', 'Affiliate', 'AffiliateEmail', 'Code', 'Customer', 'Plan', 'Period',
+                    'PaymentAmount', 'CommissionPercent', 'CommissionAmount', 'Status',
+                    'EligibleAfter', 'PaidAt', 'PaidMethod', 'PaidReference'].join(',');
+    const lines = rows.map((c) => [
+      new Date(c.paymentDate).toISOString().slice(0, 10),
+      c.referrerId?.username, c.referrerId?.email,
+      c.promoCodeId?.code, c.referredUserId?.username, c.plan, c.period,
+      c.paymentAmount, c.commissionPercent, c.commissionAmount, c.status,
+      c.eligibleAfter ? new Date(c.eligibleAfter).toISOString().slice(0, 10) : '',
+      c.paidAt ? new Date(c.paidAt).toISOString().slice(0, 10) : '',
+      c.paidMethod || '', c.paidReference || ''
+    ].map(esc).join(','));
+
+    const csv = '﻿' + header + '\n' + lines.join('\n'); // BOM pre Excel UTF-8
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="commissions-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    logger.error('[Admin] CSV export error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
 
