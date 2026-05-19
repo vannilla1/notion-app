@@ -5136,13 +5136,17 @@ function PromoCodesTab() {
   const [filterStatus, setFilterStatus] = useState(''); // '' | 'active' | 'inactive' | 'expired' | 'exhausted' | 'stripe'
   const [sortBy, setSortBy] = useState('createdAt'); // createdAt | usedCount | value | expiresAt
 
-  // Form state
+  // Form state — vrátane affiliate polí (referrerId + commissionPercent).
+  // Ak referrerId zostáva '', kód je admin-generic bez provízie.
   const [form, setForm] = useState({
     code: '', name: '', type: 'percentage', value: '',
     duration: 'once', durationInMonths: '3',
     validForPlans: [], validForPeriods: [],
-    maxUses: '', maxUsesPerUser: '1', expiresAt: ''
+    maxUses: '', maxUsesPerUser: '1', expiresAt: '',
+    referrerId: '', commissionPercent: '10'
   });
+  // Affiliate dropdown — načítame pri otváraní formu
+  const [affiliates, setAffiliates] = useState([]);
 
   const fetchCodes = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
@@ -5172,9 +5176,17 @@ function PromoCodesTab() {
   }, [fetchCodes]);
 
   const resetForm = () => {
-    setForm({ code: '', name: '', type: 'percentage', value: '', duration: 'once', durationInMonths: '3', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '' });
+    setForm({ code: '', name: '', type: 'percentage', value: '', duration: 'once', durationInMonths: '3', validForPlans: [], validForPeriods: [], maxUses: '', maxUsesPerUser: '1', expiresAt: '', referrerId: '', commissionPercent: '10' });
     setShowForm(false);
   };
+
+  // Load affiliates dropdown (enrolled users) keď sa otvorí form
+  useEffect(() => {
+    if (!showForm) return;
+    adminApi.get('/api/admin/affiliates')
+      .then((r) => setAffiliates((r.data.affiliates || []).filter((a) => a.enrolled)))
+      .catch(() => setAffiliates([]));
+  }, [showForm]);
 
   const generateCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -5186,6 +5198,14 @@ function PromoCodesTab() {
   const handleCreate = async () => {
     if (!form.code || !form.name || !form.value) {
       alert('Vyplňte kód, názov a hodnotu');
+      return;
+    }
+    // Affiliate validácia client-side — ak je vybraný affiliate, commission %
+    // musí byť 1-100. Backend validuje tiež, ale chytíme chyby skôr.
+    const hasReferrer = !!form.referrerId;
+    const cp = hasReferrer ? parseFloat(form.commissionPercent) : 0;
+    if (hasReferrer && (!Number.isFinite(cp) || cp < 1 || cp > 100)) {
+      alert('Provízia musí byť 1-100% pri affiliate kódoch');
       return;
     }
     setSaving(true);
@@ -5201,7 +5221,10 @@ function PromoCodesTab() {
           : null,
         maxUses: form.maxUses ? parseInt(form.maxUses) : 0,
         maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : 1,
-        expiresAt: form.expiresAt || null
+        expiresAt: form.expiresAt || null,
+        // Affiliate fields — null/0 keď nie je referrer vybraný
+        referrerId: hasReferrer ? form.referrerId : null,
+        commissionPercent: hasReferrer ? cp : 0
       });
       resetForm();
       fetchCodes();
@@ -5481,6 +5504,38 @@ function PromoCodesTab() {
                 onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))} />
             </div>
           </div>
+
+          {/* ─── Affiliate sekcia ─── */}
+          <div style={{ marginTop: 14, padding: 12, background: 'var(--bg-secondary, #f8fafc)', borderRadius: 8, border: '1px dashed var(--border-color, #e5e7eb)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>🤝 Affiliate kód (voliteľné)</div>
+            <p style={{ fontSize: 11, color: 'var(--text-muted, #64748b)', margin: '0 0 8px' }}>
+              Ak vyberieš affiliateho, dostane <em>commission %</em> z každej platby pod týmto kódom (recurring).
+              Nech vybraný = admin generic kód bez provízie.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+              <div>
+                <label style={labelStyle}>Affiliate (referrer)</label>
+                <select style={inputStyle} value={form.referrerId}
+                  onChange={e => setForm(f => ({ ...f, referrerId: e.target.value }))}>
+                  <option value="">— Žiadny (admin generic) —</option>
+                  {affiliates.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.username} ({a.email}){a.status !== 'active' ? ` [${a.status}]` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Provízia (%)</label>
+                <input style={inputStyle} type="number" min="1" max="100" step="0.5"
+                  value={form.commissionPercent}
+                  onChange={e => setForm(f => ({ ...f, commissionPercent: e.target.value }))}
+                  disabled={!form.referrerId}
+                  placeholder="napr. 10" />
+              </div>
+            </div>
+          </div>
+
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' }}>
             <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={resetForm}>Zrušiť</button>
             <button className="btn btn-primary" style={{ fontSize: '12px', padding: '6px 14px' }} disabled={saving} onClick={handleCreate}>
