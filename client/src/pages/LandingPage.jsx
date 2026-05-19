@@ -65,6 +65,9 @@ export default function LandingPage() {
             <li><a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a></li>
             <li><a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a></li>
             <li><a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a></li>
+            {!isIosNativeApp() && (
+              <li><a href="#affiliate" onClick={(e) => { e.preventDefault(); scrollTo('affiliate'); }}>Affiliate</a></li>
+            )}
             <li><a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a></li>
           </ul>
 
@@ -84,6 +87,9 @@ export default function LandingPage() {
           <a href="#cennik" onClick={(e) => { e.preventDefault(); scrollTo('cennik'); }}>Cenník</a>
           <a href="#faq" onClick={(e) => { e.preventDefault(); scrollTo('faq'); }}>Časté otázky</a>
           <a href="#stiahnut" onClick={(e) => { e.preventDefault(); scrollTo('stiahnut'); }}>Stiahnuť</a>
+          {!isIosNativeApp() && (
+            <a href="#affiliate" onClick={(e) => { e.preventDefault(); scrollTo('affiliate'); }}>Affiliate</a>
+          )}
           <a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a>
           <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</a>
         </div>
@@ -478,6 +484,150 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* Affiliate program — skryté v iOS native shell-e (sekcia hovorí
+          o províziach a externom payout-e na IBAN, čo môže byť pre Apple
+          review citlivé). Web verzia ho ďalej zobrazuje. */}
+      {!isIosNativeApp() && (
+      <section className="lp-affiliate" id="affiliate">
+        <div className="lp-section">
+          <div className="lp-section-header">
+            <span className="lp-section-accent" />
+            <h2 className="lp-section-title">Zarábajte s Prpl CRM &mdash; affiliate program</h2>
+            <p className="lp-section-subtitle">
+              Odporučte Prpl CRM ďalším firmám a dostávajte recurring proviziu z každej ich platby
+            </p>
+          </div>
+
+          <div className="lp-affiliate-grid">
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#EEF2FF' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">Recurring provízia</h3>
+              <p className="lp-affiliate-desc">
+                Dostávate <strong>10&nbsp;%</strong> (alebo dohodnuté %) z <em>každej</em> platby
+                používateľa, ktorý sa zaregistroval pod vaším kódom. Mesiac za mesiacom, rok za rokom.
+              </p>
+            </div>
+
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#F0FDF4' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">Výplata na IBAN</h3>
+              <p className="lp-affiliate-desc">
+                Bez zbytočnej byrokracie. Stačí nám zadať IBAN a banku. Vyplácame mesačne &mdash;
+                minimálna suma na výplatu je <strong>20&nbsp;€</strong>.
+              </p>
+            </div>
+
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#FEF3C7' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">30-dňová ochranná doba</h3>
+              <p className="lp-affiliate-desc">
+                Provízia sa stáva nárokovateľnou až po 30&nbsp;dňoch od platby (pre prípad refundu).
+                Potom je vaša, navždy.
+              </p>
+            </div>
+
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#FEE2E2' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">Bez zmluvy a záväzku</h3>
+              <p className="lp-affiliate-desc">
+                Nepotrebujete živnosť ani zmluvu. Stačí dohoda emailom. Účet v&nbsp;Prpl&nbsp;CRM
+                tiež nie je podmienkou &mdash; affiliate môže byť ktokoľvek.
+              </p>
+            </div>
+
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#E0E7FF' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">Vlastný unikátny kód</h3>
+              <p className="lp-affiliate-desc">
+                Každý affiliate dostane vlastný zľavový kód (napr. <code>JANKO20</code>),
+                ktorý zároveň dáva vašim odporúčaniam <strong>zľavu</strong> pri registrácii.
+              </p>
+            </div>
+
+            <div className="lp-affiliate-card">
+              <div className="lp-affiliate-icon" style={{ background: '#F3E8FF' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="21" x2="9" y2="9" />
+                </svg>
+              </div>
+              <h3 className="lp-affiliate-title">Affiliate dashboard</h3>
+              <p className="lp-affiliate-desc">
+                Ak máte účet v Prpl CRM, vidíte v aplikácii prehľad zarobených provízií,
+                históriu výplat a stav každej platby pod vaším kódom.
+              </p>
+            </div>
+          </div>
+
+          {/* Ako sa prihlásiť — 3 kroky */}
+          <div className="lp-affiliate-howto">
+            <h3 className="lp-affiliate-howto-title">Ako sa prihlásiť do programu</h3>
+            <div className="lp-affiliate-steps">
+              <div className="lp-affiliate-step">
+                <div className="lp-affiliate-step-num">1</div>
+                <h4>Napíšte nám email</h4>
+                <p>
+                  Pošlite správu na <a href="mailto:support@prplcrm.eu?subject=Affiliate%20program%20%E2%80%94%20mám%20záujem" className="lp-affiliate-link"><strong>support@prplcrm.eu</strong></a> s&nbsp;predmetom
+                  &bdquo;Affiliate program&ldquo;. Stačí krátka veta o&nbsp;tom, kto ste
+                  a&nbsp;komu by ste Prpl&nbsp;CRM odporúčali.
+                </p>
+              </div>
+              <div className="lp-affiliate-step">
+                <div className="lp-affiliate-step-num">2</div>
+                <h4>Dohodneme detaily</h4>
+                <p>
+                  Odpovieme do <strong>24&nbsp;hodín</strong>. Dohodneme proviznú sadzbu
+                  (štandardne 10&nbsp;%) a&nbsp;tvar vášho zľavového kódu. Pošlete nám IBAN
+                  pre výplaty.
+                </p>
+              </div>
+              <div className="lp-affiliate-step">
+                <div className="lp-affiliate-step-num">3</div>
+                <h4>Začnete zarábať</h4>
+                <p>
+                  Aktivujeme vám kód, dáme vám propagačné materiály a&nbsp;každá platba pod
+                  vaším kódom vám generuje <strong>recurring proviziu</strong> &mdash;
+                  automaticky, navždy.
+                </p>
+              </div>
+            </div>
+
+            <div className="lp-affiliate-cta">
+              <a
+                href="mailto:support@prplcrm.eu?subject=Affiliate%20program%20%E2%80%94%20mám%20záujem&body=Dobrý%20deň%2C%0A%0Amám%20záujem%20o%20zapojenie%20do%20affiliate%20programu%20Prpl%20CRM.%0A%0AKto%20som%3A%20%0AKomu%20by%20som%20rád%20odporúčal%3A%20%0A%0AĎakujem!"
+                className="lp-btn lp-btn-primary"
+                style={{ fontSize: '15px', padding: '14px 32px' }}
+              >
+                Chcem sa pridať &rarr;
+              </a>
+              <p className="lp-affiliate-cta-note">
+                Alebo nám napíšte cez <a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>kontaktný formulár</a> nižšie.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+      )}
 
       {/* Contact */}
       <section className="lp-contact" id="kontakt">
