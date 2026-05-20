@@ -1584,6 +1584,11 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
     }
     const currentHash = createEventHash(taskData, targetCalendarId);
 
+    // Trackuje canonical eventId pre dedupe sweep (rovnaký pattern ako v
+     // autoSyncTaskToCalendar). Zmaže staré duplicity zo race conditions
+     // alebo workspace migrácií.
+    let canonicalEventId = null;
+
     if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
       // Task changed workspaces — delete stale event, re-insert in new cal.
       try {
@@ -1592,6 +1597,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
         if (e.code !== 404) logger.debug('[Google Calendar] Stale delete failed (/sync-task)', { error: e.message });
       }
       const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+      canonicalEventId = event.data.id;
       user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
       user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
       user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
@@ -1604,6 +1610,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
           eventId: existingEventId,
           resource: eventData
         });
+        canonicalEventId = existingEventId;
         if (!existingCalendarId) {
           user.googleCalendar.syncedTaskCalendars.set(taskData.id, updateCalendarId);
         }
@@ -1612,6 +1619,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
       } catch (e) {
         if (e.code === 404) {
           const event = await calendar.events.insert({ calendarId: targetCalendarId, resource: eventData });
+          canonicalEventId = event.data.id;
           user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
           user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
           user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
@@ -1625,10 +1633,17 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
         calendarId: targetCalendarId,
         resource: eventData
       });
+      canonicalEventId = event.data.id;
       user.googleCalendar.syncedTaskIds.set(taskData.id, event.data.id);
       user.googleCalendar.syncedTaskCalendars.set(taskData.id, targetCalendarId);
       user.googleCalendar.syncedEventHashes.set(taskData.id, currentHash);
       await user.save();
+    }
+
+    // Defenzívne dedupe sweep — fire-and-forget, response nečaká.
+    if (canonicalEventId) {
+      cleanupDuplicateCalendarEvents(calendar, targetCalendarId, taskData.id, canonicalEventId)
+        .catch(err => logger.debug('[Google Calendar /sync-task] Dedupe sweep failed', { taskId: taskData.id, error: err.message }));
     }
 
     res.json({ success: true, message: 'Úloha bola synchronizovaná' });
@@ -2561,6 +2576,77 @@ function getCalendarIdForSyncedTask(user, taskId) {
   return calendarId || user.googleCalendar?.calendarId || 'primary';
 }
 
+/**
+ * Defenzívne čistenie duplicitných eventov pre daný taskId v target kalendári.
+ *
+ * Prečo: user reportoval, že pri zmene dueDate v CRM sa udalosť v Google
+ * Calendar pridáva pod nový dátum, ale stará so starým dátumom ostáva. Auto-sync
+ * logika volá events.update na existingEventId (čo by malo udalosť presunúť,
+ * nie zduplikovať) — symptom teda pochádza zo scenárov mimo happy-path:
+ *   1. Race condition v minulosti (concurrent create + update obišli lock).
+ *   2. Workspace migrácia z legacy "primary" → per-workspace cal, kde sa
+ *      stary event v primary nevyčistil (predchádza syncedTaskCalendars mape).
+ *   3. User manuálne v Google Calendar duplikoval event.
+ *   4. Token refresh počas insert/update vrátil chybu, my sme stratili
+ *      ID-čko v syncedTaskIds, ďalší sync vložil nové ID.
+ *
+ * Ako: každý event, ktorý my vkladáme, má extendedProperties.private.taskId
+ * nastavený na CRM task ID. Google Calendar API podporuje filter
+ * `privateExtendedProperty=taskId=...` pri events.list — tento zoznam je
+ * autoritatívnym zdrojom pravdy, nezávislý od syncedTaskIds mapy.
+ *
+ * Vracia počet zmazaných duplicitných eventov (0 = clean, 1+ = našli sa
+ * a vymazali). Errors swallowed (defenzívna funkcia, nesmie shodiť sync).
+ */
+async function cleanupDuplicateCalendarEvents(calendarClient, calendarId, taskId, keepEventId) {
+  if (!calendarClient || !calendarId || !taskId) return 0;
+  const idStr = String(taskId);
+  try {
+    const resp = await calendarClient.events.list({
+      calendarId,
+      privateExtendedProperty: `taskId=${idStr}`,
+      maxResults: 50,
+      // showDeleted: false default — nechceme detegovať tombstones ako duplicity.
+      singleEvents: true
+    });
+    const items = resp.data?.items || [];
+    if (items.length <= 1) return 0; // 0 alebo 1 event → žiadna duplicita
+
+    let deleted = 0;
+    for (const ev of items) {
+      if (!ev.id) continue;
+      // Keep the canonical event (the one we just inserted/updated)
+      if (keepEventId && ev.id === keepEventId) continue;
+      try {
+        await calendarClient.events.delete({ calendarId, eventId: ev.id });
+        deleted++;
+      } catch (e) {
+        if (e.code !== 404) {
+          logger.warn('[Google Calendar] Duplicate cleanup delete failed', {
+            taskId: idStr,
+            eventId: ev.id,
+            calendarId,
+            error: e.message
+          });
+        }
+      }
+    }
+    if (deleted > 0) {
+      logger.info('[Google Calendar] Cleaned up duplicate events', { taskId: idStr, calendarId, deleted });
+    }
+    return deleted;
+  } catch (e) {
+    // events.list môže zlyhať z rôznych dôvodov (rate limit, scope problem
+    // u starých tokenov bez calendar.readonly). Nesmie shodiť sync — len logni.
+    logger.warn('[Google Calendar] Duplicate cleanup list failed', {
+      taskId: idStr,
+      calendarId,
+      error: e.message
+    });
+    return 0;
+  }
+}
+
 // ==================== AUTO-SYNC HELPER FUNCTIONS ====================
 
 // In-memory lock to prevent duplicate syncs for the same task.
@@ -2740,6 +2826,12 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
             contact: taskData.contactName || taskData.contact || null
           }, targetCalendarId);
 
+          // Trackuje canonical eventId pre dedupe sweep na konci. Inicializuje
+          // sa po každej úspešnej Google mutácii; cleanup zmaže ostatné eventy
+          // s rovnakým taskId v target kalendári (defenzívne proti starým
+          // duplicitám zo race conditions / migrácií / manuálnych kópií).
+          let canonicalEventId = null;
+
           if (existingEventId && existingCalendarId && existingCalendarId !== targetCalendarId) {
             // Event was previously synced to a different calendar (e.g. task
             // moved between workspaces, or we migrated from legacy single
@@ -2760,6 +2852,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
               calendarId: targetCalendarId,
               resource: eventData
             });
+            canonicalEventId = event.data.id;
             await User.findByIdAndUpdate(user._id, {
               $set: {
                 [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
@@ -2776,6 +2869,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 eventId: existingEventId,
                 resource: eventData
               });
+              canonicalEventId = existingEventId;
               // Backfill calendar mapping if it was missing (pre-PR2 legacy).
               const setOps = {
                 [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
@@ -2791,6 +2885,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                   calendarId: targetCalendarId,
                   resource: eventData
                 });
+                canonicalEventId = event.data.id;
                 await User.findByIdAndUpdate(user._id, {
                   $set: {
                     [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
@@ -2808,6 +2903,7 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
               calendarId: targetCalendarId,
               resource: eventData
             });
+            canonicalEventId = event.data.id;
             await User.findByIdAndUpdate(user._id, {
               $set: {
                 [`googleCalendar.syncedTaskIds.${taskId}`]: event.data.id,
@@ -2815,6 +2911,14 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
                 [`googleCalendar.syncedEventHashes.${taskId}`]: currentHash
               }
             });
+          }
+
+          // Defenzívne dedupe — zmaže akékoľvek staré eventy s rovnakým taskId
+          // v target kalendári, ktoré nie sú canonicalEventId. Fire-and-forget
+          // tak, aby HTTP response nemusel čakať (events.list+delete cyklus).
+          if (canonicalEventId) {
+            cleanupDuplicateCalendarEvents(calendar, targetCalendarId, taskId, canonicalEventId)
+              .catch(err => logger.debug('[Auto-sync Calendar] Dedupe sweep failed', { taskId, error: err.message }));
           }
         }
       } catch (error) {
