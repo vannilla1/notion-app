@@ -70,12 +70,21 @@ export default function PrivacyPolicy() {
         </p>
         <ul style={{ paddingLeft: '20px' }}>
           <li>
-            <code>https://www.googleapis.com/auth/calendar.events</code> — čítanie a zápis <strong>iba udalostí</strong> vo vašom
-            primárnom Google Calendar. Pri synchronizácii vytvárame/aktualizujeme/mažeme udalosti
-            zodpovedajúce projektom v CRM (s termínom, názvom a popisom). <strong>Nemáme prístup k nastaveniam kalendára, zdieľaným kalendárom ani udalostiam iných používateľov.</strong>
+            <code>https://www.googleapis.com/auth/calendar</code> — správa kalendárov vo vašom Google účte. Tento scope
+            využívame výhradne na <strong>vytvorenie samostatných sekundárnych kalendárov</strong> ("Prpl CRM — názov
+            pracovného prostredia") pre každé vaše pracovné prostredie, aby boli CRM udalosti vizuálne oddelené od vášho
+            osobného kalendára. <strong>Nemáme prístup k udalostiam mimo nami vytvorených kalendárov</strong> ani k zdieľaným kalendárom iných používateľov.
           </li>
           <li>
-            <code>https://www.googleapis.com/auth/tasks</code> — čítanie a zápis úloh v Google Tasks na synchronizáciu s projektmi v aplikácii.
+            <code>https://www.googleapis.com/auth/calendar.events</code> — čítanie a zápis udalostí v nami vytvorených kalendároch
+            (a v primárnom kalendári pre legacy používateľov, ktorí si pripojili Google pred zavedením per-workspace kalendárov).
+            Pri synchronizácii vytvárame/aktualizujeme/mažeme udalosti zodpovedajúce projektom v CRM (s termínom, názvom a popisom).
+            <strong>Operujeme iba s udalosťami, ktoré sme sami vytvorili</strong> (označené naším markerom <code>source=prplcrm</code>).
+          </li>
+          <li>
+            <code>https://www.googleapis.com/auth/tasks</code> — čítanie a zápis úloh v Google Tasks. Vytvárame samostatné
+            task-listy pomenované podľa pracovných prostredí a synchronizujeme do nich CRM úlohy s termínom.
+            <strong>Pracujeme iba s task-listami, ktoré sme sami vytvorili.</strong>
           </li>
         </ul>
         <p>
