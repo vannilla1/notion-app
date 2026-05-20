@@ -1,8 +1,40 @@
 # Google OAuth Verification — Submission Package
 
 > **Status:** Pripravený na podanie | **Aplikácia:** Prpl CRM | **Web:** https://prplcrm.eu
+> **Typ:** RE-verifikácia (verifikácia bola dokončená v minulosti, ale 23.4.2026 sa pridal nový sensitive scope)
 
 Tento dokument obsahuje všetko, čo musíš pripraviť pred kliknutím na **Submit for verification** v Google Cloud Console. Po podaní Google odpovie do 2-6 týždňov (sensitive scopes, bez CASA auditu).
+
+---
+
+## 🔄 Kontext: prečo treba re-verifikáciu
+
+Aplikácia bola pravdepodobne **už úspešne verifikovaná** pre staršie scope-y. Dňa **23.4.2026** sa však scope-ový set zmenil:
+
+| Stará verzia (verifikovaná) | Nová verzia (po commit `683888e`) |
+|---|---|
+| `calendar.events` (✅ overený) | `calendar.events` (✅ overený) |
+| `calendar.app.created` (✅ overený) | **`calendar` (⚠️ NOVÝ, NEoverený)** |
+| `tasks` (✅ overený) | `tasks` (✅ overený) |
+
+**Dôvod zmeny:** `calendar.app.created` bol nestabilný (Google Workspace admin politiky ho blokovali, `calendarList.list()` nedovidel app-created kalendáre). Switch na plný `calendar` scope všetko vyriešil — ale zaviedol povinnosť re-verifikovať.
+
+**Google OAuth verifikácia nepokrýva neskôr pridané scopes** — preto tester vidí varovanie pre nový `calendar` scope, aj keď zvyšok aplikácie je formálne verifikovaný.
+
+### Najprv overenie aktuálneho stavu (3 min)
+
+Pred submitnutím urob tento quick-check v Google Cloud Console:
+
+1. Otvor [OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+2. Pozri sekciu **App information** → hľadaj badge **„Verified"**:
+   - ✅ Ak vidíš zelený badge **„Verified"** → potvrdená predchádzajúca verifikácia; submit pôjde ako **„Update verification request"**
+   - ⚠️ Ak NIE je badge alebo vidíš **„Verification in progress"** / **„Issues needed"** → verifikácia nebola dokončená / je rozpracovaná
+   - ❌ Ak vidíš **„Not verified"** → submit pôjde ako úplne nová verifikácia
+3. Otvor sekciu **Scopes** → skontroluj, ktoré scopes sú formálne overené (zelený štítok pri každom):
+   - Predpokladané overené: `email`, `profile`, `openid`, `calendar.events`, `tasks`
+   - Predpokladané NEoverené (nový od 23.4): `calendar`
+
+> 💡 Skríns sekcie **Verification status** mi pošli — môžem ti pomôcť interpretovať aký submit Google očakáva.
 
 ---
 
@@ -62,19 +94,35 @@ Otvor sekciu **Scopes** v OAuth consent screen:
 
 Po pridaní každého sensitive scope sa zobrazí pole pre **justification** — vyplň ho takto (pripravený text nižšie 👇):
 
-#### Justification text pre `auth/calendar`
+#### Justification text pre `auth/calendar` (NOVÝ — re-verifikácia)
 
 ```
 Prpl CRM is a B2B CRM system that lets teams manage contacts, projects,
-and tasks. We use the full calendar scope (not calendar.events alone)
-because we create dedicated secondary calendars per user workspace —
-"Prpl CRM — {workspace name}" — so the user's task events are visually
-isolated from their personal events in the Google Calendar UI. The
-calendar.app.created scope was insufficient because (a) calendarList.list
-cannot see app-created calendars without the reader scope, and (b) some
-Google Workspace accounts block calendar.app.created by admin policy. We
-do NOT read events created by other apps; we only operate on calendars we
-created and events with our private extended property (source=prplcrm).
+and tasks. We previously used calendar.app.created for our per-workspace
+calendar feature, but switched to the full calendar scope on 2026-04-23
+(commit 683888e) because:
+
+1. calendar.app.created is unreliable across Google Workspace accounts —
+   many enterprise admin policies block it.
+2. calendarList.list cannot enumerate app-created calendars without an
+   additional reader scope, so users could not see their workspace
+   calendars in our UI.
+3. The result was that calendars.insert() succeeded silently-nowhere
+   for affected users and events fell back to the user's primary
+   calendar — surfacing as a critical "tasks landing in wrong calendar"
+   bug that we could not fix without the broader scope.
+
+What we actually do with the calendar scope:
+- Create dedicated secondary calendars per user workspace named
+  "Prpl CRM — {workspace name}".
+- Read calendarList to display these calendars to the user and let
+  them choose which workspace syncs to which calendar.
+- Set the calendar's color to match the workspace's brand color
+  (a UX nicety that calendar.app.created allows but only inconsistently).
+- We do NOT modify or read calendars/events that were not created by
+  our application. Every event we create carries
+  extendedProperties.private.source=prplcrm; we filter on that marker
+  in every read operation.
 ```
 
 #### Justification text pre `auth/calendar.events`
@@ -109,27 +157,32 @@ Ak používaš ešte test users (sekcia **Test users**), môžeš ich nechať ta
 
 Toto je najťažšia časť — Google vyžaduje **YouTube video (unlisted)**, ktoré ukáže:
 
-1. **OAuth consent flow** — užívateľ klikne „Connect Google Calendar" v Prpl CRM, prejde Google consent screenom (vidno scope-y), schváli
+1. **OAuth consent flow** — užívateľ klikne „Connect Google Calendar" v Prpl CRM, prejde Google consent screenom (vidno všetky 3 calendar/tasks scope-y), schváli
 2. **Actual usage** — vidno ako sa CRM tasky reálne objavujú v Google Calendari (jeden create-update-delete cyklus)
 3. **Each scope shown in use:**
-   - `calendar` — ukázať, že CRM vytvorí samostatný kalendár (v Google Calendar UI v ľavom paneli)
-   - `calendar.events` — ukázať vytvorenie udalosti z CRM tasky
-   - `tasks` — to isté pre Google Tasks (mobile app alebo Gmail bočný panel)
+   - `calendar` (NOVÝ — toto je dôležité pre re-verifikáciu) — ukázať, že CRM vytvorí samostatný kalendár ("Prpl CRM — Workspace1") v ľavom paneli Google Calendar UI **+ zmení mu farbu** podľa workspace brand color (toto demonštruje že potrebujeme aj write access na calendar metadata, nie iba app.created)
+   - `calendar.events` — ukázať vytvorenie udalosti z CRM tasky (event sa objaví v tom novom kalendári)
+   - `tasks` — to isté pre Google Tasks (Gmail bočný panel, vidno task-list "Prpl CRM — Workspace1" + tasky v ňom)
 
-**Praktický postup:**
+**Praktický postup (90-120s scenár, pre re-verifikáciu zdôraznený nový scope):**
 
 1. Otvor **QuickTime Player** na Macu → **File → New Screen Recording**
-2. Nahraj cca 60-90 sekundové video s nasledovným scenárom:
-   - [00:00-00:15] Otvor prplcrm.eu, prihlás sa
-   - [00:15-00:30] Klikni "Pripojiť Google Calendar" → vidno Google consent screen → schvál
-   - [00:30-00:50] Vráť sa do CRM, vytvor task s termínom → otvor druhý tab s Google Calendar → vidno udalosť pribudla
-   - [00:50-01:10] Zmeň dátum tasky v CRM → vidno že sa v Google Calendar presunula
-   - [01:10-01:30] Otvor Google Tasks panel v Gmail → vidno tú istú tasku
+2. Nahraj video s nasledovným scenárom:
+   - [00:00-00:10] Otvor prplcrm.eu, prihlás sa
+   - [00:10-00:25] **Otvor Google Calendar v druhom tabe — ukáž že je ľavý panel "Other calendars" PRÁZDNY** (zatiaľ žiadne workspace cal)
+   - [00:25-00:40] V Prpl CRM klikni "Pripojiť Google Calendar" → vidno Google consent screen — **na krátku chvíľu zoom-ni na zoznam scope-ov aby bolo jasne vidno všetky tri** → schvál
+   - [00:40-00:55] **Vráť sa do Google Calendar tabu, refresh → vidno že pribudol nový kalendár "Prpl CRM — Workspace1" s farbou** (toto je dôkaz že potrebujeme plný calendar scope)
+   - [00:55-01:15] Vráť sa do CRM, vytvor task s termínom → refresh Google Calendar → vidno udalosť v workspace kalendári
+   - [01:15-01:35] Zmeň dátum tasky v CRM → refresh Google Calendar → vidno že sa udalosť presunula (a stará zmizla — pekná ukážka že nesvinime kalendár duplicity)
+   - [01:35-01:50] Otvor Google Tasks bočný panel v Gmail → vidno task-list "Prpl CRM — Workspace1" + tú istú tasku
 
 3. Upload na YouTube ako **Unlisted** (neviditeľné cez search, ale dostupné cez link)
 4. Skopíruj link, vlož ho do Google verifikácie formu
 
-> 💡 Tip: Video môže byť bez voiceoveru, ale potom dopíš krátky text-overlay popisujúci čo sa deje (Final Cut, iMovie, alebo aj OnLine canva).
+> 💡 **Re-verification špecifické tipy:**
+> - V description videa napíš: *"This video demonstrates the newly added `https://www.googleapis.com/auth/calendar` scope (added 2026-04-23) which replaces the previously verified `calendar.app.created` scope. The reason for the change is documented in commit 683888e."*
+> - Demo musí jasne odlíšiť **čo nový scope robí**, čo by `calendar.events` sám nedokázal: konkrétne **vytvorenie nového kalendára + zmena jeho farby**.
+> - Pre Google reviewerov: tieto schopnosti sú nemožné s iba `calendar.events`, ktorý môže iba modifikovať existujúce kalendáre/eventy.
 
 ---
 
@@ -151,6 +204,22 @@ to manage contacts, projects, tasks, and team collaboration. The Google
 Calendar and Google Tasks integrations are optional add-ons that let
 users mirror their CRM tasks into their Google productivity stack, so
 they don't have to switch between apps to see their pending work.
+
+This submission is a re-verification request following commit 683888e
+(2026-04-23) which switched our calendar scope from
+calendar.app.created (previously verified) to the broader calendar
+scope. The change was necessary because calendar.app.created proved
+unreliable across Google Workspace environments — many enterprise
+admin policies block it, and calendarList.list cannot enumerate
+app-created calendars without an additional reader scope. The result
+was production users reporting that their dedicated workspace
+calendars never appeared and events fell back into the user's
+primary calendar. The broader scope allows us to create the workspace
+calendars reliably (including setting their colors), while we maintain
+strict Limited Use compliance: every event we create is marked with
+extendedProperties.private.source=prplcrm, and we filter on that
+marker in every read operation. We never read or modify calendars
+or events that we did not create.
 ```
 
 - **Verification contact email:** `pethobby.sk@gmail.com`
