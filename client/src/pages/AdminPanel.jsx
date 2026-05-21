@@ -5628,14 +5628,20 @@ function PromoCodesTab() {
               </div>
             </div>
             <div>
-              <label style={labelStyle}>Max. použití (0 = neobmedzené)</label>
+              <label style={labelStyle}>Celkový limit použití (0 = bez limitu)</label>
               <input style={inputStyle} type="number" min="0" value={form.maxUses}
                 onChange={e => setForm(f => ({ ...f, maxUses: e.target.value }))} placeholder="0" />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                Koľkokrát môže kód <strong>celkom</strong> použiť ľubovoľný počet ľudí.
+              </div>
             </div>
             <div>
-              <label style={labelStyle}>Max. na používateľa</label>
+              <label style={labelStyle}>Limit na jedného používateľa</label>
               <input style={inputStyle} type="number" min="0" value={form.maxUsesPerUser}
                 onChange={e => setForm(f => ({ ...f, maxUsesPerUser: e.target.value }))} placeholder="1" />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                Koľkokrát môže <strong>ten istý</strong> user kód uplatniť. Typicky 1.
+              </div>
             </div>
             <div>
               <label style={labelStyle}>Platnosť do</label>
@@ -5839,14 +5845,20 @@ function PromoCodesTab() {
                   onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div>
-                <label style={labelStyle}>Max. použití (0 = neobmedzené)</label>
+                <label style={labelStyle}>Celkový limit použití (0 = bez limitu)</label>
                 <input style={inputStyle} type="number" min="0" value={editForm.maxUses}
                   onChange={e => setEditForm(f => ({ ...f, maxUses: e.target.value }))} />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                  Koľkokrát môže kód <strong>celkom</strong> použiť ľubovoľný počet ľudí. Po dosiahnutí limitu sa kód vyčerpá.
+                </div>
               </div>
               <div>
-                <label style={labelStyle}>Max. použití na používateľa</label>
+                <label style={labelStyle}>Limit na jedného používateľa</label>
                 <input style={inputStyle} type="number" min="1" value={editForm.maxUsesPerUser}
                   onChange={e => setEditForm(f => ({ ...f, maxUsesPerUser: e.target.value }))} />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                  Koľkokrát môže <strong>ten istý</strong> user kód uplatniť. Typicky 1.
+                </div>
               </div>
               <div>
                 <label style={labelStyle}>Expirácia (prázdne = bez expirácie)</label>
