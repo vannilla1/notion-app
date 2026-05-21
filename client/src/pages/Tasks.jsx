@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
 import { useAuth } from '../context/AuthContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { getWorkspaceRoleLabel } from '../utils/constants';
@@ -178,9 +179,28 @@ function SortableSubtaskItem({ id, children }) {
 }
 
 // Calendar View Component
-function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass, onTaskClick, loading }) {
+function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass, onTaskClick, loading, workspaceColor }) {
   const [calendarMode, setCalendarMode] = useState('month'); // 'month', 'week', 'day'
   const [selectedDate, setSelectedDate] = useState(new Date());
+  // Aktívna workspace farba pre tinting kalendárových items.
+  // Fallback na app accent indigo ak workspace ešte nenastavený.
+  const wsColor = workspaceColor || '#6366f1';
+
+  // Default dĺžka timed eventu — 1h. Zladené s Google Calendar sync, ktorý
+  // pre task s dueTime vytvára event 14:30 → 15:30 v Google. Vďaka tomu má
+  // CRM kalendár a Google Calendar vizuálne rovnaký dojem.
+  const DEFAULT_DURATION_MIN = 60;
+
+  // Helper — vypočíta "14:30 → 15:30" string z dueTime.
+  const formatTimeRange = (dueTime, durationMin = DEFAULT_DURATION_MIN) => {
+    if (!dueTime || !/^\d{2}:\d{2}$/.test(dueTime)) return '';
+    const [h, m] = dueTime.split(':').map(Number);
+    const totalMin = h * 60 + m + durationMin;
+    const endH = Math.floor(totalMin / 60) % 24;
+    const endM = totalMin % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${dueTime} – ${pad(endH)}:${pad(endM)}`;
+  };
 
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
@@ -353,7 +373,8 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                       key={item.id}
                       className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
                       onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
-                      title={`${item.dueTime ? item.dueTime + ' — ' : ''}${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
+                      title={`${item.dueTime ? formatTimeRange(item.dueTime) + ' — ' : ''}${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
+                      style={{ borderLeftColor: wsColor }}
                     >
                       <div className="calendar-item-body">
                         {item.dueTime && (
@@ -406,10 +427,11 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     key={item.id}
                     className={`calendar-week-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
                     onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
+                    style={{ borderLeftColor: wsColor }}
                   >
                     <div className="calendar-week-item-content">
                       {item.dueTime && (
-                        <span className="calendar-week-item-time">⏰ {item.dueTime}</span>
+                        <span className="calendar-week-item-time">⏰ {formatTimeRange(item.dueTime)}</span>
                       )}
                       {item.type === 'subtask' && (
                         <span className="calendar-week-item-project">{item.task.title}</span>
@@ -427,32 +449,157 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
     );
   };
 
-  // --- DAY VIEW ---
+  // --- DAY VIEW (timeline grid 6:00-22:00) ---
+  // Zobrazenie ako v Google/Apple Calendar — vertikálna hodinová os, timed
+  // eventy umiestnené absolútne na ich časovej pozícii, výška = 1h duration.
+  // Itemy bez dueTime (celodenné) sa zobrazujú vo vrchnej "All-day" sekcii.
   const renderDay = () => {
-    const items = sortItemsByTime(getItemsForDate(selectedDate));
+    const allDayItems = getItemsForDate(selectedDate).filter(i => !i.dueTime);
+    const timedItems = sortItemsByTime(getItemsForDate(selectedDate).filter(i => i.dueTime));
+
+    // Visible window: 6:00 – 22:00 = 16h × 60px slot = 960px grid.
+    // Eventy mimo (napr. nočné 23:30) sa scrollnu do view.
+    const HOUR_HEIGHT = 60; // px per hour
+    const FIRST_HOUR = 6;
+    const LAST_HOUR = 22;
+    const totalHours = LAST_HOUR - FIRST_HOUR + 1;
+
+    // Helper — z dueTime ("HH:MM") spočíta top offset v px voči FIRST_HOUR.
+    const timeToTop = (dueTime) => {
+      const [h, m] = dueTime.split(':').map(Number);
+      const minutesFromStart = (h - FIRST_HOUR) * 60 + m;
+      return Math.max(0, (minutesFromStart / 60) * HOUR_HEIGHT);
+    };
+
+    // Simple overlap detection — events ktoré sa časovo prekrývajú dostanú
+    // column index, aby sa zobrazili vedľa seba. Naivný greedy algoritmus
+    // ktorý stačí na typický CRM use-case (max ~5 prekrytí naraz).
+    const itemsWithLayout = timedItems.map(item => {
+      const [h, m] = item.dueTime.split(':').map(Number);
+      const startMin = h * 60 + m;
+      const endMin = startMin + DEFAULT_DURATION_MIN;
+      return { ...item, startMin, endMin, col: 0, totalCols: 1 };
+    });
+    // Greedy column assignment
+    for (let i = 0; i < itemsWithLayout.length; i++) {
+      const a = itemsWithLayout[i];
+      const overlapping = itemsWithLayout.filter((b, j) =>
+        j !== i && b.startMin < a.endMin && a.startMin < b.endMin
+      );
+      const usedCols = new Set(overlapping.filter(b => b.col !== undefined).map(b => b.col));
+      let col = 0;
+      while (usedCols.has(col)) col++;
+      a.col = col;
+      const maxCol = Math.max(col, ...overlapping.map(b => b.col || 0));
+      a.totalCols = maxCol + 1;
+      // Propaguj totalCols do prekrývajúcich sa items
+      for (const b of overlapping) {
+        b.totalCols = Math.max(b.totalCols, maxCol + 1);
+      }
+    }
+
+    // Aktuálny čas indikátor (červená čiara) — len ak je selectedDate today
+    const isToday = isSameDay(selectedDate, today);
+    const nowMin = isToday ? new Date().getHours() * 60 + new Date().getMinutes() : null;
+    const nowTopPx = nowMin !== null
+      ? ((nowMin - FIRST_HOUR * 60) / 60) * HOUR_HEIGHT
+      : null;
+    const showNowLine = nowTopPx !== null && nowTopPx >= 0 && nowTopPx <= totalHours * HOUR_HEIGHT;
 
     return (
       <div className="calendar-day-view">
-        {items.length === 0 && <div className="calendar-day-empty">Žiadne termíny na tento deň</div>}
-        {items.map(item => (
-          <div
-            key={item.id}
-            className={`calendar-day-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-            onClick={() => onTaskClick(item.task)}
-          >
-            <div className="calendar-day-item-header">
-              <span className="calendar-day-item-type">{item.type === 'subtask' ? '↳ Úloha' : 'Projekt'}</span>
-              {item.dueTime && (
-                <span className="calendar-day-item-time">⏰ {item.dueTime}</span>
-              )}
-              {item.completed && <span className="calendar-day-item-done">✅</span>}
+        {/* All-day section — celodenné items hore */}
+        {allDayItems.length > 0 && (
+          <div className="calendar-day-allday">
+            <div className="calendar-day-allday-label">Celodenné</div>
+            <div className="calendar-day-allday-items">
+              {allDayItems.map(item => (
+                <div
+                  key={item.id}
+                  className={`calendar-day-allday-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
+                  onClick={() => onTaskClick(item.task)}
+                  style={{ borderLeftColor: wsColor, background: `${wsColor}15` }}
+                  title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
+                >
+                  {item.type === 'subtask' && (
+                    <span className="calendar-day-allday-project">{item.task.title} →</span>
+                  )}
+                  <span className="calendar-day-allday-title">{item.title}</span>
+                  {item.completed && <span className="calendar-day-allday-done">✓</span>}
+                </div>
+              ))}
             </div>
-            <span className="calendar-day-item-title">{item.title}</span>
-            {item.task && item.type === 'subtask' && (
-              <span className="calendar-day-item-parent">z: {item.task.title}</span>
+          </div>
+        )}
+
+        {/* Timeline grid */}
+        <div className="calendar-day-timeline" style={{ height: `${totalHours * HOUR_HEIGHT}px` }}>
+          {/* Hodinová os vľavo */}
+          <div className="calendar-day-hours">
+            {Array.from({ length: totalHours }, (_, i) => {
+              const hour = FIRST_HOUR + i;
+              return (
+                <div key={hour} className="calendar-day-hour-label" style={{ height: `${HOUR_HEIGHT}px` }}>
+                  <span>{hour}:00</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Stĺpec eventov */}
+          <div className="calendar-day-events">
+            {/* Hodinové horizontal lines */}
+            {Array.from({ length: totalHours }, (_, i) => (
+              <div
+                key={i}
+                className="calendar-day-hour-line"
+                style={{ top: `${i * HOUR_HEIGHT}px` }}
+              />
+            ))}
+
+            {/* "Teraz" čiara */}
+            {showNowLine && (
+              <div className="calendar-day-now-line" style={{ top: `${nowTopPx}px` }}>
+                <span className="calendar-day-now-dot" />
+              </div>
+            )}
+
+            {/* Timed eventy */}
+            {itemsWithLayout.map(item => {
+              const top = timeToTop(item.dueTime);
+              const height = (DEFAULT_DURATION_MIN / 60) * HOUR_HEIGHT;
+              const widthPct = 100 / (item.totalCols || 1);
+              const leftPct = (item.col || 0) * widthPct;
+              return (
+                <div
+                  key={item.id}
+                  className={`calendar-day-event ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
+                  style={{
+                    top: `${top}px`,
+                    height: `${height - 2}px`, // -2 pre malú medzeru medzi susednými hodinami
+                    left: `calc(${leftPct}% + 2px)`,
+                    width: `calc(${widthPct}% - 4px)`,
+                    borderLeftColor: wsColor,
+                    background: `${wsColor}22`
+                  }}
+                  onClick={() => onTaskClick(item.task)}
+                  title={`${formatTimeRange(item.dueTime)} — ${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
+                >
+                  <div className="calendar-day-event-time">{formatTimeRange(item.dueTime)}</div>
+                  {item.type === 'subtask' && (
+                    <div className="calendar-day-event-project">{item.task.title}</div>
+                  )}
+                  <div className="calendar-day-event-title">{item.title}</div>
+                  {item.completed && <span className="calendar-day-event-done">✓</span>}
+                </div>
+              );
+            })}
+
+            {timedItems.length === 0 && allDayItems.length === 0 && (
+              <div className="calendar-day-empty">Žiadne termíny na tento deň</div>
             )}
           </div>
-        ))}
+        </div>
       </div>
     );
   };
@@ -483,6 +630,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
 function Tasks() {
   const { user, logout, updateUser } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const [tasks, setTasks] = useState([]);
@@ -2834,6 +2982,7 @@ function Tasks() {
                     }, 100);
                   }}
                   loading={loading}
+                  workspaceColor={currentWorkspace?.color}
                 />
               ) : loading ? (
                 <div className="loading">Načítavam...</div>

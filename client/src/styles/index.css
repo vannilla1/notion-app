@@ -11196,6 +11196,266 @@ body.ios-app {
 }
 
 /* ========================================
+   Day view — TIMELINE GRID (hodinová mriežka)
+
+   Nový design: vertikálna časová os 6:00-22:00, eventy umiestnené absolútne
+   na ich časovej pozícii (1h block = 60px). Itemy bez času sa zobrazujú vo
+   vrchnej "All-day" sekcii. Overlap detection rozdelí prekrývajúce sa eventy
+   do stĺpcov vedľa seba (ako v Google/Apple Calendar).
+   ======================================== */
+
+/* All-day items hore */
+.calendar-day-allday {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-secondary, #f8fafc);
+  min-height: 48px;
+}
+
+.calendar-day-allday-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary, #64748b);
+  width: 60px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.calendar-day-allday-items {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calendar-day-allday-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-left: 4px solid var(--accent-color, #6366f1);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.calendar-day-allday-item:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.calendar-day-allday-item.completed {
+  opacity: 0.6;
+}
+
+.calendar-day-allday-item.completed .calendar-day-allday-title {
+  text-decoration: line-through;
+}
+
+.calendar-day-allday-project {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.calendar-day-allday-title {
+  font-weight: 500;
+  flex: 1;
+}
+
+.calendar-day-allday-done {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+/* Timeline grid container */
+.calendar-day-timeline {
+  display: flex;
+  position: relative;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: calc(100vh - 280px);
+  background: var(--bg-primary, white);
+}
+
+/* Hodinová os vľavo */
+.calendar-day-hours {
+  width: 60px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color, #e2e8f0);
+}
+
+.calendar-day-hour-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 2px 8px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+}
+
+/* Stĺpec eventov */
+.calendar-day-events {
+  flex: 1;
+  position: relative;
+  min-height: 100%;
+}
+
+/* Horizontálne hodinové linky */
+.calendar-day-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Aktuálny čas — červená čiara */
+.calendar-day-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px solid #ef4444;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.calendar-day-now-dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  background: #ef4444;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
+}
+
+/* Event block — umiestnený absolútne podľa času */
+.calendar-day-event {
+  position: absolute;
+  border-left: 3px solid #6366f1;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+  z-index: 2;
+  transition: transform 0.1s, box-shadow 0.1s, z-index 0s 0.1s;
+  background: rgba(99, 102, 241, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-sizing: border-box;
+}
+
+.calendar-day-event:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 4;
+  transition-delay: 0s;
+}
+
+.calendar-day-event.completed {
+  opacity: 0.55;
+}
+
+.calendar-day-event.completed .calendar-day-event-title {
+  text-decoration: line-through;
+}
+
+.calendar-day-event.overdue {
+  /* Overdue tasky majú navyše červený outline */
+  outline: 1px solid #ef4444;
+  outline-offset: -1px;
+}
+
+.calendar-day-event-time {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.85;
+  line-height: 1.2;
+}
+
+.calendar-day-event-project {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-day-event-title {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.calendar-day-event-done {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: #16a34a;
+  font-weight: 700;
+}
+
+/* Empty state */
+.calendar-day-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-secondary, #94a3b8);
+  font-style: italic;
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Dark mode úpravy */
+@media (prefers-color-scheme: dark) {
+  .calendar-day-event {
+    background: rgba(99, 102, 241, 0.25);
+  }
+  .calendar-day-hour-line {
+    border-top-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .calendar-day-hours {
+    width: 48px;
+  }
+  .calendar-day-hour-label {
+    font-size: 10px;
+    padding: 2px 6px 0 0;
+  }
+  .calendar-day-event {
+    font-size: 10px;
+    padding: 3px 5px;
+  }
+  .calendar-day-event-title {
+    font-size: 10px;
+  }
+  .calendar-day-allday {
+    padding: 8px 12px;
+  }
+}
+
+/* ========================================
    Bottom Navigation (mobile iOS-style tab bar)
    ======================================== */
 
