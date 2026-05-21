@@ -189,18 +189,36 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
   const dayNames = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
   const dayNamesFull = ['Pondelok', 'Utorok', 'Streda', 'Štvrtok', 'Piatok', 'Sobota', 'Nedeľa'];
 
-  // Collect all items with dueDates (tasks + subtasks)
+  // Collect all items with dueDates (tasks + subtasks).
+  // Propaguje aj dueTime (HH:MM) — bez tohto sa časový údaj v kalendári vôbec
+  // nezobrazoval, hoci ho task/subtask reálne má.
   const collectDueDateItems = (taskList) => {
     const items = [];
     for (const task of taskList) {
       if (task.dueDate) {
-        items.push({ id: task.id, title: task.title, dueDate: task.dueDate, completed: task.completed, type: 'task', task });
+        items.push({
+          id: task.id,
+          title: task.title,
+          dueDate: task.dueDate,
+          dueTime: task.dueTime || '',
+          completed: task.completed,
+          type: 'task',
+          task
+        });
       }
       const collectSubtasks = (subtasks, parentTask) => {
         if (!subtasks) return;
         for (const sub of subtasks) {
           if (sub.dueDate) {
-            items.push({ id: sub.id, title: sub.title, dueDate: sub.dueDate, completed: sub.completed, type: 'subtask', task: parentTask });
+            items.push({
+              id: sub.id,
+              title: sub.title,
+              dueDate: sub.dueDate,
+              dueTime: sub.dueTime || '',
+              completed: sub.completed,
+              type: 'subtask',
+              task: parentTask
+            });
           }
           if (sub.subtasks) collectSubtasks(sub.subtasks, parentTask);
         }
@@ -208,6 +226,20 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
       collectSubtasks(task.subtasks, task);
     }
     return items;
+  };
+
+  // Sort: items s časom hore (vzostupne podľa HH:MM), celodenné dole.
+  // Toto je správanie ktoré users očakávajú v kalendároch — vidieť najprv
+  // čo je naviazané na konkrétnu hodinu, potom všeobecne na deň.
+  const sortItemsByTime = (items) => {
+    return [...items].sort((a, b) => {
+      const aHas = !!a.dueTime;
+      const bHas = !!b.dueTime;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      if (aHas && bHas) return a.dueTime.localeCompare(b.dueTime);
+      return 0;
+    });
   };
 
   const allItems = collectDueDateItems(tasks);
@@ -292,6 +324,10 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
         itemsByDay[day].push(item);
       }
     }
+    // Zoraď v rámci každého dňa — items s časom hore (HH:MM vzostupne).
+    for (const day of Object.keys(itemsByDay)) {
+      itemsByDay[day] = sortItemsByTime(itemsByDay[day]);
+    }
 
     const cells = [];
     for (let i = 0; i < startDayOfWeek; i++) cells.push(null);
@@ -317,9 +353,12 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                       key={item.id}
                       className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
                       onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
-                      title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
+                      title={`${item.dueTime ? item.dueTime + ' — ' : ''}${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
                     >
                       <div className="calendar-item-body">
+                        {item.dueTime && (
+                          <span className="calendar-item-time">{item.dueTime}</span>
+                        )}
                         {item.type === 'subtask' && (
                           <span className="calendar-item-project-badge">{item.task.title}</span>
                         )}
@@ -348,7 +387,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
         {Array.from({ length: 7 }, (_, i) => {
           const date = new Date(weekStart);
           date.setDate(date.getDate() + i);
-          const items = getItemsForDate(date);
+          const items = sortItemsByTime(getItemsForDate(date));
           const isCurrentDay = isSameDay(date, today);
 
           return (
@@ -369,6 +408,9 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
                   >
                     <div className="calendar-week-item-content">
+                      {item.dueTime && (
+                        <span className="calendar-week-item-time">⏰ {item.dueTime}</span>
+                      )}
                       {item.type === 'subtask' && (
                         <span className="calendar-week-item-project">{item.task.title}</span>
                       )}
@@ -387,7 +429,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
   // --- DAY VIEW ---
   const renderDay = () => {
-    const items = getItemsForDate(selectedDate);
+    const items = sortItemsByTime(getItemsForDate(selectedDate));
 
     return (
       <div className="calendar-day-view">
@@ -400,6 +442,9 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
           >
             <div className="calendar-day-item-header">
               <span className="calendar-day-item-type">{item.type === 'subtask' ? '↳ Úloha' : 'Projekt'}</span>
+              {item.dueTime && (
+                <span className="calendar-day-item-time">⏰ {item.dueTime}</span>
+              )}
               {item.completed && <span className="calendar-day-item-done">✅</span>}
             </div>
             <span className="calendar-day-item-title">{item.title}</span>
