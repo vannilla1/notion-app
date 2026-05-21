@@ -653,6 +653,10 @@ function Tasks() {
   const [highlightedTaskIds, setHighlightedTaskIds] = useState(new Set());
   const taskRefs = useRef({});
   const pendingHighlightRef = useRef(null);
+  // Trigger counter — forces the [tasks, highlightTrigger] effect to re-run
+  // aj keď sa `tasks` nezmenia. Bez tohto by klik v calendar (rovnaký
+  // workspace, žiadny refetch) nikdy nevyvolal processing pending highlight-u.
+  const [highlightTrigger, setHighlightTrigger] = useState(0);
   // tasksRef drží vždy aktuálnu hodnotu `tasks`. Po toggleTask/toggleSubtask
   // potrebujeme čítať čerstvé tasks (po fetchTasks), ale React state update
   // je async — closure v setTimeout by čítala stale `tasks` zo svojho času.
@@ -1182,11 +1186,17 @@ function Tasks() {
   }, [tasks]);
 
   // Helper function to process highlight. ALWAYS routes through
-  // pendingHighlightRef + [tasks] effect — never reads stale `tasks` closure.
-  // This is what makes deep-links reliable across workspace switches.
+  // pendingHighlightRef + [tasks, highlightTrigger] effect — never reads stale
+  // `tasks` closure. This is what makes deep-links reliable across workspace
+  // switches.
+  //
+  // highlightTrigger increment je nutný pre prípad keď sa `tasks` nemení
+  // (napr. klik v calendar v rovnakom workspace) — bez neho by effect
+  // nezbehol a pending highlight by sa stratil.
   const processHighlight = useCallback((taskId, subtaskId) => {
     debug.log('[DeepLink] Tasks: queueing pending highlight', { taskId, subtaskId });
     pendingHighlightRef.current = { taskId, subtaskId };
+    setHighlightTrigger(n => n + 1);
   }, []);
 
   // Handle notification deep links — unified via URL query params
@@ -1297,7 +1307,7 @@ function Tasks() {
       setHighlightedTaskId(null);
       setHighlightedSubtaskId(null);
     }, 3000);
-  }, [tasks, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors]);
+  }, [tasks, highlightTrigger, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
