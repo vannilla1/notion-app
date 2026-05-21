@@ -372,7 +372,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     <div
                       key={item.id}
                       className={`calendar-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-                      onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
+                      onClick={(e) => { e.stopPropagation(); onTaskClick(item); }}
                       title={`${item.dueTime ? formatTimeRange(item.dueTime) + ' — ' : ''}${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
                       style={{ borderLeftColor: wsColor }}
                     >
@@ -426,7 +426,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                   <div
                     key={item.id}
                     className={`calendar-week-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); onTaskClick(item.task); }}
+                    onClick={(e) => { e.stopPropagation(); onTaskClick(item); }}
                     style={{ borderLeftColor: wsColor }}
                   >
                     <div className="calendar-week-item-content">
@@ -2973,13 +2973,24 @@ function Tasks() {
                   calendarMonth={calendarMonth}
                   setCalendarMonth={setCalendarMonth}
                   getDueDateClass={getDueDateClass}
-                  onTaskClick={(task) => {
+                  onTaskClick={(item) => {
+                    // Klik na kalendárový item — naviguj priamo na konkrétnu
+                    // úlohu/subtask. Predtým sa otvorila len rodičovská
+                    // tasknitka v list view bez highlight a bez expand
+                    // subtask-stromu, takže user musel ručne dohľadávať.
+                    //
+                    // processHighlight() je rovnaký mechanizmus aký používajú
+                    // notifikácie a deep-links: expanduje celý ancestor chain
+                    // (až po subtask), highlightne target na ~3s a scrollne
+                    // s retry (pre prípad že DOM ešte nie je renderlý).
                     setViewMode('list');
-                    setExpandedTask(task.id);
-                    setTimeout(() => {
-                      const el = document.querySelector(`[data-task-id="${task.id}"]`);
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 100);
+                    if (item.type === 'subtask') {
+                      // Pre subtask: parentId = item.task.id, subtaskId = item.id
+                      processHighlight(item.task.id, item.id);
+                    } else {
+                      // Pre top-level task: iba taskId
+                      processHighlight(item.task?.id || item.id, null);
+                    }
                   }}
                   loading={loading}
                   workspaceColor={currentWorkspace?.color}
