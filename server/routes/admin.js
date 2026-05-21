@@ -2375,7 +2375,13 @@ router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res)
     const promoCode = await PromoCode.findById(req.params.id);
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
-    const { name, isActive, maxUses, maxUsesPerUser, expiresAt } = req.body;
+    const {
+      name, isActive, maxUses, maxUsesPerUser, expiresAt,
+      // Edit rozšírenie: aplikačné filtre + affiliate priradenie. Stripe-side
+      // imutabilné polia (code, type, value, duration) tu úmyselne nie sú —
+      // Stripe ich nedovolí zmeniť po vytvorení coupon-u.
+      validForPlans, validForPeriods, referrerId, commissionPercent
+    } = req.body;
 
     const changes = {};
     if (name !== undefined) { changes.name = name; promoCode.name = name; }
@@ -2385,6 +2391,45 @@ router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res)
     if (expiresAt !== undefined) {
       changes.expiresAt = expiresAt;
       promoCode.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    }
+    if (Array.isArray(validForPlans)) {
+      changes.validForPlans = validForPlans;
+      promoCode.validForPlans = validForPlans;
+    }
+    if (Array.isArray(validForPeriods)) {
+      changes.validForPeriods = validForPeriods;
+      promoCode.validForPeriods = validForPeriods;
+    }
+
+    // Affiliate priradenie — referrerId môže byť null (zrušenie afil. priradenia)
+    if (referrerId !== undefined) {
+      if (referrerId === null || referrerId === '') {
+        changes.referrerId = null;
+        promoCode.referrerId = null;
+        promoCode.commissionPercent = 0;
+      } else {
+        // Overenie že referrer existuje a je enrolled
+        const referrer = await User.findById(referrerId).select('affiliate.enrolled');
+        if (!referrer || !referrer.affiliate?.enrolled) {
+          return res.status(400).json({ message: 'Vybraný používateľ nie je registrovaný ako affiliate' });
+        }
+        const cp = parseFloat(commissionPercent);
+        if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
+          return res.status(400).json({ message: 'Provízia musí byť 1-100%' });
+        }
+        changes.referrerId = referrerId;
+        changes.commissionPercent = cp;
+        promoCode.referrerId = referrerId;
+        promoCode.commissionPercent = cp;
+      }
+    } else if (commissionPercent !== undefined && promoCode.referrerId) {
+      // Zmena iba commission% pri existujúcom referrer-ovi
+      const cp = parseFloat(commissionPercent);
+      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
+        return res.status(400).json({ message: 'Provízia musí byť 1-100%' });
+      }
+      changes.commissionPercent = cp;
+      promoCode.commissionPercent = cp;
     }
 
     // Update Stripe promotion code active status

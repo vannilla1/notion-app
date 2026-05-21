@@ -4,6 +4,7 @@ import adminApi, { API_BASE_URL } from '@/api/adminApi';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import AdminHelpToggle from '../components/AdminHelpToggle';
+import { QRCodeSVG } from 'qrcode.react';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler);
 
@@ -5148,6 +5149,17 @@ function PromoCodesTab() {
   // Affiliate dropdown — načítame pri otváraní formu
   const [affiliates, setAffiliates] = useState([]);
 
+  // EDIT modal state — otvorí sa s prefilled values pri klik na ✏️.
+  // Imutabilné polia (code, type, value, duration) sú v UI iba čítatelné
+  // — Stripe API nedovolí ich zmeniť po vytvorení coupon-u.
+  const [editingCode, setEditingCode] = useState(null); // promo code objekt alebo null
+  const [editForm, setEditForm] = useState(null); // form payload alebo null
+  const [editSaving, setEditSaving] = useState(false);
+
+  // QR modal state — { code, url } alebo null. URL je registrácia s pred-vyplneným
+  // kódom v query param-i (auto-applied pri checkout-e).
+  const [qrModal, setQrModal] = useState(null);
+
   const fetchCodes = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
     try {
@@ -5253,6 +5265,133 @@ function PromoCodesTab() {
     } catch {
       alert('Chyba pri mazaní');
     }
+  };
+
+  // Otvorí Edit modal s prefilled values. Imutabilné polia (code, type,
+  // value, duration*) sa zobrazia ako read-only chips. Editovateľné:
+  // name, isActive, maxUses/PerUser, expiresAt, validForPlans/Periods,
+  // referrerId + commissionPercent.
+  const openEdit = (code) => {
+    setEditingCode(code);
+    setEditForm({
+      name: code.name || '',
+      isActive: !!code.isActive,
+      maxUses: code.maxUses != null ? String(code.maxUses) : '',
+      maxUsesPerUser: code.maxUsesPerUser != null ? String(code.maxUsesPerUser) : '1',
+      expiresAt: code.expiresAt ? new Date(code.expiresAt).toISOString().slice(0, 10) : '',
+      validForPlans: Array.isArray(code.validForPlans) ? [...code.validForPlans] : [],
+      validForPeriods: Array.isArray(code.validForPeriods) ? [...code.validForPeriods] : [],
+      // referrerId môže byť populated objekt alebo string
+      referrerId: code.referrerId?._id || code.referrerId || '',
+      commissionPercent: code.commissionPercent ? String(code.commissionPercent) : '10'
+    });
+    // Fetch affiliates ak ešte nemáme
+    if (affiliates.length === 0) {
+      adminApi.get('/api/admin/affiliates')
+        .then((r) => setAffiliates((r.data.affiliates || []).filter((a) => a.enrolled)))
+        .catch(() => {});
+    }
+  };
+
+  const closeEdit = () => {
+    setEditingCode(null);
+    setEditForm(null);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingCode || !editForm) return;
+    if (!editForm.name.trim()) {
+      alert('Názov nemôže byť prázdny');
+      return;
+    }
+    // Affiliate validation (rovnaký pattern ako create)
+    const hasReferrer = !!editForm.referrerId;
+    const cp = hasReferrer ? parseFloat(editForm.commissionPercent) : 0;
+    if (hasReferrer && (!Number.isFinite(cp) || cp < 1 || cp > 100)) {
+      alert('Provízia musí byť 1-100% pri affiliate kódoch');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await adminApi.put(`/api/admin/promo-codes/${editingCode._id}`, {
+        name: editForm.name,
+        isActive: editForm.isActive,
+        maxUses: editForm.maxUses ? parseInt(editForm.maxUses) : 0,
+        maxUsesPerUser: editForm.maxUsesPerUser ? parseInt(editForm.maxUsesPerUser) : 1,
+        expiresAt: editForm.expiresAt || null,
+        validForPlans: editForm.validForPlans,
+        validForPeriods: editForm.validForPeriods,
+        referrerId: hasReferrer ? editForm.referrerId : null,
+        commissionPercent: hasReferrer ? cp : 0
+      });
+      closeEdit();
+      fetchCodes();
+    } catch (err) {
+      alert('Chyba pri ukladaní: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // Toggles v edit form-e — separátne od main form-u kvôli izolácii state-u.
+  const toggleEditPlan = (plan) => {
+    setEditForm(f => ({
+      ...f,
+      validForPlans: f.validForPlans.includes(plan)
+        ? f.validForPlans.filter(p => p !== plan)
+        : [...f.validForPlans, plan]
+    }));
+  };
+
+  const toggleEditPeriod = (period) => {
+    setEditForm(f => ({
+      ...f,
+      validForPeriods: f.validForPeriods.includes(period)
+        ? f.validForPeriods.filter(p => p !== period)
+        : [...f.validForPeriods, period]
+    }));
+  };
+
+  // QR — generuje URL pre registráciu s pred-vyplneným kódom. Pri scan-e
+  // sa nový user otvorí na /login?register=true&code=PRPL-XXX a kód sa
+  // automaticky aplikuje pri checkout-e.
+  const openQR = (code) => {
+    const url = `https://prplcrm.eu/login?register=true&code=${encodeURIComponent(code.code)}`;
+    setQrModal({ code, url });
+  };
+
+  const closeQR = () => setQrModal(null);
+
+  // Download QR ako PNG — konverzia z inline SVG cez canvas
+  const downloadQR = () => {
+    if (!qrModal) return;
+    const svg = document.querySelector('#qr-svg-container svg');
+    if (!svg) return;
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const size = 800;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      const a = document.createElement('a');
+      a.download = `qr-${qrModal.code.code}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    };
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  };
+
+  const copyQRUrl = () => {
+    if (!qrModal) return;
+    navigator.clipboard.writeText(qrModal.url).then(
+      () => alert('URL skopírovaná do schránky'),
+      () => alert('Nepodarilo sa skopírovať')
+    );
   };
 
   const viewStats = async (code) => {
@@ -5597,6 +5736,10 @@ function PromoCodesTab() {
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <button onClick={() => viewStats(c)} title="Štatistiky"
                       style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>📊</button>
+                    <button onClick={() => openQR(c)} title="QR kód"
+                      style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>🔲</button>
+                    <button onClick={() => openEdit(c)} title="Upraviť"
+                      style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>✏️</button>
                     <button onClick={() => handleToggle(c._id, c.isActive)} title={c.isActive ? 'Deaktivovať' : 'Aktivovať'}
                       style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>
                       {c.isActive ? '⏸️' : '▶️'}
@@ -5651,6 +5794,184 @@ function PromoCodesTab() {
             ) : (
               <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>Zatiaľ žiadne použitia</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          EDIT MODAL — úprava existujúceho promo kódu
+
+          Imutabilné polia (code, type, value, duration) sú v UI ako
+          read-only chips — Stripe API ich po vytvorení coupon-u nedovolí
+          zmeniť. Edituje sa iba názov, aktívnosť, limity, expiry,
+          plán/obdobie filter a affiliate priradenie.
+          ═══════════════════════════════════════════════════════════════ */}
+      {editingCode && editForm && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={closeEdit}>
+          <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-lg)', padding: '24px', maxWidth: '640px', width: '92%', maxHeight: '90vh', overflow: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>✏️ Upraviť kód {editingCode.code}</h3>
+              <button onClick={closeEdit} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            {/* Read-only sekcia — imutabilné Stripe-side polia */}
+            <div style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px' }}>
+              <span><strong>Kód:</strong> <code>{editingCode.code}</code></span>
+              <span><strong>Typ:</strong> {PROMO_TYPES[editingCode.type]?.icon} {PROMO_TYPES[editingCode.type]?.label || editingCode.type}</span>
+              <span><strong>Hodnota:</strong> {editingCode.value}{PROMO_TYPES[editingCode.type]?.unit}</span>
+              <span><strong>Trvanie:</strong> {
+                editingCode.duration === 'once' ? 'Len 1. platba'
+                  : editingCode.duration === 'forever' ? 'Navždy'
+                  : editingCode.duration === 'repeating' ? `${editingCode.durationInMonths} mes.` : '—'
+              }</span>
+              <span style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                Tieto polia sa nedajú meniť (Stripe limitácia). Ak treba inú hodnotu, vytvor nový kód.
+              </span>
+            </div>
+
+            {/* Editovateľné polia */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={labelStyle}>Interný názov</label>
+                <input style={inputStyle} value={editForm.name}
+                  onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>Max. použití (0 = neobmedzené)</label>
+                <input style={inputStyle} type="number" min="0" value={editForm.maxUses}
+                  onChange={e => setEditForm(f => ({ ...f, maxUses: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>Max. použití na používateľa</label>
+                <input style={inputStyle} type="number" min="1" value={editForm.maxUsesPerUser}
+                  onChange={e => setEditForm(f => ({ ...f, maxUsesPerUser: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>Expirácia (prázdne = bez expirácie)</label>
+                <input style={inputStyle} type="date" value={editForm.expiresAt}
+                  onChange={e => setEditForm(f => ({ ...f, expiresAt: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>Stav</label>
+                <button type="button" style={{ ...inputStyle, cursor: 'pointer', background: editForm.isActive ? '#10B98115' : '#EF444415', color: editForm.isActive ? '#10B981' : '#EF4444', fontWeight: 600 }}
+                  onClick={() => setEditForm(f => ({ ...f, isActive: !f.isActive }))}>
+                  {editForm.isActive ? '✅ Aktívny' : '⏸️ Neaktívny'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <label style={labelStyle}>Platí pre plány (prázdne = všetky)</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['free', 'team', 'pro'].map(plan => (
+                  <span key={plan} style={chipStyle(editForm.validForPlans.includes(plan))} onClick={() => toggleEditPlan(plan)}>
+                    {plan}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <label style={labelStyle}>Platí pre obdobia (prázdne = všetky)</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {[{ k: 'monthly', l: 'Mesačne' }, { k: 'yearly', l: 'Ročne' }].map(p => (
+                  <span key={p.k} style={chipStyle(editForm.validForPeriods.includes(p.k))} onClick={() => toggleEditPeriod(p.k)}>
+                    {p.l}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Affiliate sekcia (rovnaký pattern ako Create form) */}
+            <div style={{ marginTop: 14, padding: 12, background: 'var(--bg-secondary, #f8fafc)', borderRadius: 8, border: '1px dashed var(--border-color, #e5e7eb)' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>🤝 Affiliate kód (voliteľné)</div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                Ak vyberieš affiliateho, dostane <em>commission %</em> z každej platby pod týmto kódom (recurring).
+                Bez affiliate = admin generic kód bez provízie.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+                <div>
+                  <label style={labelStyle}>Affiliate (referrer)</label>
+                  <select style={inputStyle} value={editForm.referrerId}
+                    onChange={e => setEditForm(f => ({ ...f, referrerId: e.target.value }))}>
+                    <option value="">— Žiadny (admin generic) —</option>
+                    {affiliates.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.username} ({a.email}){a.status !== 'active' ? ` [${a.status}]` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Provízia (%)</label>
+                  <input style={inputStyle} type="number" min="1" max="100" step="0.5"
+                    value={editForm.commissionPercent}
+                    onChange={e => setEditForm(f => ({ ...f, commissionPercent: e.target.value }))}
+                    disabled={!editForm.referrerId}
+                    placeholder="napr. 10" />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={closeEdit}>Zrušiť</button>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px' }} disabled={editSaving} onClick={handleEditSave}>
+                {editSaving ? 'Ukladám...' : 'Uložiť zmeny'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          QR MODAL — generuje QR kód s URL na registráciu s pred-vyplneným
+          promo kódom. User scanne QR → otvorí sa prplcrm.eu/login?register=
+          true&code=PRPL-XXX → kód sa automaticky aplikuje pri checkout-e.
+          ═══════════════════════════════════════════════════════════════ */}
+      {qrModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={closeQR}>
+          <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-lg)', padding: '24px', maxWidth: '420px', width: '92%' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>🔲 QR kód — {qrModal.code.code}</h3>
+              <button onClick={closeQR} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div id="qr-svg-container" style={{ display: 'flex', justifyContent: 'center', padding: '20px', background: 'white', borderRadius: 8, marginBottom: 12 }}>
+              <QRCodeSVG
+                value={qrModal.url}
+                size={256}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#1e293b"
+                imageSettings={undefined}
+              />
+            </div>
+
+            <div style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderRadius: 6, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>URL ktorú obsahuje QR:</div>
+              <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
+                {qrModal.url}
+              </div>
+            </div>
+
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+              Scan tohoto QR otvorí registráciu s pred-vyplneným kódom <strong>{qrModal.code.code}</strong>.
+              Kód sa automaticky uplatní pri checkout-e (cez Stripe). Vhodné na vytlačenie na vizitky,
+              letáky alebo zdieľanie cez sociálne siete.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={copyQRUrl}>
+                📋 Skopírovať URL
+              </button>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={downloadQR}>
+                💾 Stiahnuť PNG
+              </button>
+            </div>
           </div>
         </div>
       )}
