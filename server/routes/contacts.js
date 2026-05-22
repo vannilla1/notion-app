@@ -5,6 +5,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
+const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
@@ -493,10 +494,19 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // up (task is gone) and the events would orphan forever in Google.
     autoDeleteAllTasksOfContactFromGoogle(contact);
 
-    // Cascade: zmaž aj prílohy v ContactFile kolekcii. Bez tohto zostanú
-    // orphaned Base64 payloady v DB (MB per file) aj po zmazaní kontaktu —
-    // hromadí sa to tichu v tle a bloatuje Mongo storage. ContactFile má
-    // contactId ref, ale Mongoose neposkytuje auto-cascade, musíme ručne.
+    // Cascade: zmaž aj prílohy v ContactFile kolekcii + R2 objects.
+    // Bez tohto zostanú orphaned files (MongoDB base64 alebo R2 objects)
+    // aj po zmazaní kontaktu. R2 účtuje per-GB, nie per-object, ale aj tak
+    // sa hromadí storage cost ak by sme to nemazali.
+    if (fileStorage.isR2Available()) {
+      // Najprv získať všetky r2Keys patriace k tomuto kontaktu
+      const r2Files = await ContactFile.find(
+        { contactId: req.params.id, r2Key: { $ne: null } },
+        { r2Key: 1 }
+      ).lean();
+      // Paralel delete z R2 (fire-and-forget, individual errors logged inside)
+      Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
+    }
     await ContactFile.deleteMany({ contactId: req.params.id });
     await Contact.findByIdAndDelete(req.params.id);
 
@@ -960,12 +970,29 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         uploadedAt: new Date()
       };
 
-      // Save file data to separate collection (keeps Contact documents small)
-      await ContactFile.create({
-        contactId: contact._id,
-        fileId: fileId,
-        data: base64Data
-      });
+      // Storage strategy: R2 preferred, base64-MongoDB fallback.
+      // R2 = ~5 MB pravý binary blob; MongoDB base64 = 6.65 MB string (33%
+      // expanzia). Po naplnení Atlas free tier-u presúvame všetky nové
+      // uploady do R2. Legacy files (data field) stále podporujeme v
+      // download flow-e.
+      if (fileStorage.isR2Available()) {
+        const r2Key = fileStorage.contactFileKey(fileId);
+        await fileStorage.uploadFile(r2Key, req.file.buffer, req.file.mimetype);
+        await ContactFile.create({
+          contactId: contact._id,
+          fileId: fileId,
+          r2Key: r2Key,
+          data: null
+        });
+        logger.debug('[Contact upload] Stored in R2', { fileId, r2Key, size: req.file.size });
+      } else {
+        await ContactFile.create({
+          contactId: contact._id,
+          fileId: fileId,
+          data: base64Data
+        });
+        logger.warn('[Contact upload] R2 unavailable, stored as base64 in MongoDB', { fileId });
+      }
 
       // Only store metadata in Contact (no data field)
       contact.files.push(fileData);
@@ -1038,31 +1065,43 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'File not found' });
     }
 
-    // Try ContactFile collection first, fall back to legacy embedded data
-    let base64Data;
+    // 3-tier resolution v poradí preference:
+    //   1. R2 (r2Key set) — primary storage, najmenšie ConsumeR, žiadny
+    //      base64 overhead, scaluje do nekonečna
+    //   2. ContactFile.data (legacy base64) — pre files pred-R2-migrácie
+    //   3. fileMeta.data (very-legacy embedded v Contact docu)
+    let fileBuffer;
     const contactFile = await ContactFile.findOne(
       { fileId },
-      { data: 1 }
+      { r2Key: 1, data: 1 }
     ).lean();
 
-    if (contactFile) {
-      base64Data = contactFile.data;
-      logger.info('Contact file download: found in ContactFile', { fileId, dataLen: base64Data?.length });
+    if (contactFile?.r2Key && fileStorage.isR2Available()) {
+      // Modern path — fetch z R2
+      try {
+        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
+        logger.info('Contact file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+      } catch (r2Err) {
+        logger.error('Contact file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
+        return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      }
+    } else if (contactFile?.data) {
+      // Legacy: base64 v ContactFile collection
+      fileBuffer = Buffer.from(contactFile.data, 'base64');
+      logger.info('Contact file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
     } else if (fileMeta.data) {
-      // Legacy: data still embedded — migrate on-the-fly
-      base64Data = fileMeta.data;
-      logger.info('Contact file download: using legacy embedded data, migrating', { fileId });
+      // Very-legacy: base64 embedded priamo v Contact docu — migruj on-the-fly
+      fileBuffer = Buffer.from(fileMeta.data, 'base64');
+      logger.info('Contact file download: very-legacy embedded data, migrating', { fileId });
       ContactFile.updateOne(
         { fileId },
-        { $setOnInsert: { contactId, fileId, data: base64Data } },
+        { $setOnInsert: { contactId, fileId, data: fileMeta.data } },
         { upsert: true }
       ).catch(() => {});
     } else {
       logger.error('Contact file download: NO DATA anywhere', { contactId, fileId, fileName: fileMeta.originalName });
       return res.status(404).json({ message: 'File data not found — file may need to be re-uploaded' });
     }
-
-    const fileBuffer = Buffer.from(base64Data, 'base64');
 
     res.set({
       'Content-Type': fileMeta.mimetype,
@@ -1094,7 +1133,14 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
     contact.files.splice(fileIndex, 1);
     await contact.save();
 
-    // Also delete from ContactFile collection
+    // Vymaž z oboch storage layers: R2 (ak existuje) + MongoDB. Robíme to v
+    // tomto poradí: 1) lookup r2Key, 2) delete z R2 (best-effort), 3) delete
+    // ContactFile row. Ak by 2 zlyhalo, ostane R2 orphan — opraviteľné cez
+    // bulk cleanup script (cheap; R2 účtuje za GB, nie za počet objektov).
+    const cfRow = await ContactFile.findOne({ contactId: contact._id, fileId: deletedFileId }, { r2Key: 1 }).lean();
+    if (cfRow?.r2Key && fileStorage.isR2Available()) {
+      fileStorage.deleteFile(cfRow.r2Key).catch(() => {}); // fire-and-forget
+    }
     await ContactFile.deleteOne({ contactId: contact._id, fileId: deletedFileId }).catch(() => {});
 
     const io = req.app.get('io');

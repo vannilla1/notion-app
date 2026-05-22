@@ -8,6 +8,7 @@ const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const ContactFile = require('../models/ContactFile');
+const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
@@ -2842,12 +2843,25 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         uploadedAt: new Date()
       };
 
+      // Helper — uloženie file content-u. R2 ak je k dispozícii, inak base64
+      // do MongoDB. Pri R2 chybe (rate limit, sieť) hodí — caller catchne.
+      const persistFile = async (contactId = null) => {
+        if (fileStorage.isR2Available()) {
+          const r2Key = fileStorage.contactFileKey(fileId);
+          await fileStorage.uploadFile(r2Key, req.file.buffer, req.file.mimetype);
+          await ContactFile.create({ contactId, fileId, r2Key, data: null });
+          logger.debug('[Task upload] Stored in R2', { fileId, r2Key, size: req.file.size });
+        } else {
+          await ContactFile.create({ contactId, fileId, data: base64Data });
+          logger.warn('[Task upload] R2 unavailable, stored as base64', { fileId });
+        }
+      };
+
       // Try global Task first (only if taskId is a valid ObjectId)
       if (mongoose.Types.ObjectId.isValid(taskId)) {
         const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
         if (task) {
-          // Save file data to ContactFile collection
-          await ContactFile.create({ fileId, data: base64Data });
+          await persistFile(null); // global task — no contactId
 
           if (subtaskId) {
             const subtask = findSubtaskById(task.subtasks, subtaskId);
@@ -2873,8 +2887,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const contactTask = contact.tasks.find(t => t.id === taskId);
       if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
 
-      // Save file data to ContactFile collection
-      await ContactFile.create({ contactId: contact._id, fileId, data: base64Data });
+      await persistFile(contact._id);
 
       if (subtaskId) {
         const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
@@ -2949,11 +2962,19 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     if (!fileMeta) {
       logger.warn('Task file download: file metadata not found anywhere', { taskId, fileId, subtaskId });
 
-      // Last resort: try ContactFile directly (file metadata may have been lost but data is safe)
-      const directCF = await ContactFile.findOne({ fileId }, { data: 1 }).lean();
+      // Last resort: try ContactFile directly (file metadata may have been lost but data is safe).
+      // Aktualizované pre R2 — najprv pozri r2Key, ak je tam, fetch z R2.
+      const directCF = await ContactFile.findOne({ fileId }, { r2Key: 1, data: 1 }).lean();
       if (directCF) {
-        logger.info('Task file download: found in ContactFile by direct lookup (metadata was lost)', { fileId });
-        const fileBuffer = Buffer.from(directCF.data, 'base64');
+        logger.info('Task file download: found in ContactFile by direct lookup (metadata lost)', { fileId, hasR2: !!directCF.r2Key });
+        let fileBuffer;
+        if (directCF.r2Key && fileStorage.isR2Available()) {
+          fileBuffer = await fileStorage.downloadFile(directCF.r2Key);
+        } else if (directCF.data) {
+          fileBuffer = Buffer.from(directCF.data, 'base64');
+        } else {
+          return res.status(404).json({ message: 'Súbor nenájdený' });
+        }
         res.set({
           'Content-Type': 'application/octet-stream',
           'Content-Disposition': `attachment; filename="${fileId}"`,
@@ -2965,19 +2986,27 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
-    // Try ContactFile collection first, fall back to legacy embedded data
-    let base64Data;
-    const contactFile = await ContactFile.findOne({ fileId }, { data: 1 }).lean();
-    if (contactFile) {
-      base64Data = contactFile.data;
-      logger.info('Task file download: data from ContactFile', { fileId, dataLen: base64Data?.length });
+    // 3-tier resolution (R2 → ContactFile.data → fileMeta.data legacy)
+    let fileBuffer;
+    const contactFile = await ContactFile.findOne({ fileId }, { r2Key: 1, data: 1 }).lean();
+
+    if (contactFile?.r2Key && fileStorage.isR2Available()) {
+      try {
+        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
+        logger.info('Task file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+      } catch (r2Err) {
+        logger.error('Task file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
+        return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      }
+    } else if (contactFile?.data) {
+      fileBuffer = Buffer.from(contactFile.data, 'base64');
+      logger.info('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
     } else if (fileMeta.data) {
-      // Legacy: data still embedded — migrate on-the-fly
-      base64Data = fileMeta.data;
-      logger.info('Task file download: using legacy embedded data, migrating', { fileId });
+      fileBuffer = Buffer.from(fileMeta.data, 'base64');
+      logger.info('Task file download: very-legacy embedded data, migrating', { fileId });
       ContactFile.updateOne(
         { fileId },
-        { $setOnInsert: { fileId, data: base64Data } },
+        { $setOnInsert: { fileId, data: fileMeta.data } },
         { upsert: true }
       ).catch(() => {});
     } else {
@@ -2985,7 +3014,6 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
-    const fileBuffer = Buffer.from(base64Data, 'base64');
     res.set({
       'Content-Type': fileMeta.mimetype,
       'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
@@ -3004,7 +3032,12 @@ router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asy
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
 
-    // Delete file data from ContactFile collection
+    // Delete z oboch vrstiev: R2 (ak existuje) + ContactFile row.
+    // Najprv lookup r2Key, potom paralelne mazanie.
+    const cfRow = await ContactFile.findOne({ fileId }, { r2Key: 1 }).lean();
+    if (cfRow?.r2Key && fileStorage.isR2Available()) {
+      fileStorage.deleteFile(cfRow.r2Key).catch(() => {}); // fire-and-forget
+    }
     await ContactFile.deleteOne({ fileId }).catch(() => {});
 
     // Try global Task first (only if taskId is a valid ObjectId)
