@@ -4166,7 +4166,20 @@ function StorageTab() {
 
   // Atlas tier usage warning gradient (zelená/oranžová/červená)
   const usagePct = data.database.usagePct || 0;
-  const tierColor = usagePct < 60 ? '#10b981' : usagePct < 85 ? '#f59e0b' : '#ef4444';
+
+  // "Pending compaction" detection: keď reálne dáta (dataSize) sú << storage,
+  // Atlas má veľa fragmentovaného miesta po vymazaní polí. To NIE je critical
+  // situácia — len čakanie na internal compaction (6h-7d na M0 free tier).
+  // Heuristika: data < 10% storage AND storage > 100 MB → pending compaction.
+  const dataSize = data.database.dataSize || 0;
+  const storageSize = data.database.storageSize || 0;
+  const isPendingCompaction = storageSize > 100 * 1024 * 1024 && dataSize > 0 && (dataSize / storageSize) < 0.1;
+
+  // Pri pending compaction použij modrú (info) namiesto červenej (critical) —
+  // situácia nie je nebezpečná, len čakáme na Atlas internal cleanup.
+  const tierColor = isPendingCompaction
+    ? '#3b82f6'
+    : usagePct < 60 ? '#10b981' : usagePct < 85 ? '#f59e0b' : '#ef4444';
 
   return (
     <div>
@@ -4213,9 +4226,19 @@ function StorageTab() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
           <span>{fmtSize(data.database.storageSize)} z {data.database.tierLimitMb} MB</span>
           <span>
-            {usagePct < 60 ? '✅ Healthy' : usagePct < 85 ? '⚠️ Watch — zvážte cleanup' : '🚨 Critical — upgrade tier alebo cleanup teraz'}
+            {isPendingCompaction
+              ? '⏳ Pending compaction — Atlas si vyžiada čas (6h-7d)'
+              : usagePct < 60 ? '✅ Healthy' : usagePct < 85 ? '⚠️ Watch — zvážte cleanup' : '🚨 Critical — upgrade tier alebo cleanup teraz'}
           </span>
         </div>
+        {isPendingCompaction && (
+          <div style={{ marginTop: 10, padding: 10, background: '#dbeafe', borderRadius: 6, fontSize: 11, color: '#1e40af', border: '1px solid #93c5fd' }}>
+            <strong>ℹ️ Storage size ešte neodzrkadľuje cleanup.</strong> Reálne dáta: <strong>{fmtSize(dataSize)}</strong>
+            {' '}({((dataSize / storageSize) * 100).toFixed(1)}% z aktuálneho storage).
+            {' '}MongoDB Atlas na free tier-i kompaktuje fragmentovaný disk space v pozadí — typicky <strong>6-24 hodín</strong>,
+            niekedy až do týždňa. <strong>Nie je to problém</strong> — kapacita pre nové dáta je voľná ({fmtSize(data.database.tierLimitMb * 1024 * 1024 - dataSize)} reálneho miesta).
+          </div>
+        )}
         <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, margin: 0 }}>
           Atlas tier limit sa nedá zistiť z dbStats. Aktuálna hodnota je z env var <code>ATLAS_TIER_LIMIT_MB</code> (default 512 = M0 Free).
         </p>
