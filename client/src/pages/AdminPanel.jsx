@@ -4210,17 +4210,38 @@ function StorageTab() {
         </h2>
       </div>
 
-      {/* DB overview cards */}
+      {/* Overview cards — MongoDB + R2 spolu, aby user videl kompletný obraz
+          o tom kde žijú dáta. Po R2 migrácii MongoDB stats sú malé, files
+          sú v R2. Bez tohto by overview ukazoval len Mongo a R2 by sa zdal
+          ako vedľajšia vec, hoci tam je 99% objemu. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '12px' }}>
         {[
-          { label: 'Dáta', value: fmtSize(data.database.dataSize) },
-          { label: 'Storage', value: fmtSize(data.database.storageSize) },
-          { label: 'Indexy', value: fmtSize(data.database.indexSize) },
-          { label: 'Kolekcie', value: data.database.collections }
+          {
+            label: 'MongoDB dáta',
+            value: fmtSize(data.database.dataSize),
+            hint: 'Skutočné dáta v Mongo'
+          },
+          {
+            label: 'MongoDB storage',
+            value: fmtSize(data.database.storageSize),
+            hint: 'Disk space (vrátane fragmentácie)'
+          },
+          {
+            label: 'R2 files',
+            value: r2Stats?.configured
+              ? `${r2Stats.objectCount.toLocaleString()}`
+              : '—',
+            hint: r2Stats?.configured
+              ? `${fmtSize(r2Stats.totalBytes)} v R2`
+              : 'R2 nie je nakonfigurované'
+          },
+          { label: 'Indexy', value: fmtSize(data.database.indexSize), hint: `${data.database.collections} kolekcií` },
+          { label: 'Kolekcie', value: data.database.collections, hint: 'Total v Mongo' }
         ].map(s => (
           <div key={s.label} style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '12px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
             <div style={{ fontSize: '20px', fontWeight: 700 }}>{s.value}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.label}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>{s.label}</div>
+            {s.hint && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: 2, opacity: 0.7 }}>{s.hint}</div>}
           </div>
         ))}
       </div>
