@@ -57,6 +57,20 @@ function getStatus() {
   };
 }
 
+/**
+ * Spočíta files ktoré ešte čakajú na migráciu do R2. Async — robí DB query.
+ *
+ * UI to volá pri otvorení Storage tabu, aby vedelo či zobraziť migration
+ * card alebo skryť (po dokončení sa karta auto-skryje, pri budúcom
+ * base64 fallback-u sa znovu objaví).
+ */
+async function getPendingMigrationCount() {
+  return ContactFile.countDocuments({
+    r2Key: null,
+    data: { $ne: null, $exists: true }
+  });
+}
+
 function resetState(mode) {
   state.running = true;
   state.startedAt = new Date().toISOString();
@@ -194,5 +208,6 @@ function finishState() {
 
 module.exports = {
   runContactFileMigration,
-  getStatus
+  getStatus,
+  getPendingMigrationCount
 };

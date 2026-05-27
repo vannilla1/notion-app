@@ -4335,9 +4335,12 @@ function StorageTab() {
 
       {/* ─────────────────────────────────────────────────────────────
           R2 MIGRATION CARD — presun ContactFile.data → Cloudflare R2.
-          Ak migrácia beží, ukazuje live progress bar + posledné logy.
-          Inak ukazuje dve tlačidlá: Dry-run (preview) + Live (ostro).
+          Karta sa zobrazí IBA ak existujú files čakajúce na migráciu
+          (pendingCount > 0) ALEBO ak migrácia práve beží ALEBO ak práve
+          dobehla (chceme ukázať výsledok). Po prvom úspešnom run-ne
+          a opustení tabu sa skryje sama.
           ───────────────────────────────────────────────────────────── */}
+      {migration && (migration.pendingCount > 0 || migration.running || (migration.finishedAt && migration.processed > 0)) && (
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border-color)', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
@@ -4433,6 +4436,7 @@ function StorageTab() {
           </div>
         )}
       </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
         {/* Collection breakdown chart */}

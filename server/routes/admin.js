@@ -4029,8 +4029,17 @@ router.post('/migration/contactfiles-to-r2', authenticateToken, requireAdmin, as
   }
 });
 
-router.get('/migration/contactfiles-to-r2/status', authenticateToken, requireAdmin, (req, res) => {
-  res.json(fileMigration.getStatus());
+router.get('/migration/contactfiles-to-r2/status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    // Pending count je DB query, takže async. UI rozhoduje ne-základe
+    // tejto hodnoty či zobraziť migration card (skryje sa keď 0).
+    const status = fileMigration.getStatus();
+    const pendingCount = await fileMigration.getPendingMigrationCount();
+    res.json({ ...status, pendingCount });
+  } catch (err) {
+    logger.error('[Admin] Migration status fetch failed', { error: err.message });
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // R2 bucket stats — paralela k MongoDB tier usage. Iteratuje cez všetky
