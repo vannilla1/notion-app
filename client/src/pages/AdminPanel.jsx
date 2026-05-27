@@ -4049,6 +4049,26 @@ function StorageTab() {
 
   useEffect(() => { fetchMigrationStatus(); }, [fetchMigrationStatus]);
 
+  // ─────────────────────────────────────────────────────────────────────
+  // R2 bucket stats (paralela k Atlas tier usage).
+  // ─────────────────────────────────────────────────────────────────────
+  const [r2Stats, setR2Stats] = useState(null);
+  const fetchR2Stats = useCallback(async () => {
+    try {
+      const r = await adminApi.get('/api/admin/storage/r2');
+      setR2Stats(r.data);
+    } catch (e) {
+      setR2Stats({ configured: false, error: e.response?.data?.message || e.message });
+    }
+  }, []);
+  useEffect(() => { fetchR2Stats(); }, [fetchR2Stats]);
+  // Re-fetch po úspešnej migrácii (count sa zmení)
+  useEffect(() => {
+    if (migration && !migration.running && migration.succeeded > 0) {
+      fetchR2Stats();
+    }
+  }, [migration?.running, migration?.succeeded, fetchR2Stats]);
+
   // Polling pri behu migrácie — 2s interval. Auto-stop keď migration.running=false.
   useEffect(() => {
     if (!migration?.running) {
@@ -4243,6 +4263,75 @@ function StorageTab() {
           Atlas tier limit sa nedá zistiť z dbStats. Aktuálna hodnota je z env var <code>ATLAS_TIER_LIMIT_MB</code> (default 512 = M0 Free).
         </p>
       </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          CLOUDFLARE R2 BUCKET USAGE — paralela k Atlas tier card.
+          Free tier = 10 GB. Pri 10 GB → upgrade na paid ($0.015/GB/mes).
+          ───────────────────────────────────────────────────────────── */}
+      {r2Stats && (
+        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border-color)', marginBottom: 20 }}>
+          {!r2Stats.configured ? (
+            <>
+              <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 4px' }}>☁️ Cloudflare R2</h3>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                R2 nie je nakonfigurované. {r2Stats.error && <span style={{ color: '#ef4444' }}>{r2Stats.error}</span>}
+              </p>
+            </>
+          ) : (() => {
+            const r2TotalGb = (r2Stats.freeTierStorageBytes / 1024 / 1024 / 1024);
+            const r2UsedGb = (r2Stats.totalBytes / 1024 / 1024 / 1024);
+            const r2Pct = r2Stats.usagePct || 0;
+            const r2Color = r2Pct < 60 ? '#10b981' : r2Pct < 85 ? '#f59e0b' : '#ef4444';
+            const r2Free = r2Stats.freeTierStorageBytes - r2Stats.totalBytes;
+            return (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    ☁️ Cloudflare R2 — <code style={{ fontSize: 12, padding: '1px 6px', background: 'var(--bg-primary)', borderRadius: 4 }}>{r2Stats.bucket}</code>
+                  </h3>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: r2Color }}>
+                    {r2Pct}% využité
+                  </span>
+                </div>
+                <div style={{ height: 12, background: 'var(--bg-primary)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                  <div style={{
+                    width: `${Math.min(100, Math.max(0.5, r2Pct))}%`,
+                    height: '100%',
+                    background: r2Color,
+                    transition: 'width 0.5s ease'
+                  }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                  <span>{fmtSize(r2Stats.totalBytes)} z {r2TotalGb.toFixed(0)} GB free tier</span>
+                  <span>
+                    {r2Pct < 60 ? '✅ Healthy' : r2Pct < 85 ? '⚠️ Watch — blížiš sa k limitu' : '🚨 Limit blízko — zváž upgrade'}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginTop: 12, fontSize: 11 }}>
+                  <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 6, textAlign: 'center' }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{r2Stats.objectCount.toLocaleString()}</div>
+                    <div style={{ color: 'var(--text-muted)' }}>Objektov v buckete</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 6, textAlign: 'center' }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{fmtSize(r2Free)}</div>
+                    <div style={{ color: 'var(--text-muted)' }}>Voľné v free tier</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-primary)', padding: 8, borderRadius: 6, textAlign: 'center' }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>
+                      {r2Stats.objectCount > 0 ? fmtSize(Math.round(r2Stats.totalBytes / r2Stats.objectCount)) : '—'}
+                    </div>
+                    <div style={{ color: 'var(--text-muted)' }}>Priemerná veľkosť</div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, margin: 0 }}>
+                  Free tier: <strong>10 GB storage</strong> + <strong>1M class A ops</strong> + <strong>10M class B ops</strong> / mes. Egress (download) je vždy zadarmo.
+                  Pri prekročení: $0.015/GB/mes.
+                </p>
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {/* ─────────────────────────────────────────────────────────────
           R2 MIGRATION CARD — presun ContactFile.data → Cloudflare R2.

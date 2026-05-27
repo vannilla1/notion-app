@@ -4033,4 +4033,19 @@ router.get('/migration/contactfiles-to-r2/status', authenticateToken, requireAdm
   res.json(fileMigration.getStatus());
 });
 
+// R2 bucket stats — paralela k MongoDB tier usage. Iteratuje cez všetky
+// objekty v buckete cez ListObjectsV2 (1 API call pri <1000 objektoch).
+// Costs 1 class A operation (free tier: 1M/mes). Volá sa pri otvorení
+// Storage tabu + admin refresh.
+router.get('/storage/r2', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const fileStorage = require('../services/fileStorage');
+    const stats = await fileStorage.getBucketStats();
+    res.json(stats);
+  } catch (err) {
+    logger.error('[Admin] R2 stats fetch failed', { error: err.message });
+    res.status(500).json({ message: err.message, configured: false });
+  }
+});
+
 module.exports = router;

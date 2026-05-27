@@ -21,7 +21,8 @@ const {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
-  HeadObjectCommand
+  HeadObjectCommand,
+  ListObjectsV2Command
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const logger = require('../utils/logger');
@@ -153,6 +154,50 @@ function contactFileKey(fileId) {
   return `contactfiles/${fileId}`;
 }
 
+/**
+ * Vráti aggregate stats pre celý bucket: počet objektov + total bytes.
+ *
+ * Implementácia: ListObjectsV2 s pagination (max 1000 objektov per call).
+ * Pre tvojich 83 files = 1 call. Pri 10000 files = 10 calls. Stále v
+ * Cloudflare R2 free tier (1M class A ops/mes).
+ *
+ * Pre prehľad v admin paneli — paralela k MongoDB tier usage card.
+ * Cache na strane volajúceho, neukladáme tu (každý refresh fetchne fresh).
+ */
+async function getBucketStats() {
+  if (!isConfigured) {
+    return { configured: false, objectCount: 0, totalBytes: 0 };
+  }
+
+  let objectCount = 0;
+  let totalBytes = 0;
+  let continuationToken = undefined;
+
+  // Pagination loop — Cloudflare R2 limit je 1000 objektov per response
+  do {
+    const cmd = new ListObjectsV2Command({
+      Bucket: R2_BUCKET,
+      MaxKeys: 1000,
+      ContinuationToken: continuationToken
+    });
+    const response = await s3Client.send(cmd);
+    const contents = response.Contents || [];
+    objectCount += contents.length;
+    totalBytes += contents.reduce((sum, obj) => sum + (obj.Size || 0), 0);
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return {
+    configured: true,
+    bucket: R2_BUCKET,
+    objectCount,
+    totalBytes,
+    // R2 free tier: 10 GB storage, 1M class A ops, 10M class B ops / mes
+    freeTierStorageBytes: 10 * 1024 * 1024 * 1024,
+    usagePct: parseFloat(((totalBytes / (10 * 1024 * 1024 * 1024)) * 100).toFixed(2))
+  };
+}
+
 module.exports = {
   isR2Available,
   uploadFile,
@@ -161,6 +206,7 @@ module.exports = {
   getPresignedUrl,
   fileExists,
   contactFileKey,
+  getBucketStats,
   // Vystavujeme bucket name pre logging / diagnostiku
   bucket: R2_BUCKET
 };
