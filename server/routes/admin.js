@@ -3972,4 +3972,65 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// DB STORAGE MIGRATION — ContactFile.data (base64) → Cloudflare R2
+//
+// One-off migration endpoint. Migrácia môže trvať 2-5 min, takže nemôže
+// bežať synchrónne v HTTP requeste (Render request timeout). Riešenie:
+// POST kickne off async migráciu (fire-and-forget), vráti 202 hneď.
+// Status sa pollom cez GET endpoint — UI poll-uje každé 2s a zobrazuje
+// progress live.
+// ═══════════════════════════════════════════════════════════════════════
+const fileMigration = require('../services/fileMigration');
+
+router.post('/migration/contactfiles-to-r2', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true;
+
+    // Ak už migrácia beží — vráť 409 (Conflict). Inak by sa pustila duplicitná.
+    const currentStatus = fileMigration.getStatus();
+    if (currentStatus.running) {
+      return res.status(409).json({
+        message: 'Migrácia už beží',
+        status: currentStatus
+      });
+    }
+
+    // Fire-and-forget. Promise sa vyrieši v pozadí, my hneď vrátime response.
+    // Error catch je tam aby unhandledPromiseRejection nepadol proces.
+    fileMigration.runContactFileMigration({ dryRun })
+      .then((result) => {
+        logger.info('[Admin] Migration finished', {
+          succeeded: result.succeeded,
+          failed: result.failed
+        });
+      })
+      .catch((err) => {
+        logger.error('[Admin] Migration crashed', { error: err.message });
+      });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: dryRun ? 'storage.migration_dryrun_started' : 'storage.migration_started',
+      category: 'system',
+      targetType: 'migration',
+      targetId: 'contactfiles-to-r2',
+      details: { mode: dryRun ? 'dry-run' : 'live' },
+      ipAddress: req.ip
+    });
+
+    res.status(202).json({
+      message: dryRun ? 'Dry-run started' : 'Migration started',
+      status: fileMigration.getStatus()
+    });
+  } catch (err) {
+    logger.error('[Admin] Migration start failed', { error: err.message });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/migration/contactfiles-to-r2/status', authenticateToken, requireAdmin, (req, res) => {
+  res.json(fileMigration.getStatus());
+});
+
 module.exports = router;
