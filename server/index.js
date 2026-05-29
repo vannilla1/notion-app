@@ -27,6 +27,7 @@ const messageRoutes = require('./routes/messages');
 const adminRoutes = require('./routes/admin');
 const affiliateRoutes = require('./routes/affiliate');
 const billingRoutes = require('./routes/billing');
+const billingAppleRoutes = require('./routes/billingApple');
 const contactFormRoutes = require('./routes/contact-form');
 const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
@@ -203,6 +204,12 @@ app.use('/api/push', pushRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/contact-form', contactFormRoutes);
+// Apple IAP endpoints (iOS only) — mount PRED '/api/billing' (špecifickejšie
+// pred všeobecné), aby '/api/billing/apple/*' šlo priamo sem a nemuselo
+// padať cez Stripe router. Notification webhook je tu (nie pri Stripe
+// raw-body handleri) — Apple V2 posiela JSON { signedPayload } a JWS sa
+// overuje self-contained, netreba raw body.
+app.use('/api/billing/apple', billingAppleRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/affiliate', affiliateRoutes);

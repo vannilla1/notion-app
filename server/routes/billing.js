@@ -83,12 +83,24 @@ router.get('/status', authenticateToken, async (req, res) => {
 
     const result = {
       plan: sub.plan || 'free',
+      // source: 'stripe' | 'apple' | null — UI podľa toho rozhodne, či
+      // ukázať Stripe billing portal alebo "spravované cez App Store"
+      // (Apple subscriptions sa menia v iOS Settings, nie cez nás).
+      source: sub.source || null,
       billingPeriod: sub.billingPeriod || null,
       paidUntil: sub.paidUntil || null,
       cancelAtPeriodEnd: sub.cancelAtPeriodEnd || false,
       hasStripeCustomer: !!sub.stripeCustomerId,
-      hasSubscription: !!sub.stripeSubscriptionId
+      hasSubscription: !!sub.stripeSubscriptionId,
+      // appleManaged true keď je aktívny plán platený cez Apple IAP — web
+      // UI vtedy skryje Stripe checkout/portal a ukáže informačný text.
+      appleManaged: sub.source === 'apple'
     };
+
+    // Apple-managed subscription — preskočíme Stripe API call (nemá zmysel).
+    if (sub.source === 'apple') {
+      return res.json(result);
+    }
 
     // If active Stripe subscription, fetch latest info
     if (sub.stripeSubscriptionId) {
@@ -617,6 +629,9 @@ async function updateUserSubscription(user, subscription) {
     stripeSubscriptionId: subscription.id,
     stripeCustomerId: subscription.customer,
     stripePriceId: priceId,
+    // source='stripe' keď je plán aktívny cez Stripe. Pri downgrade na free
+    // (isActive=false) nastavíme null. Bráni to konfliktu s 'apple' source.
+    source: isActive ? 'stripe' : null,
     plan: isActive ? (plan || user.subscription.plan) : 'free',
     billingPeriod: period || user.subscription.billingPeriod,
     paidUntil: new Date(subscription.current_period_end * 1000),
