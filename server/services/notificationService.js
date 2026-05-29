@@ -19,6 +19,12 @@ const logger = require('../utils/logger');
 // Store io instance
 let io = null;
 
+// Notification.userId je striktne ObjectId. Niektoré legacy volania môžu
+// poslať username string (napr. task.createdBy = "mkm") — bez tejto kontroly
+// Mongoose hodí BSONError pri save. Radšej skip + warn (soft fail).
+const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
+const isValidObjectId = (v) => OBJECT_ID_RE.test(String(v == null ? '' : v));
+
 // VAPID configuration status
 let vapidConfigured = false;
 
@@ -739,6 +745,17 @@ const createNotification = async ({
   category = null  // explicit override; otherwise classifyByType(type) is used
 }) => {
   try {
+    // Defensive: userId musí byť platný ObjectId. Legacy dáta občas nesú
+    // username string (napr. task.createdBy = "mkm") — namiesto hard BSONError,
+    // ktorý by zlyhal a zaspamoval logy, notifikáciu ticho preskočíme s warnom.
+    if (!isValidObjectId(userId)) {
+      logger.warn('[NotificationService] Skipping notification — userId is not a valid ObjectId', {
+        userId: String(userId == null ? '' : userId),
+        type
+      });
+      return null;
+    }
+
     // Ensure workspaceId is also available inside data so push payloads
     // (which use data as the payload envelope) carry workspace context
     const dataWithWs = workspaceId

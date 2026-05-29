@@ -1,7 +1,62 @@
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
+const User = require('../models/User');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
+
+// ─── Recipient resolution ────────────────────────────────────────────────
+//
+// Príjemcovia notifikácií sa skladajú z viacerých polí, ktoré historicky
+// nemajú jednotný typ:
+//   - task.assignedTo  → [ObjectId]  (vždy platné)
+//   - task.createdBy   → String      (legacy môže byť username, napr. "mkm")
+//   - subtask.assignedTo → [String]  (môže byť ObjectId string aj username)
+//   - contact.userId   → ObjectId
+// Notification.userId je striktne ObjectId, takže username "mkm" spôsobí
+// BSONError pri caste. Tu username → _id dohľadáme a nevalidné preskočíme.
+
+const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
+const isObjectId = (v) => OBJECT_ID_RE.test(String(v == null ? '' : v));
+
+/**
+ * Resolve a collection of raw recipient identifiers (ObjectId strings alebo
+ * legacy usernames) na pole platných ObjectId stringov. Username hodnoty
+ * dohľadáme cez User.username → _id; nevyriešené preskočíme s warnom (žiadny
+ * hard error).
+ * @param {Iterable<string>} rawIds
+ * @returns {Promise<string[]>}
+ */
+const resolveRecipientIds = async (rawIds) => {
+  const ids = Array.from(new Set(
+    Array.from(rawIds || []).map(v => String(v == null ? '' : v)).filter(Boolean)
+  ));
+
+  const valid = [];
+  const usernames = [];
+  for (const id of ids) {
+    if (isObjectId(id)) valid.push(id);
+    else usernames.push(id);
+  }
+
+  if (usernames.length > 0) {
+    try {
+      const users = await User.find({ username: { $in: usernames } }, '_id username').lean();
+      const byName = new Map(users.map(u => [u.username, u._id.toString()]));
+      for (const name of usernames) {
+        const resolved = byName.get(name);
+        if (resolved) {
+          valid.push(resolved);
+        } else {
+          logger.warn('[DueDateChecker] Could not resolve recipient to a valid userId, skipping', { recipient: name });
+        }
+      }
+    } catch (err) {
+      logger.warn('[DueDateChecker] Failed to resolve usernames to userIds', { error: err.message, usernames });
+    }
+  }
+
+  return Array.from(new Set(valid));
+};
 
 /**
  * Due date urgency levels based on days remaining
@@ -367,8 +422,11 @@ const checkDueDates = async () => {
             usersToNotify.add(task.createdBy.toString());
           }
 
-          // Send full notification (in-app + web push + APNs) to each user
-          for (const userId of usersToNotify) {
+          // Send full notification (in-app + web push + APNs) to each user.
+          // Resolve username→_id a vyhoď nevalidné, nech sa subtask vetva
+          // nezasekne na createdBy="mkm" (legacy username v ObjectId poli).
+          const recipientIds = await resolveRecipientIds(usersToNotify);
+          for (const userId of recipientIds) {
             try {
               const notificationType = change.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
               await notificationService.createNotification({
@@ -435,7 +493,8 @@ const checkDueDates = async () => {
           usersToNotify.add(task.createdBy.toString());
         }
 
-        for (const userId of usersToNotify) {
+        const recipientIds = await resolveRecipientIds(usersToNotify);
+        for (const userId of recipientIds) {
           try {
             const notificationType = rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate';
             await notificationService.createNotification({
@@ -520,7 +579,8 @@ const checkDueDates = async () => {
           }
           if (task.createdBy) usersToNotify.add(task.createdBy.toString());
 
-          for (const userId of usersToNotify) {
+          const recipientIds = await resolveRecipientIds(usersToNotify);
+          for (const userId of recipientIds) {
             try {
               await notificationService.createNotification({
                 userId,
@@ -633,7 +693,8 @@ const checkContactDueDates = async () => {
             if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
             usersToNotify.add(contact.userId.toString());
 
-            for (const userId of usersToNotify) {
+            const recipientIds = await resolveRecipientIds(usersToNotify);
+            for (const userId of recipientIds) {
               try {
                 await notificationService.createNotification({
                   userId,
@@ -680,7 +741,8 @@ const checkContactDueDates = async () => {
             if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
             usersToNotify.add(contact.userId.toString());
 
-            for (const userId of usersToNotify) {
+            const recipientIds = await resolveRecipientIds(usersToNotify);
+            for (const userId of recipientIds) {
               try {
                 await notificationService.createNotification({
                   userId,
@@ -746,7 +808,8 @@ const checkContactDueDates = async () => {
             if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
             usersToNotify.add(contact.userId.toString());
 
-            for (const userId of usersToNotify) {
+            const recipientIds = await resolveRecipientIds(usersToNotify);
+            for (const userId of recipientIds) {
               try {
                 await notificationService.createNotification({
                   userId,
