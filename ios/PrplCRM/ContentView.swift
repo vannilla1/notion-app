@@ -420,6 +420,16 @@ struct WebView: UIViewRepresentable {
         context.coordinator.webView = webView
         context.coordinator.startForegroundObserver()
 
+        // IAP: transakcie ktoré prídu mimo priameho nákupu (auto-renewal,
+        // Ask to Buy approval, restore na inom zariadení) — StoreKit listener
+        // ich finish-ne a pingne web nech refreshne subscription status.
+        // Backend dostane authoritatívny update cez ASSN webhook; toto je
+        // len UI sync. requestId 'external' nemá web-side promise, ale
+        // window.__iapResult ho môže použiť na trigger re-fetch.
+        StoreKitManager.shared.onExternalTransaction = { [weak coordinator = context.coordinator] jws in
+            coordinator?.injectIapResultRaw(requestId: "external", dict: ["success": true, "jws": jws, "external": true])
+        }
+
         // If a push notification arrived before the app launched, load the
         // deep link URL directly instead of the default /app. Avoids race
         // where /app finishes loading first and the deep link never applies.
@@ -681,6 +691,79 @@ struct WebView: UIViewRepresentable {
                 if let webView = self.webView {
                     OAuthController.startAppleSignIn(from: webView)
                 }
+            }
+
+            // ── Apple IAP bridge (StoreKit 2) ──────────────────────────
+            // Web → native: nákup / fetch produktov / restore. Native spraví
+            // StoreKit operáciu a vráti výsledok do webu cez injekt:
+            //   window.__iapProducts(requestId, [...])  — zoznam produktov+ceny
+            //   window.__iapResult(requestId, {...})    — výsledok nákupu (jws/error)
+            // Web potom JWS POSTne na /api/billing/apple/verify (Option B —
+            // reuse web api clientu pre token/refresh/error handling).
+            if type == "iapGetProducts" {
+                let requestId = body["requestId"] as? String ?? ""
+                debugLog("[IAP] getProducts requestId=\(requestId)")
+                Task {
+                    let products = await StoreKitManager.shared.productsForWeb()
+                    self.injectIapProducts(requestId: requestId, products: products)
+                }
+            }
+
+            if type == "iapPurchase", let productId = body["productId"] as? String {
+                let requestId = body["requestId"] as? String ?? ""
+                debugLog("[IAP] purchase \(productId) requestId=\(requestId)")
+                Task {
+                    let outcome = await StoreKitManager.shared.purchase(productId: productId)
+                    self.injectIapResult(requestId: requestId, outcome: outcome)
+                }
+            }
+
+            if type == "iapRestore" {
+                let requestId = body["requestId"] as? String ?? ""
+                debugLog("[IAP] restore requestId=\(requestId)")
+                Task {
+                    if let jws = await StoreKitManager.shared.restorePurchases() {
+                        self.injectIapResultRaw(requestId: requestId, dict: ["success": true, "jws": jws])
+                    } else {
+                        self.injectIapResultRaw(requestId: requestId, dict: ["success": false, "error": "Žiadne aktívne predplatné na obnovenie"])
+                    }
+                }
+            }
+        }
+
+        // ── IAP injekt helpery (main thread + JSON-safe) ──
+        // requestId generuje web (alphanumeric), interpolácia do JS je OK.
+        // dict/products sú JSON-serialized → bezpečné voči injection.
+        func injectIapResult(requestId: String, outcome: StoreKitManager.PurchaseOutcome) {
+            var dict: [String: Any] = [:]
+            switch outcome {
+            case .success(let jws):
+                dict = ["success": true, "jws": jws]
+            case .userCancelled:
+                dict = ["success": false, "cancelled": true]
+            case .pending:
+                dict = ["success": false, "pending": true]
+            case .failed(let message):
+                dict = ["success": false, "error": message]
+            }
+            injectIapResultRaw(requestId: requestId, dict: dict)
+        }
+
+        func injectIapResultRaw(requestId: String, dict: [String: Any]) {
+            guard let data = try? JSONSerialization.data(withJSONObject: dict),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            let js = "if (typeof window.__iapResult === 'function') { window.__iapResult('\(requestId)', \(json)); }"
+            DispatchQueue.main.async { [weak self] in
+                self?.webView?.evaluateJavaScript(js, completionHandler: nil)
+            }
+        }
+
+        func injectIapProducts(requestId: String, products: [[String: Any]]) {
+            guard let data = try? JSONSerialization.data(withJSONObject: products),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            let js = "if (typeof window.__iapProducts === 'function') { window.__iapProducts('\(requestId)', \(json)); }"
+            DispatchQueue.main.async { [weak self] in
+                self?.webView?.evaluateJavaScript(js, completionHandler: nil)
             }
         }
 

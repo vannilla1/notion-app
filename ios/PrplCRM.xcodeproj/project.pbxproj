@@ -12,6 +12,7 @@
 		A10003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20003 /* Assets.xcassets */; };
 		A10004 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20006 /* KeychainHelper.swift */; };
 		A10005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20007 /* PrivacyInfo.xcprivacy */; };
+		A10010 /* StoreKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20010 /* StoreKitManager.swift */; };
 		C32EBA4D2FA0F4EF000432AC /* OAuthController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32EBA4C2FA0F4EF000432AC /* OAuthController.swift */; };
 		C32EBA502FA10C45000432AC /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C32EBA4F2FA10C45000432AC /* GoogleSignIn */; };
 		C32EBA522FA10C45000432AC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C32EBA512FA10C45000432AC /* GoogleSignInSwift */; };
@@ -26,6 +27,7 @@
 		A20005 /* PrplCRM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrplCRM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20006 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A20007 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A20010 /* StoreKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitManager.swift; sourceTree = "<group>"; };
 		C32EBA4C2FA0F4EF000432AC /* OAuthController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthController.swift; sourceTree = "<group>"; };
 		C32EBA532FA11127000432AC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		C398032A2F8568D6007EFD20 /* PrplCRM.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PrplCRM.entitlements; sourceTree = "<group>"; };
@@ -60,6 +62,7 @@
 				A20001 /* PrplCRMApp.swift */,
 				A20002 /* ContentView.swift */,
 				A20006 /* KeychainHelper.swift */,
+				A20010 /* StoreKitManager.swift */,
 				A20003 /* Assets.xcassets */,
 				A20004 /* Info.plist */,
 				C32EBA532FA11127000432AC /* GoogleService-Info.plist */,
@@ -153,6 +156,7 @@
 				A10001 /* PrplCRMApp.swift in Sources */,
 				A10002 /* ContentView.swift in Sources */,
 				A10004 /* KeychainHelper.swift in Sources */,
+				A10010 /* StoreKitManager.swift in Sources */,
 				C32EBA4D2FA0F4EF000432AC /* OAuthController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
