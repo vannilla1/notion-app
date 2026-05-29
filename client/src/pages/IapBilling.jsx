@@ -161,16 +161,25 @@ export default function IapBilling() {
                   </div>
                 )}
 
-                {/* Mesačne / ročne toggle */}
-                <div className="billing-period-toggle" style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
-                  <button
-                    className={`btn btn-sm ${billingPeriod === 'monthly' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setBillingPeriod('monthly')}
-                  >Mesačne</button>
-                  <button
-                    className={`btn btn-sm ${billingPeriod === 'yearly' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setBillingPeriod('yearly')}
-                  >Ročne <span style={{ fontSize: 11, opacity: 0.85 }}>(ušetríš)</span></button>
+                {/* Mesačne / ročne toggle — segmented control (.period-btn),
+                    vycentrovaný. Zhodný s web BillingPage. "ušetríš" je
+                    v zelenom badge, nie natlačený text. */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                  <div className="billing-period-toggle" style={{ marginBottom: 0 }}>
+                    <button
+                      className={`period-btn ${billingPeriod === 'monthly' ? 'active' : ''}`}
+                      onClick={() => setBillingPeriod('monthly')}
+                    >
+                      Mesačne
+                    </button>
+                    <button
+                      className={`period-btn ${billingPeriod === 'yearly' ? 'active' : ''}`}
+                      onClick={() => setBillingPeriod('yearly')}
+                    >
+                      Ročne
+                      <span className="period-save-badge">ušetríš</span>
+                    </button>
+                  </div>
                 </div>
 
                 {message && (
