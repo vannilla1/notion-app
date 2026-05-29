@@ -94,9 +94,31 @@ const userSchema = new mongoose.Schema({
   // Subscription / plan
   subscription: {
     plan: { type: String, enum: ['free', 'team', 'pro'], default: 'free' },
+    // Payment source — ktorý systém vlastní aktuálny platený plán.
+    //   'stripe' = web + Android (Stripe Checkout / subscriptions)
+    //   'apple'  = iOS appka (Apple In-App Purchase / StoreKit 2)
+    //   null     = free plán (žiadna platba)
+    // KRITICKÉ pre UI: Apple subscriptions sa spravujú v iOS Settings →
+    // Apple ID → Subscriptions, NIE cez Stripe billing portal. Web UI
+    // musí podľa source rozhodnúť, či zobraziť "Spravovať predplatné"
+    // (Stripe portal) alebo "Spravované cez App Store" (read-only info).
+    // Zároveň bráni double-billing: ak má user 'apple' source, web checkout
+    // sa zablokuje (a naopak), aby neplatil dvakrát za ten istý plán.
+    source: { type: String, enum: ['stripe', 'apple', null], default: null },
     stripeCustomerId: { type: String, default: null },
     stripeSubscriptionId: { type: String, default: null },
     stripePriceId: { type: String, default: null },
+    // ── Apple IAP polia (StoreKit 2 + App Store Server API) ──
+    // originalTransactionId je STABILNÉ ID naprieč všetkými renewals jednej
+    // subscription — primárny lookup kľúč keď príde App Store Server
+    // Notification V2 (DID_RENEW, EXPIRED, REFUND, atď.). Na rozdiel od
+    // transactionId (ktoré sa mení každý renewal) toto ostáva konštantné.
+    appleOriginalTransactionId: { type: String, default: null, index: true },
+    appleProductId: { type: String, default: null },
+    // Sandbox vs Production — sandbox transakcie (test účty + Apple review)
+    // chodia cez iný App Store Server API host. Ukladáme aby sme vedeli kam
+    // sa pýtať pri renewal/refund lookup-e.
+    appleEnvironment: { type: String, enum: ['Production', 'Sandbox', null], default: null },
     billingPeriod: { type: String, enum: ['monthly', 'yearly', null], default: null },
     // 'trialEndsAt' field (and 'trial' plan) was removed — local trial flow
     // was inert and confusing. Stripe-side trial state ('trialing' status)
