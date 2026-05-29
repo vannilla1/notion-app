@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -28,7 +27,6 @@ import { iapAvailable, fetchIapProducts, purchaseIap, restoreIap } from '../util
 export default function IapBilling() {
   const { user, logout, updateUser } = useAuth();
   const { currentWorkspace } = useWorkspace();
-  const navigate = useNavigate();
 
   const [status, setStatus] = useState(null);
   const [plans, setPlans] = useState([]);
@@ -135,9 +133,9 @@ export default function IapBilling() {
       <div className="crm-content">
         <main className="crm-main">
           <div className="billing-page">
-            {/* Nadpis + späť */}
+            {/* Nadpis — back tlačidlo netreba, navigáciu rieši header logo
+                + bottom nav v iOS shell-e. */}
             <div className="billing-header">
-              <button className="btn btn-secondary" style={{ fontSize: 13 }} onClick={() => navigate('/app')}>← Späť</button>
               <h2>Predplatné</h2>
             </div>
 
