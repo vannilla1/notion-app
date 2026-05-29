@@ -1450,12 +1450,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
             <span className="menu-icon">👥</span>
             Správa tímu
           </button>
-          {/*
-            Predplatné položka skrytá v iOS native appke kvôli Apple Guideline 3.1.1.
-            Apple nedovolí externé payment mechanisms (Stripe Checkout, Stripe Portal,
-            promo kódy) pre digital subscriptions konzumované v iOS appke. User v iOS
-            appke spravuje plán cez webovú verziu na prplcrm.eu.
-          */}
           {/* Affiliate dashboard — visible iba ak user.affiliate.enrolled.
               Externý affiliate (shadow user bez prihlásenia) toto nikdy nevidí
               lebo nemôže byť prihlásený. CRM-affiliate userovi sa zobrazí. */}
@@ -1465,12 +1459,18 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               Affiliate program
             </button>
           )}
-          {!isIosNativeApp() && (
-            <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
-              <span className="menu-icon">💳</span>
-              Predplatné
-            </button>
-          )}
+          {/*
+            Predplatné — zobrazené na VŠETKÝCH platformách:
+              web/Android → BillingPage (Stripe Checkout/Portal)
+              iOS native  → IapBilling (Apple In-App Purchase / StoreKit 2)
+            Route /app/billing v App.jsx rozhoduje podľa isIosNativeApp().
+            Apple Guideline 3.1.1 je splnená — iOS používa výhradne Apple IAP,
+            žiadne external payment linky.
+          */}
+          <button className="user-menu-item" onClick={() => { setIsOpen(false); navigate('/app/billing'); }}>
+            <span className="menu-icon">💳</span>
+            Predplatné
+          </button>
           <div className="user-menu-divider"></div>
           <button className="user-menu-item logout" onClick={onLogout}>
             <span className="menu-icon">🚪</span>

@@ -26,6 +26,7 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const Messages = lazy(() => import('./pages/Messages'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
+const IapBilling = lazy(() => import('./pages/IapBilling'));
 const UserAffiliate = lazy(() => import('./pages/UserAffiliate'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminPanel = lazy(() => import('./pages/AdminPanel'));
@@ -484,7 +485,7 @@ function AppContent() {
           path="/app/billing"
           element={
             isAuthenticated
-              ? (isIosNativeApp() ? <Navigate to="/app" replace /> : <BillingPage />)
+              ? (isIosNativeApp() ? <IapBilling /> : <BillingPage />)
               : <Navigate to="/login" />
           }
         />
