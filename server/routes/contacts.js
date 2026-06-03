@@ -1156,4 +1156,30 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
   }
 });
 
+// Premenovanie už nahratého súboru kontaktu — meníme iba originalName
+// v dokumente (R2/ContactFile obsah ostáva, mení sa len zobrazovaný názov).
+router.patch('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const newName = (req.body.originalName || '').trim().slice(0, 200);
+    if (!newName) return res.status(400).json({ message: 'Názov nesmie byť prázdny' });
+
+    const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    if (!contact) return res.status(404).json({ message: 'Contact not found' });
+
+    const file = (contact.files || []).find(f => f.id === req.params.fileId);
+    if (!file) return res.status(404).json({ message: 'File not found' });
+
+    file.originalName = newName;
+    contact.markModified('files');
+    await contact.save();
+
+    const io = req.app.get('io');
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+
+    res.json({ message: 'Názov upravený', originalName: newName });
+  } catch (error) {
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
 module.exports = router;

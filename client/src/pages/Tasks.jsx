@@ -709,6 +709,7 @@ function Tasks() {
   const subtaskFileInputRef = useRef(null);
   const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
   const [pendingUpload, setPendingUpload] = useState(null); // { file, taskId, subtaskId? } — čaká na pomenovanie
+  const [renamingFile, setRenamingFile] = useState(null); // { taskId, fileId, currentName, subtaskId? } — premenovanie existujúceho
 
   // Linked messages
   const [linkedMessages, setLinkedMessages] = useState({});
@@ -2073,6 +2074,7 @@ function Tasks() {
                     <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                     <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
+                    <button className="btn-icon-sm" onClick={() => setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName, subtaskId: subtask.id })} title="Premenovať">✏️</button>
                     <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
                   </div>
                 );
@@ -2315,6 +2317,22 @@ function Tasks() {
       await fetchTasks();
     } catch (error) {
       alert('Chyba pri mazaní súboru');
+    }
+  };
+
+  // Premenovanie už nahratého súboru cez FileRenameModal (renamingFile state).
+  const handleFileRename = async (finalName) => {
+    if (!renamingFile) return;
+    const { taskId, fileId, subtaskId } = renamingFile;
+    setRenamingFile(null);
+    try {
+      const url = subtaskId
+        ? `/api/tasks/${taskId}/files/${fileId}?subtaskId=${subtaskId}`
+        : `/api/tasks/${taskId}/files/${fileId}`;
+      await api.patch(url, { originalName: finalName });
+      await fetchTasks();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri premenovaní súboru');
     }
   };
 
@@ -3264,6 +3282,7 @@ function Tasks() {
                                       <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                                       <span className="task-file-size">{formatFileSize(file.size)}</span>
                                       <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
+                                      <button className="btn-icon-sm" onClick={() => setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName })} title="Premenovať">✏️</button>
                                       <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
                                     </div>
                                   );
@@ -3518,6 +3537,17 @@ function Tasks() {
           file={pendingUpload.file}
           onConfirm={confirmPendingUpload}
           onCancel={() => setPendingUpload(null)}
+        />
+      )}
+
+      {/* Premenovanie už nahratého súboru */}
+      {renamingFile && (
+        <FileRenameModal
+          fileName={renamingFile.currentName}
+          title="Premenovať súbor"
+          confirmLabel="Uložiť"
+          onConfirm={handleFileRename}
+          onCancel={() => setRenamingFile(null)}
         />
       )}
     </div>

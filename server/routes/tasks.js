@@ -3088,4 +3088,64 @@ router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asy
   }
 });
 
+// Premenovanie už nahratého súboru — meníme iba originalName v dokumente
+// (R2/ContactFile obsah ostáva nedotknutý, mení sa len zobrazovaný názov).
+router.patch('/:taskId/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+  try {
+    const { taskId, fileId } = req.params;
+    const subtaskId = req.query.subtaskId;
+    const newName = (req.body.originalName || '').trim().slice(0, 200);
+    if (!newName) return res.status(400).json({ message: 'Názov nesmie byť prázdny' });
+
+    const applyRename = (files) => {
+      const f = (files || []).find(x => x.id === fileId);
+      if (!f) return false;
+      f.originalName = newName;
+      return true;
+    };
+
+    // Global Task (iba ak je taskId platné ObjectId)
+    if (mongoose.Types.ObjectId.isValid(taskId)) {
+      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      if (task) {
+        let ok;
+        if (subtaskId) {
+          const subtask = findSubtaskById(task.subtasks, subtaskId);
+          if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
+          ok = applyRename(subtask.files);
+          task.markModified('subtasks');
+        } else {
+          ok = applyRename(task.files);
+          task.markModified('files');
+        }
+        if (!ok) return res.status(404).json({ message: 'Súbor nenájdený' });
+        await task.save();
+        return res.json({ message: 'Názov upravený', originalName: newName });
+      }
+    }
+
+    // Contact-embedded tasks (UUID task IDs)
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': taskId });
+    if (!contact) return res.status(404).json({ message: 'Projekt nenájdený' });
+    const contactTask = contact.tasks.find(t => t.id === taskId);
+    if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+
+    let ok;
+    if (subtaskId) {
+      const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
+      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
+      ok = applyRename(subtask.files);
+    } else {
+      ok = applyRename(contactTask.files);
+    }
+    if (!ok) return res.status(404).json({ message: 'Súbor nenájdený' });
+    contact.markModified('tasks');
+    await contact.save();
+    res.json({ message: 'Názov upravený', originalName: newName });
+  } catch (error) {
+    logger.error('Task file rename error', { error: error.message });
+    res.status(500).json({ message: 'Chyba pri premenovaní súboru' });
+  }
+});
+
 module.exports = router;

@@ -163,6 +163,7 @@ function CRM() {
   // File states
   const [uploadingFile, setUploadingFile] = useState(null);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
+  const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
   const fileInputRefs = {};
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
@@ -584,6 +585,19 @@ function CRM() {
       await api.delete(`/api/contacts/${contactId}/files/${fileId}`);
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri mazaní súboru');
+    }
+  };
+
+  // Premenovanie už nahratého súboru cez FileRenameModal (renamingFile state).
+  // Refresh kontaktov rieši socket 'contact-updated' z backendu.
+  const handleFileRename = async (finalName) => {
+    if (!renamingFile) return;
+    const { contactId, fileId } = renamingFile;
+    setRenamingFile(null);
+    try {
+      await api.patch(`/api/contacts/${contactId}/files/${fileId}`, { originalName: finalName });
+    } catch (error) {
+      alert(error.response?.data?.message || 'Chyba pri premenovaní súboru');
     }
   };
 
@@ -1816,6 +1830,13 @@ function CRM() {
                                         {downloadingFileId === file.id ? '⏳' : '⬇️'}
                                       </button>
                                       <button
+                                        onClick={() => setRenamingFile({ contactId: contact.id, fileId: file.id, currentName: file.originalName })}
+                                        className="btn-icon-sm"
+                                        title="Premenovať"
+                                      >
+                                        ✏️
+                                      </button>
+                                      <button
                                         onClick={() => deleteFile(contact.id, file.id)}
                                         className="btn-icon-sm btn-danger"
                                         title="Vymazať"
@@ -1934,6 +1955,17 @@ function CRM() {
           file={pendingUpload.file}
           onConfirm={confirmPendingUpload}
           onCancel={() => setPendingUpload(null)}
+        />
+      )}
+
+      {/* Premenovanie už nahratého súboru */}
+      {renamingFile && (
+        <FileRenameModal
+          fileName={renamingFile.currentName}
+          title="Premenovať súbor"
+          confirmLabel="Uložiť"
+          onConfirm={handleFileRename}
+          onCancel={() => setRenamingFile(null)}
         />
       )}
 

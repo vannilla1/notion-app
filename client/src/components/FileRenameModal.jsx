@@ -17,12 +17,15 @@ import { useState, useRef, useEffect } from 'react';
  * názvu, príponu vidí ako needitovateľný suffix.
  *
  * Props:
- *  - file: File objekt (kvôli .name)
+ *  - file: File objekt (kvôli .name) — pri nahrávaní nového súboru
+ *  - fileName: string — alternatíva k `file`, pri premenovaní už nahratého súboru
+ *  - title: nadpis modalu (default "Názov prílohy")
+ *  - confirmLabel: text potvrdzovacieho tlačidla (default "Nahrať")
  *  - onConfirm(finalName): zavolá sa s celým názvom vrátane prípony
- *  - onCancel(): zrušenie (nič sa nenahrá)
+ *  - onCancel(): zrušenie
  */
-export default function FileRenameModal({ file, onConfirm, onCancel }) {
-  const fullName = file?.name || '';
+export default function FileRenameModal({ file, fileName, title, confirmLabel, onConfirm, onCancel }) {
+  const fullName = fileName || file?.name || '';
   const dotIdx = fullName.lastIndexOf('.');
   // Prípona iba ak bodka nie je na začiatku (skryté súbory) a nejaká je.
   const ext = dotIdx > 0 ? fullName.slice(dotIdx) : '';
@@ -61,12 +64,12 @@ export default function FileRenameModal({ file, onConfirm, onCancel }) {
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-content" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Názov prílohy</h3>
+          <h3>{title || 'Názov prílohy'}</h3>
           <button className="modal-close" onClick={onCancel}>×</button>
         </div>
         <div className="modal-body">
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>Pomenuj súbor pred nahratím</label>
+            <label>Pomenuj súbor</label>
             <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
               <input
                 ref={inputRef}
@@ -108,7 +111,7 @@ export default function FileRenameModal({ file, onConfirm, onCancel }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onCancel}>Zrušiť</button>
-          <button className="btn btn-primary" onClick={submit}>Nahrať</button>
+          <button className="btn btn-primary" onClick={submit}>{confirmLabel || 'Nahrať'}</button>
         </div>
       </div>
     </div>
