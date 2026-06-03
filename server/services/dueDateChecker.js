@@ -83,6 +83,40 @@ const getUrgencyLevel = (dueDate) => {
   return null; // More than 14 days - no urgency
 };
 
+// ─── Ranné okno pre date-only notifikácie ───────────────────────────────
+//
+// Date-only notifikácie (urgency level changes + custom reminders, ktoré
+// nemajú presný čas) sa posielajú IBA v rannom okne 06:00–06:59
+// Europe/Bratislava. Bez tohto by chodili pri prepočte dní o UTC polnoci =
+// 01:00–02:00 ráno SK (Render server beží v UTC), čo budí používateľov.
+//
+// Časové pripomienky (timeReminders s presným HH:MM) sú NEdotknuté — tie
+// majú vlastný presný čas a posielajú sa hneď v danú minútu.
+//
+// Mechanizmus: mimo okna sa urgency/reminder DETEKCIA preskočí → `changes`
+// ostane prázdne → žiadna notifikácia A žiadny update lastUrgencyLevel
+// (stav sa "podrží"). Pri prvom cron tiku v 06:00 sa detekcia spustí,
+// notifikácia odošle a stav updatne. Cron beží každých 5 min (12 tikov za
+// hodinu) — idempotenciu zabezpečí lastUrgencyLevel/reminderSent (ďalšie
+// tiky už nič nepošlú, lebo level/flag sa nezmenil).
+//
+// Robustnosť: ak by server zmeškal celé 06:00 okno (výpadok), stav ostane
+// stale a notifikácia sa pošle pri ďalšom 06:00 (možno s vyšším levelom).
+// Nestratí sa, len sa oneskorí.
+const MORNING_SEND_HOUR = 6;
+const isMorningSendWindow = (now = new Date()) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Bratislava', hour: '2-digit', hour12: false
+    }).formatToParts(now);
+    const hh = parseInt(parts.find(p => p.type === 'hour')?.value, 10) % 24;
+    return hh === MORNING_SEND_HOUR;
+  } catch {
+    // Ak Intl zlyhá (nemalo by) — fallback povolí (radšej poslať než nikdy)
+    return true;
+  }
+};
+
 /**
  * Get urgency change message
  */
@@ -359,6 +393,12 @@ const checkDueDates = async () => {
   try {
     logger.info('[DueDateChecker] Starting due date check...');
 
+    // Date-only notifikácie (urgency + reminder) posielame len v rannom okne
+    // 06:00 SK. timeReminders (presný čas) bežia vždy. Mimo okna sa urgency/
+    // reminder detekcia preskočí (changes ostane prázdne → bez notifikácie
+    // a bez update stavu).
+    const morningWindow = isMorningSendWindow();
+
     // Get all incomplete tasks with due dates or reminders
     const tasks = await Task.find({
       completed: false,
@@ -378,8 +418,8 @@ const checkDueDates = async () => {
     for (const task of tasks) {
       const changes = [];
 
-      // Check main task due date
-      if (task.dueDate && !task.completed) {
+      // Check main task due date — len v rannom okne (date-only notifikácia)
+      if (morningWindow && task.dueDate && !task.completed) {
         const currentLevel = getUrgencyLevel(task.dueDate);
         const storedLevel = task.lastUrgencyLevel || null;
 
@@ -399,8 +439,8 @@ const checkDueDates = async () => {
         }
       }
 
-      // Check subtasks
-      processSubtasks(task.subtasks, task._id, changes);
+      // Check subtasks — len v rannom okne
+      if (morningWindow) processSubtasks(task.subtasks, task._id, changes);
 
       // Send notifications for changes
       for (const change of changes) {
@@ -457,17 +497,18 @@ const checkDueDates = async () => {
         }
       }
 
-      // --- Custom reminders ---
+      // --- Custom reminders --- (date-only → len v rannom okne)
       const reminders = [];
-
-      // Check main task reminder
-      const taskReminder = checkReminder(task);
-      if (taskReminder) {
-        reminders.push({ type: 'task', task, ...taskReminder });
+      let taskReminder = null;
+      if (morningWindow) {
+        // Check main task reminder
+        taskReminder = checkReminder(task);
+        if (taskReminder) {
+          reminders.push({ type: 'task', task, ...taskReminder });
+        }
+        // Check subtask reminders
+        processSubtaskReminders(task.subtasks, task._id, reminders);
       }
-
-      // Check subtask reminders
-      processSubtaskReminders(task.subtasks, task._id, reminders);
 
       // Mark reminders as sent BEFORE sending notifications (prevents duplicates on overlapping runs)
       if (reminders.length > 0) {
@@ -620,8 +661,8 @@ const checkDueDates = async () => {
       }
     }
 
-    // Also check contact tasks
-    const contactResult = await checkContactDueDates();
+    // Also check contact tasks (rovnaké ranné okno pre date-only)
+    const contactResult = await checkContactDueDates(morningWindow);
     notificationsSent += contactResult.notificationsSent;
 
     logger.info(`[DueDateChecker] Completed. Notifications sent: ${notificationsSent}, Tasks updated: ${tasksUpdated}, Contacts updated: ${contactResult.contactsUpdated}`);
@@ -639,7 +680,7 @@ const checkDueDates = async () => {
 /**
  * Check contact tasks for due date urgency changes and reminders
  */
-const checkContactDueDates = async () => {
+const checkContactDueDates = async (morningWindow = true) => {
   try {
     // files.data is now in ContactFile collection, Contact docs are small
     const contacts = await Contact.find(
@@ -664,8 +705,8 @@ const checkContactDueDates = async () => {
 
         const changes = [];
 
-        // Check task due date
-        if (task.dueDate) {
+        // Check task due date — len v rannom okne (date-only notifikácia)
+        if (morningWindow && task.dueDate) {
           const currentLevel = getUrgencyLevel(task.dueDate);
           const storedLevel = task.lastUrgencyLevel || null;
 
@@ -677,8 +718,8 @@ const checkContactDueDates = async () => {
           }
         }
 
-        // Check subtasks
-        processSubtasks(task.subtasks, contact._id, changes);
+        // Check subtasks — len v rannom okne
+        if (morningWindow) processSubtasks(task.subtasks, contact._id, changes);
 
         // Send urgency notifications
         for (const change of changes) {
@@ -720,11 +761,14 @@ const checkContactDueDates = async () => {
           }
         }
 
-        // Custom reminders
+        // Custom reminders — date-only → len v rannom okne
         const reminders = [];
-        const taskReminder = checkReminder(task);
-        if (taskReminder) reminders.push({ type: 'task', task, ...taskReminder });
-        processSubtaskReminders(task.subtasks, contact._id, reminders);
+        let taskReminder = null;
+        if (morningWindow) {
+          taskReminder = checkReminder(task);
+          if (taskReminder) reminders.push({ type: 'task', task, ...taskReminder });
+          processSubtaskReminders(task.subtasks, contact._id, reminders);
+        }
 
         if (reminders.length > 0) {
           if (taskReminder) task.reminderSent = true;
