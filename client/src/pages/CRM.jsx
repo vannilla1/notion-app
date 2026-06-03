@@ -14,6 +14,7 @@ import AnnouncementBanner from '../components/AnnouncementBanner';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
+import FileRenameModal from '../components/FileRenameModal';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -161,6 +162,7 @@ function CRM() {
 
   // File states
   const [uploadingFile, setUploadingFile] = useState(null);
+  const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const fileInputRefs = {};
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
@@ -507,7 +509,7 @@ function CRM() {
   };
 
   // File functions
-  const handleFileUpload = async (contactId, file) => {
+  const handleFileUpload = async (contactId, file, customName) => {
     if (!file) return;
 
     setUploadingFile(contactId);
@@ -562,9 +564,18 @@ function CRM() {
       xhr.timeout = 60000; // 60 seconds
 
       const formData = new FormData();
+      // customName PRED file-om, nech ho multer zaradí do req.body.
+      if (customName && customName.trim()) formData.append('customName', customName.trim());
       formData.append('file', file);
       xhr.send(formData);
     });
+  };
+
+  const confirmPendingUpload = (finalName) => {
+    if (!pendingUpload) return;
+    const { file, contactId } = pendingUpload;
+    setPendingUpload(null);
+    handleFileUpload(contactId, file, finalName);
   };
 
   const deleteFile = async (contactId, fileId) => {
@@ -1755,7 +1766,10 @@ function CRM() {
                                   type="file"
                                   hidden
                                   onChange={(e) => {
-                                    handleFileUpload(contact.id, e.target.files[0]);
+                                    const f = e.target.files[0];
+                                    // Otvor modal na pomenovanie (kvôli "image.jpg" z fotoaparátu);
+                                    // upload sa spustí až po potvrdení.
+                                    if (f) setPendingUpload({ file: f, contactId: contact.id });
                                     e.target.value = '';
                                   }}
                                   disabled={uploadingFile === contact.id}
@@ -1912,6 +1926,15 @@ function CRM() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pomenovanie prílohy pred nahratím (prepíše "image.jpg" z fotoaparátu) */}
+      {pendingUpload && (
+        <FileRenameModal
+          file={pendingUpload.file}
+          onConfirm={confirmPendingUpload}
+          onCancel={() => setPendingUpload(null)}
+        />
       )}
 
       {/* File Preview Modal */}

@@ -2834,10 +2834,15 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const base64Data = req.file.buffer.toString('base64');
       const fileId = uuidv4();
 
+      // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
+      // Frontend posiela hotový názov vrátane prípony. Fallback na pôvodný.
+      // Limit 200 znakov ako ochrana proti zneužitiu.
+      const customName = (req.body.customName || '').trim().slice(0, 200);
+
       // Metadata only (no Base64 data in document — stored in ContactFile collection)
       const fileMeta = {
         id: fileId,
-        originalName: req.file.originalname,
+        originalName: customName || req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
         uploadedAt: new Date()

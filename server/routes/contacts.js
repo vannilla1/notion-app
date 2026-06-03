@@ -962,9 +962,13 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       const base64Data = req.file.buffer.toString('base64');
       const fileId = uuidv4();
 
+      // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
+      // Frontend posiela hotový názov vrátane prípony. Fallback na pôvodný.
+      const customName = (req.body.customName || '').trim().slice(0, 200);
+
       const fileData = {
         id: fileId,
-        originalName: req.file.originalname,
+        originalName: customName || req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
         uploadedAt: new Date()

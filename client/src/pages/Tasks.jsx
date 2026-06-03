@@ -21,6 +21,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 import FilePreviewModal from '../components/FilePreviewModal';
+import FileRenameModal from '../components/FileRenameModal';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 
@@ -707,6 +708,7 @@ function Tasks() {
   const taskFileInputRef = useRef(null);
   const subtaskFileInputRef = useRef(null);
   const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
+  const [pendingUpload, setPendingUpload] = useState(null); // { file, taskId, subtaskId? } — čaká na pomenovanie
 
   // Linked messages
   const [linkedMessages, setLinkedMessages] = useState({});
@@ -2260,11 +2262,13 @@ function Tasks() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  const handleFileUpload = async (taskId, subtaskId, file) => {
+  const handleFileUpload = async (taskId, subtaskId, file, customName) => {
     const key = subtaskId || taskId;
     setUploadingFile(key);
     try {
       const formData = new FormData();
+      // customName posielame PRED file-om, nech ho multer určite zaradí do req.body.
+      if (customName && customName.trim()) formData.append('customName', customName.trim());
       formData.append('file', file);
       const url = subtaskId
         ? `/api/tasks/${taskId}/files?subtaskId=${subtaskId}`
@@ -2325,8 +2329,17 @@ function Tasks() {
   const onFileSelected = (e, isSubtask) => {
     const file = e.target.files[0];
     if (!file || !activeFileTarget) return;
-    handleFileUpload(activeFileTarget.taskId, activeFileTarget.subtaskId, file);
+    // Najprv otvor modal na pomenovanie (kvôli "image.jpg" z fotoaparátu).
+    // Upload sa spustí až po potvrdení v modale.
+    setPendingUpload({ file, taskId: activeFileTarget.taskId, subtaskId: activeFileTarget.subtaskId });
     e.target.value = '';
+  };
+
+  const confirmPendingUpload = (finalName) => {
+    if (!pendingUpload) return;
+    const { file, taskId, subtaskId } = pendingUpload;
+    setPendingUpload(null);
+    handleFileUpload(taskId, subtaskId, file, finalName);
   };
 
   // Helper to check if task or any uncompleted subtask is assigned to user
@@ -3496,6 +3509,15 @@ function Tasks() {
           file={previewFile.file}
           downloadUrl={previewFile.downloadUrl}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+
+      {/* Pomenovanie prílohy pred nahratím (prepíše "image.jpg" z fotoaparátu) */}
+      {pendingUpload && (
+        <FileRenameModal
+          file={pendingUpload.file}
+          onConfirm={confirmPendingUpload}
+          onCancel={() => setPendingUpload(null)}
         />
       )}
     </div>
