@@ -54,6 +54,7 @@ struct OAuthBackendClient {
     static func exchangeIdToken(provider: String, idToken: String,
                                 fullName: String? = nil,
                                 email: String? = nil,
+                                attempt: Int = 1,
                                 completion: @escaping (Result<String, Error>) -> Void) {
         guard let url = URL(string: "\(OAuthConfig.backendBaseURL)/api/auth/\(provider)/native") else {
             completion(.failure(NSError(domain: "OAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid backend URL"])))
@@ -62,7 +63,11 @@ struct OAuthBackendClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 30
+        // ⚠️ Render free-tier API SPÍ a studený štart trvá 30-50s. Pôvodný 30s
+        // timeout vypršal SKÔR, než sa API zobudilo → login zlyhal hláškou
+        // "nepripojené k internetu" pri prvom prihlásení po nečinnosti. 90s
+        // pokryje wake-up. (Web axios má tiež 60s + retry — toto to zarovnáva.)
+        req.timeoutInterval = 90
 
         // Pre Google používa "idToken" (Google SDK token).
         // Pre Apple používa "identityToken" (z AppleIDCredential).
@@ -87,8 +92,33 @@ struct OAuthBackendClient {
             return
         }
 
+        // Retry helper — pri prechodnej sieťovej chybe (typicky cold-start, keď
+        // sa spojenie zhodí počas wake-upu) skúsime ešte raz. maxAttempts=2.
+        func retryIfTransient(_ error: Error) -> Bool {
+            guard attempt < 2 else { return false }
+            let nsErr = error as NSError
+            guard nsErr.domain == NSURLErrorDomain else { return false }
+            let transient: Set<Int> = [
+                NSURLErrorTimedOut,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorCannotFindHost,
+                NSURLErrorDNSLookupFailed
+            ]
+            guard transient.contains(nsErr.code) else { return false }
+            // Krátka pauza nech sa Render service stihne dobudiť, potom retry.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                exchangeIdToken(provider: provider, idToken: idToken,
+                                fullName: fullName, email: email,
+                                attempt: attempt + 1, completion: completion)
+            }
+            return true
+        }
+
         URLSession.shared.dataTask(with: req) { data, response, error in
             if let error = error {
+                if retryIfTransient(error) { return }
                 completion(.failure(error))
                 return
             }
