@@ -188,6 +188,25 @@ export const AuthProvider = ({ children }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Soft logout (iOS native) ───────────────────────────────────────────
+  // api.js po 401/403 v native appke dispatchne 'prpl:force-logout' MIESTO
+  // window.location.href='/login' (plný reload). Plný reload by v iOS shelli
+  // re-spustil baked Keychain→localStorage WKUserScript, ktorý resuscituje už
+  // neplatný token → nekonečný 401/reload loop. Tu vyčistíme React auth state
+  // BEZ reloadu — App.jsx následne softvérovo presmeruje na /login (cez
+  // isAuthenticated=false), takže baked script sa znova nespustí.
+  useEffect(() => {
+    const onForceLogout = () => {
+      removeStoredToken();
+      delete api.defaults.headers.common['Authorization'];
+      setToken(null);
+      setUser(null);
+      setLoading(false);
+    };
+    window.addEventListener('prpl:force-logout', onForceLogout);
+    return () => window.removeEventListener('prpl:force-logout', onForceLogout);
+  }, []);
+
   const logout = () => {
     removeStoredToken();
     delete api.defaults.headers.common['Authorization'];

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getStoredToken, removeStoredToken } from '../utils/authStorage';
+import { getStoredToken, removeStoredToken, isNativeIOSApp } from '../utils/authStorage';
 import { getStoredWorkspaceId, removeStoredWorkspaceId } from '../utils/workspaceStorage';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -90,7 +90,22 @@ api.interceptors.response.use(
       // removeStoredToken() maže z sessionStorage (web) alebo localStorage (iOS)
       // + cleanup legacy kľúčov (user, starý localStorage token z predošlej verzie).
       removeStoredToken();
-      if (window.location.pathname !== '/login') {
+
+      // ⚠️ iOS NATIVE: NESMIEME robiť window.location.href='/login' (plný reload).
+      // Dôvod: ContentView.swift bake-uje WKUserScript ktorý pri KAŽDOM document
+      // load-e injektne token z Keychainu do localStorage (ak je prázdny). Plný
+      // reload po 401/403 → baked script znova injektne ten istý (už neplatný)
+      // token → ďalší 401 → reload → NEKONEČNÝ LOOP ("dashboard prebliskne →
+      // connecting forever"). V Safari to neexistuje, preto bug bol iba v appke.
+      //
+      // Riešenie: v native appke spravíme SOFT logout cez event → AuthContext
+      // vyčistí React state a appka softvérovo (bez document reloadu) prejde na
+      // /login. Žiadny reload = baked script sa znova nespustí = loop sa preruší.
+      // removeStoredToken() medzitým cez removeItem→'logout' bridge zmaže aj
+      // Keychain, takže ďalší štart appky už starý token neresuscituje.
+      if (isNativeIOSApp()) {
+        window.dispatchEvent(new CustomEvent('prpl:force-logout'));
+      } else if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
     }
