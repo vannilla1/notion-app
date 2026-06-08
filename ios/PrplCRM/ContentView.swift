@@ -843,6 +843,10 @@ struct WebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            // -999 NSURLErrorCancelled = benígne: ďalšia navigácia (redirect/
+            // window.location) supersedovala túto, alebo sme ju zámerne zrušili
+            // v decidePolicyFor. NESMIE zobraziť "Nepodarilo sa pripojiť" ErrorView.
+            if (error as NSError).code == NSURLErrorCancelled { return }
             if !hasFinishedInitialLoad {
                 parent.loadError = true
                 parent.isLoading = false
@@ -874,18 +878,22 @@ struct WebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            let nsErr = error as NSError
+            // -999 NSURLErrorCancelled = benígne zrušenie: pri invite + Apple
+            // logine prebieha viacero navigácií naraz (deep-link load + redirect
+            // na /app cez window.location.assign). Tá prvá sa ZRUŠÍ ešte pred
+            // hasFinishedInitialLoad=true → predtým to FALOŠNE zobrazilo "no
+            // internet" ErrorView, hoci skutočná navigácia uspela (user skončil
+            // vo workspace). -999 preto NESMIE nastaviť loadError ani sa logovať.
+            if nsErr.code == NSURLErrorCancelled { return }
             if !hasFinishedInitialLoad {
                 parent.loadError = true
                 parent.isLoading = false
             }
-            let nsErr = error as NSError
-            // -999 = NSURLErrorCancelled (user zrušil — neignoruj ak to je legitímny abort)
-            if nsErr.code != NSURLErrorCancelled {
-                reportNativeError(
-                    name: "iOSProvisionalNavigationFailed",
-                    message: "\(nsErr.domain) code=\(nsErr.code): \(nsErr.localizedDescription)"
-                )
-            }
+            reportNativeError(
+                name: "iOSProvisionalNavigationFailed",
+                message: "\(nsErr.domain) code=\(nsErr.code): \(nsErr.localizedDescription)"
+            )
         }
 
         // Pošle native iOS chybu na in-house tracking (nahradí Sentry).
