@@ -35,6 +35,9 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const WorkspaceMember = require('../models/WorkspaceMember');
+const Invitation = require('../models/Invitation');
+const Workspace = require('../models/Workspace');
 const { JWT_SECRET, invalidateUserCache } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -200,7 +203,137 @@ async function generateUniqueUsername(seed) {
 // Throws: OAuthError s code & statusCode
 // ─────────────────────────────────────────────────────────────────────
 
+// Public entry — resolve usera A potom auto-akceptuj pending pozvánky.
+// Wrapper drží invite-accept STRIKTNE non-fatal: ak zlyhá, login pokračuje.
 async function findOrCreateUserFromProfile(provider, profile) {
+  const result = await resolveUserFromProfile(provider, profile);
+  try {
+    await autoAcceptPendingInvites(result.user);
+  } catch (err) {
+    logger.warn('[oauth] autoAcceptPendingInvites wrapper failed', { error: err.message });
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Auto-accept pending workspace invitations on OAuth login/registration.
+//
+// PROBLÉM (iOS bug — pozvaný user + Apple/Google native login):
+// Pozvaný user, ktorý sa prihlási cez Apple/Google v native appke, NIKDY
+// neprejde cez AcceptInvite stránku ani cez Login formulár — native bridge
+// (window.__nativeAuthLogin) ho tvrdo redirectne na /app. Pending pozvánka
+// tak ostane neprijatá → user nemá žiadny workspace → namiesto prostredia,
+// do ktorého bol pozvaný, uvidí WorkspaceSetup (alebo pri Render cold-starte
+// dlhý "Načítavam..." spinner). Toto to rieši pri zdroji.
+//
+// BEZPEČNOSŤ (auto-accept beží BEZ tokenu, takže email je jediná autorizácia):
+//   - len keď user.emailVerified === true (provider potvrdil vlastníctvo),
+//   - len EXACT email match invitation.email === user.email (na rozdiel od
+//     token-based /invitation/:token/accept route, kde token je dôkaz),
+//   - Apple relay (Hide My Email) preskakujeme — relay adresa sa nikdy
+//     nezhoduje s reálnou pozvánkou.
+//
+// Robustnosť: per-invitation try/catch, NIKDY nehádže (login sa nesmie
+// zablokovať). Rešpektuje seat capacity (mirror accept route — plné
+// prostredie nechá pending, user dostane jasný error pri manuálnom accepte).
+// ─────────────────────────────────────────────────────────────────────
+async function autoAcceptPendingInvites(user) {
+  if (!user || user.emailVerified !== true) return;
+  const emailLower = (user.email || '').toLowerCase().trim();
+  if (!emailLower || isAppleRelayEmail(emailLower)) return;
+
+  let pending;
+  try {
+    pending = await Invitation.find({
+      email: emailLower,
+      status: 'pending',
+      expiresAt: { $gt: new Date() }
+    });
+  } catch (err) {
+    logger.warn('[oauth] autoAccept: invitation lookup failed', { error: err.message });
+    return;
+  }
+  if (!pending || pending.length === 0) return;
+
+  let firstAcceptedWsId = null;
+  for (const invitation of pending) {
+    try {
+      // Už člen? → len označ accepted (idempotentné).
+      const existing = await WorkspaceMember.findOne({
+        workspaceId: invitation.workspaceId,
+        userId: user._id
+      });
+      if (existing) {
+        invitation.status = 'accepted';
+        await invitation.save();
+        if (!firstAcceptedWsId) firstAcceptedWsId = invitation.workspaceId;
+        continue;
+      }
+
+      const workspace = await Workspace.findById(invitation.workspaceId);
+      if (!workspace) {
+        invitation.status = 'expired';
+        await invitation.save();
+        continue;
+      }
+
+      // Seat capacity (mirror /invitation/:token/accept).
+      const owner = await User.findById(workspace.ownerId).select('email subscription');
+      const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk')
+        .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
+      if (!isTeamPro) {
+        const ownerPlan = owner?.subscription?.plan || 'free';
+        const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
+        const baseSeatLimit = seatLimits[ownerPlan] || 2;
+        if (baseSeatLimit !== Infinity) {
+          const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
+          const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
+          if (memberCount >= maxSeats) {
+            // Plné — nechaj pending (user dostane jasný error pri manuálnom accepte).
+            continue;
+          }
+        }
+      }
+
+      await WorkspaceMember.create({
+        workspaceId: invitation.workspaceId,
+        userId: user._id,
+        role: invitation.role,
+        invitedBy: invitation.invitedBy
+      });
+      invitation.status = 'accepted';
+      await invitation.save();
+      if (!firstAcceptedWsId) firstAcceptedWsId = invitation.workspaceId;
+
+      logger.info('[oauth] auto-accepted pending invitation', {
+        userId: user._id.toString(),
+        workspaceId: invitation.workspaceId.toString(),
+        email: emailLower
+      });
+    } catch (err) {
+      // Duplicate-key (race: dva paralelné loginy) je benígny — membership existuje.
+      logger.warn('[oauth] autoAccept: invitation processing failed', {
+        error: err.message,
+        invitationId: invitation?._id?.toString()
+      });
+    }
+  }
+
+  // currentWorkspaceId nastavíme na prvý prijatý workspace IBA ak user ešte
+  // žiadny nemá — nikdy neprepisujeme existujúci aktívny workspace.
+  if (firstAcceptedWsId && !user.currentWorkspaceId) {
+    try {
+      user.currentWorkspaceId = firstAcceptedWsId;
+      await user.save();
+      await invalidateUserCache(user._id);
+    } catch (err) {
+      logger.warn('[oauth] autoAccept: set currentWorkspaceId failed', { error: err.message });
+    }
+  }
+}
+
+async function resolveUserFromProfile(provider, profile) {
   if (!['google', 'apple'].includes(provider)) {
     throw new OAuthError('INVALID_PROVIDER', `Neznámy provider: ${provider}`);
   }

@@ -10,6 +10,7 @@ import { useSocket } from './hooks/useSocket';
 import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
+import { removeStoredToken } from './utils/authStorage';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -85,6 +86,68 @@ class RouteErrorBoundary extends Component {
     }
     return this.props.children;
   }
+}
+
+// Top-level loading gate (App.jsx:407). Po 15s bez vyriešenia ponúkne escape
+// — inak by stall (Render cold-start, zaseknutý workspace/auth fetch, alebo
+// nečakaný stav) ostal navždy ako "Načítavam..." bez možnosti von. Toto je
+// hard záruka, že user nikdy neostane trvalo zaseknutý na spinneri.
+function LoadingGate() {
+  const [showEscape, setShowEscape] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShowEscape(true), 20000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const hardReload = () => {
+    // Strip query (napr. zaseknuté ws=) a reload na čistý /app.
+    try { window.location.assign('/app'); } catch { window.location.reload(); }
+  };
+  const relogin = () => {
+    // Vyčisti token + workspace storage a začni odznova na /login. Rieši
+    // prípad zaseknutia v nekonzistentnom auth/workspace stave.
+    try { removeStoredToken(); } catch { /* noop */ }
+    window.location.assign('/login');
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+      color: 'var(--text-secondary, #64748b)', padding: '24px'
+    }}>
+      <div style={{ textAlign: 'center', maxWidth: 360 }}>
+        <div>Načítavam…</div>
+        {showEscape && (
+          <div style={{ marginTop: 28 }}>
+            <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 16 }}>
+              Načítavanie trvá dlhšie než zvyčajne. Skús to znova alebo sa prihlás odznova.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={hardReload}
+                style={{
+                  padding: '10px 18px', background: 'var(--accent-color, #6366f1)', color: '#fff',
+                  border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer'
+                }}
+              >
+                Skúsiť znova
+              </button>
+              <button
+                onClick={relogin}
+                style={{
+                  padding: '10px 18px', background: 'transparent', color: 'var(--text-secondary, #64748b)',
+                  border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 14, cursor: 'pointer'
+                }}
+              >
+                Prihlásiť sa odznova
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const typeToSection = (type) => {
@@ -405,18 +468,7 @@ function AppContent() {
     urlWs !== (currentWorkspaceId?.toString?.() || currentWorkspaceId);
 
   if (!isPublicPage && (loading || (isAuthenticated && workspaceLoading) || (isAuthenticated && pendingWsSwitch))) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--bg-secondary, #f8fafc)',
-        color: 'var(--text-secondary, #64748b)'
-      }}>
-        Načítavam...
-      </div>
-    );
+    return <LoadingGate />;
   }
 
   if (isAuthenticated && needsWorkspace) {
