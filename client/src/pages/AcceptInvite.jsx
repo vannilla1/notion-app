@@ -9,7 +9,7 @@ import { isIosNativeApp } from '../utils/platform';
 function AcceptInvite() {
   const { token } = useParams();
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, loading: authLoading } = useAuth();
   const { fetchWorkspaces, switchWorkspace } = useWorkspace();
 
   const [invitation, setInvitation] = useState(null);
@@ -20,20 +20,30 @@ function AcceptInvite() {
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
 
   useEffect(() => {
+    // Počkaj kým sa auth vyrieši. Inak by sme pri UŽ PRIJATEJ pozvánke ukázali
+    // "Prihlás sa a pokračuj" screen aj prihlásenému userovi (kým fetchUser ešte
+    // beží, isAuthenticated je dočasne false) — to bol bug pri otvorení invite
+    // linku z emailu v iOS appke: deep-link load → AcceptInvite mount → auth
+    // ešte neresolvnutá → zlý screen namiesto presmerovania do workspace.
+    if (authLoading) return;
+
     const fetchInvitation = async () => {
       try {
         const data = await getInvitationByToken(token);
         setInvitation(data);
       } catch (err) {
-        // If invitation was already accepted
+        // Pozvánka už bola prijatá (410 alreadyAccepted).
         if (err.response?.data?.alreadyAccepted) {
-          if (isAuthenticated && err.response?.data?.workspaceId) {
-            try {
-              await switchWorkspace(err.response.data.workspaceId);
-            } catch { /* ignore */ }
-            navigate('/app');
+          // Prihlásený user (= už člen) → pusti ho rovno do appky. switchWorkspace
+          // je best-effort (ak workspaceId chýba alebo zlyhá, aj tak ideme na /app).
+          if (isAuthenticated) {
+            if (err.response?.data?.workspaceId) {
+              try { await switchWorkspace(err.response.data.workspaceId); } catch { /* ignore */ }
+            }
+            navigate('/app', { replace: true });
             return;
           }
+          // Neprihlásený → ukáž "už prijatá, prihlás sa".
           setAlreadyAccepted(true);
           setError(err.response?.data?.message);
         } else {
@@ -44,7 +54,7 @@ function AcceptInvite() {
       }
     };
     fetchInvitation();
-  }, [token, isAuthenticated, switchWorkspace, navigate]);
+  }, [token, isAuthenticated, authLoading, switchWorkspace, navigate]);
 
   const handleAccept = async () => {
     setAccepting(true);
