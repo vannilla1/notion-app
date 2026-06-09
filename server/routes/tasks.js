@@ -1331,9 +1331,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Otherwise use MongoDB query with index on tasks.id
       let contact;
       if (contactId) {
-        contact = await Contact.findById(contactId);
+        contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       } else {
-        contact = await Contact.findOne({ 'tasks.id': req.params.id });
+        contact = await Contact.findOne({ 'tasks.id': req.params.id, workspaceId: req.workspaceId });
       }
 
       if (contact && contact.tasks) {
@@ -1562,13 +1562,13 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       if (contactIds !== undefined) {
         finalContactIds = Array.isArray(contactIds) ? contactIds : [];
         if (finalContactIds.length > 0) {
-          const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+          const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       } else if (contactId !== undefined) {
         finalContactIds = contactId ? [contactId] : [];
         if (contactId) {
-          const contact = await Contact.findById(contactId);
+          const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
           if (contact) {
             contactNames = [contact.name];
           }
@@ -1576,7 +1576,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       } else {
         // Keep existing and fetch names
         if (finalContactIds.length > 0) {
-          const contacts = await Contact.find({ _id: { $in: finalContactIds } });
+          const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       }
@@ -2151,7 +2151,7 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
     const updatedContacts = [];
 
     for (const contactId of finalContactIds) {
-      const contact = await Contact.findById(contactId);
+      const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       if (!contact) continue;
 
       // Create new embedded task for this contact

@@ -164,7 +164,6 @@ function CRM() {
   const [uploadingFile, setUploadingFile] = useState(null);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
-  const fileInputRefs = {};
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
