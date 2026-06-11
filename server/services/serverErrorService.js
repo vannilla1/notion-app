@@ -181,8 +181,47 @@ function errorMiddleware(err, req, res, next) {
   if (!status || status >= 500) {
     // Fire and forget — nepočkáme na Mongo aby sme nespozdili response
     recordError(err, req).catch(() => {});
+    // Marker pre captureResponseErrors finish-hook — tento request už má
+    // recordnutý SKUTOČNÝ error (so stackom), nech ho hook nezdvojí synteticky.
+    if (res?.locals) res.locals.__errorRecorded = true;
   }
   next(err);
+}
+
+// Boot okno — počas prvých 30s po štarte ignorujeme 503 (DB ešte connectuje,
+// readiness middleware vracia 503 — nie je to aplikačná chyba). Zhodné s
+// apiMetrics STARTUP_GRACE.
+const CAPTURE_BOOT_TIME = Date.now();
+const CAPTURE_STARTUP_GRACE_MS = 30 * 1000;
+
+/**
+ * Finish-hook middleware — zachytí KAŽDÚ 5xx odpoveď, ktorú handler poslal
+ * PRIAMO cez res.status(5xx) bez next(err).
+ *
+ * PREČO: v celej appke nikto nevolá next(err) — všetkých ~245 catch blokov
+ * robí res.status(500).json(...) priamo. errorMiddleware (ktorý plní ServerError)
+ * sa preto nikdy nespustí a reálne 500-tky boli NEVIDITEĽNÉ v Diagnostike →
+ * admin videl falošné "takmer žiadne chyby". Tento hook to rieši plošne.
+ *
+ * Limit: nemáme pôvodný Error objekt (handler ho odchytil lokálne), takže
+ * stack chýba — ale route + status + frekvencia (cez fingerprint dedup podľa
+ * method+path) je hlavný signál "čo a kde zlyháva". Pre kritické cesty
+ * (billing webhooky) voláme recordError explicitne so stackom samostatne.
+ */
+function captureResponseErrors(req, res, next) {
+  res.on('finish', () => {
+    const status = res.statusCode;
+    if (status < 500) return;
+    // Startup 503 = boot artifact, nie chyba.
+    if (status === 503 && Date.now() - CAPTURE_BOOT_TIME < CAPTURE_STARTUP_GRACE_MS) return;
+    // Už recordnuté so skutočným stackom cez errorMiddleware → nezdvojuj.
+    if (res.locals && res.locals.__errorRecorded) return;
+    const err = new Error(`HTTP ${status} ${req.method} ${req.originalUrl || req.url}`);
+    err.name = 'UnhandledServerResponse';
+    err.status = status;
+    recordError(err, req).catch(() => {});
+  });
+  next();
 }
 
 /**
@@ -268,6 +307,7 @@ async function recordClientError(payload, context = {}) {
 
 module.exports = {
   errorMiddleware,
+  captureResponseErrors,
   recordError,
   recordClientError,
   // Exports pre testy / manual use

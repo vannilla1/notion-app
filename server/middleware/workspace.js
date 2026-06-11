@@ -4,6 +4,7 @@ const Workspace = require('../models/Workspace');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 const { isIosNativeApp } = require('../utils/platform');
+const { logSecurityEvent } = require('../services/securityAudit');
 
 // In-memory cache for workspace validation (reduces 3 DB queries to 0 per request)
 // Kľúč: `${userId}:${workspaceId}` — per-device model, každý device môže mať iný
@@ -130,6 +131,12 @@ const requireWorkspace = async (req, res, next) => {
       // vedieť že má nastaviť iný workspace). Nesilent-fallback — to by
       // spôsobilo "correct section, wrong workspace" bug.
       if (requestedWsId) {
+        // SECURITY: prihlásený user žiada workspace, ktorého nie je členom =
+        // cross-tenant pokus (IDOR probing). Najdôležitejší multi-tenant útok —
+        // durable stopa (throttled per IP) do Diagnostiky.
+        logSecurityEvent('security.cross_workspace_denied', req, {
+          requestedWorkspaceId: requestedWsId.toString()
+        });
         return res.status(403).json({
           message: 'Nie ste členom tohto pracovného prostredia',
           code: 'NOT_MEMBER'

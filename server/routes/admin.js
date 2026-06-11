@@ -2789,7 +2789,37 @@ router.get('/auth-events', authenticateToken, requireAdmin, async (req, res) => 
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    res.json({ events: logs, topFailingIPs });
+    // Post-auth abuse signály (category: 'security') — neplatný JWT, cross-
+    // workspace IDOR, rate-limit. Sú THROTTLED (max 1/IP/min v securityAudit),
+    // takže počty = "koľko IP-minút", nie raw počet requestov (UI to uvedie).
+    const securityLogs = await AuditLog.find({
+      category: 'security',
+      createdAt: { $gte: since }
+    }).sort({ createdAt: -1 }).limit(200).lean();
+
+    const secByAction = {};
+    const secByIp = {};
+    for (const log of securityLogs) {
+      secByAction[log.action] = (secByAction[log.action] || 0) + 1;
+      const ip = log.ipAddress || 'unknown';
+      if (!secByIp[ip]) secByIp[ip] = { ip, count: 0, actions: {} };
+      secByIp[ip].count++;
+      secByIp[ip].actions[log.action] = (secByIp[ip].actions[log.action] || 0) + 1;
+    }
+    const topSecurityIPs = Object.values(secByIp)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    res.json({
+      events: logs,
+      topFailingIPs,
+      securitySignals: {
+        total: securityLogs.length,
+        byAction: secByAction,
+        topIPs: topSecurityIPs,
+        recent: securityLogs.slice(0, 30)
+      }
+    });
   } catch (error) {
     logger.error('Auth events error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });

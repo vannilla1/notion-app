@@ -45,7 +45,7 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
 const Page = require('./models/Page');
 const logger = require('./utils/logger');
-const { errorMiddleware: serverErrorMirrorMiddleware, recordError } = require('./services/serverErrorService');
+const { errorMiddleware: serverErrorMirrorMiddleware, captureResponseErrors, recordError } = require('./services/serverErrorService');
 const onlineUsers = require('./services/onlineUsers');
 
 const app = express();
@@ -146,6 +146,11 @@ app.use('/api', apiLimiter);
 
 // Track API requests for admin metrics
 app.use('/api', trackRequest);
+
+// Zachytí 5xx odpovede poslané priamo cez res.status(5xx) bez next(err) →
+// inak by reálne 500-tky boli neviditeľné v Diagnostike (žiadny handler
+// nevolá next(err)). Plní ServerError kolekciu route+status signálom.
+app.use('/api', captureResponseErrors);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

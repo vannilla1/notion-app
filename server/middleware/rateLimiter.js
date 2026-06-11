@@ -1,6 +1,7 @@
 const rateLimit = require('express-rate-limit');
 const { ipKeyGenerator } = require('express-rate-limit');
 const logger = require('../utils/logger');
+const { logSecurityEvent } = require('../services/securityAudit');
 
 // ─────────────────────────────────────────────────────────────────────────
 // Trust proxy konfigurácia
@@ -40,6 +41,7 @@ const loginLimiter = rateLimit({
       ip: req.ip,
       email: req.body?.email
     });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'login_ip' });
     res.status(options.statusCode).json(options.message);
   },
   skip: skipInDev
@@ -74,6 +76,7 @@ const loginEmailLimiter = rateLimit({
       ip: req.ip,
       email: req.body?.email
     });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'login_email' });
     res.status(options.statusCode).json(options.message);
   },
   skip: skipInDev
@@ -165,6 +168,12 @@ const apiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Predtým apiLimiter NEMAL handler → general API 429 (scraping / DoS) boli
+  // úplne neviditeľné (ani v logoch). Throttled durable security stopa.
+  handler: (req, res, next, options) => {
+    logSecurityEvent('security.rate_limited', req, { limiter: 'api_general' });
+    res.status(options.statusCode).json(options.message);
+  },
   skip: (req) => {
     // Skip rate limiting iba pre legitímne file upload/download endpointy
     // (Tasks/Contacts/Messages mountované na /api, takže req.path tu má
@@ -211,6 +220,7 @@ const adminLoginLimiter = rateLimit({
       ip: req.ip,
       email: req.body?.email
     });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'admin_login' });
     res.status(options.statusCode).json(options.message);
   },
   skip: skipInDev

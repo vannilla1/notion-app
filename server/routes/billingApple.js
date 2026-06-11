@@ -15,6 +15,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
+const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const appleIap = require('../services/appleIap');
 const { APPLE_PRODUCTS, getProductInfo, allProductIds } = require('../config/appleProducts');
@@ -164,6 +165,10 @@ router.post('/verify', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     logger.error('[AppleIAP] /verify error', { error: err.message, userId: req.user?.id });
+    // Billing-critical — spike verify failures = rozbitý Apple cert/kľúč alebo
+    // útok. Viditeľné v Diagnostike.
+    err.name = err.name === 'Error' ? 'AppleIapVerifyError' : err.name;
+    recordError(err, req).catch(() => {});
     res.status(400).json({ message: 'Overenie transakcie zlyhalo' });
   }
 });
@@ -270,6 +275,12 @@ router.post('/notifications', async (req, res) => {
     res.status(200).end();
   } catch (err) {
     logger.error('[AppleIAP] Notification processing error', { error: err.message, stack: err.stack?.substring(0, 300) });
+    // Billing-critical — App Store notification (renewal/cancel/refund) zlyhala
+    // → subscription stav sa môže rozísť. recordError so stackom + marker, aby
+    // ho captureResponseErrors finish-hook nezdvojil synteticky.
+    err.name = err.name === 'Error' ? 'AppleNotificationProcessingError' : err.name;
+    recordError(err, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     // 500 → Apple retryuje neskôr (užitočné pri tranzientných chybách)
     res.status(500).json({ message: 'Notification processing failed' });
   }

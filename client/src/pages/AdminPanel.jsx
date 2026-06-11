@@ -7100,6 +7100,60 @@ function DiagActiveSection() {
           </table>
         )}
       </div>
+
+      <h3 style={{ marginTop: 24 }}>Bezpečnostné signály (24h)</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+        Neplatný/forged token, cross-workspace pokus (IDOR), rate-limit. Throttlované
+        max 1×/IP/min — počty sú „IP-minúty", nie raw počet requestov.
+      </p>
+      <div style={{ background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+        {(() => {
+          const sig = auth?.securitySignals;
+          const byAction = sig?.byAction || {};
+          const actionKeys = Object.keys(byAction);
+          const LABELS = {
+            'security.token_invalid': '🔑 Neplatný / forged token',
+            'security.cross_workspace_denied': '🚫 Cross-workspace (IDOR)',
+            'security.rate_limited': '🐢 Rate-limit zásah'
+          };
+          if (actionKeys.length === 0) {
+            return <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>Žiadne bezpečnostné signály ✓</div>;
+          }
+          return (
+            <div style={{ padding: '12px' }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+                {actionKeys.map(a => (
+                  <div key={a} style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13 }}>
+                    {LABELS[a] || a}: <strong>{byAction[a]}</strong>
+                  </div>
+                ))}
+              </div>
+              {(sig.topIPs || []).length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>IP</th>
+                      <th style={{ padding: '8px', textAlign: 'right' }}>Spolu</th>
+                      <th style={{ padding: '8px' }}>Akcie</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sig.topIPs.map((ip, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '8px', fontFamily: 'monospace' }}>{ip.ip}</td>
+                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: ip.count > 5 ? '#ef4444' : 'inherit' }}>{ip.count}</td>
+                        <td style={{ padding: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                          {Object.entries(ip.actions).map(([a, c]) => `${(LABELS[a] || a).replace(/^\S+\s/, '')}(${c})`).join(', ')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 }

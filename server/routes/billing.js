@@ -5,6 +5,7 @@ const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { recordError } = require('../services/serverErrorService');
 
 // ===== Plan prices (for discount calculations) =====
 const PLAN_DISPLAY_PRICES = {
@@ -499,6 +500,10 @@ module.exports.handleWebhook = async (req, res) => {
     );
   } catch (err) {
     logger.error('[Stripe Webhook] Signature verification failed', { error: err.message });
+    // Viditeľné v Diagnostike — opakované signature failures = zlý webhook
+    // secret alebo pokus o podvrhnutie eventov.
+    err.name = 'StripeWebhookSignatureFailed';
+    recordError(err, req).catch(() => {});
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -555,6 +560,10 @@ module.exports.handleWebhook = async (req, res) => {
       error: error.message,
       stack: error.stack
     });
+    // Billing-critical — broken subscription/payment sync. Vraciame 200 (aby
+    // Stripe neretryoval donekonečna), ale chybu MUSÍME vidieť v Diagnostike.
+    error.name = error.name === 'Error' ? 'StripeWebhookProcessingError' : error.name;
+    recordError(error, req).catch(() => {});
     // Return 200 to prevent Stripe from retrying (we logged the error)
     res.json({ received: true, error: error.message });
   }

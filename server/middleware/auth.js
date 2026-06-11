@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 const { getRedis } = require('../utils/redisClient');
+const { logSecurityEvent } = require('../services/securityAudit');
 
 // JWT_SECRET is MANDATORY. No dev fallback, no silent insecure defaults —
 // either the operator configures it explicitly (in .env / platform secrets)
@@ -96,6 +97,9 @@ const authenticateToken = async (req, res, next) => {
     let user = await getCachedUser(decoded.id);
 
     if (!user) {
+      // Validný podpis, ale user neexistuje → token pre zmazaný účet alebo
+      // forged s naším secretom. Durable security stopa (throttled per IP).
+      logSecurityEvent('security.token_invalid', req, { reason: 'user_not_found' });
       return res.status(401).json({ message: 'Neplatný token' });
     }
 
@@ -126,6 +130,9 @@ const authenticateToken = async (req, res, next) => {
     };
     next();
   } catch (err) {
+    // Neplatný / expirovaný / forged JWT. Spike z jednej IP = credential
+    // stuffing alebo skúšanie forged tokenov. Durable stopa (throttled per IP).
+    logSecurityEvent('security.token_invalid', req, { reason: err.name === 'TokenExpiredError' ? 'expired' : 'invalid' });
     return res.status(401).json({ message: 'Neplatný alebo expirovaný token' });
   }
 };
