@@ -276,6 +276,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
                     webViewRef?.injectPrplCrmAuthToken(jwt)
                 case .failure(let error):
                     print("[AppleSignIn] Backend exchange failed: \(error.localizedDescription)")
+                    NativeErrorReporter.report(name: "iOSAppleSignInBackendFailed", message: error.localizedDescription, url: "https://prplcrm.eu/native/apple-signin")
                     OAuthController.showAlert(in: self.presentingWindow,
                         title: "Apple prihlásenie",
                         message: error.localizedDescription)
@@ -299,6 +300,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
         // ťažko diagnostikuje — Apple len napíše "still got an error" bez specifik.
         let humanReadable = AppleSignInController.appleSignInErrorMessage(for: nsErr)
         print("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
+        NativeErrorReporter.report(name: "iOSAppleSignInAuthError", message: "code=\(nsErr.code) domain=\(nsErr.domain): \(error.localizedDescription)", url: "https://prplcrm.eu/native/apple-signin")
 
         OAuthController.showAlert(in: presentingWindow,
             title: "Apple prihlásenie zlyhalo",
@@ -373,6 +375,7 @@ class GoogleSignInController {
                 // User cancel — ticho.
                 if nsErr.code == GIDSignInError.canceled.rawValue { return }
                 print("[GoogleSignIn] Error: \(error.localizedDescription)")
+                NativeErrorReporter.report(name: "iOSGoogleSignInError", message: "code=\(nsErr.code): \(error.localizedDescription)", url: "https://prplcrm.eu/native/google-signin")
                 OAuthController.showAlert(in: presentingViewController.view.window,
                     title: "Google prihlásenie",
                     message: error.localizedDescription)
@@ -392,6 +395,7 @@ class GoogleSignInController {
                         webView?.injectPrplCrmAuthToken(jwt)
                     case .failure(let err):
                         print("[GoogleSignIn] Backend exchange failed: \(err.localizedDescription)")
+                        NativeErrorReporter.report(name: "iOSGoogleSignInBackendFailed", message: err.localizedDescription, url: "https://prplcrm.eu/native/google-signin")
                         OAuthController.showAlert(in: presentingViewController.view.window,
                             title: "Google prihlásenie",
                             message: err.localizedDescription)
@@ -483,5 +487,42 @@ enum OAuthController {
         #else
         return false
         #endif
+    }
+}
+
+// MARK: - Native error reporter (shared)
+
+/// Centrálny reporter natívnych chýb → POST /api/errors/client (rovnaký endpoint
+/// ako web reportError + iOS WebView chyby cez ContentView). Best-effort,
+/// fire-and-forget, 5s timeout. Zdieľaný cez celý target — ContentView (WebView),
+/// OAuthController (Apple/Google sign-in) aj StoreKitManager (IAP), aby auth- a
+/// revenue-critical zlyhania boli viditeľné v admin Diagnostike, nielen v Xcode
+/// konzole.
+///
+/// Definované tu (existujúci súbor v projekte), nie ako nový .swift súbor — nový
+/// súbor by vyžadoval úpravu project.pbxproj. enum (internal) je dostupné zo
+/// všetkých súborov rovnakého modulu.
+enum NativeErrorReporter {
+    static func report(name: String, message: String, url: String = "https://prplcrm.eu/native") {
+        let body: [String: Any] = [
+            "name": name,
+            "message": message,
+            "url": url,
+            "userAgent": "PrplCRM-iOS/native",
+            "release": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        ]
+        // ⚠️ MUSÍ ísť na API doménu (perun-crm-api.onrender.com), NIE prplcrm.eu —
+        // to je len static frontend, ktorý by na /api/errors/client vrátil
+        // index.html (HTTP 200) a report by nikdy nedorazil na backend. Predošlá
+        // verzia tu mala natvrdo prplcrm.eu → všetky iOS native chyby (jetsam,
+        // nav failures) sa ticho strácali. Teraz cez OAuthConfig.backendBaseURL.
+        guard let json = try? JSONSerialization.data(withJSONObject: body),
+              let endpoint = URL(string: "\(OAuthConfig.backendBaseURL)/api/errors/client") else { return }
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = json
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req).resume()
     }
 }

@@ -49,6 +49,7 @@ final class StoreKitManager {
             NSLog("[StoreKit] Loaded \(fetched.count) products")
         } catch {
             NSLog("[StoreKit] loadProducts error: \(error.localizedDescription)")
+            NativeErrorReporter.report(name: "iOSStoreKitLoadProductsFailed", message: error.localizedDescription, url: "https://prplcrm.eu/native/iap")
         }
     }
 
@@ -92,6 +93,7 @@ final class StoreKitManager {
                     await transaction.finish()
                     return .success(jws: jws)
                 } else {
+                    NativeErrorReporter.report(name: "iOSStoreKitVerificationFailed", message: "Purchase result .unverified pre \(productId)", url: "https://prplcrm.eu/native/iap")
                     return .failed(message: "Overenie transakcie zlyhalo")
                 }
             case .userCancelled:
@@ -102,6 +104,7 @@ final class StoreKitManager {
                 return .failed(message: "Neznámy výsledok nákupu")
             }
         } catch {
+            NativeErrorReporter.report(name: "iOSStoreKitPurchaseFailed", message: "\(productId): \(error.localizedDescription)", url: "https://prplcrm.eu/native/iap")
             return .failed(message: error.localizedDescription)
         }
     }

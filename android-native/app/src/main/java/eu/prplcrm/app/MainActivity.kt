@@ -11,12 +11,16 @@ import android.view.KeyEvent
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.annotation.RequiresApi
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -44,6 +48,11 @@ import com.google.firebase.messaging.FirebaseMessaging
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+
+    // Posledná načítaná URL na našej doméne — pre recovery po onRenderProcessGone.
+    // Mŕtvy WebView vráti webView.url == null, takže ho trackujeme samostatne
+    // (inak by crash recovery vždy hodil usera na /app namiesto jeho stránky).
+    private var lastLoadedUrl: String? = null
 
     /** Requestuje notification permission pri prvom spustení na Android 13+. */
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -204,6 +213,32 @@ class MainActivity : AppCompatActivity() {
         // je len placeholder aby bol kód strukturovaný (document-start JS injection).
     }
 
+    /**
+     * Recovery po onRenderProcessGone — mŕtvy WebView sa už nedá použiť, treba
+     * vytvoriť nový a načítať poslednú URL. Rovnaký setup ako v onCreate. Beží
+     * na UI threade (WebViewClient callback), takže setContentView je bezpečné.
+     */
+    private fun recreateWebViewAfterCrash() {
+        try {
+            // webView.url je na mŕtvom rendereri null → použijeme trackovanú URL.
+            val lastUrl = lastLoadedUrl ?: getString(R.string.webapp_url)
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            webView.destroy()
+            webView = WebView(this).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            setContentView(webView)
+            configureWebView()
+            setupWebViewClients()
+            webView.loadUrl(lastUrl)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "WebView recreate after crash failed", e)
+        }
+    }
+
     private fun setupWebViewClients() {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
@@ -238,6 +273,7 @@ class MainActivity : AppCompatActivity() {
                 val currentHost = url?.let { Uri.parse(it).host }
                 if (currentHost == ourHost) {
                     webView.addJavascriptInterface(WebAppInterface(this@MainActivity, webView), "NativeBridge")
+                    url?.let { lastLoadedUrl = it } // pre crash recovery
                 } else {
                     webView.removeJavascriptInterface("NativeBridge")
                 }
@@ -260,6 +296,48 @@ class MainActivity : AppCompatActivity() {
                 }
                 sb.append("}catch(e){}})();")
                 view?.evaluateJavascript(sb.toString(), null)
+            }
+
+            // Natívna telemetria — predtým Android nemal žiadnu. Reportujeme len
+            // main-frame chyby (subresource fails ako favicon/analytics by spamovali).
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame != true) return
+                NativeErrorReporter.report(
+                    this@MainActivity,
+                    "AndroidWebViewError",
+                    "code=${error?.errorCode} desc=${error?.description} url=${request.url}",
+                    request.url?.toString() ?: "https://prplcrm.eu/native-android"
+                )
+            }
+
+            override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame != true) return
+                NativeErrorReporter.report(
+                    this@MainActivity,
+                    "AndroidWebViewHttpError",
+                    "status=${errorResponse?.statusCode} url=${request.url}",
+                    request.url?.toString() ?: "https://prplcrm.eu/native-android"
+                )
+            }
+
+            // Android ekvivalent iOS WebContent termination (memory jetsam / render
+            // crash). onRenderProcessGone existuje až od API 26 — na API 24/25
+            // (Android 7.x, <1% zariadení) ho framework nevolá a render crash appku
+            // zhodí ako predtým. Na API 26+ vrátime true → appka prežije + recovery.
+            @RequiresApi(Build.VERSION_CODES.O)
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                val crashed = detail?.didCrash() == true
+                NativeErrorReporter.report(
+                    this@MainActivity,
+                    "AndroidRenderProcessGone",
+                    "didCrash=$crashed (memory jetsam alebo render crash)",
+                    "https://prplcrm.eu/native-android/render-gone"
+                )
+                // Mŕtvy WebView treba nahradiť novým — inak biela obrazovka.
+                recreateWebViewAfterCrash()
+                return true // appka nespadne
             }
         }
 

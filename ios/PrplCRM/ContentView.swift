@@ -901,21 +901,9 @@ struct WebView: UIViewRepresentable {
         // fire-and-forget. Endpoint je rovnaký ako pre web errory, iba
         // s platform='ios' markerom v userAgent a v kontexte.
         private func reportNativeError(name: String, message: String) {
-            let body: [String: Any] = [
-                "name": name,
-                "message": message,
-                "url": (lastURL ?? parent.url).absoluteString,
-                "userAgent": "PrplCRM-iOS/native",
-                "release": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-            ]
-            guard let json = try? JSONSerialization.data(withJSONObject: body),
-                  let endpoint = URL(string: "https://prplcrm.eu/api/errors/client") else { return }
-            var req = URLRequest(url: endpoint)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = json
-            req.timeoutInterval = 5
-            URLSession.shared.dataTask(with: req).resume()
+            // Deleguje na zdieľaný NativeErrorReporter (OAuthController.swift) —
+            // jedna implementácia POST /api/errors/client pre celý target.
+            NativeErrorReporter.report(name: name, message: message, url: (lastURL ?? parent.url).absoluteString)
         }
 
         // Handle JavaScript alert()
