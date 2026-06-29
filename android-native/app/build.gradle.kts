@@ -29,8 +29,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 202      // production.3 — pridané /auth pathPrefix do App Links pre Sign in with Google/Apple OAuth callback (prplcrm.eu/auth/callback#token=...). Bez tohto Chrome ostal otvorený a appka nedostala JWT.
-        versionName = "1.0.1"
+        versionCode = 203      // production.4 — nové app ikony (prpl liquid-glass logo) + natívna error telemetria (WebView/render-crash reporting).
+        versionName = "1.0.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
