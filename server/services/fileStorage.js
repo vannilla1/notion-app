@@ -42,7 +42,15 @@ if (isConfigured) {
     credentials: {
       accessKeyId: R2_ACCESS_KEY_ID,
       secretAccessKey: R2_SECRET_ACCESS_KEY
-    }
+    },
+    // ⚠️ Cloudflare R2 NEPODPORUJE default "flexible checksums" (CRC32), ktoré
+    // @aws-sdk/client-s3 v3.729+ pridáva automaticky do PutObject/GetObject.
+    // S default hodnotou "WHEN_SUPPORTED" R2 vráti chybu a KAŽDÝ upload padne
+    // na HTTP 500. "WHEN_REQUIRED" checksum nepridá, pokiaľ ho operácia priamo
+    // nevyžaduje — R2 to akceptuje. (Toto zlyhanie začalo po bumpe SDK; migrácia
+    // v máji bežala na staršej verzii pred zavedením tohto defaultu.)
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED'
   });
   logger.info('[FileStorage] R2 configured', { bucket: R2_BUCKET });
 } else {

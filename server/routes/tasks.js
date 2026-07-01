@@ -9,6 +9,7 @@ const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const ContactFile = require('../models/ContactFile');
 const fileStorage = require('../services/fileStorage');
+const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
@@ -2909,6 +2910,12 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       res.json({ message: 'Súbor nahraný', file: fileMeta });
     } catch (error) {
       logger.error('Task file upload error', { error: error.message });
+      // Zaznamenaj SKUTOČNÝ error (stack + message) do Diagnostiky — inak by
+      // captureResponseErrors finish-hook zachytil len generický "HTTP 500"
+      // bez príčiny (presne to sa stalo pri R2 checksum bugu).
+      error.name = error.name === 'Error' ? 'TaskFileUploadError' : error.name;
+      recordError(error, req).catch(() => {});
+      if (res.locals) res.locals.__errorRecorded = true;
       res.status(500).json({ message: 'Chyba pri nahrávaní súboru' });
     }
   });
