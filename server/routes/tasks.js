@@ -2656,6 +2656,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
+    // Predtým: len res.status(500) bez logu → príčina úplne neviditeľná (ani
+    // v Render logoch). recordError zachytí SKUTOČNÝ stack do Diagnostiky.
+    logger.error('Subtask update error', { error: error.message, taskId: req.params.taskId, subtaskId: req.params.subtaskId });
+    error.name = error.name === 'Error' ? 'SubtaskUpdateError' : error.name;
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
