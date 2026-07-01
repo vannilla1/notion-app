@@ -774,8 +774,8 @@ export default function LandingPage() {
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">
-            <Link to="/vop">Obchodné podmienky</Link>
-            <Link to="/ochrana-udajov">Ochrana osobných údajov</Link>
+            <Link to="/vop/">Obchodné podmienky</Link>
+            <Link to="/ochrana-udajov/">Ochrana osobných údajov</Link>
           </div>
         </div>
         <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vannilla</a></p>
