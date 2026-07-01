@@ -436,16 +436,15 @@ export default function LandingPage() {
           </div>
 
           <div className="lp-download-badges">
-            {/* App Store: nechávame neaktívny dokým neprejde Apple review na
-                1.0.4 build 64 — zatiaľ vizuálne tlmený s "Pripravujeme" hint
-                aby user vedel že čoskoro príde. Po schválení stačí nahradiť
-                href + odstrániť aria-disabled. */}
+            {/* App Store — appka je LIVE (1.0.8+). Aktívny odkaz na App Store
+                stránku. Zobrazujeme všade (App Store nie je konkurenčná
+                platforma voči iOS binárke, takže Guideline 2.3.10 sa netýka). */}
             <a
-              href="#"
-              className="lp-badge lp-badge-disabled"
-              onClick={(e) => e.preventDefault()}
-              aria-disabled="true"
-              title="App Store verzia je v Apple review — čoskoro k dispozícii"
+              href="https://apps.apple.com/app/prpl-crm/id6761299370"
+              className="lp-badge"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Stiahnuť Prpl CRM v App Store"
             >
               <span className="lp-badge-icon">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
@@ -453,7 +452,7 @@ export default function LandingPage() {
                 </svg>
               </span>
               <span className="lp-badge-text">
-                <span className="lp-badge-label">Pripravujeme</span>
+                <span className="lp-badge-label">Dostupné na</span>
                 <span className="lp-badge-store">App Store</span>
               </span>
             </a>
