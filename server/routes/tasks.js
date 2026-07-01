@@ -2504,12 +2504,14 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
             // Send notification about subtask update (exclude newly assigned - they get assignment notification)
             const subtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-            await notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
+            await notificationService.notifySubtaskChange(subtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId)
+              .catch((e) => logger.warn('[Subtask] notifSubtaskChange zlyhala (non-fatal)', { error: e.message }));
 
             // Notify newly assigned users with specific assignment notification
             if (newlyAssigned.length > 0) {
               logger.debug('[Subtask Update Contact] Sending assignment notification', { newlyAssigned });
-              await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user, req.workspaceId);
+              await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user, req.workspaceId)
+              .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
             }
 
             // Auto-complete project when all subtasks are done
@@ -2566,12 +2568,14 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
         // Send notification about subtask update (exclude newly assigned - they get assignment notification)
         const globalSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-        await notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user, newlyAssigned, req.workspaceId);
+        await notificationService.notifySubtaskChange(globalSubtaskType, updated, task, req.user, newlyAssigned, req.workspaceId)
+          .catch((e) => logger.warn('[Subtask] notifSubtaskChange zlyhala (non-fatal)', { error: e.message }));
 
         // Notify newly assigned users with specific assignment notification
         if (newlyAssigned.length > 0) {
           logger.debug('[Subtask Update Global] Sending assignment notification', { newlyAssigned });
-          await notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user, req.workspaceId);
+          await notificationService.notifySubtaskAssignment(updated, task, newlyAssigned, req.user, req.workspaceId)
+            .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
         }
 
         // Auto-complete project when all subtasks are done
@@ -2631,12 +2635,14 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
           // Send notification about subtask update (exclude newly assigned - they get assignment notification)
           const fallbackSubtaskType = completed === true ? 'subtask.completed' : 'subtask.updated';
-          await notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId);
+          await notificationService.notifySubtaskChange(fallbackSubtaskType, updated, contact.tasks[taskIndex], req.user, newlyAssigned, req.workspaceId)
+            .catch((e) => logger.warn('[Subtask] notifSubtaskChange zlyhala (non-fatal)', { error: e.message }));
 
           // Notify newly assigned users with specific assignment notification
           if (newlyAssigned.length > 0) {
             logger.debug('[Subtask Update Fallback] Sending assignment notification', { newlyAssigned });
-            await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user, req.workspaceId);
+            await notificationService.notifySubtaskAssignment(updated, contact.tasks[taskIndex], newlyAssigned, req.user, req.workspaceId)
+              .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
           }
 
           // Auto-complete project when all subtasks are done
