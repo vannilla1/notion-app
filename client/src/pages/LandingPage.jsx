@@ -56,7 +56,7 @@ export default function LandingPage() {
       <nav className={`lp-navbar ${scrolled ? 'scrolled' : ''}`}>
         <div className="lp-navbar-inner">
           <a href="#" className="lp-logo" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-            <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="32" height="32" style={{ borderRadius: '8px' }} />
+            <img src="/icons/icon-96x96.png" alt="Prpl CRM — jednoduchý CRM pre malé firmy" width="32" height="32" style={{ borderRadius: '8px' }} />
             Prpl CRM
           </a>
 
@@ -106,11 +106,11 @@ export default function LandingPage() {
             <span>&#10024;</span> Zadarmo, navždy — bez platobnej karty
           </div>
           <h1 className="lp-hero-title">
-            Spravujte kontakty a projekty<br />na jednom mieste
+            Jednoduchý CRM pre malé firmy<br />a živnostníkov
           </h1>
           <p className="lp-hero-subtitle">
-            Moderný CRM systém pre správu kontaktov, projektov a tímovej spolupráce.
-            Jednoduchý, rýchly a vždy po ruke.
+            Spravujte kontakty, projekty a úlohy na jednom mieste — celý v slovenčine.
+            Moderný CRM systém pre malé tímy: jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
             <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</a>
@@ -126,7 +126,8 @@ export default function LandingPage() {
             <span className="lp-section-accent" />
             <h2 className="lp-section-title">Všetko čo potrebujete</h2>
             <p className="lp-section-subtitle">
-              Prpl CRM vám pomôže organizovať prácu a zefektívniť tímovú spoluprácu
+              Prpl CRM — jednoduchý CRM pre malé firmy, živnostníkov a tímy — vám pomôže
+              organizovať kontakty, projekty a úlohy na jednom mieste, celý v slovenčine
             </p>
           </div>
 
@@ -202,6 +203,47 @@ export default function LandingPage() {
                 {isIosNativeApp()
                   ? 'Pristupujte k CRM odkiaľkoľvek — natívna iOS aplikácia vždy po ruke.'
                   : 'Pristupujte k CRM odkiaľkoľvek — natívna aplikácia pre Android aj iOS vždy po ruke.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pre koho — keyword-rich sekcia s personami (SEO: "CRM pre malé firmy",
+          "CRM pre živnostníkov", "slovenský CRM"). Bez cien → zobrazené aj v iOS. */}
+      <section className="lp-features" id="pre-koho">
+        <div className="lp-section">
+          <div className="lp-section-header">
+            <span className="lp-section-accent" />
+            <h2 className="lp-section-title">Pre koho je Prpl CRM</h2>
+            <p className="lp-section-subtitle">
+              Navrhnutý pre malé firmy, živnostníkov a tímy, ktorí chcú mať klientov,
+              projekty a úlohy pod kontrolou — bez zložitého nastavovania
+            </p>
+          </div>
+
+          <div className="lp-features-grid">
+            <div className="lp-feature-card">
+              <h3 className="lp-feature-title">Živnostníci a freelanceri</h3>
+              <p className="lp-feature-desc">
+                CRM pre živnostníka: majte klientov, zákazky a úlohy prehľadne na jednom
+                mieste — v mobile aj na webe, celý v slovenčine.
+              </p>
+            </div>
+
+            <div className="lp-feature-card">
+              <h3 className="lp-feature-title">Malé firmy a tímy</h3>
+              <p className="lp-feature-desc">
+                CRM pre malé firmy: zdieľané pracovné prostredie, tímová spolupráca
+                a spoločná správa kontaktov, projektov a úloh.
+              </p>
+            </div>
+
+            <div className="lp-feature-card">
+              <h3 className="lp-feature-title">Obchod a služby</h3>
+              <p className="lp-feature-desc">
+                Sledujte kontakty, pripomienky a rozpracované projekty na jednom mieste.
+                Jednoduchý slovenský CRM systém, ktorý zvládnete za pár minút.
               </p>
             </div>
           </div>
@@ -369,6 +411,26 @@ export default function LandingPage() {
           </div>
 
           <div className="lp-faq-list">
+            <details className="lp-faq-item">
+              <summary>Čo je Prpl CRM?</summary>
+              <p>Prpl CRM je moderný slovenský CRM systém pre správu kontaktov, projektov a tímovej spolupráce. Ponúka bezplatný plán, mobilnú aplikáciu pre iOS a Android, synchronizáciu s Google Calendar a Tasks a push notifikácie.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Aký CRM systém je najlepší pre malé firmy a živnostníkov na Slovensku?</summary>
+              <p>Prpl CRM je jednoduchý slovenský CRM systém navrhnutý pre malé firmy a živnostníkov. Ponúka bezplatný plán, správu kontaktov, projektov a úloh, tímovú spoluprácu, Google sync a mobilné aplikácie — bez zložitej konfigurácie a celý v slovenčine.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Má Prpl CRM mobilnú aplikáciu?</summary>
+              <p>Áno, Prpl CRM má natívnu mobilnú aplikáciu pre iOS (s podporou Face ID) aj pre Android. Všetky dáta sa synchronizujú v reálnom čase medzi zariadeniami.</p>
+            </details>
+
+            <details className="lp-faq-item">
+              <summary>Koľko stojí Prpl CRM?</summary>
+              <p>Prpl CRM má 3 plány: <strong>Free</strong> (0 € navždy), <strong>Tím</strong> (4,99 €/mesiac alebo 49 €/rok) a <strong>Pro</strong> (9,99 €/mesiac alebo 99 €/rok). Všetky ceny sú vrátane DPH. Free plán je bez časového obmedzenia a bez platobnej karty.</p>
+            </details>
+
             <details className="lp-faq-item">
               <summary>Čo je pracovné prostredie (workspace)?</summary>
               <p>Pracovné prostredie je zdieľaný priestor, kde tím spolupracuje na kontaktoch, projektoch a úlohách. Každé prostredie má vlastné dáta, členov a nastavenia. Zakladateľ prostredia určuje jeho limity podľa svojho plánu.</p>
@@ -708,7 +770,7 @@ export default function LandingPage() {
       <footer className="lp-footer">
         <div className="lp-footer-inner">
           <div className="lp-footer-left">
-            <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="24" height="24" style={{ borderRadius: '6px' }} />
+            <img src="/icons/icon-96x96.png" alt="Prpl CRM — slovenský CRM systém" width="24" height="24" style={{ borderRadius: '6px' }} />
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">

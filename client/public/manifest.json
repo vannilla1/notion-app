@@ -11,6 +11,18 @@
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "itunes",
+      "url": "https://apps.apple.com/app/prpl-crm/id6761299370",
+      "id": "6761299370"
+    },
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=eu.prplcrm.app",
+      "id": "eu.prplcrm.app"
+    }
+  ],
   "shortcuts": [
     {
       "name": "Úlohy",

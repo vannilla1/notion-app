@@ -37,6 +37,14 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     headers:
+      # Content-hashed build assety (Vite dáva do názvu hash, napr.
+      # index-Cu59bbMV.js) sú immutable — obsah sa pri zmene NIKDY neprepíše,
+      # zmení sa názov. Preto ich cachujeme 1 rok (rýchlejšie opakované návštevy
+      # + lepšie Core Web Vitals). MUSÍ ísť PRED /*, Render vyhodnocuje zhora
+      # nadol (first-match), inak by /* no-cache zabralo aj assety.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
       - path: /*
         name: Cache-Control
         value: no-cache
@@ -58,12 +66,17 @@ services:
       # Pre-rendered statické stránky pre Google OAuth verification
       # (reviewer + Googlebot vidia plný text policy/VOP bez JS).
       # MUSIA ísť PRED catch-all, lebo Render spracováva routes zhora dolu.
+      # POZOR: cieľ musí byť /ochrana-udajov/index.html — pre-rendrované súbory
+      # sú v adresároch public/ochrana-udajov/index.html, NIE ako .html v roote.
+      # Predtým cieľ /ochrana-udajov.html neexistoval → rewrite prepadol na
+      # catch-all /* → /index.html a Google/crawleri dostávali prázdny SPA shell
+      # namiesto legal obsahu (overené live curl 2026-07).
       - type: rewrite
         source: /ochrana-udajov
-        destination: /ochrana-udajov.html
+        destination: /ochrana-udajov/index.html
       - type: rewrite
         source: /vop
-        destination: /vop.html
+        destination: /vop/index.html
       # SPA fallback pre všetky ostatné routes (React Router zaberie).
       # NOTE: /.well-known/* physical files are served BEFORE this rewrite by
       # Render's static-first resolution, so assetlinks + apple-app-site-association

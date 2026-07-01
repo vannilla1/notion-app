@@ -75,6 +75,7 @@
     <meta property="og:title" content="Prpl CRM — Jednoduchý CRM systém pre malé firmy" />
     <meta property="og:description" content="Spravujte kontakty, projekty a tímovú spoluprácu na jednom mieste. Zadarmo na vyskúšanie, s mobilnou aplikáciou a synchronizáciou Google Tasks." />
     <meta property="og:image" content="https://prplcrm.eu/icons/icon-512x512.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="512" />
     <meta property="og:image:height" content="512" />
     <meta property="og:image:alt" content="Prpl CRM logo" />
@@ -193,6 +194,32 @@
     }
     </script>
 
+    <!-- App rich results: MobileApplication s install odkazmi na oba store -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "MobileApplication",
+      "name": "Prpl CRM",
+      "operatingSystem": "iOS, Android",
+      "applicationCategory": "BusinessApplication",
+      "inLanguage": "sk",
+      "url": "https://prplcrm.eu",
+      "downloadUrl": [
+        "https://apps.apple.com/app/prpl-crm/id6761299370",
+        "https://play.google.com/store/apps/details?id=eu.prplcrm.app"
+      ],
+      "installUrl": [
+        "https://apps.apple.com/app/prpl-crm/id6761299370",
+        "https://play.google.com/store/apps/details?id=eu.prplcrm.app"
+      ],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "EUR"
+      }
+    }
+    </script>
+
     <!-- AEO: FAQ Structured Data for AI/Voice Search -->
     <script type="application/ld+json">
     {
@@ -274,7 +301,10 @@
         "email": "support@prplcrm.eu",
         "availableLanguage": "Slovak"
       },
-      "sameAs": [],
+      "sameAs": [
+        "https://apps.apple.com/app/prpl-crm/id6761299370",
+        "https://play.google.com/store/apps/details?id=eu.prplcrm.app"
+      ],
       "address": {
         "@type": "PostalAddress",
         "addressCountry": "SK"

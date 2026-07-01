@@ -1,5 +1,7 @@
 # Pre-rendered policy/VOP pre Google OAuth verification.
 # Musia byť PRED catch-all — Render/Netlify _redirects spracúva zhora dolu.
-/ochrana-udajov   /ochrana-udajov.html   200
-/vop              /vop.html              200
+# Cieľ = /ochrana-udajov/index.html (reálne súbory sú v adresároch, NIE .html
+# v roote) — inak rewrite prepadne na SPA shell a legal obsah sa nezobrazí.
+/ochrana-udajov   /ochrana-udajov/index.html   200
+/vop              /vop/index.html              200
 /*                /index.html            200
