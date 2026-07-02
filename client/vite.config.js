@@ -8,6 +8,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // 'inline' = registrácia SW priamo v index.html namiesto externého
+      // /registerSW.js. Ten bol SYNCHRÓNNY parser-blocking <script> v <head>
+      // — Lighthouse 13 / PageSpeed ho počítal do kritickej cesty FCP/LCP
+      // (~1 s penalta na slow-4G simulácii; render-blocking-insight flag).
+      // Inline = žiadny request, žiadne blokovanie. iOS shell neutralizácia
+      // SW (inline skript vyššie v <head>) beží pred ním, poradie zachované.
+      injectRegister: 'inline',
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: false, // We use our own manifest.json
       workbox: {
