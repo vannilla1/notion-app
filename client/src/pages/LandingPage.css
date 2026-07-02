@@ -269,16 +269,17 @@
   max-width: 720px;
   position: relative;
   z-index: 1;
-  animation: lp-fadeInUp 0.8s ease;
+  /* Len transform, ŽIADNA opacity — hero obsahuje LCP element (subtitle)
+     a Chrome počíta LCP až od momentu viditeľnosti. Fade z opacity:0 posúval
+     LCP o štýly + 0.8s animácie (PageSpeed ~3.2s). Pohyb "príchodu" ostáva. */
+  animation: lp-riseUp 0.8s ease;
 }
 
-@keyframes lp-fadeInUp {
+@keyframes lp-riseUp {
   from {
-    opacity: 0;
     transform: translateY(30px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
