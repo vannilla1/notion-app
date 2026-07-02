@@ -101,6 +101,42 @@ try {
   html = html.replace(marker, () => `<div id="root">${appHtml}</div>${POST_ROOT_GUARD}`);
   html = html.replace('</head>', () => `${extraLinks}${HEAD_GUARD}</head>`);
 
+  // 4b) CRITICAL CSS — hlavný CSS balík (33 kB gz) je render-blocking a landing
+  // z neho potrebuje zlomok → FCP/LCP penalta ~450 ms (Lighthouse). Preto:
+  //   - inline: base blok z styles/index.css (reset + :root + body — index.css
+  //     nemá žiadne ďalšie globálne element pravidlá, overené) + celý
+  //     LandingPage.css (jediná var() závislosť: --bg-primary, je v :root)
+  //   - hlavný CSS link → media="print" + onload swap (rovnaký vzor ako fonty)
+  //     + <noscript> fallback. Na app routách je #root aj tak prázdny až po
+  //     React mount (guardy vyššie) a CSS dobehne dávno pred JS bundle-om.
+  // Štýly sa extrahujú zo SOURCE súborov pri každom builde → nikdy nezostarnú.
+  const baseCss = readFileSync(path.join(clientDir, 'src/styles/index.css'), 'utf8');
+  const layoutIdx = baseCss.indexOf('/* Layout */');
+  if (layoutIdx < 200) throw new Error('styles/index.css: marker "/* Layout */" nenájdený — critical CSS extrakcia zlyhala');
+  const lpCssSrc = readFileSync(path.join(clientDir, 'src/pages/LandingPage.css'), 'utf8');
+  const minify = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').replace(/\s*([{}:;,>])\s*/g, '$1').trim();
+  const criticalCss = minify(baseCss.slice(0, layoutIdx)) + minify(lpCssSrc);
+  if (!criticalCss.includes('.lp-navbar') || !criticalCss.includes(':root')) {
+    throw new Error('critical CSS nekompletný (chýba .lp-navbar alebo :root)');
+  }
+
+  // hlavný stylesheet → async (presne 1 očakávaný — Vite entry CSS)
+  const cssLinkRe = /<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+\.css)">/g;
+  const cssLinks = [...html.matchAll(cssLinkRe)];
+  if (cssLinks.length !== 1) {
+    throw new Error(`očakávaný presne 1 entry CSS link, nájdených ${cssLinks.length}`);
+  }
+  const cssHref = cssLinks[0][1];
+  // preload drží download na vysokej priorite (media=print by ho degradoval
+  // a na pomalej sieti by React mount mohol predbehnúť CSS → neštýlovaná appka);
+  // rovnaký preload+swap vzor už index.html používa pre Google Fonts.
+  html = html.replace(cssLinks[0][0], () =>
+    `<style data-lp-critical>${criticalCss}</style>` +
+    `<link rel="preload" as="style" crossorigin href="${cssHref}">` +
+    `<link rel="stylesheet" crossorigin href="${cssHref}" media="print" onload="this.media='all'">` +
+    `<noscript><link rel="stylesheet" crossorigin href="${cssHref}"></noscript>`
+  );
+
   // atomický zápis — polovičný index.html by bol horší než akékoľvek zlyhanie
   writeFileSync(indexPath + '.tmp', html);
   renameSync(indexPath + '.tmp', indexPath);
