@@ -32,8 +32,26 @@ export const isIosNativeApp = () => {
   return cached;
 };
 
+// Android natívny shell (Kotlin WebView) — UA suffix "PrplCRM-Android/x.y.z"
+// injektovaný v MainActivity.kt. Rovnaký vzor ako iOS.
+let androidCached;
+export const isAndroidNativeApp = () => {
+  if (androidCached !== undefined) return androidCached;
+  try {
+    androidCached = /PrplCRM-Android/.test(navigator.userAgent);
+  } catch {
+    androidCached = false;
+  }
+  return androidCached;
+};
+
+// Ktorýkoľvek natívny shell (iOS alebo Android). Použiť na gating vecí,
+// ktoré do natívnych appiek nepatria — napr. web analytika (App Store /
+// Google Play data-safety deklarácie) alebo cookie consent bannery.
+export const isNativeApp = () => isIosNativeApp() || isAndroidNativeApp();
+
 // Reset cache (only for tests)
-export const __resetPlatformCache = () => { cached = undefined; mobileCached = undefined; };
+export const __resetPlatformCache = () => { cached = undefined; mobileCached = undefined; androidCached = undefined; };
 
 // Mobile / tablet detection. Used to hide desktop-only UI like the Web Push
 // notifications toggle:

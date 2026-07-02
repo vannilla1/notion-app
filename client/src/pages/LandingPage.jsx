@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/api/api';
 import { isIosNativeApp } from '@/utils/platform';
+import { trackEvent } from '@/utils/analytics';
+import CookieConsent, { CookieSettingsLink } from '@/components/CookieConsent';
 import './LandingPage.css';
 
 export default function LandingPage() {
@@ -113,8 +115,8 @@ export default function LandingPage() {
             Moderný CRM systém pre malé tímy: jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
-            <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-white">Vyskúšajte zadarmo</a>
-            <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-outline">Prihlásiť sa</a>
+            <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-white" onClick={() => trackEvent('cta_register', { location: 'hero' })}>Vyskúšajte zadarmo</a>
+            <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-outline" onClick={() => trackEvent('cta_login', { location: 'hero' })}>Prihlásiť sa</a>
           </div>
         </div>
       </section>
@@ -311,7 +313,7 @@ export default function LandingPage() {
                 <li style={{ color: '#94a3b8' }}><span className="lp-pricing-check" style={{ background: '#f1f5f9', color: '#94a3b8' }}><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>Bez príloh súborov</li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_free' })}>
                 Začať zadarmo
               </a>
             </div>
@@ -348,7 +350,7 @@ export default function LandingPage() {
                 <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Prílohy súborov (1&nbsp;GB)</strong></li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_tim' })}>
                 Začať s Tímom
               </a>
             </div>
@@ -384,7 +386,7 @@ export default function LandingPage() {
                 <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Skorý prístup k novým funkciám</li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-primary lp-pricing-cta">
+              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-primary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_pro' })}>
                 Začať s Pro
               </a>
             </div>
@@ -506,6 +508,7 @@ export default function LandingPage() {
               className="lp-badge"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => trackEvent('app_store_click', { location: 'download' })}
               aria-label="Stiahnuť Prpl CRM v App Store"
             >
               <span className="lp-badge-icon">
@@ -529,6 +532,7 @@ export default function LandingPage() {
                 className="lp-badge"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => trackEvent('google_play_click', { location: 'download' })}
                 aria-label="Stiahnuť Prpl CRM na Google Play"
               >
                 <span className="lp-badge-icon">
@@ -776,10 +780,13 @@ export default function LandingPage() {
           <div className="lp-footer-links">
             <Link to="/vop/">Obchodné podmienky</Link>
             <Link to="/ochrana-udajov/">Ochrana osobných údajov</Link>
+            <CookieSettingsLink />
           </div>
         </div>
         <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vannilla</a></p>
       </footer>
+
+      <CookieConsent />
     </div>
   );
 }

@@ -1310,3 +1310,102 @@
     padding: 24px;
   }
 }
+
+/* Cookie/analytika consent banner — fixný dolný pruh, neprekrýva obsah,
+   žiadny CLS (obsah sa neposúva). Zobrazuje sa len na landing page. */
+.lp-cookie-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+}
+
+.lp-cookie-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.lp-cookie-text a {
+  color: #6366f1;
+  text-decoration: underline;
+}
+
+.lp-cookie-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.lp-cookie-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.lp-cookie-accept {
+  background: #6366f1;
+  color: #fff;
+}
+
+.lp-cookie-accept:hover {
+  background: #4f46e5;
+}
+
+.lp-cookie-decline {
+  background: transparent;
+  color: #64748b;
+  border-color: #e2e8f0;
+}
+
+.lp-cookie-decline:hover {
+  background: #f8fafc;
+}
+
+@media (max-width: 640px) {
+  .lp-cookie-banner {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+  }
+
+  .lp-cookie-actions {
+    justify-content: center;
+  }
+}
+
+/* Footer "Nastavenia cookies" — vyzerá ako ostatné footer linky (je to button
+   kvôli akcii, nie navigácii). */
+.lp-cookie-settings-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.lp-cookie-settings-link:hover {
+  text-decoration: underline;
+}

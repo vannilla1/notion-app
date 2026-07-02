@@ -21,7 +21,7 @@ export default function PrivacyPolicy() {
       lineHeight: '1.7'
     }}>
       <h1 style={{ fontSize: '28px', marginBottom: '8px' }}>Zásady ochrany osobných údajov</h1>
-      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 21. apríla 2026</p>
+      <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 2. júla 2026</p>
 
       <section style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>1. Prevádzkovateľ</h2>
@@ -120,7 +120,19 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>6. Vaše práva</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>6. Cookies a analytika (webová stránka)</h2>
+        <p>Na verejnej webovej stránke prplcrm.eu (marketingová úvodná stránka) používame nástroj <strong>Google Analytics 4</strong> (Google Ireland Ltd.) na anonymizované štatistiky návštevnosti — výlučne <strong>s vaším predchádzajúcim súhlasom</strong> podľa čl. 6 ods. 1 písm. a) GDPR, ktorý udelíte cez cookie lištu. Bez súhlasu sa analytika vôbec nenačíta a žiadne analytické cookies sa neukladajú.</p>
+        <ul>
+          <li><strong>Cookies:</strong> _ga a _ga_* (životnosť do 24 mesiacov) — pseudonymný identifikátor prehliadača na rozlíšenie návštev.</li>
+          <li><strong>Účel:</strong> súhrnné štatistiky návštevnosti (počet návštev, zdroje, používanie stránky). Reklamné funkcie a personalizácia sú vypnuté.</li>
+          <li><strong>Príjemca:</strong> Google Ireland Ltd.; údaje môže spracúvať aj Google LLC (USA) na základe rámca EU-US Data Privacy Framework.</li>
+          <li><strong>Odvolanie súhlasu:</strong> kedykoľvek cez odkaz „Nastavenia cookies" v pätičke stránky — rovnako jednoducho, ako bol udelený.</li>
+        </ul>
+        <p>V samotnej aplikácii (po prihlásení) ani v mobilných aplikáciách pre iOS a Android sa žiadna webová analytika nepoužíva.</p>
+      </section>
+
+      <section style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>7. Vaše práva</h2>
         <p>Máte právo:</p>
         <ul style={{ paddingLeft: '20px' }}>
           <li>Požiadať o vymazanie vášho účtu a všetkých súvisiacich údajov</li>
@@ -136,7 +148,7 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>7. Ako zmazať svoj účet</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>8. Ako zmazať svoj účet</h2>
         <p>Účet a všetky súvisiace údaje môžete zmazať jedným z týchto spôsobov:</p>
         <h3 style={{ fontSize: '16px', marginTop: '16px', marginBottom: '8px' }}>a) Emailová žiadosť (odporúčané)</h3>
         <ol style={{ paddingLeft: '20px' }}>
@@ -163,7 +175,7 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>8. Uchovávanie dát</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>9. Uchovávanie dát</h2>
         <ul style={{ paddingLeft: '20px' }}>
           <li>Vaše údaje uchovávame po dobu aktivity účtu. Po jeho zmazaní odstránime všetky osobné údaje do 30 dní.</li>
           <li>Google OAuth tokeny sú vymazané okamžite po odpojení Google integrácie alebo zmazaní účtu.</li>
@@ -172,7 +184,7 @@ export default function PrivacyPolicy() {
       </section>
 
       <section style={{ marginBottom: '32px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>9. Kontakt</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>10. Kontakt</h2>
         <p>
           V prípade otázok ohľadom ochrany osobných údajov nás kontaktujte na adrese uvedenej v aplikácii alebo cez{' '}
           <a href="https://prplcrm.eu" style={{ color: '#6366f1' }}>prplcrm.eu</a>.
