@@ -15,7 +15,7 @@
 // je hardcoded — Render env vars pre static site sa spravujú len v dashboarde.
 import { isNativeApp } from '@/utils/platform';
 
-export const GA_MEASUREMENT_ID = ''; // prázdne = analytika úplne vypnutá
+export const GA_MEASUREMENT_ID = 'G-7ZPCQKCR65'; // GA4 property "Prpl CRM" → stream prplcrm.eu
 
 const CONSENT_KEY = 'prpl_analytics_consent'; // 'granted' | 'denied' | null (nerozhodnuté)
 const GTAG_SRC = 'https://www.googletagmanager.com/gtag/js';
