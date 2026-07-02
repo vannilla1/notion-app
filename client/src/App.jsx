@@ -29,7 +29,12 @@ const Messages = lazy(() => import('./pages/Messages'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
 const IapBilling = lazy(() => import('./pages/IapBilling'));
 const UserAffiliate = lazy(() => import('./pages/UserAffiliate'));
-const LandingPage = lazy(() => import('./pages/LandingPage'));
+// LandingPage je EAGER (nie lazy) — '/' je prerendrovaná (scripts/prerender.mjs)
+// a lazy import by pri React mounte commitol Suspense fallback, ktorý by zmazal
+// prerendrovaný obsah → obsah→spinner→obsah flash + CLS. Chunk má ~44 kB pred
+// gzipom; v iOS shelli sa '/' aj tak redirectuje preč (renderuje sa len na webe).
+// ESM import je hoisted, umiestnenie medzi lazy deklaráciami je zámerné (kontext).
+import LandingPage from './pages/LandingPage';
 const AdminPanel = lazy(() => import('./pages/AdminPanel'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));

@@ -56,3 +56,4 @@ android-native/app/google-services.json
 # uložiť. Obsah tu nikdy necommituj, na Render idú cez env variables.
 secrets/
 
+client/dist-server/
