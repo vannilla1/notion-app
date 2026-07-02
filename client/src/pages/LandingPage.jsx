@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import api from '@/api/api';
 import { isIosNativeApp } from '@/utils/platform';
 import { trackEvent } from '@/utils/analytics';
@@ -778,8 +777,11 @@ export default function LandingPage() {
             <p className="lp-footer-text">&copy; 2026 Prpl CRM. Všetky práva vyhradené.</p>
           </div>
           <div className="lp-footer-links">
-            <Link to="/vop/">Obchodné podmienky</Link>
-            <Link to="/ochrana-udajov/">Ochrana osobných údajov</Link>
+            {/* Obyčajné <a>, nie <Link>: legal stránky sú pre-rendrované statické
+                HTML (full page load je správny) a LandingPage tak nepotrebuje
+                Router context — nutné pre samostatnú hydratáciu (main.jsx). */}
+            <a href="/vop/">Obchodné podmienky</a>
+            <a href="/ochrana-udajov/">Ochrana osobných údajov</a>
             <CookieSettingsLink />
           </div>
         </div>

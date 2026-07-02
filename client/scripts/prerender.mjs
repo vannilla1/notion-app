@@ -137,6 +137,38 @@ try {
     `<noscript><link rel="stylesheet" crossorigin href="${cssHref}"></noscript>`
   );
 
+  // 4c) DEFEROVANÝ REACT BOOT — Lighthouse/lantern počíta každý JS objavený
+  // pred LCP paintom do pesimistického LCP grafu (empiricky: entry script
+  // KDEKOĽVEK v HTML + modulepreloady = LCP ~4.2s sim; bez nich 2.3s).
+  // Preto: statický entry <script> + vite modulepreloady odstránime a boot
+  // riadi inline skript v <head>:
+  //   - mimo '/' (app routy, iOS shell): boot OKAMŽITE — správanie ako doteraz
+  //   - na '/': boot po load evente / prvej interakcii (skorší z nich)
+  //     + 4s absolútny fallback. Landing je dovtedy plne čitateľný (statické
+  //     HTML) a React sa HYDRATUJE bez repaint-u (main.jsx), takže LCP ostáva
+  //     ukotvený na prvom painte.
+  const entryScriptRe = /<script type="module" crossorigin src="(\/assets\/index-[^"]+\.js)"><\/script>/;
+  const entryMatch = html.match(entryScriptRe);
+  if (!entryMatch) throw new Error('entry module script nenájdený v dist/index.html');
+  const entrySrc = entryMatch[1];
+  const mpRe = /<link rel="modulepreload" crossorigin href="(\/assets\/[^"]+\.js)">\s*/g;
+  const preloads = [...html.matchAll(mpRe)].map((m) => m[1]);
+  html = html.replace(entryScriptRe, '');
+  html = html.replace(mpRe, '');
+
+  const bootScript =
+    '<script>(function(){var d=0;function b(){if(d)return;d=1;' +
+    JSON.stringify(preloads) +
+    '.forEach(function(h){var l=document.createElement("link");l.rel="modulepreload";l.crossOrigin="";l.href=h;document.head.appendChild(l)});' +
+    'var s=document.createElement("script");s.type="module";s.crossOrigin="";s.src=' +
+    JSON.stringify(entrySrc) +
+    ';document.body.appendChild(s)}' +
+    'if(location.pathname!=="/"){b();return}' +
+    '["pointerdown","keydown","touchstart","scroll"].forEach(function(e){addEventListener(e,b,{once:true,passive:true})});' +
+    'if(document.readyState==="complete"){setTimeout(b,60)}else{addEventListener("load",function(){setTimeout(b,60)})}' +
+    'setTimeout(b,4000)})()</script>';
+  html = html.replace('</head>', () => `${bootScript}</head>`);
+
   // atomický zápis — polovičný index.html by bol horší než akékoľvek zlyhanie
   writeFileSync(indexPath + '.tmp', html);
   renameSync(indexPath + '.tmp', indexPath);

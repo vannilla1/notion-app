@@ -77,14 +77,42 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <AppErrorBoundary>
-      <BrowserRouter>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </BrowserRouter>
-    </AppErrorBoundary>
-  </React.StrictMode>
+// Prerendrovaný landing ('/') sa HYDRATUJE namiesto nahradenia:
+// createRoot().render() by celý DOM zmazal a nanovo vykreslil — ten repaint
+// (po načítaní webfontov) Chrome počíta ako nový, neskorší LCP. hydrateRoot
+// sa na existujúce HTML len "pripne" (event handlery) bez prekreslenia.
+// LandingPage je na to samostatná: bez Routera (footer <a>), bez AuthProvideru.
+// Markup MUSÍ presne sedieť s entry-server.jsx (inak React spadne na client
+// render). Fallbacky: iOS shell, prázdny root (prerender zlyhal), iná cesta
+// → plný App cez createRoot ako doteraz.
+import LandingPage from './pages/LandingPage';
+
+const rootEl = document.getElementById('root');
+const hydratableLanding = (
+  window.location.pathname === '/' &&
+  !window.__iosNative &&
+  rootEl.firstElementChild !== null
 );
+
+if (hydratableLanding) {
+  ReactDOM.hydrateRoot(
+    rootEl,
+    <React.StrictMode>
+      <AppErrorBoundary>
+        <LandingPage />
+      </AppErrorBoundary>
+    </React.StrictMode>
+  );
+} else {
+  ReactDOM.createRoot(rootEl).render(
+    <React.StrictMode>
+      <AppErrorBoundary>
+        <BrowserRouter>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </BrowserRouter>
+      </AppErrorBoundary>
+    </React.StrictMode>
+  );
+}

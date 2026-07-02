@@ -8,19 +8,16 @@
 // Zámerne renderujeme LandingPage PRIAMO (nie celý App):
 //  - App používa React.lazy pre všetky routes a renderToString by pre
 //    nerozbehnutý lazy chunk vyrenderoval len Suspense fallback (spinner).
-//  - LandingPage žiadne lazy deti nemá, potrebuje len Router context
-//    kvôli <Link> — ten dodá StaticRouter.
+//  - LandingPage nemá žiadnu Router závislosť (footer legal odkazy sú
+//    obyčajné <a>) — žiadny StaticRouter nie je potrebný.
 //
-// Na klientovi potom main.jsx spraví createRoot().render() — React 18 pri
-// render() obsah root-u NAHRADÍ (nejde o hydratáciu, mismatch nehrozí).
+// KRITICKÉ: výstup MUSÍ byť identický s tým, čo klient hydratuje v main.jsx
+// (hydrateRoot s <LandingPage/>) — pri mismatchi React spadne na client
+// render = repaint = pokazený LCP. Preto obe strany renderujú holé
+// <LandingPage /> bez wrapperov ovplyvňujúcich markup.
 import { renderToString } from 'react-dom/server';
-import { StaticRouter } from 'react-router-dom/server';
 import LandingPage from './pages/LandingPage';
 
 export function render() {
-  return renderToString(
-    <StaticRouter location="/">
-      <LandingPage />
-    </StaticRouter>
-  );
+  return renderToString(<LandingPage />);
 }
