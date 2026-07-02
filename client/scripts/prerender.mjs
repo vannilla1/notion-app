@@ -162,7 +162,9 @@ try {
     '.forEach(function(h){var l=document.createElement("link");l.rel="modulepreload";l.crossOrigin="";l.href=h;document.head.appendChild(l)});' +
     'var s=document.createElement("script");s.type="module";s.crossOrigin="";s.src=' +
     JSON.stringify(entrySrc) +
-    ';document.body.appendChild(s)}' +
+    // POZOR: na app routách beží boot OKAMŽITE z <head> — document.body vtedy
+    // ešte NEEXISTUJE (null.appendChild = crash = biela appka). head existuje vždy.
+    ';(document.body||document.head).appendChild(s)}' +
     'if(location.pathname!=="/"){b();return}' +
     '["pointerdown","keydown","touchstart","scroll"].forEach(function(e){addEventListener(e,b,{once:true,passive:true})});' +
     'if(document.readyState==="complete"){setTimeout(b,60)}else{addEventListener("load",function(){setTimeout(b,60)})}' +
