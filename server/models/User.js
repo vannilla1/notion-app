@@ -193,14 +193,15 @@ const userSchema = new mongoose.Schema({
   //
   // 'general' notifikácie (cudzie zmeny, blížiace sa termíny, po termíne,
   // pridanie člena do workspace) sa vždy ukladajú do bell-panela, ale
-  // push sa posiela LEN ak má user explicitne zapnutý príslušný toggle.
-  // Default je všade false — anti-spam.
+  // push sa dá vypnúť príslušným toggle-om. OPT-OUT model (2026-07):
+  // default všade true — "každá notifikácia sa zobrazí", user si môže
+  // konkrétny druh vypnúť v Nastaveniach notifikácií.
   // ─────────────────────────────────────────────────────────────────────
   notificationPreferences: {
-    pushTeamActivity: { type: Boolean, default: false }, // cudzie projekty/úlohy/kontakty
-    pushDeadlines:    { type: Boolean, default: false }, // 7d / 3d / dnes pripomienky
-    pushOverdue:      { type: Boolean, default: false }, // po termíne
-    pushNewMember:    { type: Boolean, default: false }  // nový člen workspace
+    pushTeamActivity: { type: Boolean, default: true }, // cudzie projekty/úlohy/kontakty
+    pushDeadlines:    { type: Boolean, default: true }, // 7d / 3d / dnes pripomienky
+    pushOverdue:      { type: Boolean, default: true }, // po termíne
+    pushNewMember:    { type: Boolean, default: true }  // nový člen workspace
   },
   // ─────────────────────────────────────────────────────────────────────
   // Affiliate program — referral commission system (2026-05-19)

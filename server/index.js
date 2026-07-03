@@ -538,6 +538,35 @@ server.listen(PORT, () => {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }
 
+      // One-shot migration (2026-07): push notifikácie opt-in → opt-out.
+      // Doterajšie false hodnoty boli schema defaulty (nikto nemal dôvod
+      // opt-in klikať), preto ich preklápame na true. NA ROZDIEL od trial
+      // migrácie vyššie MUSÍ byť guardovaná markerom — false je po novom
+      // legitímna používateľská voľba a opakovaný beh by ju prepisoval.
+      try {
+        const mongooseRef = require('mongoose');
+        const migrations = mongooseRef.connection.db.collection('app_migrations');
+        const MIGRATION_KEY = 'push_prefs_opt_out_2026_07';
+        const alreadyDone = await migrations.findOne({ _id: MIGRATION_KEY });
+        if (!alreadyDone) {
+          const res = await User.updateMany(
+            {},
+            {
+              $set: {
+                'notificationPreferences.pushTeamActivity': true,
+                'notificationPreferences.pushDeadlines': true,
+                'notificationPreferences.pushOverdue': true,
+                'notificationPreferences.pushNewMember': true
+              }
+            }
+          );
+          await migrations.insertOne({ _id: MIGRATION_KEY, at: new Date(), modified: res.modifiedCount });
+          logger.info(`Push prefs opt-out migration: enabled for ${res.modifiedCount} users`);
+        }
+      } catch (err) {
+        logger.error('Push prefs opt-out migration failed', { error: err.message });
+      }
+
       // Initialize admin email service immediately
       initializeEmail();
 

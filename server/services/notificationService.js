@@ -269,13 +269,24 @@ const sendAPNsNotification = async (userId, payload) => {
       dataWorkspaceId: payload.data?.workspaceId || null
     });
 
+    // Badge = skutočný počet neprečítaných (nie hardcoded 1 — to nechávalo
+    // na ikonke trvalú "1" bez ohľadu na reálny stav). Nová notifikácia je
+    // v čase pushu už uložená v DB, takže count ju zahŕňa. iOS stranu čistí
+    // scenePhase handler v PrplCRMApp.swift pri každom otvorení appky.
+    let unreadCount = 1;
+    try {
+      unreadCount = await Notification.countDocuments({ userId, read: false });
+    } catch {
+      // fallback 1 — badge radšej nepresný než žiadny push
+    }
+
     const apnsPayload = {
       aps: {
         alert: {
           title: String(payload.title).slice(0, 100),
           body: String(payload.body || payload.message || '').slice(0, 200)
         },
-        badge: 1,
+        badge: unreadCount || 1,
         sound: 'default',
         'mutable-content': 1,
         'interruption-level': 'active',
@@ -823,16 +834,17 @@ const createNotification = async ({
       try {
         // ─── Push gating ────────────────────────────────────────────────
         // Direct → vždy posielame push (priradenia, dokončenie mojej úlohy
-        // niekým iným, správa pre mňa). General → len ak má user explicitne
-        // zapnutý príslušný toggle vo svojich notificationPreferences.
+        // niekým iným, správa pre mňa). General → OPT-OUT model: push ide,
+        // POKIAĽ si ho user explicitne nevypol v notificationPreferences
+        // ("každá notifikácia sa zobrazí" — 2026-07). Chýbajúca preferencia
+        // = zapnuté. Explicitné false (vypnuté v UI) sa rešpektuje.
         const prefKey = getPushPrefKey(notification.type, notification.category);
         if (prefKey) {
           const recipient = await User.findById(userId, 'notificationPreferences').lean();
-          const enabled = recipient?.notificationPreferences?.[prefKey];
+          const enabled = recipient?.notificationPreferences?.[prefKey] !== false;
           if (!enabled) {
-            // User has not opted in for this kind of general notification —
-            // still saved to the bell panel (Socket.IO emit už prebehol),
-            // ale push na telefón / web sa nepošle.
+            // User si tento druh notifikácií vypol — uložená v bell paneli
+            // ostáva (Socket.IO emit už prebehol), push na telefón sa nepošle.
             return;
           }
         }

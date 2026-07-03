@@ -19,6 +19,12 @@ import UserNotifications
 struct PrplCRMApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    // Scene lifecycle — v SwiftUI (scene-based) appke sa UIApplicationDelegate
+    // metóda applicationDidBecomeActive NEVOLÁ, takže badge cleanup tam bol
+    // mŕtvy kód a číslo na ikonke ostávalo "zaseknuté" po otvorení appky.
+    // Čistenie preto visí na scenePhase (.active = každý návrat do popredia).
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Deterministicky dispatchne Universal Link do Coordinatora cez NSNotification-
     /// Center. Obchádza SwiftUI render cyklus (@Published/updateUIView), ktorý v
     /// kombinácii s `appWillEnterForeground`-delayed-reload vytváral race window:
@@ -97,6 +103,16 @@ struct PrplCRMApp: App {
                     if let url = activity.webpageURL {
                         debugLog("[UniversalLink] Continue activity: \(url.absoluteString)")
                         Self.dispatchDeepLink(url.absoluteString, via: appDelegate)
+                    }
+                }
+                // Badge cleanup pri KAŽDOM prechode appky do popredia (spustenie
+                // aj návrat z pozadia). Server posiela v badge reálny počet
+                // neprečítaných; otvorením appky ho user "videl" → vynulovať,
+                // vrátane doručených banerov v Notification Center.
+                .onChange(of: scenePhase) { phase in
+                    if phase == .active {
+                        UNUserNotificationCenter.current().setBadgeCount(0)
+                        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
                     }
                 }
         }
