@@ -785,7 +785,7 @@ export default function LandingPage() {
             <CookieSettingsLink />
           </div>
         </div>
-        <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vannilla</a></p>
+        <p className="lp-footer-credit">Created by <a href="https://vaicode.xyz" target="_blank" rel="noopener noreferrer">vaicode studio</a>.</p>
       </footer>
 
       <CookieConsent />
