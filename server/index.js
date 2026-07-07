@@ -58,7 +58,11 @@ const server = http.createServer(app);
 // CORS configuration - restrict to frontend origin
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || 'https://prplcrm.eu',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  // PATCH je nutné explicitne uviesť — používa ho premenovanie príloh
+  // (jediné PATCH endpointy: PATCH /api/tasks|contacts/:id/files/:fileId).
+  // Bez neho browser zablokuje CORS preflight a rename padne s network errorom
+  // na webe aj v iOS/Android WebView (žiadny iný endpoint PATCH nepoužíva).
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Workspace-Id'],
   credentials: false,
   optionsSuccessStatus: 200,
