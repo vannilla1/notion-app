@@ -56,6 +56,13 @@ export function TimeInput({ value, onChange, disabled, className = '', style, ti
 
 function DateTimeInput({ type, value, onChange, disabled, className, style, title, ariaLabel, autoFocus }) {
   const inputRef = useRef(null);
+  // Guard proti DVOJITÉMU otvoreniu v jednom geste. Klik na prázdny input
+  // spustí onMouseDown → openPicker (showPicker OTVORÍ), a hneď potom focus →
+  // onFocus → openPicker znova. Druhé showPicker() vyhodí (picker už beží) →
+  // catch → el.focus() → to práve otvorený picker ZAVRIE = blik a "treba
+  // klikať viackrát". Na iOS to isté cez touchStart + syntetický mouseDown.
+  // Preto po prvom otvorení krátko blokujeme ďalšie volania v tom istom geste.
+  const openingRef = useRef(false);
 
   // Pri click/touch sa pokúsime force-open natívny picker. Niektoré
   // browser/input-type kombinácie (najmä iOS Safari + type="time") občas
@@ -64,6 +71,11 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
   const openPicker = () => {
     const el = inputRef.current;
     if (!el || el.disabled) return;
+    if (openingRef.current) return; // už otvárame v tomto geste — nevolať 2×
+    openingRef.current = true;
+    // Uvoľni guard po dobehnutí mousedown→focus→click sekvencie. Ďalšie
+    // (zámerné) kliknutie používateľa je po tomto okne a otvorí picker znova.
+    setTimeout(() => { openingRef.current = false; }, 350);
 
     if (typeof el.showPicker === 'function') {
       try {
