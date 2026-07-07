@@ -15,6 +15,7 @@ import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import FileRenameModal from '../components/FileRenameModal';
+import ConfirmModal from '../components/ConfirmModal';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -164,6 +165,22 @@ function CRM() {
   const [uploadingFile, setUploadingFile] = useState(null);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
+  // Po dokončení poslednej podúlohy globálneho projektu — potvrdenie uzavretia
+  // (server projekt už automaticky nezatvára). Len global projekty (contact
+  // projekty sa auto-nezatvárali nikdy).
+  const [projectClosePrompt, setProjectClosePrompt] = useState(null); // { taskId, title }
+
+  const confirmCloseProject = async () => {
+    if (!projectClosePrompt) return;
+    const { taskId } = projectClosePrompt;
+    setProjectClosePrompt(null);
+    try {
+      await api.put(`/api/tasks/${taskId}`, { completed: true, source: 'global' });
+      await fetchGlobalTasks();
+    } catch {
+      alert('Nepodarilo sa uzavrieť projekt');
+    }
+  };
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -991,11 +1008,16 @@ function CRM() {
     try {
       const source = task.source || 'contact';
       if (source === 'global') {
-        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+        const res = await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
           completed: !subtask.completed,
           source: 'global'
         });
         await fetchGlobalTasks();
+        // Posledná podúloha otvoreného projektu → spýtaj sa na uzavretie
+        // (server projekt už automaticky nezatvára).
+        if (res?.data?.projectAutoCloseEligible) {
+          setProjectClosePrompt({ taskId: task.id, title: task.title });
+        }
       } else {
         if (!task.contactId || !task.id || !subtask.id) {
           alert('Chyba: Chýbajúce údaje');
@@ -1965,6 +1987,18 @@ function CRM() {
           confirmLabel="Uložiť"
           onConfirm={handleFileRename}
           onCancel={() => setRenamingFile(null)}
+        />
+      )}
+
+      {/* Potvrdenie uzavretia projektu po dokončení poslednej úlohy */}
+      {projectClosePrompt && (
+        <ConfirmModal
+          title="Uzavrieť projekt?"
+          message={`Všetky úlohy v projekte „${projectClosePrompt.title}" sú hotové. Chcete celý projekt uzavrieť, alebo ho ešte nechať otvorený?`}
+          confirmLabel="Uzavrieť projekt"
+          cancelLabel="Nechať otvorený"
+          onConfirm={confirmCloseProject}
+          onCancel={() => setProjectClosePrompt(null)}
         />
       )}
 

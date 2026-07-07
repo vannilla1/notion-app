@@ -170,6 +170,11 @@ export const useTaskOperations = () => {
         ? `/api/tasks/${taskId}/subtasks/${subtaskId}`
         : `/api/contacts/${contactId}/tasks/${taskId}/subtasks/${subtaskId}`;
       const res = await api.put(url, { completed: !currentCompleted });
+      // POZOR pre budúceho konzumenta (aktuálne sa tento hook method nikde
+      // nepoužíva): pri isGlobal môže res.data niesť projectAutoCloseEligible=true
+      // (posledná podúlohu dokončila projekt). Ak to niekto zapojí, musí príznak
+      // spracovať (potvrdenie uzavretia projektu) — inak sa projekt už nezavrie
+      // ani sa nespýta. Vzor: Tasks.jsx / CRM.jsx toggleSubtask + ConfirmModal.
       return res.data;
     } catch (err) {
       const message = err.response?.data?.message || 'Chyba pri aktualizácii úlohy';

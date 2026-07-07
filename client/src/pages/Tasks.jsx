@@ -16,6 +16,7 @@ import NotificationBell from '../components/NotificationBell';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import TimeRemindersPicker from '../components/TimeRemindersPicker';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
+import ConfirmModal from '../components/ConfirmModal';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -710,6 +711,9 @@ function Tasks() {
   const [activeFileTarget, setActiveFileTarget] = useState(null); // { taskId, subtaskId? }
   const [pendingUpload, setPendingUpload] = useState(null); // { file, taskId, subtaskId? } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { taskId, fileId, currentName, subtaskId? } — premenovanie existujúceho
+  // Po dokončení poslednej podúlohy sa projekt UŽ nezatvára automaticky —
+  // tento stav zobrazí potvrdzovacie okno, nech sa používateľ rozhodne.
+  const [projectClosePrompt, setProjectClosePrompt] = useState(null); // { taskId, source, title }
 
   // Linked messages
   const [linkedMessages, setLinkedMessages] = useState({});
@@ -1680,16 +1684,34 @@ function Tasks() {
       isDueDateFilter(filterAtToggle) || isAssignedFilter(filterAtToggle) || filterAtToggle === 'new'
     );
     try {
-      await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
+      const res = await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
         completed: !subtask.completed,
         source: task.source
       });
       await fetchTasks();
-      if (shouldFocusNext) {
+      // Ak to bola POSLEDNÁ podúloha otvoreného projektu, server vráti príznak
+      // projectAutoCloseEligible — spýtame sa používateľa, či projekt uzavrieť.
+      // (Server už projekt automaticky nezatvára.)
+      if (res?.data?.projectAutoCloseEligible) {
+        setProjectClosePrompt({ taskId: task.id, source: task.source, title: task.title });
+      } else if (shouldFocusNext) {
         setTimeout(() => focusNextMatch(filterAtToggle, userIdAtToggle, null, subtask.id), 0);
       }
     } catch {
       // Silently fail
+    }
+  };
+
+  // Uzavretie projektu potvrdené používateľom v ConfirmModal-e.
+  const confirmCloseProject = async () => {
+    if (!projectClosePrompt) return;
+    const { taskId, source } = projectClosePrompt;
+    setProjectClosePrompt(null);
+    try {
+      await api.put(`/api/tasks/${taskId}`, { completed: true, source });
+      await fetchTasks();
+    } catch {
+      alert('Nepodarilo sa uzavrieť projekt');
     }
   };
 
@@ -3548,6 +3570,18 @@ function Tasks() {
           confirmLabel="Uložiť"
           onConfirm={handleFileRename}
           onCancel={() => setRenamingFile(null)}
+        />
+      )}
+
+      {/* Potvrdenie uzavretia projektu po dokončení poslednej úlohy */}
+      {projectClosePrompt && (
+        <ConfirmModal
+          title="Uzavrieť projekt?"
+          message={`Všetky úlohy v projekte „${projectClosePrompt.title}" sú hotové. Chcete celý projekt uzavrieť, alebo ho ešte nechať otvorený?`}
+          confirmLabel="Uzavrieť projekt"
+          cancelLabel="Nechať otvorený"
+          onConfirm={confirmCloseProject}
+          onCancel={() => setProjectClosePrompt(null)}
         />
       )}
     </div>

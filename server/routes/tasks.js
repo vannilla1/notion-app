@@ -162,6 +162,20 @@ const allSubtasksCompleted = (subtasks) => {
   return true;
 };
 
+// Odpoveď na PUT podúlohy — vráti podúlohu + príznak, či táto zmena práve
+// dokončila POSLEDNÚ podúlohu otvoreného projektu. Projekt sa už NEZATVÁRA
+// automaticky na serveri (pôvodné správanie) — namiesto toho o uzavretí
+// rozhodne používateľ cez potvrdzovacie okno na klientovi (2026-07).
+// Podúlohu serializujeme na plain objekt, aby sa dal doplniť príznak bez
+// zásahu do subdoc-u; ostatné polia ostávajú identické ako predtým.
+const subtaskWithCloseFlag = (subtask, eligible) => {
+  const obj = subtask && typeof subtask.toObject === 'function'
+    ? subtask.toObject()
+    : { ...(subtask || {}) };
+  obj.projectAutoCloseEligible = !!eligible;
+  return obj;
+};
+
 // Helper function to populate assigned users info
 const populateAssignedUsers = async (assignedToIds) => {
   if (!assignedToIds || assignedToIds.length === 0) return [];
@@ -2514,17 +2528,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
             }
 
-            // Auto-complete project when all subtasks are done
-            if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
-              contact.tasks[taskIndex].completed = true;
-              contact.markModified('tasks');
-              await contact.save();
-              io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-              io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
-              logger.info('[Auto-complete] Project auto-completed (contact)', { taskId: req.params.taskId });
-            }
-
-            return res.json(updated);
+            // Posledná podúloha hotová? Nezatváraj projekt automaticky —
+            // vráť príznak, nech sa používateľ rozhodne cez potvrdzovacie okno.
+            const closeEligible = completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks);
+            return res.json(subtaskWithCloseFlag(updated, closeEligible));
           }
         }
       }
@@ -2578,16 +2585,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
             .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
         }
 
-        // Auto-complete project when all subtasks are done
-        if (completed === true && !task.completed && allSubtasksCompleted(task.subtasks)) {
-          task.completed = true;
-          task.markModified('subtasks');
-          await task.save();
-          io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
-          logger.info('[Auto-complete] Project auto-completed (global)', { taskId: task._id.toString() });
-        }
-
-        return res.json(updated);
+        // Posledná podúloha hotová? Nezatváraj projekt automaticky —
+        // vráť príznak, nech sa používateľ rozhodne cez potvrdzovacie okno.
+        const closeEligible = completed === true && !task.completed && allSubtasksCompleted(task.subtasks);
+        return res.json(subtaskWithCloseFlag(updated, closeEligible));
       }
     }
 
@@ -2645,17 +2646,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
               .catch((e) => logger.warn('[Subtask] notifSubtaskAssignment zlyhala (non-fatal)', { error: e.message }));
           }
 
-          // Auto-complete project when all subtasks are done
-          if (completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks)) {
-            contact.tasks[taskIndex].completed = true;
-            contact.markModified('tasks');
-            await contact.save();
-            io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
-            io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contact.tasks[taskIndex], { contactId: contact._id.toString(), contactName: contact.name, source: 'contact' }));
-            logger.info('[Auto-complete] Project auto-completed (fallback contact)', { taskId: req.params.taskId });
-          }
-
-          return res.json(updated);
+          // Posledná podúloha hotová? Nezatváraj projekt automaticky —
+          // vráť príznak, nech sa používateľ rozhodne cez potvrdzovacie okno.
+          const closeEligible = completed === true && !contact.tasks[taskIndex].completed && allSubtasksCompleted(contact.tasks[taskIndex].subtasks);
+          return res.json(subtaskWithCloseFlag(updated, closeEligible));
         }
       }
     }
