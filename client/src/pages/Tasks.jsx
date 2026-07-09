@@ -735,9 +735,13 @@ function Tasks() {
       .then(response => response.blob())
       .then(blob => {
         const link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
+        const objUrl = window.URL.createObjectURL(blob);
+        link.href = objUrl;
         link.download = 'projekty.csv';
         link.click();
+        // Uvoľni blob URL — inak leží v pamäti do reloadu (na iOS WKWebView
+        // prispieva k memory jetsam). Malý timeout, nech stihne prebehnúť download.
+        setTimeout(() => window.URL.revokeObjectURL(objUrl), 10000);
       })
       .catch(() => alert('Chyba pri exporte'));
   };

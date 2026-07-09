@@ -212,6 +212,15 @@ function CRM() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTextContent, setPreviewTextContent] = useState(null);
+
+  // Uvoľni blob URL náhľadu pri KAŽDEJ zmene (prepnutie na iný súbor) aj pri
+  // opustení stránky. closePreview revoke-uje len pri explicitnom zatvorení —
+  // bez tohto by pri prezeraní viacerých príloh blob URL-y ostávali v pamäti
+  // (na iOS WKWebView prispieva k memory jetsam). Revoke starej hodnoty je
+  // idempotentný voči closePreview (dvojitý revoke je no-op).
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
   const [previewError, setPreviewError] = useState(null);
   const [downloadingFileId, setDownloadingFileId] = useState(null);
 
