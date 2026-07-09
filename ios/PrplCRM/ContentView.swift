@@ -585,13 +585,47 @@ struct WebView: UIViewRepresentable {
             // pred týmto observer-om) videl, že už sme handle-li deep link a
             // skipol by inak destructive reload na pôvodnú URL.
             didHandleDeepLinkThisCycle = true
-            DispatchQueue.main.async {
-                webView.load(URLRequest(url: url))
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                // location.replace() namiesto webView.load(): load() pri KAŽDOM
+                // tape na notifikáciu pridal do back-forward listu nový záznam
+                // (každá deep-link URL je unikátna vďaka _t) aj so snapshotom
+                // stránky — opakované notifikácie tak postupne nafúkli pamäť
+                // WebContent procesu (memory jetsam na /tasks deep linkoch,
+                // diagnostika release 70). replace() históriu NAHRADÍ, takže
+                // back-forward list nerastie. Fallback na load() pre cold start
+                // (stránka ešte nenačítaná) alebo ak JS zlyhá.
+                if self.hasFinishedInitialLoad, webView.url != nil {
+                    let escaped = fullUrl
+                        .replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "'", with: "\\'")
+                    webView.evaluateJavaScript("window.location.replace('\(escaped)')") { _, err in
+                        if err != nil {
+                            debugLog("[Push] location.replace zlyhal — fallback na load()")
+                            webView.load(URLRequest(url: url))
+                        }
+                    }
+                } else {
+                    webView.load(URLRequest(url: url))
+                }
             }
         }
 
         @objc private func appDidReceiveMemoryWarning() {
-            debugLog("[WebView] ⚠ Memory warning received — at URL \(lastURL?.absoluteString ?? "nil")")
+            debugLog("[WebView] ⚠ Memory warning — purging caches (at \(lastURL?.absoluteString ?? "nil"))")
+            // Aktívne uvoľnenie pamäte SKÔR, než iOS zabije WebContent proces
+            // (jetsam). Čistíme len cache vrstvy — localStorage/cookies (auth
+            // token!) sa NEDOTÝKAME:
+            //  - URLCache: app-side HTTP cache
+            //  - WKWebsiteDataTypeMemoryCache: in-memory zdroje web obsahu
+            //    (dekódované obrázky, skripty) vo WebContent procese
+            URLCache.shared.removeAllCachedResponses()
+            WKWebsiteDataStore.default().removeData(
+                ofTypes: [WKWebsiteDataTypeMemoryCache],
+                modifiedSince: .distantPast
+            ) {
+                debugLog("[WebView] Memory cache purged")
+            }
         }
 
         @objc private func appWillEnterForeground() {
