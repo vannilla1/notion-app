@@ -1,10 +1,13 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
+const WorkspaceMember = require('../models/WorkspaceMember');
+const Workspace = require('../models/Workspace');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
@@ -373,6 +376,289 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Kopírovanie kontaktu (so VŠETKÝM — projekty/úlohy/podúlohy/prílohy) do INÉHO
+// workspace, kde má user prístup. Vytvorí NEZÁVISLÚ kópiu (originál ostane).
+//   - nové UUID pre kontakt (_id), všetky task/subtask id a file id →
+//     kópia sa nepletie so zdrojom ani s Google sync mapami (tie sú user-scoped
+//     kľúčované práve týmto UUID), preto sa kópia bude syncovať nanovo.
+//   - prílohy sa FYZICKY duplikujú (blob R2/base64 → nový kľúč → nový ContactFile),
+//     aby zmazanie jednej kópie nezhodilo druhú. Zvláda aj legacy base64.
+//   - assignedTo sa filtruje len na členov cieľového workspace.
+//   - žiadny Google sync (rovnako ako /duplicate); "už odoslané" reminder markery
+//     sa resetujú. Stav dokončenia, termíny, poznámky a priority sa zachovajú.
+// requireWorkspace validuje len ZDROJOVÝ workspace; cieľ overujeme manuálne
+// (WorkspaceMember), aby sme negenerovali falošné cross-workspace IDOR alarmy.
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async (req, res) => {
+  let createdContactId = null;
+  const targetWorkspaceId = req.body?.targetWorkspaceId;
+  try {
+    const sourceWorkspaceId = req.workspaceId;
+
+    if (!targetWorkspaceId || !mongoose.Types.ObjectId.isValid(targetWorkspaceId)) {
+      return res.status(400).json({ message: 'Chýba alebo neplatné cieľové prostredie' });
+    }
+    if (String(targetWorkspaceId) === String(sourceWorkspaceId)) {
+      return res.status(400).json({ message: 'Cieľové prostredie je rovnaké ako zdrojové' });
+    }
+
+    // 1) Zdrojový kontakt — scoped na aktuálny (zdrojový) workspace
+    const source = await Contact.findOne({ _id: req.params.id, workspaceId: sourceWorkspaceId });
+    if (!source) return res.status(404).json({ message: 'Kontakt nenájdený' });
+
+    // 2) Členstvo v cieľovom workspace (manuálne — nie cez X-Workspace-Id header)
+    const targetMembership = await WorkspaceMember.findOne({ workspaceId: targetWorkspaceId, userId: req.user.id });
+    if (!targetMembership) return res.status(403).json({ message: 'Do tohto prostredia nemáte prístup' });
+
+    // 3) Limity CIEĽOVÉHO prostredia — podľa plánu VLASTNÍKA cieľa (nie žiadateľa),
+    // aby sa cez copy nedal zaplaviť napr. Free workspace nad jeho strop.
+    const targetWs = await Workspace.findById(targetWorkspaceId);
+    if (!targetWs) return res.status(404).json({ message: 'Cieľové prostredie neexistuje' });
+    const owner = await User.findById(targetWs.ownerId, 'subscription');
+    const ownerPlan = owner?.subscription?.plan || 'free';
+
+    // 3a) Member-over-limit (zrkadlí enforceWorkspaceLimits) — ak je cieľ nad
+    // seat limitom vlastníka, je v read-only režime a nepridávame doň obsah.
+    const memberLimits = { free: 2, trial: 2, team: 10 };
+    if (ownerPlan !== 'pro') {
+      const maxMembers = (memberLimits[ownerPlan] || 2) + (targetWs.paidSeats || 0);
+      const memberCount = await WorkspaceMember.countDocuments({ workspaceId: targetWorkspaceId });
+      if (memberCount > maxMembers) {
+        return res.status(403).json({ message: 'Cieľové prostredie prekročilo limit členov a je len na čítanie.' });
+      }
+    }
+
+    // 3b) Limit počtu kontaktov cieľa (plán vlastníka)
+    const contactLimits = { free: 5, team: 25, pro: Infinity };
+    const maxContacts = contactLimits[ownerPlan] || 5;
+    if (maxContacts !== Infinity) {
+      const count = await Contact.countDocuments({ workspaceId: targetWorkspaceId });
+      if (count >= maxContacts) {
+        return res.status(403).json({
+          message: isIosNativeApp(req)
+            ? `Cieľové prostredie dosiahlo limit ${maxContacts} kontaktov.`
+            : `Cieľové prostredie dosiahlo limit ${maxContacts} kontaktov (plán vlastníka prostredia).`
+        });
+      }
+    }
+
+    // Platní členovia cieľa — na filtrovanie assignedTo (nečlenov ticho zahodíme)
+    const targetMembers = await WorkspaceMember.find({ workspaceId: targetWorkspaceId }, 'userId').lean();
+    const targetUserIds = new Set(targetMembers.map(m => String(m.userId)));
+    const filterAssignees = (arr) => (Array.isArray(arr) ? arr.filter(uid => targetUserIds.has(String(uid))) : []);
+
+    // 4) Vytvor kontakt v cieli (najprv prázdny — potrebujeme _id pre ContactFile)
+    const newContact = new Contact({
+      workspaceId: targetWorkspaceId,
+      userId: req.user.id,
+      name: source.name || '',
+      email: source.email || '',
+      phone: source.phone || '',
+      company: source.company || '',
+      website: source.website || '',
+      notes: source.notes || '',
+      status: source.status || 'new',
+      files: [],
+      tasks: []
+    });
+    await newContact.save();
+    createdContactId = newContact._id;
+
+    // Ohraničenie práce jedného requestu — pri veľa/veľkých prílohách by inak
+    // sekvenčné R2 download+upload prekročilo request timeout / pamäť.
+    const MAX_COPY_FILES = 80;
+    const MAX_COPY_BYTES = 200 * 1024 * 1024; // 200 MB spolu
+    const copyStats = { skippedError: 0, skippedCapped: 0, bytes: 0, count: 0 };
+
+    // Skopíruj JEDEN súbor: blob (R2 → ContactFile.data → embedded legacy) →
+    // nový fileId → nový R2 objekt / ContactFile riadok. Vráti nové metadata
+    // alebo null. null z troch dôvodov: (a) zdroj naozaj nemá dáta (bezpečné
+    // preskočenie), (b) prekročený cap, (c) reálna chyba pri kópii — (b)+(c)
+    // sa POČÍTAJÚ a nahlásia klientovi (kópia je čiastočná).
+    const copyOneFile = async (fileMeta) => {
+      if (!fileMeta?.id) return null;
+      if (copyStats.count >= MAX_COPY_FILES || copyStats.bytes >= MAX_COPY_BYTES) {
+        copyStats.skippedCapped++;
+        return null;
+      }
+      let buffer = null;
+      try {
+        const cf = await ContactFile.findOne({ fileId: fileMeta.id }, { r2Key: 1, data: 1 }).lean();
+        if (cf?.r2Key && fileStorage.isR2Available()) buffer = await fileStorage.downloadFile(cf.r2Key);
+        else if (cf?.data) buffer = Buffer.from(cf.data, 'base64');
+        else if (fileMeta.data) buffer = Buffer.from(fileMeta.data, 'base64');
+      } catch (e) {
+        // Zdroj mal dáta (r2Key existoval), ale download zlyhal → REÁLNA chyba
+        logger.warn('[Copy] Príloha — čítanie zdroja zlyhalo (preskakujem)', { fileId: fileMeta.id, error: e.message });
+        copyStats.skippedError++;
+        return null;
+      }
+      if (!buffer || !buffer.length) return null; // zdroj naozaj bez dát — OK
+
+      try {
+        const newFileId = uuidv4();
+        if (fileStorage.isR2Available()) {
+          const newKey = fileStorage.contactFileKey(newFileId);
+          await fileStorage.uploadFile(newKey, buffer, fileMeta.mimetype || 'application/octet-stream');
+          await ContactFile.create({ contactId: newContact._id, fileId: newFileId, r2Key: newKey, data: null });
+        } else {
+          await ContactFile.create({ contactId: newContact._id, fileId: newFileId, data: buffer.toString('base64') });
+        }
+        copyStats.count++;
+        copyStats.bytes += buffer.length;
+        return {
+          id: newFileId,
+          originalName: fileMeta.originalName,
+          mimetype: fileMeta.mimetype,
+          size: fileMeta.size,
+          uploadedAt: fileMeta.uploadedAt || new Date()
+        };
+      } catch (e) {
+        logger.warn('[Copy] Príloha — zápis kópie zlyhal (preskakujem)', { fileId: fileMeta.id, error: e.message });
+        copyStats.skippedError++;
+        return null;
+      }
+    };
+
+    const copyFiles = async (files) => {
+      const out = [];
+      for (const f of (files || [])) {
+        const nf = await copyOneFile(f);
+        if (nf) out.push(nf);
+      }
+      return out;
+    };
+
+    // Rekurzívne — nested subtasks sú v schéme netypovaný Array (plain objekty)
+    const copySubtasks = async (subs) => {
+      const out = [];
+      for (const s of (subs || [])) {
+        out.push({
+          id: uuidv4(),
+          title: s.title,
+          completed: !!s.completed,
+          dueDate: s.dueDate || '',
+          dueTime: s.dueTime || '',
+          notes: s.notes || '',
+          priority: s.priority ?? null,
+          assignedTo: filterAssignees(s.assignedTo),
+          subtasks: await copySubtasks(s.subtasks),
+          files: await copyFiles(s.files),
+          createdAt: new Date().toISOString(),
+          modifiedAt: null,
+          timeReminders: Array.isArray(s.timeReminders) ? [...s.timeReminders] : [],
+          timeRemindersSent: [],
+          reminderSent: false,
+          lastUrgencyLevel: null
+        });
+      }
+      return out;
+    };
+
+    const copyTasks = async (tasks) => {
+      const out = [];
+      for (const t of (tasks || [])) {
+        out.push({
+          id: uuidv4(),
+          title: t.title,
+          description: t.description || '',
+          completed: !!t.completed,
+          priority: t.priority || 'medium',
+          dueDate: t.dueDate || '',
+          dueTime: t.dueTime || '',
+          assignedTo: filterAssignees(t.assignedTo),
+          subtasks: await copySubtasks(t.subtasks),
+          files: await copyFiles(t.files),
+          createdAt: new Date().toISOString(),
+          modifiedAt: null,
+          timeReminders: Array.isArray(t.timeReminders) ? [...t.timeReminders] : [],
+          timeRemindersSent: [],
+          reminderSent: false,
+          lastUrgencyLevel: null
+        });
+      }
+      return out;
+    };
+
+    // 5) Naplň kópiu obsahom (kontakt-level prílohy + projekty so všetkým)
+    newContact.files = await copyFiles(source.files);
+    newContact.tasks = await copyTasks(source.tasks);
+    newContact.markModified('files');
+    newContact.markModified('tasks');
+    await newContact.save();
+
+    // 6) Emit do CIEĽOVÉHO workspace (nie zdrojového — kópia je tam)
+    const io = req.app.get('io');
+    const plain = contactToPlainObject(newContact);
+    io.to(`workspace-${targetWorkspaceId}`).emit('contact-created', plain);
+
+    // Invaliduj cache CIEĽOVÉHO workspace — auto-invalidate wrapper čistí len
+    // req.workspaceId (zdroj), takže cieľové listy by ostali stale (30s-2min).
+    try {
+      invalidateWorkspaceData(targetWorkspaceId, 'contacts');
+      invalidateWorkspaceData(targetWorkspaceId, 'tasks');
+    } catch { /* cache invalidation best-effort */ }
+
+    const skippedFiles = copyStats.skippedError + copyStats.skippedCapped;
+    logger.info('[Copy] Kontakt skopírovaný do iného workspace', {
+      sourceContactId: String(source._id),
+      newContactId: String(newContact._id),
+      sourceWs: String(sourceWorkspaceId),
+      targetWs: String(targetWorkspaceId),
+      tasks: newContact.tasks.length,
+      filesCopied: copyStats.count,
+      filesSkipped: skippedFiles
+    });
+
+    // Audit log (cross-tenant akcia — patrí do audit trailu)
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: 'contact.copied',
+      category: 'contact',
+      targetType: 'contact',
+      targetId: String(newContact._id),
+      targetName: newContact.name,
+      details: {
+        sourceContactId: String(source._id),
+        sourceWorkspaceId: String(sourceWorkspaceId),
+        targetWorkspaceId: String(targetWorkspaceId),
+        filesCopied: copyStats.count,
+        filesSkipped: skippedFiles
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: targetWorkspaceId
+    });
+
+    return res.status(201).json({
+      message: 'Kontakt skopírovaný',
+      contact: plain,
+      targetWorkspaceId: String(targetWorkspaceId),
+      skippedFiles // klient upozorní, ak sa nejaké prílohy nepodarilo skopírovať
+    });
+  } catch (error) {
+    logger.error('[Copy] Kopírovanie kontaktu zlyhalo', { error: error.message, stack: error.stack });
+    // Cleanup — nenechať polovičný kontakt v cieli. Zmažeme aj R2 objekty
+    // (nielen ContactFile riadky), nech nezostanú orphan bloby.
+    if (createdContactId) {
+      (async () => {
+        try {
+          const rows = await ContactFile.find({ contactId: createdContactId }, { r2Key: 1 }).lean();
+          for (const r of rows) {
+            if (r.r2Key) await fileStorage.deleteFile(r.r2Key).catch(() => {});
+          }
+          await ContactFile.deleteMany({ contactId: createdContactId }).catch(() => {});
+          await Contact.deleteOne({ _id: createdContactId, workspaceId: targetWorkspaceId }).catch(() => {});
+        } catch { /* best-effort cleanup */ }
+      })();
+    }
+    return res.status(500).json({ message: 'Kopírovanie kontaktu zlyhalo' });
   }
 });
 

@@ -16,6 +16,7 @@ import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 // Help tips for CRM/Contacts page
 const crmHelpTips = [
@@ -109,6 +110,7 @@ const crmHelpTips = [
 
 function CRM() {
   const { user, logout, updateUser } = useAuth();
+  const { workspaces, currentWorkspaceId } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const [contacts, setContacts] = useState([]);
@@ -169,6 +171,30 @@ function CRM() {
   // (server projekt už automaticky nezatvára). Len global projekty (contact
   // projekty sa auto-nezatvárali nikdy).
   const [projectClosePrompt, setProjectClosePrompt] = useState(null); // { taskId, title }
+  // Kopírovanie kontaktu do iného pracovného prostredia
+  const [copyingContact, setCopyingContact] = useState(null); // { id, name } — otvorí picker cieľa
+  const [copyBusy, setCopyBusy] = useState(false);
+
+  const copyContactToWorkspace = async (targetWorkspaceId) => {
+    if (!copyingContact || copyBusy) return;
+    setCopyBusy(true);
+    try {
+      const res = await api.post(`/api/contacts/${copyingContact.id}/copy-to-workspace`, { targetWorkspaceId });
+      const wsName = workspaces.find(w => String(w.id || w._id) === String(targetWorkspaceId))?.name || 'prostredia';
+      const skipped = res?.data?.skippedFiles || 0;
+      const contactName = copyingContact.name || 'bez názvu';
+      setCopyingContact(null);
+      alert(
+        `Kontakt „${contactName}" bol skopírovaný do „${wsName}".` +
+        (skipped > 0 ? `\n\n⚠️ ${skipped} ${skipped === 1 ? 'prílohu' : 'príloh'} sa nepodarilo skopírovať — skús to prosím pre ne znova.` : '')
+      );
+      // Kópia je v INOM prostredí — v aktuálnom CRM ju nevidno, netreba refetch.
+    } catch (error) {
+      alert(error.response?.data?.message || 'Kopírovanie kontaktu zlyhalo');
+    } finally {
+      setCopyBusy(false);
+    }
+  };
 
   const confirmCloseProject = async () => {
     if (!projectClosePrompt) return;
@@ -1754,6 +1780,9 @@ function CRM() {
                         {editingContact !== contact.id && (
                           <div className="contact-actions">
                             <button onClick={() => startEditContact(contact)} className="btn-icon" title="Upraviť">✏️</button>
+                            {workspaces.length > 1 && (
+                              <button onClick={() => setCopyingContact({ id: contact.id, name: contact.name })} className="btn-icon" title="Kopírovať do iného prostredia">📋</button>
+                            )}
                             <button onClick={() => deleteContact(contact)} className="btn-icon" title="Vymazať">🗑️</button>
                           </div>
                         )}
@@ -2000,6 +2029,46 @@ function CRM() {
           onConfirm={confirmCloseProject}
           onCancel={() => setProjectClosePrompt(null)}
         />
+      )}
+
+      {/* Kopírovanie kontaktu do iného pracovného prostredia — výber cieľa */}
+      {copyingContact && (
+        <div className="modal-overlay" onClick={() => !copyBusy && setCopyingContact(null)}>
+          <div className="modal-content" style={{ maxWidth: 460 }} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Kopírovať kontakt do prostredia</h3>
+              <button className="modal-close" onClick={() => !copyBusy && setCopyingContact(null)} aria-label="Zavrieť">×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginTop: 0, color: 'var(--text-secondary, #64748b)', lineHeight: 1.5 }}>
+                Vytvorí sa nezávislá kópia kontaktu „<strong>{copyingContact.name || 'bez názvu'}</strong>" so všetkými projektmi, úlohami a prílohami. Originál ostane. Vyber cieľové prostredie:
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                {workspaces.filter(w => String(w.id || w._id) !== String(currentWorkspaceId)).map(w => {
+                  const wid = String(w.id || w._id);
+                  return (
+                    <button
+                      key={wid}
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={copyBusy}
+                      onClick={() => copyContactToWorkspace(wid)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-start', textAlign: 'left' }}
+                    >
+                      <span style={{ width: 12, height: 12, borderRadius: '50%', background: w.color || '#6366f1', flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{w.name}</span>
+                      {w.role && <span style={{ fontSize: 12, color: 'var(--text-muted, #94a3b8)' }}>{w.role === 'owner' ? 'vlastník' : w.role === 'manager' ? 'správca' : 'člen'}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {copyBusy && <p style={{ marginTop: 12, marginBottom: 0, color: 'var(--accent-color, #6366f1)' }}>Kopírujem… (pri veľa prílohách to môže chvíľu trvať)</p>}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" disabled={copyBusy} onClick={() => setCopyingContact(null)}>Zrušiť</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* File Preview Modal */}
