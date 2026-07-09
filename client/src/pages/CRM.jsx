@@ -111,6 +111,12 @@ const crmHelpTips = [
 function CRM() {
   const { user, logout, updateUser } = useAuth();
   const { workspaces, currentWorkspaceId } = useWorkspace();
+  // Ref na aktuálny workspace — socket handlery (deps [socket,isConnected])
+  // by inak zachytili stale hodnotu. Cez ref čítajú vždy najnovší workspace
+  // bez re-subscribu. Slúži na odfiltrovanie real-time udalostí z INÝCH
+  // prostredí (socket je pripojený do miestností VŠETKÝCH mojich workspace-ov).
+  const currentWorkspaceIdRef = useRef(currentWorkspaceId);
+  currentWorkspaceIdRef.current = currentWorkspaceId;
   const navigate = useNavigate();
   const location = useLocation();
   const [contacts, setContacts] = useState([]);
@@ -475,11 +481,27 @@ function CRM() {
   useEffect(() => {
     if (!socket || !isConnected) return;
 
+    // Socket je pripojený do miestností VŠETKÝCH mojich workspace-ov, takže
+    // udalosti chodia aj z prostredí, ktoré práve nezobrazujem (napr. keď
+    // skopírujem kontakt do iného prostredia, príde mi contact-created z CIEĽA).
+    // Aplikuj len tie, čo patria do aktuálne zobrazeného workspace. Ak payload
+    // workspaceId nemá, nefiltrujeme (spätná kompatibilita).
+    const belongsToCurrentWs = (obj) => {
+      const ws = obj?.workspaceId;
+      const cur = currentWorkspaceIdRef.current;
+      // Ak chýba workspaceId v payloade ALEBO ešte nepoznáme aktuálny workspace,
+      // NEfiltrujeme — nerozbime normálne real-time vytváranie v aktuálnom prostredí.
+      if (!ws || !cur) return true;
+      return String(ws) === String(cur);
+    };
+
     const handleContactCreated = (contact) => {
-      setContacts(prev => [...prev, contact]);
+      if (!belongsToCurrentWs(contact)) return; // udalosť z iného prostredia — ignoruj
+      setContacts(prev => (prev.some(c => c.id === contact.id) ? prev : [...prev, contact]));
     };
 
     const handleContactUpdated = (updatedContact) => {
+      if (!belongsToCurrentWs(updatedContact)) return;
       setContacts(prev => prev.map(c =>
         c.id === updatedContact.id ? updatedContact : c
       ));
@@ -499,8 +521,9 @@ function CRM() {
     };
 
     const handleTaskCreated = (task) => {
+      if (!belongsToCurrentWs(task)) return; // globálny projekt z iného prostredia — ignoruj
       if (task.source === 'global' || !task.source) {
-        setGlobalTasks(prev => [...prev, { ...task, source: 'global' }]);
+        setGlobalTasks(prev => (prev.some(t => t.id === task.id) ? prev : [...prev, { ...task, source: 'global' }]));
       }
     };
 
