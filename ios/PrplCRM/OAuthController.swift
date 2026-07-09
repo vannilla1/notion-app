@@ -294,23 +294,36 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
             return
         }
 
-        // Diagnostické info pre Apple review tím a pre nás samotných. Apple reviewer
-        // vidí konkrétnu príčinu (napr. error code 1000 = chýba entitlement),
-        // user vidí menej technický popis. Bez týchto detailov sa rejection 2.1(a)
-        // ťažko diagnostikuje — Apple len napíše "still got an error" bez specifik.
+        // code 1000 (.unknown): NIE JE to chýbajúci entitlement — appka je
+        // schválená v App Store a Sign in with Apple funguje (Apple ho pri
+        // review testuje). V produkcii je 1000 prevažne PRECHODNÝ hiccup alebo
+        // dismiss, ktorý iOS občas nahlási ako 1000 namiesto 1001. Preto ho
+        // NEhlásime do diagnostiky (zbytočný šum) a ukážeme len jemný retry
+        // (nie alarmujúce "kontaktujte podporu"). Ak by 1000 masovo pribúdalo,
+        // prejaví sa to ako "nedá sa prihlásiť cez Apple" — iný, hlučnejší signál.
+        if nsErr.code == ASAuthorizationError.unknown.rawValue {
+            print("[AppleSignIn] Benign unknown (1000) — likely dismiss/transient, not reporting")
+            OAuthController.showAlert(in: presentingWindow,
+                title: "Apple prihlásenie sa nepodarilo",
+                message: "Skúste to prosím znova, prípadne použite prihlásenie cez Google alebo email.")
+            return
+        }
+
+        // Ostatné kódy (1002/1003/1004/1005) sú reálne, akčné — hlásime do
+        // diagnostiky (užitočné pri App review 2.1(a)) a ukážeme user-friendly hlášku.
         let humanReadable = AppleSignInController.appleSignInErrorMessage(for: nsErr)
         print("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
         NativeErrorReporter.report(name: "iOSAppleSignInAuthError", message: "code=\(nsErr.code) domain=\(nsErr.domain): \(error.localizedDescription)", url: "https://prplcrm.eu/native/apple-signin")
 
         OAuthController.showAlert(in: presentingWindow,
             title: "Apple prihlásenie zlyhalo",
-            message: humanReadable + "\n\n[Diagnostika: code=\(nsErr.code) — \(error.localizedDescription)]")
+            message: humanReadable)
     }
 
     /// Mapping ASAuthorizationError kódov na user-friendly slovenské hlášky.
     /// Najčastejšie príčiny zlyhania Sign in with Apple:
-    ///   - 1000 (unknown): chýba entitlement `com.apple.developer.applesignin`,
-    ///     alebo App ID na Apple Developer Portal nemá Sign In with Apple capability
+    ///   - 1000 (unknown): v schválenej appke NIE entitlement — prevažne
+    ///     prechodný hiccup / dismiss (handled vyššie ako benígny, sem sa nedostane)
     ///   - 1001 (canceled): user dal cancel (handled vyššie)
     ///   - 1002 (invalidResponse): Apple servery vrátili neočakávaný response
     ///   - 1003 (notHandled): no controller dostupný
