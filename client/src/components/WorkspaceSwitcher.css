@@ -318,3 +318,30 @@
   margin-left: auto;
   flex-shrink: 0;
 }
+
+/* Reorder šípky (usporiadanie prostredí) — kompaktný stĺpec ▲▼ vpravo v riadku */
+.workspace-reorder {
+  display: inline-flex;
+  flex-direction: column;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.workspace-reorder-btn {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  line-height: 1.05;
+  font-size: 10px;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  opacity: 0.65;
+  border-radius: 3px;
+}
+.workspace-reorder-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--bg-hover, #e2e8f0);
+}
+.workspace-reorder-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}

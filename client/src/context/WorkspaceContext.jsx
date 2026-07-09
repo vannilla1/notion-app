@@ -260,6 +260,25 @@ export const WorkspaceProvider = ({ children }) => {
     return { nextWorkspaceId: next.id || next._id };
   };
 
+  // Per-user zmena poradia prostredí. Optimisticky preusporiada lokálny zoznam
+  // (okamžitá odozva UI), potom persistne na server. Pri chybe vráti pôvodné.
+  const reorderWorkspaces = async (orderedIds) => {
+    const prev = workspaces;
+    const byId = new Map(prev.map(w => [String(w.id || w._id), w]));
+    const reordered = orderedIds.map(id => byId.get(String(id))).filter(Boolean);
+    // Doplň prípadné chýbajúce (bezpečnostná poistka) na koniec
+    for (const w of prev) {
+      if (!orderedIds.some(id => String(id) === String(w.id || w._id))) reordered.push(w);
+    }
+    setWorkspaces(reordered);
+    try {
+      await workspaceApi.reorderWorkspaces(reordered.map(w => String(w.id || w._id)));
+    } catch (err) {
+      setWorkspaces(prev); // rollback
+      throw err;
+    }
+  };
+
   const refreshCurrentWorkspace = async () => {
     try {
       const current = await workspaceApi.getCurrentWorkspace();
@@ -285,6 +304,7 @@ export const WorkspaceProvider = ({ children }) => {
     regenerateInviteCode,
     leaveWorkspace,
     deleteWorkspace,
+    reorderWorkspaces,
     refreshCurrentWorkspace
   };
 

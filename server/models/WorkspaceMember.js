@@ -24,6 +24,12 @@ const workspaceMemberSchema = new mongoose.Schema({
   joinedAt: {
     type: Date,
     default: Date.now
+  },
+  // Per-user poradie prostredia v zozname (drag/šípky vo switcheri). Nižšie =
+  // vyššie. Default 0 → nové/nezoradené idú hore, tiebreak podľa joinedAt.
+  order: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true,

@@ -30,6 +30,12 @@ export const updateWorkspace = async (data) => {
   return response.data;
 };
 
+// Uloží per-user poradie prostredí. orderedIds = pole workspace id v novom poradí.
+export const reorderWorkspaces = async (orderedIds) => {
+  const response = await api.put('/api/workspaces/reorder', { orderedIds });
+  return response.data;
+};
+
 export const regenerateInviteCode = async () => {
   const response = await api.post('/api/workspaces/current/regenerate-invite');
   return response.data;

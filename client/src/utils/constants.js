@@ -66,6 +66,29 @@ export const PRIORITY_COLORS = {
   high: '#ef4444'     // red
 };
 
+// Paleta farieb na označenie pracovných prostredí (workspace). Centrálne miesto
+// pre WorkspaceSwitcher aj UserMenu (predtým dve nesúrodé kópie po 8 farieb).
+export const WORKSPACE_COLORS = [
+  '#6366F1', // indigo (default)
+  '#3B82F6', // blue
+  '#06B6D4', // cyan
+  '#0EA5E9', // sky
+  '#14B8A6', // teal
+  '#10B981', // emerald
+  '#22C55E', // green
+  '#84CC16', // lime
+  '#EAB308', // yellow
+  '#F59E0B', // amber
+  '#F97316', // orange
+  '#EF4444', // red
+  '#EC4899', // pink
+  '#F43F5E', // rose
+  '#D946EF', // fuchsia
+  '#A855F7', // purple
+  '#8B5CF6', // violet
+  '#64748B'  // slate (neutral)
+];
+
 // User roles
 export const USER_ROLE = {
   ADMIN: 'admin',

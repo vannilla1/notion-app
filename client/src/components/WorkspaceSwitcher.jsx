@@ -3,11 +3,11 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import api from '../api/api';
-import { getWorkspaceRoleLabel } from '../utils/constants';
+import { getWorkspaceRoleLabel, WORKSPACE_COLORS } from '../utils/constants';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
-  const { workspaces, currentWorkspace, switchWorkspace, updateWorkspace, createWorkspace, loading } = useWorkspace();
+  const { workspaces, currentWorkspace, switchWorkspace, updateWorkspace, createWorkspace, reorderWorkspaces, loading } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
@@ -17,6 +17,7 @@ const WorkspaceSwitcher = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [colorPickerFor, setColorPickerFor] = useState(null);
   const [unreadByWs, setUnreadByWs] = useState({});
+  const [reordering, setReordering] = useState(false); // in-flight reorder guard
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
@@ -92,10 +93,26 @@ const WorkspaceSwitcher = () => {
   };
 
   const canEdit = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
-  const colorOptions = [
-    '#6366f1', '#3B82F6', '#10B981', '#F59E0B',
-    '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'
-  ];
+  const colorOptions = WORKSPACE_COLORS;
+
+  // Reorder poradia prostredí (per-user). Current je pripnutý hore; šípkami
+  // usporadúvaš ostatné. Persistuje sa celé poradie [current, ...ostatné].
+  const moveOther = async (others, index, dir) => {
+    if (reordering) return; // nečakať na prekrývajúce sa požiadavky (out-of-order)
+    const j = index + dir;
+    if (j < 0 || j >= others.length) return;
+    const arr = [...others];
+    [arr[index], arr[j]] = [arr[j], arr[index]];
+    const orderedIds = [currentWorkspace.id, ...arr.map(w => w.id)];
+    setReordering(true);
+    try {
+      await reorderWorkspaces(orderedIds);
+    } catch {
+      // rollback rieši context; UI ostane konzistentné
+    } finally {
+      setReordering(false);
+    }
+  };
 
   const handleColorChange = async (color) => {
     try {
@@ -281,7 +298,7 @@ const WorkspaceSwitcher = () => {
                     {colorOptions.map(color => (
                       <span
                         key={color}
-                        className={`workspace-color-option ${(currentWorkspace.color || '#6366f1') === color ? 'selected' : ''}`}
+                        className={`workspace-color-option ${(currentWorkspace.color || '#6366f1').toLowerCase() === color.toLowerCase() ? 'selected' : ''}`}
                         style={{ backgroundColor: color }}
                         onClick={() => handleColorChange(color)}
                       />
@@ -292,13 +309,24 @@ const WorkspaceSwitcher = () => {
             )}
           </div>
 
-          {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws) => {
+          {workspaces.filter(ws => ws.id !== currentWorkspace.id).map((ws, index, others) => {
             const unread = unreadByWs[ws.id] || 0;
+            const isFirst = index === 0;
+            const isLast = index === others.length - 1;
             return (
-              <button
+              <div
                 key={ws.id}
                 className="workspace-dropdown-item"
                 onClick={() => handleSwitch(ws.id)}
+                onKeyDown={(e) => {
+                  // Ignoruj klávesy z detí (šípky) — inak by Enter/Space na šípke
+                  // prepol prostredie namiesto posunu.
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSwitch(ws.id); }
+                }}
+                role="button"
+                tabIndex={0}
+                style={{ cursor: 'pointer' }}
               >
                 <span
                   className="workspace-color"
@@ -315,7 +343,27 @@ const WorkspaceSwitcher = () => {
                     {unread > 99 ? '99+' : unread}
                   </span>
                 )}
-              </button>
+                {others.length > 1 && (
+                  <span className="workspace-reorder" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="workspace-reorder-btn"
+                      title="Posunúť vyššie"
+                      aria-label={`Posunúť „${ws.name}" vyššie`}
+                      disabled={isFirst || reordering}
+                      onClick={(e) => { e.stopPropagation(); moveOther(others, index, -1); }}
+                    >▲</button>
+                    <button
+                      type="button"
+                      className="workspace-reorder-btn"
+                      title="Posunúť nižšie"
+                      aria-label={`Posunúť „${ws.name}" nižšie`}
+                      disabled={isLast || reordering}
+                      onClick={(e) => { e.stopPropagation(); moveOther(others, index, 1); }}
+                    >▼</button>
+                  </span>
+                )}
+              </div>
             );
           })}
 

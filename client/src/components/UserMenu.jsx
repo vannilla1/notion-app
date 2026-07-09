@@ -68,8 +68,9 @@ const translateErrorMessage = (message) => {
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
-  const { currentWorkspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
+  const { currentWorkspace, workspaces, switchWorkspace, createWorkspace, reorderWorkspaces } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
+  const [reorderingWs, setReorderingWs] = useState(false); // in-flight reorder guard (mobil)
   const [showNotifPrefs, setShowNotifPrefs] = useState(false);
   const [showMobileWorkspaces, setShowMobileWorkspaces] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -1160,10 +1161,31 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     });
   };
 
+  // Farba PROFILU používateľa (nie workspace) — vlastná paleta.
   const colorOptions = [
     '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
     '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'
   ];
+
+  // Reorder poradia prostredí na MOBILE (switcher je na mobile skrytý).
+  // `others` = zoznam bez aktuálneho; persistuje [current, ...others].
+  const moveWorkspaceMobile = async (others, index, dir) => {
+    if (reorderingWs) return;
+    const j = index + dir;
+    if (j < 0 || j >= others.length) return;
+    const arr = [...others];
+    [arr[index], arr[j]] = [arr[j], arr[index]];
+    const curId = currentWorkspace.id || currentWorkspace._id;
+    const orderedIds = [curId, ...arr.map(w => w.id || w._id)].map(String);
+    setReorderingWs(true);
+    try {
+      await reorderWorkspaces(orderedIds);
+    } catch {
+      // rollback rieši context
+    } finally {
+      setReorderingWs(false);
+    }
+  };
 
   // ─── Delete Account flow (Apple Guideline 5.1.1(v)) ───
   const handleOpenDeleteConfirm = () => {
@@ -1288,7 +1310,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               </div>
               {showMobileWorkspaces && (
                 <div className="mobile-workspace-list">
-                  {workspaces.filter(w => (w.id || w._id) !== (currentWorkspace.id || currentWorkspace._id)).map(ws => {
+                  {workspaces.filter(w => (w.id || w._id) !== (currentWorkspace.id || currentWorkspace._id)).map((ws, index, others) => {
                     const wsId = ws.id || ws._id;
                     const unread = unreadByWs[wsId] || 0;
                     return (
@@ -1337,6 +1359,28 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         <span className="workspace-role-mobile">
                           {getWorkspaceRoleLabel(ws.role)}
                         </span>
+                        {others.length > 1 && (
+                          <span
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: 8, flexShrink: 0 }}
+                          >
+                            {[{ dir: -1, glyph: '▲', dis: index === 0 }, { dir: 1, glyph: '▼', dis: index === others.length - 1 }].map(b => (
+                              <button
+                                key={b.dir}
+                                type="button"
+                                aria-label={`Posunúť „${ws.name}" ${b.dir === -1 ? 'vyššie' : 'nižšie'}`}
+                                disabled={b.dis || reorderingWs}
+                                onClick={(e) => { e.stopPropagation(); moveWorkspaceMobile(others, index, b.dir); }}
+                                style={{
+                                  border: 'none', background: 'none', padding: '2px 8px', lineHeight: 1.1,
+                                  fontSize: 12, color: 'var(--text-secondary, #64748b)',
+                                  cursor: (b.dis || reorderingWs) ? 'default' : 'pointer',
+                                  opacity: (b.dis || reorderingWs) ? 0.25 : 0.75, borderRadius: 4
+                                }}
+                              >{b.glyph}</button>
+                            ))}
+                          </span>
+                        )}
                       </div>
                     );
                   })}

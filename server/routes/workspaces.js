@@ -24,6 +24,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const workspaces = memberships
       .filter(m => m.workspaceId) // Guard against deleted workspaces
+      // Per-user poradie: order asc, tiebreak joinedAt asc (stabilné pre order=0)
+      .sort((a, b) => (a.order || 0) - (b.order || 0) || new Date(a.joinedAt) - new Date(b.joinedAt))
       .map(m => ({
         id: m.workspaceId._id,
         name: m.workspaceId.name,
@@ -32,6 +34,7 @@ router.get('/', authenticateToken, async (req, res) => {
         color: m.workspaceId.color,
         role: m.role,
         joinedAt: m.joinedAt,
+        order: m.order || 0,
         isOwner: m.role === 'owner'
       }));
 
@@ -41,6 +44,39 @@ router.get('/', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Get workspaces error', { error: error.message, userId: req.user.id });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// Uloženie PER-USER poradia prostredí (šípky vo switcheri).
+// Body: { orderedIds: [wsId1, wsId2, ...] } — index v poli = nové `order`.
+// Aktualizuje LEN memberships žiadateľa; cudzie id ticho ignoruje (bezpečnosť).
+router.put('/reorder', authenticateToken, async (req, res) => {
+  try {
+    const { orderedIds } = req.body;
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0 || orderedIds.length > 500) {
+      return res.status(400).json({ message: 'Neplatné poradie' });
+    }
+    const memberships = await WorkspaceMember.find({ userId: req.user.id }, 'workspaceId');
+    const myWsIds = new Set(memberships.map(m => m.workspaceId.toString()));
+    // Len vlastné + DEDUP (prvý výskyt) — bez dedupu by duplicitné id nafúkli
+    // bulkWrite na tisíce no-op zápisov do toho istého dokladu (DoS amplifikácia).
+    const seen = new Set();
+    const filtered = orderedIds
+      .map(String)
+      .filter(id => myWsIds.has(id) && !seen.has(id) && seen.add(id));
+
+    const ops = filtered.map((wsId, index) => ({
+      updateOne: {
+        filter: { userId: req.user.id, workspaceId: wsId },
+        update: { $set: { order: index } }
+      }
+    }));
+    if (ops.length) await WorkspaceMember.bulkWrite(ops, { ordered: false });
+
+    res.json({ message: 'Poradie uložené' });
+  } catch (error) {
+    logger.error('Reorder workspaces error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
