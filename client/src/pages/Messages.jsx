@@ -766,7 +766,7 @@ function Messages() {
             {pendingCount > 0 && (
               <span style={{ background: 'var(--danger)', color: 'white', borderRadius: '10px', padding: '2px 8px', fontSize: '12px', fontWeight: 600 }}>{pendingCount}</span>
             )}
-            <HelpGuide tips={messagesHelpTips} />
+            <HelpGuide section="messages" title="Správy" tips={messagesHelpTips} />
           </div>
 
           {/* Tabs */}

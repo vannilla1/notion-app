@@ -6,6 +6,7 @@ import { useWorkspaceSwitched, useAppResume } from '../hooks';
 import { useNavigate } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
 import HelpGuide from '../components/HelpGuide';
+import WhatsNewModal from '../components/WhatsNewModal';
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
@@ -62,6 +63,11 @@ const dashboardHelpTips = [
     icon: '➕',
     title: 'Vytvorenie a zmena workspace-u',
     description: 'V dropdowne workspace-ov (alebo v avatar menu na mobile) je tlačidlo "+ Nové prostredie". Zadajte názov a vytvorí sa. Vlastník (owner) môže workspace premenovať a zmeniť mu farebnú bodku — kliknite na farebný krúžok vedľa názvu. Pre úpravu názvu je ikona ceruzky pri aktuálnom workspace.'
+  },
+  {
+    icon: '🎨',
+    title: 'Vlastné poradie a farby prostredí',
+    description: 'V zozname prostredí (dropdown na počítači, avatar menu na mobile) presuniete prostredia šípkami ▲▼ do vlastného poradia — poradie je osobné, ostatným členom sa nemení. Vlastník môže každému prostrediu priradiť jednu z 18 farieb kliknutím na farebný krúžok.'
   },
   {
     icon: '👥',
@@ -1432,6 +1438,9 @@ function Dashboard() {
         title="Vitajte na Dashboard"
         tips={dashboardHelpTips}
       />
+
+      {/* Jednorazové „Čo je nové" po prihlásení (hlavná stránka) */}
+      <WhatsNewModal />
     </div>
   );
 }

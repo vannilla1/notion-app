@@ -66,6 +66,11 @@ const crmHelpTips = [
     description: 'V detaile sekcia "Projekty" má tlačidlo "+ Nový projekt". Zadáte názov, termín, čas, prioritu a popis. Projekt sa pripojí k tomuto kontaktu a môžete do neho pridávať úlohy. Pre väčší prehľad globálnych projektov (cez všetky kontakty) prejdite na sekciu Projekty cez navigáciu.'
   },
   {
+    icon: '📋',
+    title: 'Kopírovanie kontaktu do iného prostredia',
+    description: 'Ak máte viac pracovných prostredí, tlačidlom 📋 pri kontakte skopírujete celý kontakt — vrátane projektov, úloh, podúloh a príloh — do iného prostredia. Originál ostáva nedotknutý a kópia je úplne nezávislá.'
+  },
+  {
     icon: '✅',
     title: 'Úlohy a podúlohy pri kontakte',
     description: 'V projekte tlačidlo "+ Pridať úlohu" otvorí formulár s názvom + ikonami 📅 (termín+čas), 📝 (poznámka), 👤 (priradenie kolegu) — každá ikona rozbalí svoju oblasť. Úloha môže mať podúlohy s rovnakými možnosťami. Krúžok vľavo označuje stav: prázdny = nedokončené, zaškrtnutý = hotové. Pri dokončení projektu sa všetky jeho úlohy automaticky dokončia.'
@@ -83,7 +88,7 @@ const crmHelpTips = [
   {
     icon: '📎',
     title: 'Súbory ku kontaktu',
-    description: 'V detaile kontaktu záložka "Súbory" → "Nahrať súbor". Podporované: obrázky (JPG, PNG, GIF), dokumenty (PDF, Word, Excel), textové (TXT, MD), archívy (ZIP). Max. 10 MB / súbor. Klik na súbor → preview alebo download podľa typu.'
+    description: 'V detaile kontaktu záložka "Súbory" → "Nahrať súbor". Podporované: obrázky (JPG, PNG, GIF), dokumenty (PDF, Word, Excel), textové (TXT, MD), archívy (ZIP). Max. 10 MB / súbor. Názov súboru upravíte pri nahrávaní aj kedykoľvek neskôr cez ✏️ pri súbore. Klik na súbor → preview alebo download podľa typu.'
   },
   {
     icon: '📨',

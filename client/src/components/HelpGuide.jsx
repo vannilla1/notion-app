@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { isIosNativeApp } from '../utils/platform';
+import { useAuth } from '../context/AuthContext';
+import { newsForSection, hasUnseenSectionNews, markSectionNewsSeen, formatNewsDate } from '../utils/changelog';
 
 const hasSeenHelp = (section) => {
   const seen = localStorage.getItem(`help_seen_${section}`);
@@ -17,6 +19,10 @@ export const resetAllHelp = () => {
 
 const HelpGuide = ({ section, tips, title, children }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const { user } = useAuth();
+  // Novinky pre túto sekciu (z centrálneho registra utils/changelog.js)
+  const sectionNews = newsForSection(section);
+  const [showNewsDot, setShowNewsDot] = useState(false);
 
   useEffect(() => {
     // Auto-show help if user hasn't seen it yet
@@ -24,6 +30,19 @@ const HelpGuide = ({ section, tips, title, children }) => {
       setIsOpen(true);
     }
   }, [section]);
+
+  // Červená bodka na ? keď má sekcia nevidené novinky
+  useEffect(() => {
+    setShowNewsDot(hasUnseenSectionNews(user?.id, section));
+  }, [user?.id, section]);
+
+  // Otvorenie otáznika = novinky sekcie videné, bodka zhasne
+  useEffect(() => {
+    if (isOpen && section) {
+      markSectionNewsSeen(user?.id, section);
+      setShowNewsDot(false);
+    }
+  }, [isOpen, section, user?.id]);
 
   const handleClose = () => {
     setIsOpen(false);
@@ -42,6 +61,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
           title="Zobraziť nápovedu"
       >
         ?
+        {showNewsDot && <span className="help-news-dot" />}
       </button>
 
       {isOpen && (
@@ -52,6 +72,27 @@ const HelpGuide = ({ section, tips, title, children }) => {
               <button className="help-guide-close" onClick={handleClose}>×</button>
             </div>
             <div className="help-guide-content">
+              {/* Novinky sekcie — kŕmené z utils/changelog.js, nad tipmi */}
+              {sectionNews.length > 0 && (
+                <div className="help-guide-news">
+                  <div className="help-guide-news-title">🆕 Novinky</div>
+                  <ul className="help-guide-tips">
+                    {sectionNews.map((n) => (
+                      <li key={n.v} className="help-guide-tip">
+                        <span className="tip-icon">{n.icon || '🆕'}</span>
+                        <div className="tip-content">
+                          <strong>
+                            {n.title}
+                            <span className="help-news-date">{formatNewsDate(n.date)}</span>
+                          </strong>
+                          <p>{n.description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Filtrujeme tipy s hideOnIos=true pri behu v iOS native shell-e
                   (Apple Guideline 3.1.1 — žiadna zmienka o pláne, cene,
                   subscription manage flow). Web verzia tipy zachová. */}
@@ -104,6 +145,39 @@ const HelpGuide = ({ section, tips, title, children }) => {
         .help-guide-btn:hover {
           transform: scale(1.1);
           box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+        }
+
+        .help-news-dot {
+          position: absolute;
+          top: -2px;
+          right: -2px;
+          width: 13px;
+          height: 13px;
+          background: #ef4444;
+          border-radius: 50%;
+          border: 2px solid #ffffff;
+        }
+
+        .help-guide-news {
+          margin-bottom: 16px;
+          padding-bottom: 8px;
+          border-bottom: 2px solid #6366f1;
+        }
+
+        .help-guide-news-title {
+          color: #a5b4fc;
+          font-size: 13px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 4px;
+        }
+
+        .help-news-date {
+          color: #9ca3af;
+          font-weight: 400;
+          font-size: 12px;
+          margin-left: 8px;
         }
 
         .help-guide-overlay {

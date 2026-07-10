@@ -92,7 +92,17 @@ const tasksHelpTips = [
   {
     icon: '📎',
     title: 'Súbory pri projekte / úlohe',
-    description: 'V detaile sekcia "Súbory" alebo ikona 📎 — nahráte JPG, PNG, GIF, PDF, Word, Excel, TXT, MD, ZIP, MP3, MP4. Max. 10 MB / súbor. Klik na súbor → preview alebo download. Mazanie ikonou × pri súbore.'
+    description: 'V detaile sekcia "Súbory" alebo ikona 📎 — nahráte JPG, PNG, GIF, PDF, Word, Excel, TXT, MD, ZIP, MP3, MP4. Max. 10 MB / súbor. Názov súboru upravíte už pri nahrávaní a kedykoľvek neskôr cez ✏️ pri súbore. Klik na súbor → preview alebo download. Mazanie ikonou × pri súbore.'
+  },
+  {
+    icon: '📤',
+    title: 'Kopírovanie / presun do iného kontaktu',
+    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľový kontakt a jeho projekt (alebo „ako nový projekt") a zvolíte Kopírovať alebo Presunúť. Kópia je nezávislá a prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami.'
+  },
+  {
+    icon: '🏁',
+    title: 'Uzavretie projektu po poslednej úlohe',
+    description: 'Keď dokončíte poslednú úlohu projektu, appka sa opýta, či chcete projekt uzavrieť. Môžete ho nechať otvorený — napríklad keď plánujete pridať ďalšie úlohy.'
   },
   {
     icon: '🔍',
