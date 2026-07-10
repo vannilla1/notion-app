@@ -11,6 +11,17 @@ const fileSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now }
 }, { _id: false });
 
+// Odkaz na originál pri kópii cez transfer (kopírovanie do iného projektu).
+// Typovaná sub-schéma (nie Mixed) — PUT task berie subtasks verbatim od
+// klienta, takže tvar poľa musí vynucovať schéma.
+const copiedFromSchema = new mongoose.Schema({
+  contactId: String,
+  contactName: String,
+  taskId: String,
+  subtaskId: String,
+  copiedAt: String
+}, { _id: false });
+
 const subtaskSchema = new mongoose.Schema({
   id: { type: String, default: () => uuidv4() },
   title: String,
@@ -30,7 +41,8 @@ const subtaskSchema = new mongoose.Schema({
   reminderSent: { type: Boolean, default: false }, // legacy
   // Time-of-day reminders — viď Task.js subtaskSchema komentár.
   timeReminders: { type: [Number], default: [] },
-  timeRemindersSent: { type: [Number], default: [] }
+  timeRemindersSent: { type: [Number], default: [] },
+  copiedFrom: { type: copiedFromSchema, default: null }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -50,7 +62,8 @@ const taskSchema = new mongoose.Schema({
   reminder: Number, // legacy
   reminderSent: { type: Boolean, default: false }, // legacy
   timeReminders: { type: [Number], default: [] },
-  timeRemindersSent: { type: [Number], default: [] }
+  timeRemindersSent: { type: [Number], default: [] },
+  copiedFrom: { type: copiedFromSchema, default: null }
 }, { _id: false });
 
 const contactSchema = new mongoose.Schema({

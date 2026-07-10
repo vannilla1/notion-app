@@ -23,6 +23,7 @@ import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
 import FilePreviewModal from '../components/FilePreviewModal';
 import FileRenameModal from '../components/FileRenameModal';
+import TaskTransferModal from '../components/TaskTransferModal';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 
@@ -722,6 +723,10 @@ function Tasks() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
   const [duplicateContactIds, setDuplicateContactIds] = useState([]);
+
+  // Transfer modal — kopírovanie/presun projektu alebo úlohy do projektu
+  // iného kontaktu. { contactId, taskId, subtaskId?, title } | null
+  const [transferItem, setTransferItem] = useState(null);
 
   // Google Calendar notification
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
@@ -2057,6 +2062,13 @@ function Tasks() {
                   </span>
                 )}
                 <div className="subtask-actions">
+                  {task.source === 'contact' && task.contactId && (
+                    <button
+                      onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id || task._id, subtaskId: subtask.id, title: subtask.title })}
+                      className="btn-icon-sm"
+                      title="Kopírovať / presunúť do iného projektu"
+                    >📤</button>
+                  )}
                   <button
                     onClick={() => triggerFileUpload(task.id || task._id, subtask.id)}
                     className="btn-icon-sm"
@@ -2086,6 +2098,18 @@ function Tasks() {
           {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
             <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
               {linkifyText(subtask.notes)}
+            </div>
+          )}
+
+          {/* Odkaz na originál (kópia cez transfer) — _t vyžaduje dedupe
+              deep-linkov, bez neho by druhý klik nefungoval */}
+          {subtask.copiedFrom && !(editingSubtask?.subtaskId === subtask.id) && (
+            <div
+              style={{ marginLeft: depth * 16 + 24, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}
+              title="Zobraziť originál"
+              onClick={() => navigate(`/tasks?highlightTask=${encodeURIComponent(subtask.copiedFrom.taskId)}${subtask.copiedFrom.subtaskId ? `&subtask=${encodeURIComponent(subtask.copiedFrom.subtaskId)}` : ''}&_t=${Date.now()}`)}
+            >
+              📌 Skopírované z: {subtask.copiedFrom.contactName || 'kontakt'}
             </div>
           )}
 
@@ -3273,6 +3297,13 @@ function Tasks() {
 
                         {editingTask !== task.id && (
                           <div className="task-actions">
+                            {task.source === 'contact' && task.contactId && (
+                              <button
+                                onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id, subtaskId: null, title: task.title })}
+                                className="btn-icon"
+                                title="Kopírovať / presunúť do iného kontaktu"
+                              >📤</button>
+                            )}
                             <button onClick={() => openDuplicateModal(task)} className="btn-icon" title="Duplikovať">📋</button>
                             <button onClick={() => startEditTask(task)} className="btn-icon" title="Upraviť">✏️</button>
                             <button onClick={() => deleteTask(task)} className="btn-icon" title="Vymazať">🗑️</button>
@@ -3284,6 +3315,18 @@ function Tasks() {
                         <div className="task-expanded">
                           {task.description && (
                             <div className="task-description">{linkifyText(task.description)}</div>
+                          )}
+
+                          {/* Odkaz na originál (kópia cez transfer) — _t vyžaduje
+                              dedupe deep-linkov, bez neho by druhý klik nefungoval */}
+                          {task.copiedFrom && (
+                            <div
+                              style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', marginBottom: 8 }}
+                              title="Zobraziť originál"
+                              onClick={() => navigate(`/tasks?highlightTask=${encodeURIComponent(task.copiedFrom.taskId)}${task.copiedFrom.subtaskId ? `&subtask=${encodeURIComponent(task.copiedFrom.subtaskId)}` : ''}&_t=${Date.now()}`)}
+                            >
+                              📌 Skopírované z: {task.copiedFrom.contactName || 'kontakt'}
+                            </div>
                           )}
 
                           {/* Task file attachments */}
@@ -3535,6 +3578,20 @@ function Tasks() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Transfer Modal — kopírovanie/presun do projektu iného kontaktu */}
+      {transferItem && (
+        <TaskTransferModal
+          item={transferItem}
+          contacts={contacts}
+          onClose={() => setTransferItem(null)}
+          onDone={() => {
+            setTransferItem(null);
+            fetchTasks();
+            fetchContacts();
+          }}
+        />
       )}
 
       {/* Hidden file inputs */}

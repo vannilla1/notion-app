@@ -197,6 +197,182 @@ const findSubtaskRecursive = (subtasks, subtaskId) => {
   return null;
 };
 
+// ==================== TRANSFER HELPERY ====================
+// (kopírovanie/presun projektu alebo úlohy do projektu iného kontaktu)
+
+// Počet uzlov stromu (uzol + všetky vnorené podúlohy) — kontrola limitov plánu
+const countTreeNodes = (node) => {
+  const walk = (subs) => (subs || []).reduce((sum, s) => sum + 1 + walk(s.subtasks), 0);
+  return 1 + walk(node?.subtasks);
+};
+
+// Všetky fileId v strome (uzol + podúlohy v ľubovoľnej hĺbke)
+const collectFileIdsFromNode = (node) => {
+  const ids = [];
+  const walk = (n) => {
+    for (const f of (n?.files || [])) if (f?.id) ids.push(f.id);
+    for (const s of (n?.subtasks || [])) walk(s);
+  };
+  walk(node);
+  return ids;
+};
+
+// Rovnaké capy ako pri copy-to-workspace — ohraničenie práce jedného requestu
+const TRANSFER_MAX_COPY_FILES = 80;
+const TRANSFER_MAX_COPY_BYTES = 200 * 1024 * 1024; // 200 MB spolu
+
+// Fyzická kópia jednej prílohy pre daný kontakt — modulová obdoba copyOneFile
+// z copy-to-workspace (tá je closure nad newContact, preto sa nedá zdieľať).
+// createdFiles zbiera vytvorené bloby pre error-path cleanup — cieľový kontakt
+// existoval už predtým, jeho pôvodné prílohy sa mazať NESMÚ.
+const copyFileToContact = async (fileMeta, sourceContactId, targetContactId, stats, createdFiles) => {
+  if (!fileMeta?.id) return null;
+  if (stats.count >= TRANSFER_MAX_COPY_FILES || stats.bytes >= TRANSFER_MAX_COPY_BYTES) {
+    stats.skippedCapped++;
+    return null;
+  }
+  let buffer = null;
+  try {
+    // Scope na zdrojový kontakt — metadáta files[] sú klientom editovateľné
+    // (PUT task berie subtasks verbatim), cudzí fileId sa nesmie dať prečítať
+    const cf = await ContactFile.findOne({ fileId: fileMeta.id, contactId: sourceContactId }, { r2Key: 1, data: 1 }).lean();
+    if (cf?.r2Key && fileStorage.isR2Available()) buffer = await fileStorage.downloadFile(cf.r2Key);
+    else if (cf?.data) buffer = Buffer.from(cf.data, 'base64');
+    else if (fileMeta.data) buffer = Buffer.from(fileMeta.data, 'base64');
+  } catch (e) {
+    logger.warn('[Transfer] Príloha — čítanie zdroja zlyhalo (preskakujem)', { fileId: fileMeta.id, error: e.message });
+    stats.skippedError++;
+    return null;
+  }
+  if (!buffer || !buffer.length) return null; // zdroj naozaj bez dát — OK
+
+  try {
+    const newFileId = uuidv4();
+    if (fileStorage.isR2Available()) {
+      const newKey = fileStorage.contactFileKey(newFileId);
+      await fileStorage.uploadFile(newKey, buffer, fileMeta.mimetype || 'application/octet-stream');
+      // Zaznamenaj HNEĎ po upload-e — ak by ContactFile.create padol, error
+      // cleanup inak nevie o R2 objekte a blob by ostal orphan navždy.
+      createdFiles.push({ fileId: newFileId, r2Key: newKey });
+      await ContactFile.create({ contactId: targetContactId, fileId: newFileId, r2Key: newKey, data: null });
+    } else {
+      await ContactFile.create({ contactId: targetContactId, fileId: newFileId, data: buffer.toString('base64') });
+      createdFiles.push({ fileId: newFileId, r2Key: null });
+    }
+    stats.count++;
+    stats.bytes += buffer.length;
+    return {
+      id: newFileId,
+      originalName: fileMeta.originalName,
+      mimetype: fileMeta.mimetype,
+      size: fileMeta.size,
+      uploadedAt: fileMeta.uploadedAt || new Date()
+    };
+  } catch (e) {
+    logger.warn('[Transfer] Príloha — zápis kópie zlyhal (preskakujem)', { fileId: fileMeta.id, error: e.message });
+    stats.skippedError++;
+    return null;
+  }
+};
+
+// Hlboká kópia uzla (projekt alebo úloha/podúloha) s NOVÝMI UUID na každej
+// úrovni + fyzickou kópiou príloh. Nové UUID sú nutné: Google sync mapy sú
+// per-user keyované podľa UUID (zdieľané ID by rozbilo sync) a zdieľaný
+// fileId by pri zmazaní jednej strany zabil blob aj druhej. asTask určuje
+// tvar top uzla — úroveň sa pri prenose prispôsobí (description ↔ notes).
+const deepCopyNodeForTransfer = async (node, { asTask, sourceContactId, targetContactId, stats, createdFiles }) => {
+  const copyFilesList = async (files) => {
+    const out = [];
+    for (const f of (files || [])) {
+      const nf = await copyFileToContact(f, sourceContactId, targetContactId, stats, createdFiles);
+      if (nf) out.push(nf);
+    }
+    return out;
+  };
+  const copySubtree = async (subs) => {
+    const out = [];
+    for (const s of (subs || [])) {
+      out.push({
+        id: uuidv4(),
+        title: s.title,
+        completed: !!s.completed,
+        dueDate: s.dueDate || '',
+        dueTime: s.dueTime || '',
+        notes: s.notes || '',
+        priority: s.priority ?? null,
+        assignedTo: Array.isArray(s.assignedTo) ? [...s.assignedTo] : [],
+        subtasks: await copySubtree(s.subtasks),
+        files: await copyFilesList(s.files),
+        createdAt: new Date().toISOString(),
+        modifiedAt: null,
+        timeReminders: Array.isArray(s.timeReminders) ? [...s.timeReminders] : [],
+        timeRemindersSent: [],
+        reminderSent: false,
+        lastUrgencyLevel: null
+      });
+    }
+    return out;
+  };
+
+  const base = {
+    id: uuidv4(),
+    title: node.title,
+    completed: !!node.completed,
+    dueDate: node.dueDate || '',
+    dueTime: node.dueTime || '',
+    assignedTo: Array.isArray(node.assignedTo) ? [...node.assignedTo] : [],
+    subtasks: await copySubtree(node.subtasks),
+    files: await copyFilesList(node.files),
+    createdAt: new Date().toISOString(),
+    modifiedAt: null,
+    timeReminders: Array.isArray(node.timeReminders) ? [...node.timeReminders] : [],
+    timeRemindersSent: [],
+    reminderSent: false,
+    lastUrgencyLevel: null
+  };
+  if (asTask) {
+    base.description = node.description || node.notes || '';
+    base.priority = node.priority || 'medium';
+  } else {
+    base.notes = node.notes || node.description || '';
+    base.priority = node.priority ?? null;
+  }
+  return base;
+};
+
+// Premapovanie úrovne pri PRESUNE — UUID, prílohy aj stav pripomienok sa
+// ZACHOVÁVAJÚ (Google sync mapy, iCal UID aj deep-linky z notifikácií ostávajú
+// platné a reset príznakov by znovu vystrelil už poslané pripomienky).
+// Mení sa len tvar top uzla podľa cieľovej úrovne (description ↔ notes).
+const remapNodeLevelForMove = (node, { asTask }) => {
+  const out = {
+    id: node.id,
+    title: node.title,
+    completed: !!node.completed,
+    dueDate: node.dueDate || '',
+    dueTime: node.dueTime || '',
+    assignedTo: Array.isArray(node.assignedTo) ? [...node.assignedTo] : [],
+    subtasks: Array.isArray(node.subtasks) ? node.subtasks : [],
+    files: Array.isArray(node.files) ? node.files : [],
+    createdAt: node.createdAt || new Date().toISOString(),
+    modifiedAt: node.modifiedAt || null,
+    lastUrgencyLevel: node.lastUrgencyLevel ?? null,
+    reminder: node.reminder,
+    reminderSent: !!node.reminderSent,
+    timeReminders: Array.isArray(node.timeReminders) ? [...node.timeReminders] : [],
+    timeRemindersSent: Array.isArray(node.timeRemindersSent) ? [...node.timeRemindersSent] : [],
+    copiedFrom: node.copiedFrom || null
+  };
+  if (asTask) {
+    out.description = node.description || node.notes || '';
+    out.priority = node.priority || 'medium';
+  } else {
+    out.notes = node.notes || node.description || '';
+    out.priority = node.priority ?? null;
+  }
+  return out;
+};
+
 // Get all contacts (for current workspace) - sorted alphabetically by name
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
@@ -1188,6 +1364,307 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+// ==================== TRANSFER: KOPÍROVANIE / PRESUN DO INÉHO PROJEKTU ====================
+//
+// Prenesie projekt (:taskId) alebo úlohu/podúlohu (body.subtaskId, ľubovoľná
+// hĺbka) do projektového stromu iného kontaktu V RÁMCI TOHO ISTÉHO workspace.
+//
+// Body: { subtaskId?, targetContactId, targetTaskId?, mode: 'copy'|'move' }
+//  - targetTaskId zadané  → vloží sa DO projektu (ako úloha najvyššej úrovne)
+//  - targetTaskId chýba   → vloží sa ako NOVÝ PROJEKT cieľového kontaktu
+//  - úroveň sa automaticky prispôsobí (projekt↔úloha, description↔notes)
+//
+// copy → nové UUID + fyzická kópia príloh + reset reminder príznakov
+//        + copiedFrom odkaz na originál (viď deepCopyNodeForTransfer)
+// move → UUID/prílohy/reminder stav zachované; ContactFile.contactId sa
+//        prepne na cieľ (inak by zmazanie zdrojového kontaktu zmazalo bloby
+//        presunutej úlohy — delete kaskáduje podľa contactId)
+router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
+  const createdFiles = []; // bloby vytvorené TÝMTO requestom — pre error cleanup
+  try {
+    const { subtaskId, targetContactId, targetTaskId, mode } = req.body || {};
+
+    if (mode !== 'copy' && mode !== 'move') {
+      return res.status(400).json({ message: 'Neplatný režim (copy/move)' });
+    }
+    if (!targetContactId || !mongoose.Types.ObjectId.isValid(targetContactId)) {
+      return res.status(400).json({ message: 'Chýba alebo neplatný cieľový kontakt' });
+    }
+
+    const sourceContact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
+    if (!sourceContact) return res.status(404).json({ message: 'Kontakt nenájdený' });
+
+    const sameContact = String(targetContactId) === String(sourceContact._id);
+    const targetContact = sameContact
+      ? sourceContact
+      : await Contact.findOne({ _id: targetContactId, workspaceId: req.workspaceId });
+    if (!targetContact) return res.status(404).json({ message: 'Cieľový kontakt nenájdený' });
+
+    // Zdrojový uzol
+    const taskIndex = sourceContact.tasks.findIndex(t =>
+      t.id === req.params.taskId || (t._id && t._id.toString() === req.params.taskId)
+    );
+    if (taskIndex === -1) return res.status(404).json({ message: 'Projekt nenájdený' });
+    const sourceTask = sourceContact.tasks[taskIndex];
+
+    let sourceFound = null; // { subtask, parent, index } pri podúlohe
+    if (subtaskId) {
+      sourceFound = findSubtaskRecursive(sourceTask.subtasks, subtaskId);
+      if (!sourceFound) return res.status(404).json({ message: 'Úloha nenájdená' });
+    }
+    const sourceNodeDoc = subtaskId ? sourceFound.subtask : sourceTask;
+    // Plain deep-copy — Mongoose subdoc sa nesmie spreadovať priamo (viď PUT task)
+    const sourceNode = JSON.parse(JSON.stringify(
+      typeof sourceNodeDoc.toObject === 'function' ? sourceNodeDoc.toObject() : sourceNodeDoc
+    ));
+
+    // Cieľový projekt (ak nejde o "nový projekt")
+    let targetTask = null;
+    if (targetTaskId) {
+      const ti = targetContact.tasks.findIndex(t =>
+        t.id === targetTaskId || (t._id && t._id.toString() === targetTaskId)
+      );
+      if (ti === -1) return res.status(404).json({ message: 'Cieľový projekt nenájdený' });
+      targetTask = targetContact.tasks[ti];
+    }
+
+    // Nezmyselné kombinácie
+    if (!subtaskId && targetTask && sameContact && targetTask.id === sourceTask.id) {
+      return res.status(400).json({ message: 'Projekt nemožno vložiť do seba samého' });
+    }
+    if (mode === 'move' && !subtaskId && !targetTask && sameContact) {
+      return res.status(400).json({ message: 'Projekt už patrí tomuto kontaktu' });
+    }
+
+    // Limity plánu na CIEĽOVEJ strane (zrkadlí bežné vytváranie)
+    const user = await User.findById(req.user.id);
+    const plan = user?.subscription?.plan || 'free';
+    if (!targetTask) {
+      const taskLimits = { free: 5, team: 25, pro: Infinity };
+      const maxTasks = taskLimits[plan] || 5;
+      if (maxTasks !== Infinity && (targetContact.tasks?.length || 0) >= maxTasks) {
+        return res.status(403).json({
+          message: isIosNativeApp(req)
+            ? `Cieľový kontakt dosiahol limit ${maxTasks} projektov.`
+            : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`
+        });
+      }
+      // Aj KÓPIA ako nový projekt musí rešpektovať limit podúloh — inak by sa
+      // opakovaným kopírovaním dal množiť obsah nad strop, ktorý bežné
+      // vytváranie vynucuje. Presun obsah nemení, preto sa nekontroluje.
+      const subtaskLimits = { free: 10, team: 25, pro: Infinity };
+      const maxSubtasks = subtaskLimits[plan] || 10;
+      if (mode === 'copy' && maxSubtasks !== Infinity && countTreeNodes(sourceNode) - 1 > maxSubtasks) {
+        return res.status(403).json({
+          message: isIosNativeApp(req)
+            ? `Prenášaný projekt prekračuje limit ${maxSubtasks} úloh.`
+            : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`
+        });
+      }
+    } else {
+      // Presun v rámci TOHO ISTÉHO projektu nemení celkový počet podúloh
+      const sameProject = mode === 'move' && subtaskId && sameContact && targetTask.id === sourceTask.id;
+      if (!sameProject) {
+        const subtaskLimits = { free: 10, team: 25, pro: Infinity };
+        const maxSubtasks = subtaskLimits[plan] || 10;
+        if (maxSubtasks !== Infinity) {
+          const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
+          if (countSubtasks(targetTask.subtasks) + countTreeNodes(sourceNode) > maxSubtasks) {
+            return res.status(403).json({
+              message: isIosNativeApp(req)
+                ? `Cieľový projekt by prekročil limit ${maxSubtasks} úloh.`
+                : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`
+            });
+          }
+        }
+      }
+    }
+
+    const now = new Date().toISOString();
+    const copyStats = { skippedError: 0, skippedCapped: 0, bytes: 0, count: 0 };
+    let insertedNode;
+
+    if (mode === 'copy') {
+      insertedNode = await deepCopyNodeForTransfer(sourceNode, {
+        asTask: !targetTask,
+        sourceContactId: sourceContact._id,
+        targetContactId: targetContact._id,
+        stats: copyStats,
+        createdFiles
+      });
+      insertedNode.modifiedAt = now; // "new" filter zvýrazní čerstvú kópiu
+      insertedNode.copiedFrom = {
+        contactId: String(sourceContact._id),
+        contactName: sourceContact.name || '',
+        taskId: sourceTask.id,
+        subtaskId: subtaskId || null,
+        copiedAt: now
+      };
+    } else {
+      insertedNode = remapNodeLevelForMove(sourceNode, { asTask: !targetTask });
+      insertedNode.modifiedAt = now;
+    }
+
+    // Poradie zápisov: najprv vlož do cieľa, až potom (pri move) odstráň zo
+    // zdroja — pri páde medzi zápismi radšej dočasný duplikát než stratený strom.
+    if (targetTask) {
+      if (!targetTask.subtasks) targetTask.subtasks = [];
+      targetTask.subtasks.push(insertedNode);
+      targetTask.modifiedAt = now;
+    } else {
+      targetContact.tasks.push(insertedNode);
+    }
+
+    if (mode === 'move') {
+      if (subtaskId) {
+        sourceFound.parent.splice(sourceFound.index, 1);
+        sourceTask.modifiedAt = now;
+      } else {
+        sourceContact.tasks.splice(taskIndex, 1);
+      }
+    }
+
+    targetContact.markModified('tasks');
+    if (sameContact) {
+      await sourceContact.save(); // ten istý dokument — jeden zápis
+    } else {
+      await targetContact.save();
+      if (mode === 'move') {
+        sourceContact.markModified('tasks');
+        try {
+          await sourceContact.save();
+        } catch (e) {
+          // Kompenzácia — odstráň vložený uzol z cieľa, nech nevznikne duplikát
+          try {
+            const arr = targetTask ? targetTask.subtasks : targetContact.tasks;
+            const i = arr.findIndex(n => n.id === insertedNode.id);
+            if (i !== -1) arr.splice(i, 1);
+            targetContact.markModified('tasks');
+            await targetContact.save();
+          } catch { /* best-effort */ }
+          throw e;
+        }
+      }
+    }
+
+    // Pri presune medzi kontaktmi prepni vlastníka blobov príloh — download
+    // ide podľa fileId (funguje aj bez toho), ale delete kontaktu kaskáduje
+    // podľa contactId a zmazal by bloby presunutej úlohy.
+    if (mode === 'move' && !sameContact) {
+      const fileIds = collectFileIdsFromNode(sourceNode);
+      if (fileIds.length > 0) {
+        // Scope na zdrojový kontakt — bez neho by klientom editovateľné
+        // metadáta files[] dovolili prepnúť (a neskôr kaskádou zmazať)
+        // cudzie bloby len na základe uhádnutého fileId.
+        const repoint = () => ContactFile.updateMany(
+          { fileId: { $in: fileIds }, contactId: sourceContact._id },
+          { $set: { contactId: targetContact._id } }
+        );
+        try {
+          await repoint();
+        } catch (err) {
+          // Jeden retry; potom error (nie warn) — bez prepnutia by zmazanie
+          // zdrojového kontaktu zničilo bloby presunutej úlohy.
+          try {
+            await repoint();
+          } catch (err2) {
+            logger.error('[Transfer] Prepnutie príloh na cieľový kontakt zlyhalo (aj po retry)', {
+              error: err2.message,
+              fileIds,
+              sourceContactId: String(sourceContact._id),
+              targetContactId: String(targetContact._id)
+            });
+          }
+        }
+      }
+    }
+
+    const io = req.app.get('io');
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(targetContact));
+    if (mode === 'move' && !sameContact) {
+      io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(sourceContact));
+    }
+
+    // Google sync: pri PRESUNE sa mení kontext (meno kontaktu / názov
+    // nadradeného projektu v titulku) — obnov event presunutého uzla.
+    // Kópie sa nesyncujú (konzistentné s copy-to-workspace) — zachytí ich
+    // najbližší bulk sync alebo prvá editácia.
+    if (mode === 'move') {
+      autoSyncContactToGoogle(targetTask ? {
+        id: insertedNode.id,
+        title: `${insertedNode.title} (${targetTask.title})`,
+        description: insertedNode.notes || '',
+        dueDate: insertedNode.dueDate,
+        dueTime: insertedNode.dueTime,
+        completed: insertedNode.completed,
+        assignedTo: targetTask.assignedTo || [],
+        workspaceId: req.workspaceId?.toString(),
+        contact: targetContact.name
+      } : {
+        id: insertedNode.id,
+        title: insertedNode.title,
+        description: insertedNode.description || '',
+        dueDate: insertedNode.dueDate,
+        dueTime: insertedNode.dueTime,
+        completed: insertedNode.completed,
+        assignedTo: insertedNode.assignedTo || [],
+        workspaceId: req.workspaceId?.toString(),
+        contact: targetContact.name
+      }, 'update');
+    }
+
+    const skippedFiles = copyStats.skippedError + copyStats.skippedCapped;
+    auditService.logAction({
+      userId: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      action: mode === 'copy' ? 'task.copied' : 'task.moved',
+      category: 'task',
+      targetType: 'task',
+      targetId: insertedNode.id,
+      targetName: insertedNode.title,
+      details: {
+        mode,
+        level: subtaskId ? 'subtask' : 'project',
+        sourceContactId: String(sourceContact._id),
+        targetContactId: String(targetContact._id),
+        sourceTaskId: sourceTask.id,
+        sourceSubtaskId: subtaskId || null,
+        targetTaskId: targetTask ? targetTask.id : null,
+        filesCopied: copyStats.count,
+        filesSkipped: skippedFiles
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: req.workspaceId
+    });
+
+    return res.status(mode === 'copy' ? 201 : 200).json({
+      message: mode === 'copy' ? 'Skopírované' : 'Presunuté',
+      mode,
+      newId: insertedNode.id,
+      targetContactId: String(targetContact._id),
+      targetTaskId: targetTask ? targetTask.id : null,
+      skippedFiles
+    });
+  } catch (error) {
+    logger.error('[Transfer] Kopírovanie/presun položky zlyhalo', { error: error.message, stack: error.stack });
+    // Cleanup — zmaž LEN bloby vytvorené týmto requestom (nie existujúce
+    // prílohy cieľového kontaktu!)
+    if (createdFiles.length > 0) {
+      (async () => {
+        try {
+          for (const f of createdFiles) {
+            if (f.r2Key) await fileStorage.deleteFile(f.r2Key).catch(() => {});
+          }
+          await ContactFile.deleteMany({ fileId: { $in: createdFiles.map(f => f.fileId) } }).catch(() => {});
+        } catch { /* best-effort cleanup */ }
+      })();
+    }
+    return res.status(500).json({ message: 'Operácia zlyhala' });
   }
 });
 
