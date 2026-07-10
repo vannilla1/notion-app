@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import api from '../api/api';
 
 /**
@@ -15,17 +15,20 @@ function TaskTransferModal({ item, contacts, onClose, onDone }) {
   const [targetContactId, setTargetContactId] = useState(null);
   const [targetTaskId, setTargetTaskId] = useState(null); // 'NEW' = nový projekt
   const [busy, setBusy] = useState(false);
+  // Synchrónny guard proti dvojkliku — busy state sa prejaví až po re-renderi
+  const submitRef = useRef(false);
 
   const targetContact = contacts.find(c => (c.id || c._id) === targetContactId) || null;
 
   const submit = async (mode) => {
-    if (!targetContactId || !targetTaskId || busy) return;
+    if (!targetContactId || !targetTaskId || busy || submitRef.current) return;
     const isNew = targetTaskId === 'NEW';
     // No-op: presun projektu "ako nový projekt" toho istého kontaktu
     if (mode === 'move' && isNew && !item.subtaskId && targetContactId === item.contactId) {
       alert('Projekt už patrí tomuto kontaktu.');
       return;
     }
+    submitRef.current = true;
     setBusy(true);
     try {
       const res = await api.post(`/api/contacts/${item.contactId}/tasks/${item.taskId}/transfer`, {
@@ -41,6 +44,8 @@ function TaskTransferModal({ item, contacts, onClose, onDone }) {
     } catch (error) {
       alert(error.response?.data?.message || 'Operácia zlyhala');
       setBusy(false);
+    } finally {
+      submitRef.current = false;
     }
   };
 

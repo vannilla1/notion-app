@@ -8,6 +8,7 @@ const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
+const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
@@ -105,6 +106,25 @@ const autoDeleteTaskTreeFromGoogle = (task) => {
     autoDeleteContactFromGoogle(id).catch(() => {});
   }
 };
+
+// ==================== IDEMPOTENCIA MUTÁCIÍ ====================
+// Dvojklik / retry po timeoute nesmie vytvoriť duplikát. React "busy" state
+// na klientovi sa aktualizuje až po re-renderi (rýchly druhý klik prejde) a
+// Cloudflare vie po ~100s prerušiť dlhé kopírovanie príloh na strane
+// klienta, zatiaľ čo server request v tichosti dokončí — retry potom vyrobí
+// druhú kópiu. In-memory mapa stačí (API beží ako single instance). Kľúč sa
+// pri reálnej chybe uvoľní, aby legitímny retry prešiel.
+const recentMutationKeys = new Map(); // key -> expiresAt (ms)
+const claimMutationKey = (key, ttlMs) => {
+  const now = Date.now();
+  for (const [k, exp] of recentMutationKeys) {
+    if (exp <= now) recentMutationKeys.delete(k);
+  }
+  if (recentMutationKeys.has(key)) return false;
+  recentMutationKeys.set(key, now + ttlMs);
+  return true;
+};
+const releaseMutationKey = (key) => recentMutationKeys.delete(key);
 
 const router = express.Router();
 
@@ -571,6 +591,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 // ─────────────────────────────────────────────────────────────────────────
 router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async (req, res) => {
   let createdContactId = null;
+  let idemKey = null;
   const targetWorkspaceId = req.body?.targetWorkspaceId;
   try {
     const sourceWorkspaceId = req.workspaceId;
@@ -626,6 +647,22 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
     const targetMembers = await WorkspaceMember.find({ workspaceId: targetWorkspaceId }, 'userId').lean();
     const targetUserIds = new Set(targetMembers.map(m => String(m.userId)));
     const filterAssignees = (arr) => (Array.isArray(arr) ? arr.filter(uid => targetUserIds.has(String(uid))) : []);
+
+    // Idempotencia — až PO validáciách (skoršie returny nesmú spáliť kľúč).
+    // Explicitný kľúč posiela klient (jeden na otvorenie modálu + cieľ);
+    // fallback okno 15 s chráni aj starších (cache-ovaných) klientov.
+    const clientKey = typeof req.body?.idempotencyKey === 'string' && req.body.idempotencyKey.trim()
+      ? req.body.idempotencyKey.trim().slice(0, 100)
+      : null;
+    idemKey = clientKey
+      ? `copyws:k:${clientKey}`
+      : `copyws:f:${req.user.id}:${req.params.id}:${targetWorkspaceId}`;
+    if (!claimMutationKey(idemKey, clientKey ? 5 * 60 * 1000 : 15 * 1000)) {
+      idemKey = null; // kľúč drží prvý request — v catch ho neuvoľňovať
+      return res.status(409).json({
+        message: 'Kopírovanie tohto kontaktu už prebieha alebo práve prebehlo. Skontroluj cieľové prostredie skôr, než to skúsiš znova.'
+      });
+    }
 
     // 4) Vytvor kontakt v cieli (najprv prázdny — potrebujeme _id pre ContactFile)
     const newContact = new Contact({
@@ -760,9 +797,23 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
       return out;
     };
 
+    // Projekty kontaktu žijú na DVOCH miestach: embedded v contact.tasks a
+    // ako samostatné Task dokumenty priradené cez contactIds (projekt
+    // vytvorený na stránke Úlohy a až potom priradený kontaktu). CRM oboje
+    // zobrazuje ako projekty kontaktu — kópia musí obsahovať oboje, inak sa
+    // kontakt "prenesie bez projektov". V cieli sa stanú embedded projektmi
+    // kópie (referencie medzi prostrediami neexistujú).
+    const linkedGlobalTasks = await Task.find({
+      workspaceId: sourceWorkspaceId,
+      contactIds: String(source._id)
+    }).lean();
+
     // 5) Naplň kópiu obsahom (kontakt-level prílohy + projekty so všetkým)
     newContact.files = await copyFiles(source.files);
-    newContact.tasks = await copyTasks(source.tasks);
+    newContact.tasks = [
+      ...(await copyTasks(source.tasks)),
+      ...(await copyTasks(linkedGlobalTasks))
+    ];
     newContact.markModified('files');
     newContact.markModified('tasks');
     await newContact.save();
@@ -820,6 +871,8 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
     });
   } catch (error) {
     logger.error('[Copy] Kopírovanie kontaktu zlyhalo', { error: error.message, stack: error.stack });
+    // Po reálnej chybe uvoľni idempotency kľúč — retry musí prejsť
+    if (idemKey) releaseMutationKey(idemKey);
     // Cleanup — nenechať polovičný kontakt v cieli. Zmažeme aj R2 objekty
     // (nielen ContactFile riadky), nech nezostanú orphan bloby.
     if (createdContactId) {
@@ -1384,6 +1437,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 //        presunutej úlohy — delete kaskáduje podľa contactId)
 router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   const createdFiles = []; // bloby vytvorené TÝMTO requestom — pre error cleanup
+  let idemKey = null;
   try {
     const { subtaskId, targetContactId, targetTaskId, mode } = req.body || {};
 
@@ -1481,6 +1535,16 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
           }
         }
       }
+    }
+
+    // Idempotencia — dvojklik nesmie vytvoriť duplikát (klientsky busy state
+    // je asynchrónny). Krátke okno; kľúč sa pri chybe uvoľní.
+    idemKey = `transfer:${req.user.id}:${req.params.contactId}:${req.params.taskId}:${subtaskId || ''}:${targetContactId}:${targetTaskId || ''}:${mode}`;
+    if (!claimMutationKey(idemKey, 15 * 1000)) {
+      idemKey = null; // kľúč drží prvý request — v catch ho neuvoľňovať
+      return res.status(409).json({
+        message: 'Rovnaká operácia práve prebehla. Ak chceš ďalšiu kópiu, počkaj pár sekúnd a skús znova.'
+      });
     }
 
     const now = new Date().toISOString();
@@ -1652,6 +1716,8 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     });
   } catch (error) {
     logger.error('[Transfer] Kopírovanie/presun položky zlyhalo', { error: error.message, stack: error.stack });
+    // Po reálnej chybe uvoľni idempotency kľúč — retry musí prejsť
+    if (idemKey) releaseMutationKey(idemKey);
     // Cleanup — zmaž LEN bloby vytvorené týmto requestom (nie existujúce
     // prílohy cieľového kontaktu!)
     if (createdFiles.length > 0) {

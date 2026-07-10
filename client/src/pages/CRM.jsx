@@ -178,14 +178,23 @@ function CRM() {
   // projekty sa auto-nezatvárali nikdy).
   const [projectClosePrompt, setProjectClosePrompt] = useState(null); // { taskId, title }
   // Kopírovanie kontaktu do iného pracovného prostredia
-  const [copyingContact, setCopyingContact] = useState(null); // { id, name } — otvorí picker cieľa
+  const [copyingContact, setCopyingContact] = useState(null); // { id, name, key } — otvorí picker cieľa
   const [copyBusy, setCopyBusy] = useState(false);
+  // Synchrónny guard proti dvojkliku — copyBusy (React state) sa prejaví až
+  // po re-renderi, takže rýchly druhý klik by prešiel a vytvoril duplikát.
+  const copyReqRef = useRef(false);
 
   const copyContactToWorkspace = async (targetWorkspaceId) => {
-    if (!copyingContact || copyBusy) return;
+    if (!copyingContact || copyBusy || copyReqRef.current) return;
+    copyReqRef.current = true;
     setCopyBusy(true);
     try {
-      const res = await api.post(`/api/contacts/${copyingContact.id}/copy-to-workspace`, { targetWorkspaceId });
+      const res = await api.post(`/api/contacts/${copyingContact.id}/copy-to-workspace`, {
+        targetWorkspaceId,
+        // Server cez kľúč odmietne duplicitný request (dvojklik / retry po
+        // timeoute) — jeden kľúč na otvorenie modálu + cieľové prostredie.
+        idempotencyKey: copyingContact.key ? `${copyingContact.key}:${targetWorkspaceId}` : undefined
+      });
       const wsName = workspaces.find(w => String(w.id || w._id) === String(targetWorkspaceId))?.name || 'prostredia';
       const skipped = res?.data?.skippedFiles || 0;
       const contactName = copyingContact.name || 'bez názvu';
@@ -198,6 +207,7 @@ function CRM() {
     } catch (error) {
       alert(error.response?.data?.message || 'Kopírovanie kontaktu zlyhalo');
     } finally {
+      copyReqRef.current = false;
       setCopyBusy(false);
     }
   };
@@ -1813,7 +1823,7 @@ function CRM() {
                           <div className="contact-actions">
                             <button onClick={() => startEditContact(contact)} className="btn-icon" title="Upraviť">✏️</button>
                             {workspaces.length > 1 && (
-                              <button onClick={() => setCopyingContact({ id: contact.id, name: contact.name })} className="btn-icon" title="Kopírovať do iného prostredia">📋</button>
+                              <button onClick={() => setCopyingContact({ id: contact.id, name: contact.name, key: (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`) })} className="btn-icon" title="Kopírovať do iného prostredia">📋</button>
                             )}
                             <button onClick={() => deleteContact(contact)} className="btn-icon" title="Vymazať">🗑️</button>
                           </div>
