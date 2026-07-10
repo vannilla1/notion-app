@@ -437,6 +437,10 @@ struct WebView: UIViewRepresentable {
         if let deepLink = pushManager.pendingDeepLink, let u = buildDeepLinkURL(deepLink) {
             debugLog("[Push] makeUIView: cold-start deep link = \(u.absoluteString)")
             initialURL = u
+            // Zaznač link ako obslúžený — updateUIView beží hneď po makeUIView
+            // a pendingDeepLink sa čistí až async, takže by tú istú URL inak
+            // načítal DRUHÝKRÁT (s novým _t = nový history záznam).
+            context.coordinator.lastDeepLinkHandled = (deepLink, Date())
             // Clear now so updateUIView doesn't try to reload it again
             let pm = pushManager
             DispatchQueue.main.async { pm.pendingDeepLink = nil }
@@ -476,11 +480,28 @@ struct WebView: UIViewRepresentable {
         // deterministic. React (App.jsx) reads ws= + highlight params on mount
         // and routes the user correctly.
         if let deepLinkUrl = buildDeepLinkURL(deepLink) {
+            // DEDUPE: dispatchDeepLink doručuje TEN ISTÝ deep link dvom cestám —
+            // NotificationCenter observeru (primárna) a cez pendingDeepLink sem
+            // (fallback pre edge case, keď observer ešte nie je nainštalovaný).
+            // Bez tejto kontroly každý tap na notifikáciu navigoval DVAKRÁT:
+            // druhá navigácia išla cez webView.load() s novým _t → nový záznam
+            // v back-forward liste aj so snapshotom stránky → postupný rast
+            // pamäte WebContent procesu → memory jetsam (diagnostika release 70,
+            // /tasks aj /app deep linky). Preto build-71 fix (location.replace
+            // v NC ceste) jetsam iba spomalil, nie zastavil.
+            if let handled = context.coordinator.lastDeepLinkHandled,
+               handled.raw == deepLink,
+               Date().timeIntervalSince(handled.at) < 5 {
+                debugLog("[Push] updateUIView: deep link už obslúžený cez NC cestu — skip")
+                return
+            }
+            context.coordinator.lastDeepLinkHandled = (deepLink, Date())
             debugLog("[Push] Loading deep link URL directly = \(deepLinkUrl.absoluteString) (pageLoaded=\(context.coordinator.hasFinishedInitialLoad))")
             // Oznámime foreground handleru: tento cyklus sme obslúžili deep linkom,
             // reload treba preskočiť, inak by zahodil práve navigovanú URL.
             context.coordinator.didHandleDeepLinkThisCycle = true
-            webView.load(URLRequest(url: deepLinkUrl))
+            // Rovnaká navigácia ako NC cesta — history sa NAHRADÍ, nerastie.
+            context.coordinator.navigateReplacingHistory(deepLinkUrl.absoluteString, fallback: deepLinkUrl)
         }
     }
 
@@ -515,6 +536,10 @@ struct WebView: UIViewRepresentable {
         // Foreground potom vynechá fallback `webView.reload()`, ktorý predtým
         // clobberol deep-link navigáciu a hodil užívateľa späť na /app dashboard.
         fileprivate var didHandleDeepLinkThisCycle = false
+        // Posledný obslúžený deep link (RAW string z dispatchDeepLink) — dedupe
+        // medzi NotificationCenter cestou a updateUIView fallbackom, ktoré
+        // dostávajú ten istý link dvakrát (viď PrplCRMApp.dispatchDeepLink).
+        fileprivate var lastDeepLinkHandled: (raw: String, at: Date)?
         var pendingDeepLinkJS: String?
         // Track last successfully loaded URL so we can restore it if the
         // WebContent process terminates (iOS jetsam kills it under memory
@@ -585,29 +610,35 @@ struct WebView: UIViewRepresentable {
             // pred týmto observer-om) videl, že už sme handle-li deep link a
             // skipol by inak destructive reload na pôvodnú URL.
             didHandleDeepLinkThisCycle = true
+            // Zaznač RAW link — updateUIView dostane ten istý cez pendingDeepLink
+            // a bez tohto by navigoval druhýkrát (history growth → jetsam).
+            lastDeepLinkHandled = (urlString, Date())
             DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                // location.replace() namiesto webView.load(): load() pri KAŽDOM
-                // tape na notifikáciu pridal do back-forward listu nový záznam
-                // (každá deep-link URL je unikátna vďaka _t) aj so snapshotom
-                // stránky — opakované notifikácie tak postupne nafúkli pamäť
-                // WebContent procesu (memory jetsam na /tasks deep linkoch,
-                // diagnostika release 70). replace() históriu NAHRADÍ, takže
-                // back-forward list nerastie. Fallback na load() pre cold start
-                // (stránka ešte nenačítaná) alebo ak JS zlyhá.
-                if self.hasFinishedInitialLoad, webView.url != nil {
-                    let escaped = fullUrl
-                        .replacingOccurrences(of: "\\", with: "\\\\")
-                        .replacingOccurrences(of: "'", with: "\\'")
-                    webView.evaluateJavaScript("window.location.replace('\(escaped)')") { _, err in
-                        if err != nil {
-                            debugLog("[Push] location.replace zlyhal — fallback na load()")
-                            webView.load(URLRequest(url: url))
-                        }
+                self?.navigateReplacingHistory(fullUrl, fallback: url)
+            }
+        }
+
+        /// Navigácia na deep link BEZ rastu back-forward listu. webView.load()
+        /// pri každom tape na notifikáciu pridal do back-forward listu nový
+        /// záznam (každá deep-link URL je unikátna vďaka _t) aj so snapshotom
+        /// stránky — opakované notifikácie tak postupne nafúkli pamäť WebContent
+        /// procesu až po memory jetsam (diagnostika release 70). location.replace()
+        /// históriu NAHRADÍ, takže list nerastie. Fallback na load() pre cold
+        /// start (stránka ešte nenačítaná) alebo ak JS zlyhá.
+        fileprivate func navigateReplacingHistory(_ fullUrl: String, fallback url: URL) {
+            guard let webView = webView else { return }
+            if hasFinishedInitialLoad, webView.url != nil {
+                let escaped = fullUrl
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "'", with: "\\'")
+                webView.evaluateJavaScript("window.location.replace('\(escaped)')") { _, err in
+                    if err != nil {
+                        debugLog("[Push] location.replace zlyhal — fallback na load()")
+                        webView.load(URLRequest(url: url))
                     }
-                } else {
-                    webView.load(URLRequest(url: url))
                 }
+            } else {
+                webView.load(URLRequest(url: url))
             }
         }
 
