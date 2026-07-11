@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { getUnseenModalNews, markAllNewsSeen, formatNewsDate, SECTION_LABELS } from '../utils/changelog';
 
@@ -37,9 +38,12 @@ function WhatsNewModal() {
     setNews([]);
   };
 
-  return (
+  // createPortal + trieda modal-overlay: rovnaká medicína ako HelpGuide —
+  // fixed overlay nesmie byť rukojemníkom transformovaného predka a globálny
+  // iOS zámok scrollu tela (App.jsx) sa aktivuje len na .modal-overlay.
+  return createPortal(
     <>
-      <div className="whats-new-overlay" onClick={close}>
+      <div className="whats-new-overlay modal-overlay" onClick={close}>
         <div className="whats-new-modal" onClick={(e) => e.stopPropagation()}>
           <div className="whats-new-header">
             <h2>🎉 Čo je nové</h2>
@@ -79,7 +83,8 @@ function WhatsNewModal() {
       </div>
 
       <style>{`
-        .whats-new-overlay {
+        /* Dvojitá trieda = vyššia špecificita než globálny .modal-overlay */
+        .whats-new-overlay.modal-overlay {
           position: fixed;
           top: 0;
           left: 0;
@@ -91,6 +96,7 @@ function WhatsNewModal() {
           justify-content: center;
           z-index: 10000;
           padding: 20px;
+          padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
           animation: whatsNewFadeIn 0.2s ease;
         }
 
@@ -105,6 +111,8 @@ function WhatsNewModal() {
           max-width: 540px;
           width: 100%;
           max-height: 80vh;
+          /* dvh = skutočná viditeľná výška na iOS — footer vždy na obrazovke */
+          max-height: min(80vh, calc(100dvh - 96px));
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -150,6 +158,9 @@ function WhatsNewModal() {
           padding: 20px 24px;
           overflow-y: auto;
           flex: 1;
+          /* iOS: scroll noviniek sa nesmie prelievať do stránky za nimi */
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
         }
 
         .whats-new-intro {
@@ -247,12 +258,14 @@ function WhatsNewModal() {
 
         @media (max-width: 767px) {
           .whats-new-modal {
-            max-height: 88vh;
+            max-height: 84vh;
+            max-height: calc(100dvh - 110px);
             margin: 10px;
           }
         }
       `}</style>
-    </>
+    </>,
+    document.body
   );
 }
 

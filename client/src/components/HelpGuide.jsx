@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { isIosNativeApp } from '../utils/platform';
 import { useAuth } from '../context/AuthContext';
 import { newsForSection, hasUnseenSectionNews, markSectionNewsSeen, formatNewsDate } from '../utils/changelog';
@@ -53,7 +54,11 @@ const HelpGuide = ({ section, tips, title, children }) => {
     setIsOpen(true);
   };
 
-  return (
+  // createPortal na document.body — HelpGuide býva zavesený hlboko v obsahu
+  // stránky (napr. v hlavičke Správ) a ak má niektorý predok transform/filter,
+  // position:fixed sa počíta voči nemu, nie voči obrazovke: overlay potom
+  // scrolloval so stránkou a tlačidlo Rozumiem sa nedalo dosiahnuť (iOS bug).
+  return createPortal(
     <>
       <button
           className="help-guide-btn"
@@ -64,8 +69,11 @@ const HelpGuide = ({ section, tips, title, children }) => {
         {showNewsDot && <span className="help-news-dot" />}
       </button>
 
+      {/* Trieda modal-overlay aktivuje globálny iOS zámok scrollu tela
+          (MutationObserver v App.jsx) — bez neho sa pri scrollovaní pomoci
+          hýbala aj stránka za ňou. Vizuál preberá .help-guide-overlay. */}
       {isOpen && (
-        <div className="help-guide-overlay" onClick={handleClose}>
+        <div className="help-guide-overlay modal-overlay" onClick={handleClose}>
           <div className="help-guide-modal" onClick={e => e.stopPropagation()}>
             <div className="help-guide-header">
               <h2>{title || 'Nápoveda'}</h2>
@@ -180,7 +188,9 @@ const HelpGuide = ({ section, tips, title, children }) => {
           margin-left: 8px;
         }
 
-        .help-guide-overlay {
+        /* Dvojitá trieda = vyššia špecificita než globálny .modal-overlay,
+           aby vizuál (tmavšie pozadie, z-index 10000) vždy vyhral. */
+        .help-guide-overlay.modal-overlay {
           position: fixed;
           top: 0;
           left: 0;
@@ -192,6 +202,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
           justify-content: center;
           z-index: 10000;
           padding: 20px;
+          padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
           animation: fadeIn 0.2s ease;
         }
 
@@ -206,6 +217,9 @@ const HelpGuide = ({ section, tips, title, children }) => {
           max-width: 500px;
           width: 100%;
           max-height: 80vh;
+          /* dvh = skutočná viditeľná výška na iOS (vh tam býva vyššia než
+             obrazovka) — footer s Rozumiem musí ostať vždy na obrazovke */
+          max-height: min(80vh, calc(100dvh - 96px));
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -257,6 +271,9 @@ const HelpGuide = ({ section, tips, title, children }) => {
           padding: 24px;
           overflow-y: auto;
           flex: 1;
+          /* iOS: scroll pomoci sa nesmie prelievať do stránky za ňou */
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
         }
 
         .help-guide-tips {
@@ -325,7 +342,8 @@ const HelpGuide = ({ section, tips, title, children }) => {
 
         @media (max-width: 767px) {
           .help-guide-modal {
-            max-height: 90vh;
+            max-height: 84vh;
+            max-height: calc(100dvh - 110px);
             margin: 10px;
           }
 
@@ -335,7 +353,8 @@ const HelpGuide = ({ section, tips, title, children }) => {
           }
         }
       `}</style>
-    </>
+    </>,
+    document.body
   );
 };
 
