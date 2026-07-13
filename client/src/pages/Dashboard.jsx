@@ -239,9 +239,13 @@ function Dashboard() {
     return '';
   };
 
-  // Get all tasks for a contact (only embedded tasks)
+  // Get all tasks for a contact — embedded (contact.tasks) AND samostatné
+  // Task dokumenty priradené kontaktu cez contactIds. Projekt vytvorený na
+  // stránke Projekty a priradený kontaktu je "global" a v contact.tasks nie
+  // je — bez druhej vetvy ho Dashboard po kliknutí na kontakt neukázal, hoci
+  // v Kontaktoch (ktoré mergujú oboje) sa zobrazil. Zrkadlí CRM.getContactTasks.
   const getContactTasks = (contact) => {
-    return (contact.tasks || []).map(t => ({
+    const embedded = (contact.tasks || []).map(t => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -253,6 +257,27 @@ function Dashboard() {
       source: 'contact',
       contactId: contact.id
     }));
+
+    // `tasks` je plochý zoznam z /api/tasks (global + contact). Global projekty
+    // priradené tomuto kontaktu vyfiltrujeme podľa contactIds.
+    const contactIdStr = String(contact.id);
+    const globalForContact = (tasks || [])
+      .filter(t => t.source === 'global'
+        && (t.contactIds || []).map(id => String(id)).includes(contactIdStr))
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        completed: t.completed,
+        priority: t.priority,
+        dueDate: t.dueDate,
+        subtasks: t.subtasks || [],
+        notes: t.notes,
+        source: 'global',
+        contactId: contact.id
+      }));
+
+    return [...embedded, ...globalForContact];
   };
 
   // Get contact names (supports multiple contacts)
