@@ -439,6 +439,25 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
       EXCLUDE_FILE_DATA
     ).sort({ name: 1 }).lean();
 
+    // Projekty kontaktu žijú na dvoch miestach — embedded (c.tasks) aj
+    // samostatné Task dokumenty priradené cez contactIds. Bez druhej vetvy
+    // export podhodnocoval "Počet projektov" (často 0) pre kontakty, ktorých
+    // projekty vznikli na stránke Projekty. Načítame globálne tasky raz.
+    const globalTasks = await Task.find(
+      { workspaceId: req.workspaceId },
+      { contactIds: 1, completed: 1 }
+    ).lean();
+    const globalByContact = new Map(); // contactId(str) -> { total, completed }
+    for (const t of globalTasks) {
+      for (const cid of (t.contactIds || [])) {
+        const key = String(cid);
+        const agg = globalByContact.get(key) || { total: 0, completed: 0 };
+        agg.total++;
+        if (t.completed) agg.completed++;
+        globalByContact.set(key, agg);
+      }
+    }
+
     const escCsv = (val) => {
       if (val == null) return '';
       let str = String(val);
@@ -456,8 +475,9 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
 
     const headers = ['Meno', 'Email', 'Telefón', 'Firma', 'Web', 'Stav', 'Poznámky', 'Počet projektov', 'Dokončené projekty', 'Vytvorený'];
     const rows = contacts.map(c => {
-      const taskCount = (c.tasks || []).length;
-      const completedTasks = (c.tasks || []).filter(t => t.completed).length;
+      const g = globalByContact.get(String(c._id)) || { total: 0, completed: 0 };
+      const taskCount = (c.tasks || []).length + g.total;
+      const completedTasks = (c.tasks || []).filter(t => t.completed).length + g.completed;
       return [
         escCsv(c.name),
         escCsv(c.email),
@@ -1023,6 +1043,17 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
     }
     await ContactFile.deleteMany({ contactId: req.params.id });
+
+    // Odpoj zmazaný kontakt od samostatných (global) projektov priradených
+    // cez contactIds — inak by ostal висieť dangling contactId (projekt by na
+    // stránke Projekty tvrdil väzbu na neexistujúci kontakt). Projekt sa
+    // NEMAŽE (môže patriť aj iným kontaktom / byť ďalej užitočný ako global) —
+    // len sa z neho odstráni referencia. Embedded projekty miznú s kontaktom.
+    await Task.updateMany(
+      { workspaceId: req.workspaceId, contactIds: req.params.id },
+      { $pull: { contactIds: req.params.id } }
+    );
+
     await Contact.findByIdAndDelete(req.params.id);
 
     const io = req.app.get('io');

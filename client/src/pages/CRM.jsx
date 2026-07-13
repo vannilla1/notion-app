@@ -1455,9 +1455,17 @@ function CRM() {
         const phoneMatch = c.phone?.toLowerCase().includes(query);
         const companyMatch = c.company?.toLowerCase().includes(query);
         const notesMatch = c.notes?.toLowerCase().includes(query);
-        // Search in task titles too
-        const taskMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
-        return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || taskMatch;
+        // Hľadanie v názvoch projektov — embedded (c.tasks) AJ samostatné
+        // projekty priradené kontaktu cez contactIds (žijú v globalTasks).
+        // Bez druhej vetvy sa kontakt s "global" projektom pri hľadaní podľa
+        // jeho názvu vôbec nezobrazil.
+        const cidStr = String(c.id);
+        const embeddedMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
+        const globalMatch = globalTasks.some(t =>
+          (t.contactIds || []).map(id => String(id)).includes(cidStr)
+          && t.title?.toLowerCase().includes(query)
+        );
+        return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || embeddedMatch || globalMatch;
       }
       return true;
     }).sort((a, b) => {
@@ -1467,7 +1475,7 @@ function CRM() {
       if (orderA !== orderB) return orderA - orderB;
       return (a.name || '').localeCompare(b.name || '', 'sk');
     });
-  }, [contacts, filter, searchQuery]);
+  }, [contacts, filter, searchQuery, globalTasks]);
 
   // Memoize status counts to prevent unnecessary recalculations
   const statusCounts = useMemo(() => ({
