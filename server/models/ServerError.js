@@ -49,6 +49,18 @@ const serverErrorSchema = new mongoose.Schema({
   lastSeen: { type: Date, default: Date.now, index: true },
   count: { type: Number, default: 1 },
 
+  // Verzia appky (release) — LEN pre client/native chyby. `context.release`
+  // sa zapisuje iba pri prvom výskyte a nepretáča sa, takže sám nevie povedať
+  // z akej verzie pochádza NEDÁVNY výskyt. Tieto polia to dopĺňajú:
+  //   firstRelease — release pri prvom výskyte (mirror context.release)
+  //   lastRelease  — release pri poslednom výskyte (aktualizuje sa)
+  //   releaseCounts — { "<release>": <počet> } rozpad výskytov po verziách,
+  //     aby admin videl, či chyba ešte prší na opravenej verzii, alebo len
+  //     dokvapkávajú staré buildy.
+  firstRelease: { type: String, default: null },
+  lastRelease: { type: String, default: null },
+  releaseCounts: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+
   // Resolve workflow
   resolved: { type: Boolean, default: false, index: true },
   resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

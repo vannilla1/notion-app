@@ -6546,7 +6546,8 @@ function DiagErrorsSection() {
 Error: ${err.message}
 Status: ${err.statusCode}
 Route: ${err.method} ${err.path}
-Count: ${err.count}× (prvý výskyt ${new Date(err.firstSeen).toLocaleString('sk-SK')})
+Count: ${err.count}× (prvý výskyt ${new Date(err.firstSeen).toLocaleString('sk-SK')}, posledný ${new Date(err.lastSeen).toLocaleString('sk-SK')})
+Release: prvý ${err.firstRelease || '—'}, posledný ${err.lastRelease || '—'}${err.releaseCounts && Object.keys(err.releaseCounts).length ? ` (výskyty po verziách: ${Object.entries(err.releaseCounts).sort((a, b) => b[1] - a[1]).map(([r, c]) => `${r}×${c}`).join(', ')})` : ''}
 
 Stack:
 ${err.stack || '(bez stacku)'}
@@ -6716,6 +6717,17 @@ Workspace: ${err.workspaceId || 'N/A'}
               <div><strong>Name:</strong> {selected.name}</div>
               <div><strong>Prvý výskyt:</strong> {new Date(selected.firstSeen).toLocaleString('sk-SK')}</div>
               <div><strong>Posledný:</strong> {new Date(selected.lastSeen).toLocaleString('sk-SK')}</div>
+              {(selected.firstRelease || selected.lastRelease) && (
+                <div><strong>Release:</strong> prvý <code>{selected.firstRelease || '—'}</code> · posledný <code>{selected.lastRelease || '—'}</code></div>
+              )}
+              {selected.releaseCounts && Object.keys(selected.releaseCounts).length > 0 && (
+                <div style={{ gridColumn: 'span 2' }}>
+                  <strong>Výskyty po verziách:</strong>{' '}
+                  {Object.entries(selected.releaseCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([rel, cnt]) => <code key={rel} style={{ marginRight: 8 }}>{rel}×{cnt}</code>)}
+                </div>
+              )}
               <div><strong>User:</strong> {selected.userId?.email || 'nezalogovaný'}</div>
               <div><strong>IP:</strong> {selected.ipAddress || '—'}</div>
               {selected.url && <div style={{ gridColumn: 'span 2' }}><strong>URL:</strong> <code style={{ wordBreak: 'break-all' }}>{selected.url}</code></div>}

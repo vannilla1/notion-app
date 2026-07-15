@@ -241,9 +241,25 @@ async function recordClientError(payload, context = {}) {
     const now = new Date();
     const existing = await ServerError.findOne({ fingerprint });
 
+    // Verzia appky z tohto výskytu (natívny shell posiela payload.release).
+    // Normalizujeme na krátky string; prázdne = web bez verzie → 'web'.
+    const release = (typeof payload.release === 'string' && payload.release.trim())
+      ? payload.release.trim().slice(0, 40)
+      : 'web';
+
     if (existing) {
       existing.count += 1;
       existing.lastSeen = now;
+      // Per-release rozpad + posledná videná verzia — kľúčové, aby panel vedel
+      // rozlíšiť "prší na opravenej verzii" od "dokvapkávajú staré buildy".
+      existing.lastRelease = release;
+      if (!existing.firstRelease) existing.firstRelease = release; // backfill starých
+      const counts = (existing.releaseCounts && typeof existing.releaseCounts === 'object')
+        ? existing.releaseCounts : {};
+      counts[release] = (counts[release] || 0) + 1;
+      existing.releaseCounts = counts;
+      existing.markModified('releaseCounts'); // Mixed — inak sa zmena neuloží
+      // Ak bola resolved a opäť sa objavila → re-open
       if (existing.resolved) {
         existing.resolved = false;
         existing.resolvedAt = null;
@@ -290,6 +306,9 @@ async function recordClientError(payload, context = {}) {
         release: payload.release, // napr. git SHA z buildu ak posielaš
         breadcrumbs
       },
+      firstRelease: release,
+      lastRelease: release,
+      releaseCounts: { [release]: 1 },
       firstSeen: now,
       lastSeen: now,
       count: 1
