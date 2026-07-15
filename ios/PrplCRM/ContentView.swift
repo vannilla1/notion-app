@@ -928,18 +928,57 @@ struct WebView: UIViewRepresentable {
             }
         }
 
+        // Časy posledných WebContent terminácií — na detekciu jetsam SLUČKY
+        // (rýchle opakovanie = stránka je pre dané zariadenie príliš ťažká na
+        // to, aby sa vôbec načítala). Prvý výskyt je benígny (self-heal),
+        // opakovaný v krátkom okne treba riešiť ináč než len rovnakým reloadom.
+        private var recentTerminations: [Date] = []
+        private let terminationWindow: TimeInterval = 90 // s
+
         // Fires when iOS kills the WebContent process (memory pressure, etc.)
         // Without this handler, WKWebView stays blank or gets reloaded from
         // initial URL by our updateUIView fallback — either way the user
         // loses their current location. We reload the last known URL.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            let restoreURL = lastURL ?? parent.url
-            debugLog("[WebView] ⚠ WebContent process terminated — reloading \(restoreURL.absoluteString)")
+            let now = Date()
+            recentTerminations.append(now)
+            recentTerminations = recentTerminations.filter { now.timeIntervalSince($0) < terminationWindow }
+            let repeatCount = recentTerminations.count
+
+            let fullURL = lastURL ?? parent.url
+
+            // LOOP-AWARE recovery: prvý jetsam v okne → obnov PRESNE tam, kde
+            // user bol (plná URL so zvýraznením). Opakovaný jetsam v okne =
+            // slučka smrti pamäte na tej istej ťažkej stránke → obnov na
+            // ODĽAHČENÚ URL (bez highlight/subtask/_t query), nech sa WebContent
+            // proces vôbec stihne postaviť. Path zachováme (user ostane v sekcii).
+            let restoreURL: URL
+            if repeatCount >= 2, let lightened = Self.strippedOfQuery(fullURL) {
+                restoreURL = lightened
+                debugLog("[WebView] ⚠ Jetsam #\(repeatCount) v okne — odľahčený reload \(lightened.absoluteString)")
+            } else {
+                restoreURL = fullURL
+                debugLog("[WebView] ⚠ WebContent terminated — reload \(fullURL.absoluteString)")
+            }
+
+            // Report nesie počet opakovaní v okne — v diagnostike hneď vidno,
+            // či ide o benígny ojedinelý self-heal (#1) alebo reálnu slučku (#2+).
             reportNativeError(
                 name: "iOSWebContentProcessTerminated",
-                message: "WKWebView WebContent process terminated (memory jetsam). URL: \(restoreURL.absoluteString)"
+                message: "WKWebView WebContent process terminated (memory jetsam) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \(fullURL.absoluteString)"
             )
             webView.load(URLRequest(url: restoreURL))
+        }
+
+        /// Odstráni query (highlight/subtask/_t...) — vráti len scheme://host/path.
+        /// Použité pri jetsam slučke na odľahčenie recovery načítania.
+        static func strippedOfQuery(_ url: URL) -> URL? {
+            guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+            comps.query = nil
+            comps.fragment = nil
+            // Ak by path bola prázdna, radšej nechaj pôvodnú URL (nič nezískame)
+            guard let stripped = comps.url, stripped.absoluteString != url.absoluteString else { return nil }
+            return stripped
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
