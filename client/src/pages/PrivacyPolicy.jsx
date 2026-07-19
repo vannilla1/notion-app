@@ -9,7 +9,7 @@ export default function PrivacyPolicy() {
   const backPath = fromRegister ? '/login?register=true' : '/';
   const backLabel = fromRegister ? 'Späť na registráciu' : 'Späť na hlavnú stránku';
   // Krížový link medzi Zásadami a VOP musí zachovať from=register
-  const vopLink = fromRegister ? '/vop?from=register' : '/vop';
+  const vopLink = fromRegister ? '/vop/?from=register' : '/vop/';
 
   return (
     <div style={{

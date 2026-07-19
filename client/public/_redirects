@@ -1,7 +1,12 @@
-# Pre-rendered policy/VOP pre Google OAuth verification.
-# Musia byť PRED catch-all — Render/Netlify _redirects spracúva zhora dolu.
-# Cieľ = /ochrana-udajov/index.html (reálne súbory sú v adresároch, NIE .html
-# v roote) — inak rewrite prepadne na SPA shell a legal obsah sa nezobrazí.
-/ochrana-udajov   /ochrana-udajov/index.html   200
-/vop              /vop/index.html              200
-/*                /index.html            200
+# Kanonizácia právnych stránok — 301 na verzie s lomkou (tie sú v sitemap
+# a majú prerendered obsah + správny canonical). Pôvodný 200 rewrite na
+# /ochrana-udajov/index.html na Renderi NEFUNGOVAL (overené curl-om aj s
+# cache busterom — prichádzal SPA shell s canonical → /), takže neslashové
+# verzie existovali ako duplicity a GSC hlásil "Duplicitná, Google vybral
+# inú kanonickú stránku než používateľ". 301 duplicitu odstraňuje úplne
+# (aj pre Google OAuth verification je redirect v poriadku).
+# Pravidlá MUSIA byť PRED catch-all — spracúva sa zhora dolu.
+/ochrana-udajov   /ochrana-udajov/   301
+/vop              /vop/              301
+/index.html       /                  301
+/*                /index.html        200

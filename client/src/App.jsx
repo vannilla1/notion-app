@@ -462,7 +462,11 @@ function AppContent() {
   }, [isAuthenticated, navigateWithWorkspace]);
 
   const publicPages = ['/', '/login', '/forgot-password', '/reset-password', '/auth/callback', '/ochrana-udajov', '/vop', '/invite', '/admin'];
-  const isPublicPage = publicPages.some(p => location.pathname === p || location.pathname.startsWith('/invite/'));
+  // Kanonické URL právnych stránok majú lomku na konci (/ochrana-udajov/) —
+  // porovnanie musí tolerovať oba tvary, inak slashová verzia prepadne na
+  // LoadingGate vetvu ako "neverejná" stránka.
+  const normalizedPath = location.pathname.length > 1 ? location.pathname.replace(/\/+$/, '') : location.pathname;
+  const isPublicPage = publicPages.some(p => normalizedPath === p || location.pathname.startsWith('/invite/'));
 
   // Blok renderu child route kým sa deep-link workspace switch nedokončí.
   // Inak Tasks/CRM/Messages mountnú so starým workspacom a fetchnú dáta

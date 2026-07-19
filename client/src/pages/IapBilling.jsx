@@ -254,8 +254,8 @@ export default function IapBilling() {
                     Spravovať ho môžeš v Nastaveniach zariadenia. Platba sa účtuje cez tvoj Apple účet.
                   </p>
                   <div style={{ marginTop: 12, fontSize: 11 }}>
-                    <a href="/vop" style={{ color: 'var(--text-muted)', marginRight: 16 }}>Obchodné podmienky</a>
-                    <a href="/ochrana-udajov" style={{ color: 'var(--text-muted)' }}>Ochrana údajov</a>
+                    <a href="/vop/" style={{ color: 'var(--text-muted)', marginRight: 16 }}>Obchodné podmienky</a>
+                    <a href="/ochrana-udajov/" style={{ color: 'var(--text-muted)' }}>Ochrana údajov</a>
                   </div>
                 </div>
               </>
