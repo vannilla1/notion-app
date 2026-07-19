@@ -80,6 +80,58 @@ function isIgnored(payload) {
   return IGNORED_PATTERNS.some(p => p.test(msg));
 }
 
+// Schémy rozšírení prehliadača — chyby z nich nie sú naše.
+const EXTENSION_SCHEMES = /^(chrome-extension|moz-extension|safari-extension|safari-web-extension|webkit-masked-url):/i;
+
+/**
+ * Chyby z CUDZÍCH skriptov (rozšírenia prehliadača, skripty injektované
+ * botmi/prekladačmi) — nie sú naše a v Diagnostike len šumia. Sentry ich
+ * filtroval automaticky, in-house tracker to potrebuje tiež.
+ *
+ * Poznávací znak: PRVÝ stack frame s pozíciou (zdroj:riadok:stĺpec)
+ * nepochádza z nášho originu, ale z `<anonymous>:N:N` (injektovaný skript),
+ * `*-extension://` schémy alebo cudzieho originu. Natívne volania ako
+ * "at JSON.stringify (<anonymous>)" pozíciu NEMAJÚ — tie preskakujeme,
+ * rozhoduje prvý lokalizovaný frame. Reálny príklad z produkcie: rozšírenie
+ * prepísalo appendChild a JSON.stringify-ovalo DOM (cyklická React fiber
+ * referencia) — v stacku boli aj naše react-vendor frame-y (React volal
+ * prepísané API), ale PRVÝ lokalizovaný frame bol <anonymous>:25:21.
+ *
+ * Pri pochybnostiach (neparsovateľný stack, žiadny lokalizovaný frame)
+ * vraciame false — radšej reportovať než potichu stratiť reálnu chybu.
+ */
+function isThirdPartyStack(stack) {
+  if (!stack) return false;
+  try {
+    for (const raw of String(stack).split('\n')) {
+      const line = raw.trim();
+      // Zdroj frame-u: Chrome "at fn (src:l:c)" / "at src:l:c",
+      // Firefox+Safari "fn@src:l:c"
+      let src = null;
+      if (line.startsWith('at ')) {
+        const m = line.match(/\(([^()]*)\)\s*$/);
+        src = m ? m[1] : line.slice(3).trim();
+      } else {
+        const atIdx = line.lastIndexOf('@');
+        if (atIdx !== -1) src = line.slice(atIdx + 1).trim();
+      }
+      if (!src) continue; // riadok správy / neznámy formát
+      if (!/:\d+:\d+$/.test(src)) continue; // natívny frame bez pozície — preskoč
+      const cleaned = src.replace(/:\d+:\d+$/, '');
+      if (cleaned === '<anonymous>') return true; // injektovaný skript
+      if (EXTENSION_SCHEMES.test(cleaned)) return true; // rozšírenie
+      // Prvý lokalizovaný frame s URL — rozhoduje jeho origin
+      try {
+        const u = new URL(cleaned, location.href);
+        return u.origin !== location.origin;
+      } catch {
+        return false; // neparsovateľné — radšej reportuj
+      }
+    }
+  } catch { /* heuristika sa nesmie sama rozbiť */ }
+  return false;
+}
+
 function hashKey(payload) {
   // Jednoduchý kľúč — message + first line of stack + pathname
   const stackFirstLine = (payload.stack || '').split('\n')[0] || '';
@@ -117,6 +169,7 @@ export function reportError(payload) {
   try {
     if (!payload || !payload.message) return;
     if (isIgnored(payload)) return;
+    if (isThirdPartyStack(payload.stack)) return; // rozšírenia/injektované skripty — nie naša chyba
     const enriched = {
       name: payload.name || 'Error',
       message: String(payload.message).slice(0, 1000),
