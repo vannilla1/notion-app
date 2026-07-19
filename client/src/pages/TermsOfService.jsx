@@ -1,8 +1,18 @@
+import { useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 
 export default function TermsOfService() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  // Kanonická URL má lomku na konci (/vop/) — viď komentár v PrivacyPolicy.
+  // JS fallback redirect, kým nie je 301 pravidlo v Render dashboarde.
+  useEffect(() => {
+    const { pathname, search } = window.location;
+    if (!pathname.endsWith('/')) {
+      window.location.replace(`${pathname}/${search}`);
+    }
+  }, []);
   // Ak používateľ prišiel z registrácie (?from=register), vrátime ho späť
   // do registračného formulára namiesto na hlavnú stránku.
   const fromRegister = searchParams.get('from') === 'register';

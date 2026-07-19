@@ -1,8 +1,22 @@
+import { useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 
 export default function PrivacyPolicy() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  // Kanonická URL má lomku na konci (/ochrana-udajov/ — prerendered obsah,
+  // sitemap, canonical). Neslashovú verziu servíruje SPA shell → duplicita,
+  // ktorú GSC hlásil ako "Duplicitná, Google vybral inú kanonickú". Render
+  // ignoruje _redirects súbor (overené), takže skutočné 301 vie dať len
+  // pravidlo v Render dashboarde — toto je okamžitý JS fallback (Google
+  // JS redirecty pri indexácii rešpektuje).
+  useEffect(() => {
+    const { pathname, search } = window.location;
+    if (!pathname.endsWith('/')) {
+      window.location.replace(`${pathname}/${search}`);
+    }
+  }, []);
   // Ak používateľ prišiel z registrácie (?from=register), vrátime ho späť
   // do registračného formulára namiesto na hlavnú stránku.
   const fromRegister = searchParams.get('from') === 'register';
