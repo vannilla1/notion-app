@@ -139,6 +139,11 @@ const tasksHelpTips = [
     icon: '🔔',
     title: 'Zvonček a notifikácie',
     description: 'Pri každej zmene (vytvorenie, dokončenie, priradenie, komentár, blížiaci sa termín) tím / vy dostanete notifikáciu. Klik na notifikáciu o projekte v zvončeku otvorí daný projekt + zvýrazní konkrétnu (pod)úlohu ktorej sa zmena týkala.'
+  },
+  {
+    icon: '👤',
+    title: 'Pohľad „Moje úlohy"',
+    description: 'Tlačidlo 👤 vpravo hore (vedľa kalendára) zobrazí plochý zoznam všetkých projektov a úloh pridelených práve vám — naprieč celým prostredím, zoskupených podľa termínov (Po termíne, Dnes, Najbližších 7 dní, Neskôr, Bez termínu). Checkbox v riadku úlohu rovno dokončí, klik na riadok vás prenesie na úlohu v projekte. Rýchly vstup: dlaždica „Moje úlohy" na Dashboarde.'
   }
 ];
 
@@ -653,8 +658,10 @@ function Tasks() {
   const [filter, setFilter] = useState('all');
   const [contactFilter, setContactFilter] = useState(null); // Filter by specific contact
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar' | 'mine'
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  // Pohľad „Moje úlohy" — zobrazenie dokončených položiek (default skryté)
+  const [showMineDone, setShowMineDone] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -913,6 +920,124 @@ function Tasks() {
       navigate('/tasks', { replace: true });
     }
   }, [location.search, navigate]);
+
+  // ?view=mine — vstup z Dashboard dlaždice „Moje úlohy". Param sa po
+  // prepnutí pohľadu z URL odstráni (rovnaký vzor ako contactId vyššie).
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('view') === 'mine' && !params.get('highlightTask')) {
+      setViewMode('mine');
+      navigate('/tasks', { replace: true });
+    }
+  }, [location.search, navigate]);
+
+  // ===== „Moje úlohy" — plochý zoznam všetkého prideleného mne =====
+  // Prejde projekty aj podúlohy v ľubovoľnej hĺbke a vyberie položky s mojím
+  // priradením. Nesie kontext (koreňový projekt + cesta nadradených úloh),
+  // aby sa dalo z riadku docieliť presne na položku v strome.
+  const myItems = useMemo(() => {
+    const uid = user?.id?.toString();
+    if (!uid) return [];
+    const mine = (arr) => (arr || []).some(id => id?.toString() === uid);
+    const out = [];
+    for (const t of tasks) {
+      if (mine(t.assignedTo)) {
+        out.push({ key: `t-${t.id}`, type: 'task', task: t, item: t, path: [] });
+      }
+      const walk = (subs, path) => {
+        for (const s of (subs || [])) {
+          if (mine(s.assignedTo)) {
+            out.push({ key: `s-${t.id}-${s.id}`, type: 'subtask', task: t, item: s, path });
+          }
+          walk(s.subtasks, [...path, s.title]);
+        }
+      };
+      walk(t.subtasks, []);
+    }
+    return out;
+  }, [tasks, user?.id]);
+
+  // Zoskupenie podľa termínu; dokončené bokom (default skryté)
+  const myGroups = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const groups = { overdue: [], today: [], week: [], later: [], nodate: [], done: [] };
+    for (const it of myItems) {
+      if (it.item.completed) { groups.done.push(it); continue; }
+      if (!it.item.dueDate) { groups.nodate.push(it); continue; }
+      const due = new Date(it.item.dueDate);
+      due.setHours(0, 0, 0, 0);
+      const diff = Math.round((due - today) / 86400000);
+      if (diff < 0) groups.overdue.push(it);
+      else if (diff === 0) groups.today.push(it);
+      else if (diff <= 7) groups.week.push(it);
+      else groups.later.push(it);
+    }
+    const byDue = (a, b) =>
+      (a.item.dueDate || '9999').localeCompare(b.item.dueDate || '9999')
+      || (a.item.dueTime || '99:99').localeCompare(b.item.dueTime || '99:99');
+    Object.values(groups).forEach(g => g.sort(byDue));
+    return groups;
+  }, [myItems]);
+
+  // Riadok pohľadu „Moje úlohy" — checkbox znovupoužíva toggleTask/
+  // toggleSubtask (zachová potvrdenie, auto-close prompt aj Google sync),
+  // klik na riadok skočí na položku v strome projektov (rovnaký mechanizmus
+  // ako klik v kalendári).
+  const renderMyTaskRow = (it) => {
+    const { task, item, type, path } = it;
+    const done = !!item.completed;
+    const canToggle = !done || user?.role === 'admin';
+    const contactLabel = task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName;
+    const contextParts = [];
+    if (contactLabel) contextParts.push(`🏷️ ${contactLabel}`);
+    if (type === 'subtask') contextParts.push([task.title, ...path].join(' › '));
+    return (
+      <div
+        key={it.key}
+        className={`my-task-row ${done ? 'completed' : ''}`}
+        onClick={() => {
+          // Zoznam môže mať aktívny filter/hľadanie (napr. contactFilter z CRM
+          // „Zobraziť projekty"), ktorý by cieľovú úlohu skryl — skok by potom
+          // potichu zlyhal (bez scrollu a zvýraznenia). Pred skokom filtre
+          // vyčistíme; „Moje úlohy" aj tak zobrazuje nefiltrované dáta.
+          setContactFilter(null);
+          setFilter('all');
+          setSearchQuery('');
+          setViewMode('list');
+          processHighlight(task.id, type === 'subtask' ? item.id : null);
+        }}
+      >
+        <button
+          type="button"
+          className={`my-task-check ${done ? 'done' : ''}`}
+          style={done ? undefined : { borderColor: getPriorityColor(item.priority) }}
+          title={done ? (canToggle ? 'Znovu otvoriť' : 'Dokončené') : 'Označiť ako dokončené'}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!canToggle) return;
+            if (type === 'task') toggleTask(task);
+            else toggleSubtask(task, item);
+          }}
+        >
+          {done ? '✓' : ''}
+        </button>
+        <div className="my-task-body">
+          <div className="my-task-title">{item.title}</div>
+          {contextParts.length > 0 && (
+            <div className="my-task-context">{contextParts.join(' · ')}</div>
+          )}
+        </div>
+        <div className="my-task-meta">
+          {item.dueDate && (
+            <span className={`due-date ${getDueDateClass(item.dueDate, done)}`}>
+              📅 {new Date(item.dueDate).toLocaleDateString('sk-SK')}{item.dueTime ? ` ${item.dueTime}` : ''}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Helper function to get due date status class
   const getDueDateClass = (dueDate, completed) => {
@@ -1565,7 +1690,9 @@ function Tasks() {
     const wasCompleting = !task.completed;
     const filterAtToggle = filter;
     const userIdAtToggle = user?.id?.toString();
-    const shouldFocusNext = wasCompleting && (
+    // focus-next dáva zmysel len v LIST pohľade — z „Moje úlohy" by scroll
+    // retry bežal proti nevykreslenému zoznamu a bil sa s klikom používateľa.
+    const shouldFocusNext = wasCompleting && viewMode === 'list' && (
       isDueDateFilter(filterAtToggle) || isAssignedFilter(filterAtToggle) || filterAtToggle === 'new'
     );
     try {
@@ -1699,7 +1826,8 @@ function Tasks() {
     const wasCompleting = !subtask.completed;
     const filterAtToggle = filter;
     const userIdAtToggle = user?.id?.toString();
-    const shouldFocusNext = wasCompleting && (
+    // focus-next len v LIST pohľade — viď komentár v toggleTask
+    const shouldFocusNext = wasCompleting && viewMode === 'list' && (
       isDueDateFilter(filterAtToggle) || isAssignedFilter(filterAtToggle) || filterAtToggle === 'new'
     );
     try {
@@ -3004,7 +3132,7 @@ function Tasks() {
               )}
               <div className="tasks-header">
                 <div className="tasks-header-top">
-                  <h2>{viewMode === 'list' ? `Zoznam projektov (${sortedFilteredTasks.length})` : 'Kalendár termínov'}</h2>
+                  <h2>{viewMode === 'list' ? `Zoznam projektov (${sortedFilteredTasks.length})` : viewMode === 'mine' ? `Moje úlohy (${myItems.length - myGroups.done.length})` : 'Kalendár termínov'}</h2>
                   <div className="view-toggle">
                     <button
                       className={`view-toggle-btn ${viewMode === 'list' ? 'active' : ''}`}
@@ -3019,6 +3147,13 @@ function Tasks() {
                       title="Kalendár"
                     >
                       📅
+                    </button>
+                    <button
+                      className={`view-toggle-btn ${viewMode === 'mine' ? 'active' : ''}`}
+                      onClick={() => setViewMode('mine')}
+                      title="Moje úlohy"
+                    >
+                      👤
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"
@@ -3068,7 +3203,50 @@ function Tasks() {
                 </div>
               </div>
 
-              {viewMode === 'calendar' ? (
+              {viewMode === 'mine' ? (
+                loading ? (
+                  <div className="loading">Načítavam...</div>
+                ) : (
+                  <div className="my-tasks-view">
+                    {myItems.length === 0 && (
+                      <div className="empty-state">
+                        <p>Zatiaľ vám nie je pridelená žiadna úloha.</p>
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                          Úlohu vám pridelí kolega ikonou 👤 pri projekte alebo úlohe.
+                        </p>
+                      </div>
+                    )}
+                    {[
+                      ['overdue', '🔴 Po termíne'],
+                      ['today', '📍 Dnes'],
+                      ['week', '📅 Najbližších 7 dní'],
+                      ['later', '🗓️ Neskôr'],
+                      ['nodate', '♾️ Bez termínu']
+                    ].map(([key, label]) => myGroups[key].length > 0 && (
+                      <div key={key} className="my-tasks-group">
+                        <div className="my-tasks-group-header">{label} ({myGroups[key].length})</div>
+                        {myGroups[key].map(renderMyTaskRow)}
+                      </div>
+                    ))}
+                    {myGroups.done.length > 0 && (
+                      <div className="my-tasks-group">
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setShowMineDone(v => !v)}
+                        >
+                          {showMineDone ? 'Skryť dokončené' : `Zobraziť dokončené (${myGroups.done.length})`}
+                        </button>
+                        {showMineDone && (
+                          <div style={{ marginTop: 8 }}>
+                            {myGroups.done.map(renderMyTaskRow)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              ) : viewMode === 'calendar' ? (
                 <CalendarView
                   tasks={sortedFilteredTasks}
                   calendarMonth={calendarMonth}

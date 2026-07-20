@@ -12799,3 +12799,51 @@ body.ios-app {
   padding: 4px 8px; text-decoration: underline;
 }
 .announcement-modal-dismiss:hover { color: var(--text-secondary, #64748b); }
+
+/* ===== Moje úlohy — plochý pohľad položiek pridelených mne (Tasks 👤) ===== */
+.my-tasks-view { display: flex; flex-direction: column; gap: 20px; }
+.my-tasks-group-header {
+  font-size: 13px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.my-task-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.my-task-row:hover { border-color: var(--accent-color, #6366f1); }
+.my-task-row.completed .my-task-title { text-decoration: line-through; opacity: 0.6; }
+.my-task-check {
+  width: 20px; height: 20px; min-width: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; line-height: 1; color: #fff;
+  padding: 0;
+}
+.my-task-check.done {
+  background: var(--accent-color, #6366f1);
+  border-color: var(--accent-color, #6366f1);
+}
+.my-task-body { flex: 1; min-width: 0; }
+.my-task-title { font-size: 14px; color: var(--text-primary); }
+.my-task-context {
+  font-size: 11.5px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.my-task-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+@media (max-width: 767px) {
+  .my-task-row { padding: 10px 12px; }
+  /* Kontext môže byť dlhý — na mobile nech sa termín nezlomí mimo riadku */
+  .my-task-meta .due-date { font-size: 11px; }
+}

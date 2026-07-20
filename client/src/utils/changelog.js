@@ -17,6 +17,14 @@ import { isIosNativeApp } from './platform';
  */
 export const CHANGELOG = [
   {
+    v: 11,
+    date: '2026-07-20',
+    sections: ['tasks', 'dashboard'],
+    icon: '👤',
+    title: 'Nový pohľad „Moje úlohy"',
+    description: 'Na stránke Projekty pribudlo tlačidlo 👤 — plochý zoznam všetkých projektov a úloh pridelených práve vám naprieč celým prostredím, zoskupený podľa termínov (Po termíne, Dnes, Najbližších 7 dní…). Úlohy odbavíte checkboxom priamo v zozname a klik na riadok vás prenesie na úlohu v projekte. Rýchly vstup: dlaždica „Moje úlohy" na Dashboarde.'
+  },
+  {
     v: 10,
     date: '2026-07-10',
     sections: ['tasks', 'crm'],

@@ -25,6 +25,11 @@ const dashboardHelpTips = [
     description: 'Na vrchu sú štatistiky: celkový počet kontaktov, aktívne kontakty, projekty a dnešné úlohy. Každé číslo je klikateľné — otvorí sa filtrovaný zoznam (napr. klik na "Aktívne kontakty" → zoznam kontaktov v stave Aktívny). Pod štatistikami sú zoznamy najdôležitejších položiek na dnes.'
   },
   {
+    icon: '👤',
+    title: 'Dlaždica „Moje úlohy"',
+    description: 'V bočnom paneli Prehľad je riadok „👤 Moje úlohy" s počtom nedokončených úloh pridelených práve vám. Klik vás prenesie do plochého zoznamu na stránke Projekty, kde ich viete rovno odbaviť checkboxom.'
+  },
+  {
     icon: '⚡',
     title: 'Ako sa pohybovať v aplikácii',
     description: 'Na počítači použite tlačidlá v hlavičke: Kontakty, Projekty, Správy. Na mobile máte navigáciu na spodku obrazovky — ikony pre Prehľad, Kontakty, Projekty a Správy. Červené číslo na ikone znamená počet neprečítaných položiek pre danú sekciu.'
@@ -299,7 +304,25 @@ function Dashboard() {
   // Stats (memoized — recompute only when data changes)
   const stats = useMemo(() => {
     const activeTasks = tasks.filter(t => !t.completed);
+    // Počet nedokončených položiek pridelených mne — projekty aj podúlohy
+    // v ľubovoľnej hĺbke. Pre dlaždicu „Moje úlohy" (vstup do /tasks?view=mine).
+    const uid = user?.id?.toString();
+    const isMine = (arr) => (arr || []).some(id => id?.toString() === uid);
+    let myTasksCount = 0;
+    const countMine = (subs) => {
+      for (const s of (subs || [])) {
+        if (!s.completed && isMine(s.assignedTo)) myTasksCount++;
+        countMine(s.subtasks);
+      }
+    };
+    if (uid) {
+      for (const t of tasks) {
+        if (!t.completed && isMine(t.assignedTo)) myTasksCount++;
+        countMine(t.subtasks);
+      }
+    }
     return {
+      myTasksCount,
       activeContacts: contacts.filter(c => c.status === 'active').length,
       newContacts: contacts.filter(c => c.status === 'new').length,
       completedContacts: contacts.filter(c => c.status === 'completed').length,
@@ -317,9 +340,9 @@ function Dashboard() {
       mediumPriorityTasks: activeTasks.filter(t => t.priority === 'medium').length,
       highPriorityTasks: activeTasks.filter(t => t.priority === 'high').length,
     };
-  }, [contacts, tasks, messages]);
+  }, [contacts, tasks, messages, user?.id]);
 
-  const { activeContacts, newContacts, completedContacts, cancelledContacts, pendingTasks, completedTasks, totalReceived, pendingMessages, approvedMessages, rejectedMessages, commentedMessages, pollMessages, totalSent, lowPriorityTasks, mediumPriorityTasks, highPriorityTasks } = stats;
+  const { activeContacts, newContacts, completedContacts, cancelledContacts, pendingTasks, completedTasks, totalReceived, pendingMessages, approvedMessages, rejectedMessages, commentedMessages, pollMessages, totalSent, lowPriorityTasks, mediumPriorityTasks, highPriorityTasks, myTasksCount } = stats;
 
   // Sort functions (stable references)
   const sortTasks = useCallback((list) => [...list].sort((a, b) => {
@@ -716,6 +739,14 @@ function Dashboard() {
             >
               <span className="stat-label">Splnených</span>
               <span className="stat-value">{completedTasks}</span>
+            </div>
+            <div
+              className="stat-item clickable"
+              onClick={() => navigate('/tasks?view=mine')}
+              title="Otvoriť pohľad Moje úlohy"
+            >
+              <span className="stat-label">👤 Moje úlohy</span>
+              <span className="stat-value">{myTasksCount}</span>
             </div>
 
             <h4 style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-secondary)' }}>Podľa priority</h4>
