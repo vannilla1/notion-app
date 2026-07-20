@@ -660,6 +660,11 @@ struct WebView: UIViewRepresentable {
         }
 
         @objc private func appWillEnterForeground() {
+            // Značka návratu do popredia — didTerminate handler podľa nej
+            // rozlíši jetsam NA POZADÍ (iOS bežne reclaimuje web procesy
+            // suspendovaných appiek; handler sa spustí až pri prebudení)
+            // od jetsamu POČAS aktívneho používania.
+            lastForegroundAt = Date()
             // Po návrate zo Safari (napr. OAuth flow) bol fallback reload WebView,
             // aby sa stránka dozvedela aktuálny stav integrácie. S Universal Links
             // ale deep link (prplcrm.eu/tasks?google_tasks=connected) sám navigačne
@@ -934,6 +939,8 @@ struct WebView: UIViewRepresentable {
         // opakovaný v krátkom okne treba riešiť ináč než len rovnakým reloadom.
         private var recentTerminations: [Date] = []
         private let terminationWindow: TimeInterval = 90 // s
+        // Posledný návrat appky do popredia — na klasifikáciu background reclaimu
+        fileprivate var lastForegroundAt: Date?
 
         // Fires when iOS kills the WebContent process (memory pressure, etc.)
         // Without this handler, WKWebView stays blank or gets reloaded from
@@ -961,12 +968,26 @@ struct WebView: UIViewRepresentable {
                 debugLog("[WebView] ⚠ WebContent terminated — reload \(fullURL.absoluteString)")
             }
 
-            // Report nesie počet opakovaní v okne — v diagnostike hneď vidno,
-            // či ide o benígny ojedinelý self-heal (#1) alebo reálnu slučku (#2+).
-            reportNativeError(
-                name: "iOSWebContentProcessTerminated",
-                message: "WKWebView WebContent process terminated (memory jetsam) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \(fullURL.absoluteString)"
-            )
+            // KLASIFIKÁCIA: iOS bežne reclaimuje web procesy appiek NA POZADÍ
+            // (úplne normálne upratovanie pamäte — user nič nevidí, handler sa
+            // spustí až pri prebudení appky a recovery stránku ticho obnoví).
+            // Také výskyty NEreportujeme — v Diagnostike by len šumeli a nedajú
+            // sa nijako "opraviť". Reportujeme len jetsam počas AKTÍVNEHO
+            // používania (appka na obrazovke) — jediný, ktorý userovi reálne
+            // prerušil prácu a oplatí sa ho sledovať.
+            let appState = UIApplication.shared.applicationState
+            let sinceForeground = lastForegroundAt.map { now.timeIntervalSince($0) } ?? .infinity
+            let isBackgroundReclaim = appState != .active || sinceForeground < 3.0
+            if isBackgroundReclaim {
+                debugLog("[WebView] Jetsam na pozadí (bežný iOS reclaim) — nereportujem, len obnovujem")
+            } else {
+                // Report nesie počet opakovaní v okne — v diagnostike hneď vidno,
+                // či ide o ojedinelý self-heal (#1) alebo reálnu slučku (#2+).
+                reportNativeError(
+                    name: "iOSWebContentProcessTerminated",
+                    message: "WKWebView WebContent process terminated (memory jetsam, AKTÍVNA appka) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \(fullURL.absoluteString)"
+                )
+            }
             webView.load(URLRequest(url: restoreURL))
         }
 
