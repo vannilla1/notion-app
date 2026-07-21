@@ -1008,10 +1008,17 @@ function Tasks() {
           processHighlight(task.id, type === 'subtask' ? item.id : null);
         }}
       >
-        <button
-          type="button"
-          className={`my-task-check ${done ? 'done' : ''}`}
-          style={done ? undefined : { borderColor: getPriorityColor(item.priority) }}
+        {/* Rovnaké checkboxy ako v strome projektov: projekt = 22px vo farbe
+            priority, podúloha = 18px v akcentovej — vrátane fill pri dokončení */}
+        <div
+          className={type === 'task' ? 'task-checkbox-styled' : 'subtask-checkbox-styled'}
+          style={type === 'task' ? {
+            marginTop: 0,
+            borderColor: getPriorityColor(item.priority),
+            backgroundColor: done ? getPriorityColor(item.priority) : 'transparent'
+          } : {
+            backgroundColor: done ? 'var(--accent-color)' : 'transparent'
+          }}
           title={done ? (canToggle ? 'Znovu otvoriť' : 'Dokončené') : 'Označiť ako dokončené'}
           onClick={(e) => {
             e.stopPropagation();
@@ -1020,8 +1027,8 @@ function Tasks() {
             else toggleSubtask(task, item);
           }}
         >
-          {done ? '✓' : ''}
-        </button>
+          {done && '✓'}
+        </div>
         <div className="my-task-body">
           <div className="my-task-title">{item.title}</div>
           {contextParts.length > 0 && (
