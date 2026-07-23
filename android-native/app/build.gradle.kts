@@ -23,14 +23,14 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "eu.prplcrm.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
-        targetSdk = 35         // Android 15 — Play Store 2025 requirement
-        versionCode = 203      // production.4 — nové app ikony (prpl liquid-glass logo) + natívna error telemetria (WebView/render-crash reporting).
-        versionName = "1.0.2"
+        targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
+        versionCode = 204      // production.5 — target API 36 (Play deadline 31.8.2026)
+        versionName = "1.0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
