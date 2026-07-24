@@ -29,8 +29,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 204      // production.5 — target API 36 (Play deadline 31.8.2026)
-        versionName = "1.0.3"
+        versionCode = 205      // production.6 — mailto/tel linky do systémového handlera (ERR_UNKNOWN_URL_SCHEME fix)
+        versionName = "1.0.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

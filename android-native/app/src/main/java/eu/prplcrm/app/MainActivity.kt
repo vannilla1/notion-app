@@ -246,8 +246,21 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?
             ): Boolean {
                 val url = request?.url ?: return false
-                // External linky (mailto, tel, iné domény) otvoríme v systémovom
-                // handleri namiesto v našom WebView.
+                // Ne-http(s) schémy (mailto:, tel:, sms:, ...) NEMAJÚ host
+                // (url.host == null), takže host-podmienka nižšie ich nechávala
+                // prepadnúť do WebView → net::ERR_UNKNOWN_URL_SCHEME (diagnostika
+                // 1.0.3: mailto:support@prplcrm.eu). Otvárame ich v systémovom
+                // handleri (mail appka, dialer) a VŽDY vraciame true — do WebView
+                // nesmú. Ak zariadenie handler nemá, ticho nič (nie je to chyba).
+                val scheme = url.scheme?.lowercase()
+                if (scheme != null && scheme != "http" && scheme != "https") {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, url))
+                    } catch (_: Exception) { /* žiadna appka pre danú schému */ }
+                    return true
+                }
+                // External http(s) linky (iné domény) otvoríme v systémovom
+                // prehliadači namiesto v našom WebView.
                 val urlStr = url.toString()
                 val ourHost = Uri.parse(getString(R.string.webapp_url)).host
                 if (url.host != null && url.host != ourHost && !urlStr.startsWith("https://prplcrm.eu")) {
@@ -303,6 +316,10 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame != true) return
+                // ERR_UNKNOWN_URL_SCHEME (-10): ne-http schéma prenikla do WebView.
+                // Legitímne (mailto/tel/...) rieši shouldOverrideUrlLoading vyššie;
+                // zvyšok nie je chyba našej stránky — nereportovať (šum v paneli).
+                if (error?.errorCode == ERROR_UNSUPPORTED_SCHEME) return
                 NativeErrorReporter.report(
                     this@MainActivity,
                     "AndroidWebViewError",
