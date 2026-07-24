@@ -21,6 +21,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -48,6 +49,9 @@ import com.google.firebase.messaging.FirebaseMessaging
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    // Prediktívny back (targetSdk 36): enabled sa synchronizuje s
+    // webView.canGoBack() v doUpdateVisitedHistory + po crash-recovery.
+    private var backCallback: OnBackPressedCallback? = null
 
     // Posledná načítaná URL na našej doméne — pre recovery po onRenderProcessGone.
     // Mŕtvy WebView vráti webView.url == null, takže ho trackujeme samostatne
@@ -103,6 +107,27 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(webView)
 
+        // Späť = navigácia vo WebView, nie zatvorenie appky. Od targetSdk 36
+        // je prediktívne spätné gesto zapnuté DEFAULTNE a systém na Androide
+        // 13+ prestáva doručovať KEYCODE_BACK/onBackPressed — starý onKeyDown
+        // handler (nižšie, ostáva ako fallback pre staré verzie) by sa už
+        // nezavolal a Späť by okamžite zatváralo appku. OnBackPressedDispatcher
+        // je moderná cesta, ktorú prediktívny back rešpektuje.
+        // Štartuje disabled (root stránka nemá kam ísť späť) — enabled sa
+        // priebežne synchronizuje v doUpdateVisitedHistory. Vďaka tomu na
+        // root stránke systém prehrá natívnu prediktívnu close animáciu.
+        backCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    // Poistka pre stav rozsynchronizovania — pusti systémový back
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        }.also { onBackPressedDispatcher.addCallback(this, it) }
+
         configureWebView()
         injectLocalStorageBootstrap()
         setupWebViewClients()
@@ -147,14 +172,33 @@ class MainActivity : AppCompatActivity() {
         // WebView.loadUrl("/tasks?...") sa pokúsi načítať ako file:// scheme a vráti
         // net::ERR_ACCESS_DENIED.
         intent.getStringExtra(EXTRA_DEEP_LINK)?.takeIf { it.isNotBlank() }?.let {
-            return resolveAgainstBase(it)
+            resolveAgainstBase(it)?.let { resolved -> return resolved }
         }
-        // ACTION_VIEW → data Uri
+        // ACTION_VIEW → data Uri. Host guard aj tu: explicitný intent na náš
+        // exported komponent OBCHÁDZA intent-filter matching, takže App Links
+        // verifikácia sama osebe cudziu URL nezastaví.
         if (intent.action == Intent.ACTION_VIEW) {
-            intent.data?.toString()?.takeIf { it.startsWith("https://") }?.let { return it }
+            intent.data?.toString()
+                ?.takeIf { it.startsWith("https://") && isOurHost(it) }
+                ?.let { return it }
         }
         return null
     }
+
+    /** Host guard — porovnanie s hostom webapp_url (prplcrm.eu). */
+    private fun isOurHost(url: String): Boolean {
+        val ourHost = Uri.parse(getString(R.string.webapp_url)).host
+        return Uri.parse(url).host == ourHost
+    }
+
+    /**
+     * Query/fragment sa NIKDY nereportuje do diagnostiky — OAuth callback
+     * (/auth/callback?token=<JWT>) by inak pri 5xx/network chybe poslal
+     * session token do error logov v cleartexte.
+     */
+    private fun sanitizeUrlForReport(uri: Uri?): String =
+        uri?.buildUpon()?.clearQuery()?.fragment(null)?.build()?.toString()
+            ?: "https://prplcrm.eu/native-android"
 
     /**
      * Normalizuje deep link na absolútnu https URL.
@@ -168,8 +212,14 @@ class MainActivity : AppCompatActivity() {
      * "/app" pred "/tasks", dostali by sme "/app/tasks" ktoré ako route neexistuje
      * a React vráti biely fallback.
      */
-    private fun resolveAgainstBase(link: String): String {
-        if (link.startsWith("https://") || link.startsWith("http://")) return link
+    private fun resolveAgainstBase(link: String): String? {
+        if (link.startsWith("https://") || link.startsWith("http://")) {
+            // MainActivity je exported — deep_link extra vie poslať HOCIKTORÁ
+            // appka na zariadení. Absolútne URL preto pustíme len na náš host;
+            // inak by cudzia appka vedela do nášho brandovaného okna načítať
+            // phishingovú stránku (vyzerala by ako súčasť Prpl CRM).
+            return if (isOurHost(link)) link else null
+        }
         val webappUrl = getString(R.string.webapp_url).removeSuffix("/")
         val host = Uri.parse(webappUrl).let { "${it.scheme}://${it.host}" }
         val normalizedPath = if (link.startsWith("/")) link else "/$link"
@@ -233,6 +283,8 @@ class MainActivity : AppCompatActivity() {
             setContentView(webView)
             configureWebView()
             setupWebViewClients()
+            // Nový WebView = prázdna história — resync prediktívneho backu
+            backCallback?.isEnabled = false
             webView.loadUrl(lastUrl)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "WebView recreate after crash failed", e)
@@ -254,9 +306,17 @@ class MainActivity : AppCompatActivity() {
                 // nesmú. Ak zariadenie handler nemá, ticho nič (nie je to chyba).
                 val scheme = url.scheme?.lowercase()
                 if (scheme != null && scheme != "http" && scheme != "https") {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, url))
-                    } catch (_: Exception) { /* žiadna appka pre danú schému */ }
+                    // Allowlist kontaktných schém + vyžadujeme user gesture —
+                    // stránkový JS bez kliknutia nesmie potichu otvárať cudzie
+                    // appky (XSS/kompromitovaný redirect by inak vedel spúšťať
+                    // ľubovoľné deep-linky). Ostatné schémy sa zhltnú: do
+                    // WebView nepatria (ERR_UNKNOWN_URL_SCHEME) a von nejdú.
+                    val allowed = scheme == "mailto" || scheme == "tel" || scheme == "sms" || scheme == "geo"
+                    if (allowed && request?.hasGesture() == true) {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, url))
+                        } catch (_: Exception) { /* žiadna appka pre danú schému */ }
+                    }
                     return true
                 }
                 // External http(s) linky (iné domény) otvoríme v systémovom
@@ -320,23 +380,33 @@ class MainActivity : AppCompatActivity() {
                 // Legitímne (mailto/tel/...) rieši shouldOverrideUrlLoading vyššie;
                 // zvyšok nie je chyba našej stránky — nereportovať (šum v paneli).
                 if (error?.errorCode == ERROR_UNSUPPORTED_SCHEME) return
+                val safeUrl = sanitizeUrlForReport(request.url)
                 NativeErrorReporter.report(
                     this@MainActivity,
                     "AndroidWebViewError",
-                    "code=${error?.errorCode} desc=${error?.description} url=${request.url}",
-                    request.url?.toString() ?: "https://prplcrm.eu/native-android"
+                    "code=${error?.errorCode} desc=${error?.description} url=$safeUrl",
+                    safeUrl
                 )
             }
 
             override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
                 super.onReceivedHttpError(view, request, errorResponse)
                 if (request?.isForMainFrame != true) return
+                val safeUrl = sanitizeUrlForReport(request.url)
                 NativeErrorReporter.report(
                     this@MainActivity,
                     "AndroidWebViewHttpError",
-                    "status=${errorResponse?.statusCode} url=${request.url}",
-                    request.url?.toString() ?: "https://prplcrm.eu/native-android"
+                    "status=${errorResponse?.statusCode} url=$safeUrl",
+                    safeUrl
                 )
+            }
+
+            // História sa zmenila (aj SPA pushState) → synchronizuj prediktívny
+            // back: callback aktívny len keď má WebView kam ísť späť. Pri root
+            // stránke je vypnutý a systém prehrá natívnu close animáciu.
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                backCallback?.isEnabled = webView.canGoBack()
             }
 
             // Android ekvivalent iOS WebContent termination (memory jetsam / render
