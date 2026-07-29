@@ -237,6 +237,17 @@ const collectFileIdsFromNode = (node) => {
   return ids;
 };
 
+// Súčet veľkostí príloh v strome — pre storage quota check pri kópii
+const collectFileBytesFromNode = (node) => {
+  let bytes = 0;
+  const walk = (n) => {
+    for (const f of (n?.files || [])) bytes += f?.size || 0;
+    for (const s of (n?.subtasks || [])) walk(s);
+  };
+  walk(node);
+  return bytes;
+};
+
 // Rovnaké capy ako pri copy-to-workspace — ohraničenie práce jedného requestu
 const TRANSFER_MAX_COPY_FILES = 80;
 const TRANSFER_MAX_COPY_BYTES = 200 * 1024 * 1024; // 200 MB spolu
@@ -1568,14 +1579,45 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       }
     }
 
-    // Idempotencia — dvojklik nesmie vytvoriť duplikát (klientsky busy state
-    // je asynchrónny). Krátke okno; kľúč sa pri chybe uvoľní.
+    // Idempotencia — dvojklik ani RETRY nesmú vytvoriť duplikát. Okno musí
+    // byť dlhšie než najhorší čas kopírovania: axios interceptor po 60s
+    // timeoute request až 3× zopakuje, a ťažký projekt (desiatky príloh cez
+    // R2) beží dlhšie než pôvodných 15 s — retry by po expirácii kľúča
+    // spustil DRUHÚ plnú kópiu. S 10 min oknom retry dostane 409 (interceptor
+    // 409 neopakuje). Kľúč sa pri chybe uvoľňuje, takže legitímny retry po
+    // reálnom zlyhaní prejde.
     idemKey = `transfer:${req.user.id}:${req.params.contactId}:${req.params.taskId}:${subtaskId || ''}:${targetContactId}:${targetTaskId || ''}:${mode}`;
-    if (!claimMutationKey(idemKey, 15 * 1000)) {
+    if (!claimMutationKey(idemKey, 10 * 60 * 1000)) {
       idemKey = null; // kľúč drží prvý request — v catch ho neuvoľňovať
       return res.status(409).json({
         message: 'Rovnaká operácia práve prebehla. Ak chceš ďalšiu kópiu, počkaj pár sekúnd a skús znova.'
       });
+    }
+
+    // Storage quota (zrkadlí POST /:id/files) — kópia fyzicky duplikuje R2
+    // bloby, takže sa musí počítať do rovnakej plánovej kvóty ako upload.
+    // Bez tohto by hromadné kopírovanie ťažkého projektu (napr. do viacerých
+    // kontaktov naraz) obišlo storage strop. Presun bloby neduplikuje.
+    if (mode === 'copy') {
+      const incomingBytes = collectFileBytesFromNode(sourceNode);
+      if (incomingBytes > 0) {
+        const storageLimits = { team: 1024 * 1024 * 1024, pro: 10 * 1024 * 1024 * 1024 };
+        const storageBytes = storageLimits[plan];
+        if (storageBytes) {
+          const wsContacts = await Contact.find({ workspaceId: req.workspaceId }, 'files.size').lean();
+          const usedBytes = wsContacts.reduce((sum, c) => sum + (c.files || []).reduce((s, f) => s + (f.size || 0), 0), 0);
+          if (usedBytes + incomingBytes > storageBytes) {
+            const usedMb = Math.round(usedBytes / (1024 * 1024));
+            const limitMb = Math.round(storageBytes / (1024 * 1024));
+            return res.status(403).json({
+              message: isIosNativeApp(req)
+                ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
+                : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`,
+              code: 'STORAGE_LIMIT'
+            });
+          }
+        }
+      }
     }
 
     const now = new Date().toISOString();

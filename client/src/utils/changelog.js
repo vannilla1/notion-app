@@ -17,6 +17,14 @@ import { isIosNativeApp } from './platform';
  */
 export const CHANGELOG = [
   {
+    v: 12,
+    date: '2026-07-28',
+    sections: ['tasks'],
+    icon: '📤',
+    title: 'Kopírovanie do viacerých kontaktov naraz',
+    description: 'V okne 📤 (kopírovať/presunúť) teraz zaškrtnete rovno viac cieľových kontaktov — v každom vznikne nezávislá kópia projektu či úlohy vrátane príloh a termínov. Presun ostáva na jeden cieľ, keďže položku premiestňuje.'
+  },
+  {
     v: 11,
     date: '2026-07-20',
     sections: ['tasks', 'dashboard'],

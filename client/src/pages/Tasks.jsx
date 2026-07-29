@@ -97,7 +97,7 @@ const tasksHelpTips = [
   {
     icon: '📤',
     title: 'Kopírovanie / presun do iného kontaktu',
-    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľový kontakt a jeho projekt (alebo „ako nový projekt") a zvolíte Kopírovať alebo Presunúť. Kópia je nezávislá a prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami.'
+    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľové kontakty a projekt (alebo „ako nový projekt") a zvolíte Kopírovať alebo Presunúť. Kopírovať sa dá aj do VIACERÝCH kontaktov naraz — zaškrtnite ich v prvom kroku a v každom vznikne nezávislá kópia ako nový projekt. Kópia prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami — ten má vždy jeden cieľ.'
   },
   {
     icon: '🏁',
@@ -3801,6 +3801,12 @@ function Tasks() {
           onClose={() => setTransferItem(null)}
           onDone={() => {
             setTransferItem(null);
+            fetchTasks();
+            fetchContacts();
+          }}
+          onRefresh={() => {
+            // Čiastočný úspech batchu — obnov listy BEZ zavretia modálu,
+            // aby sa neúspešné ciele dali zopakovať
             fetchTasks();
             fetchContacts();
           }}

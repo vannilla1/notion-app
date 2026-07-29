@@ -1,51 +1,142 @@
 import { useState, useRef } from 'react';
 import api from '../api/api';
 
+// Strop hromadného kopírovania — drží batch pod rate limitom (100 req/min)
+// a ohraničuje objem duplikovaných príloh na jeden klik.
+const MAX_TARGETS = 10;
+
+// Slovenské skloňovanie: 1 kontakt / 2–4 kontakty / 5+ kontaktov
+const kontaktSklon = (n) => (n === 1 ? 'kontakt' : n < 5 ? 'kontakty' : 'kontaktov');
+
 /**
- * Modal na kopírovanie / presun projektu alebo úlohy do projektového stromu
- * iného kontaktu v rámci aktuálneho prostredia. Dvojkrokový výber:
- * 1) cieľový kontakt → 2) cieľový projekt (alebo „ako nový projekt"),
- * potom voľba akcie Kopírovať / Presunúť.
+ * Modal na kopírovanie / presun projektu alebo úlohy do projektových stromov
+ * iných kontaktov v rámci aktuálneho prostredia. Dvojkrokový výber:
+ * 1) cieľové kontakty (viacero naraz, max MAX_TARGETS) → 2) cieľový projekt,
+ * potom akcia Kopírovať / Presunúť.
+ *
+ * Viacero cieľov má zmysel len pri KOPÍROVANÍ (vznikne N nezávislých kópií).
+ * Presun položku premiestňuje, takže má práve jeden cieľ. Pri viacerých
+ * cieľoch sa vkladá vždy ako NOVÝ projekt (spoločný cieľový projekt medzi
+ * kontaktmi neexistuje).
+ *
+ * Čiastočné zlyhanie NEZAVRIE modál — výber sa zúži na neúspešné kontakty,
+ * aby sa dali zopakovať bez rizika duplikovania už úspešných kópií.
  *
  * item = { contactId, taskId, subtaskId?, title }
- *  - subtaskId chýba → prenáša sa celý projekt (taskId)
- *  - subtaskId zadané → prenáša sa úloha/podúloha (nájde sa rekurzívne)
  */
-function TaskTransferModal({ item, contacts, onClose, onDone }) {
-  const [targetContactId, setTargetContactId] = useState(null);
+function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
+  const [targetContactIds, setTargetContactIds] = useState([]);
+  const [step, setStep] = useState(1);
   const [targetTaskId, setTargetTaskId] = useState(null); // 'NEW' = nový projekt
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null); // { done, total } počas batchu
   // Synchrónny guard proti dvojkliku — busy state sa prejaví až po re-renderi
   const submitRef = useRef(false);
+  // Zastavenie batchu medzi iteráciami (tlačidlo „Zastaviť")
+  const cancelRef = useRef(false);
 
-  const targetContact = contacts.find(c => (c.id || c._id) === targetContactId) || null;
+  const contactId = (c) => c.id || c._id;
+  const contactName = (cid) => contacts.find(c => contactId(c) === cid)?.name || 'kontakt';
+  const multi = targetContactIds.length > 1;
+  const overLimit = targetContactIds.length > MAX_TARGETS;
+  // Pri jednom cieli vieme ponúknuť aj konkrétny projekt daného kontaktu
+  const singleContact = targetContactIds.length === 1
+    ? contacts.find(c => contactId(c) === targetContactIds[0]) || null
+    : null;
+  // Pri viacerých cieľoch je voľba pevne „nový projekt"
+  const effectiveTargetTaskId = multi ? 'NEW' : targetTaskId;
+
+  const toggleContact = (cid) => {
+    setTargetContactIds(prev =>
+      prev.includes(cid) ? prev.filter(id => id !== cid) : [...prev, cid]
+    );
+    setTargetTaskId(null); // zmena výberu kontaktov ruší voľbu projektu
+  };
 
   const submit = async (mode) => {
-    if (!targetContactId || !targetTaskId || busy || submitRef.current) return;
-    const isNew = targetTaskId === 'NEW';
-    // No-op: presun projektu "ako nový projekt" toho istého kontaktu
-    if (mode === 'move' && isNew && !item.subtaskId && targetContactId === item.contactId) {
+    if (targetContactIds.length === 0 || overLimit || !effectiveTargetTaskId || busy || submitRef.current) return;
+    if (mode === 'move' && multi) return; // presun = práve jeden cieľ
+    const isNew = effectiveTargetTaskId === 'NEW';
+    // No-op: presun projektu „ako nový projekt" toho istého kontaktu
+    if (mode === 'move' && isNew && !item.subtaskId && targetContactIds[0] === item.contactId) {
       alert('Projekt už patrí tomuto kontaktu.');
       return;
     }
     submitRef.current = true;
+    cancelRef.current = false;
     setBusy(true);
-    try {
-      const res = await api.post(`/api/contacts/${item.contactId}/tasks/${item.taskId}/transfer`, {
-        subtaskId: item.subtaskId || undefined,
-        targetContactId,
-        targetTaskId: isNew ? undefined : targetTaskId,
-        mode
-      });
-      if (res.data?.skippedFiles > 0) {
-        alert(`Hotovo, ale ${res.data.skippedFiles} príloh sa nepodarilo skopírovať.`);
+
+    // Sekvenčne (nie paralelne) — limity plánu aj storage kvóta sa
+    // vyhodnocujú per request a paralelný beh by ich vedel obísť.
+    const targets = [...targetContactIds];
+    const failedIds = [];       // definitívne zlyhania → dajú sa bezpečne zopakovať
+    const failureMsgs = [];
+    const unknownMsgs = [];     // timeout/409 → kópia MOŽNO vznikla, neopakovať naslepo
+    let skippedFiles = 0;
+    let ok = 0;
+    let cancelled = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      if (cancelRef.current) { cancelled = targets.length - i; break; }
+      setProgress({ done: i, total: targets.length });
+      const cid = targets[i];
+      try {
+        const res = await api.post(`/api/contacts/${item.contactId}/tasks/${item.taskId}/transfer`, {
+          subtaskId: item.subtaskId || undefined,
+          targetContactId: cid,
+          targetTaskId: isNew ? undefined : effectiveTargetTaskId,
+          mode
+        });
+        ok++;
+        skippedFiles += res.data?.skippedFiles || 0;
+      } catch (error) {
+        // Bez odpovede (timeout/sieť) alebo 409 (idempotencia) = server mohol
+        // kópiu dokončiť aj tak — NEZARADIŤ do retry výberu, inak duplikát.
+        if (!error.response || error.response.status === 409) {
+          unknownMsgs.push(`${contactName(cid)}: neznámy výsledok — skontrolujte kontakt pred opakovaním`);
+        } else {
+          failedIds.push(cid);
+          failureMsgs.push(`${contactName(cid)}: ${error.response?.data?.message || 'zlyhalo'}`);
+        }
       }
+    }
+
+    setProgress(null);
+    submitRef.current = false;
+
+    // Súhrn — časti sa SČÍTAVAJÚ (skippedFiles nesmie zaniknúť pri zlyhaní)
+    const parts = [];
+    if (ok > 0 && (multi || failureMsgs.length > 0 || unknownMsgs.length > 0 || cancelled > 0)) {
+      parts.push(`Hotovo pre ${ok} ${kontaktSklon(ok)}.`);
+    }
+    if (skippedFiles > 0) {
+      parts.push(`⚠️ ${skippedFiles} príloh sa nepodarilo skopírovať.`);
+    }
+    if (failureMsgs.length > 0) {
+      parts.push(`Nepodarilo sa:\n${failureMsgs.join('\n')}`);
+    }
+    if (unknownMsgs.length > 0) {
+      parts.push(`⚠️ ${unknownMsgs.join('\n')}`);
+    }
+    if (cancelled > 0) {
+      parts.push(`Zastavené — ${cancelled} ${kontaktSklon(cancelled)} sa nespracovalo (ostávajú vybrané).`);
+    }
+    if (parts.length > 0) alert(parts.join('\n\n'));
+
+    const remaining = [
+      ...failedIds,
+      ...(cancelled > 0 ? targets.slice(targets.length - cancelled) : [])
+    ];
+    if (remaining.length === 0) {
+      // Čisto (prípadne s unknown, ktoré sa opakovať nemajú) → zavri + refresh
       onDone();
-    } catch (error) {
-      alert(error.response?.data?.message || 'Operácia zlyhala');
+    } else {
+      // Zúž výber na neúspešné/nespracované ciele — dajú sa zopakovať bez
+      // duplikovania úspešných; parent listy medzitým obnovíme bez zavretia.
+      setTargetContactIds(remaining);
+      setStep(1);
       setBusy(false);
-    } finally {
-      submitRef.current = false;
+      if (ok > 0) onRefresh?.();
     }
   };
 
@@ -61,29 +152,42 @@ function TaskTransferModal({ item, contacts, onClose, onDone }) {
             <strong>{item.title}</strong>
           </p>
 
-          {!targetContact ? (
+          {busy && progress && (
+            <p style={{ fontSize: 13, color: 'var(--accent-color, #6366f1)', margin: '0 0 8px' }}>
+              ⏳ Kopírujem… ({progress.done + 1}/{progress.total})
+            </p>
+          )}
+
+          {step === 1 ? (
             <div className="form-group">
-              <label>Krok 1/2 — vyber cieľový kontakt</label>
+              <label>Krok 1/2 — vyber cieľové kontakty (max {MAX_TARGETS} naraz)</label>
               <div className="multi-select-contacts">
                 {contacts.map(c => {
-                  const cid = c.id || c._id;
+                  const cid = contactId(c);
                   return (
-                    <button
-                      key={cid}
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 6 }}
-                      onClick={() => { setTargetContactId(cid); setTargetTaskId(null); }}
-                    >
-                      {c.name || '(bez mena)'} {c.company ? `(${c.company})` : ''}
-                      {cid === item.contactId ? ' — aktuálny kontakt' : ''}
-                    </button>
+                    <label key={cid} className="contact-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={targetContactIds.includes(cid)}
+                        onChange={() => toggleContact(cid)}
+                        disabled={busy}
+                      />
+                      <span>
+                        {c.name || '(bez mena)'} {c.company ? `(${c.company})` : ''}
+                        {cid === item.contactId ? ' — aktuálny kontakt' : ''}
+                      </span>
+                    </label>
                   );
                 })}
                 {contacts.length === 0 && (
                   <span className="no-contacts">Žiadne kontakty</span>
                 )}
               </div>
+              {overLimit && (
+                <p style={{ fontSize: 12, color: 'var(--danger, #ef4444)', margin: '6px 0 0' }}>
+                  Naraz sa dá kopírovať najviac do {MAX_TARGETS} kontaktov — odznačte {targetContactIds.length - MAX_TARGETS}.
+                </p>
+              )}
             </div>
           ) : (
             <div className="form-group">
@@ -91,60 +195,96 @@ function TaskTransferModal({ item, contacts, onClose, onDone }) {
                 <button
                   type="button"
                   className="btn-icon-sm"
-                  onClick={() => { setTargetContactId(null); setTargetTaskId(null); }}
+                  onClick={() => { setStep(1); setTargetTaskId(null); }}
                   disabled={busy}
-                  title="Späť na výber kontaktu"
+                  title="Späť na výber kontaktov"
                 >
                   ←
                 </button>
-                Krok 2/2 — kam v kontakte „{targetContact.name}"?
+                {multi
+                  ? `Krok 2/2 — ${targetContactIds.length} vybraných ${kontaktSklon(targetContactIds.length)}`
+                  : `Krok 2/2 — kam v kontakte „${singleContact?.name || ''}"?`}
               </label>
-              <div className="multi-select-contacts">
-                <label className="contact-checkbox">
-                  <input
-                    type="radio"
-                    name="transfer-target"
-                    checked={targetTaskId === 'NEW'}
-                    onChange={() => setTargetTaskId('NEW')}
-                  />
-                  <span>➕ Ako nový projekt</span>
-                </label>
-                {(targetContact.tasks || [])
-                  // Projekt nemožno vložiť do seba samého
-                  .filter(t => !(targetContactId === item.contactId && !item.subtaskId && t.id === item.taskId))
-                  .map(t => (
-                    <label key={t.id} className="contact-checkbox">
-                      <input
-                        type="radio"
-                        name="transfer-target"
-                        checked={targetTaskId === t.id}
-                        onChange={() => setTargetTaskId(t.id)}
-                      />
-                      <span>{t.completed ? '✅ ' : ''}{t.title}</span>
-                    </label>
-                  ))}
-              </div>
+
+              {multi ? (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  Vloží sa ako <strong>nový projekt</strong> do každého z vybraných
+                  kontaktov (každý má vlastné projekty, spoločný cieľ neexistuje).
+                </p>
+              ) : (
+                <div className="multi-select-contacts">
+                  <label className="contact-checkbox">
+                    <input
+                      type="radio"
+                      name="transfer-target"
+                      checked={targetTaskId === 'NEW'}
+                      onChange={() => setTargetTaskId('NEW')}
+                      disabled={busy}
+                    />
+                    <span>➕ Ako nový projekt</span>
+                  </label>
+                  {(singleContact?.tasks || [])
+                    // Projekt nemožno vložiť do seba samého
+                    .filter(t => !(targetContactIds[0] === item.contactId && !item.subtaskId && t.id === item.taskId))
+                    .map(t => (
+                      <label key={t.id} className="contact-checkbox">
+                        <input
+                          type="radio"
+                          name="transfer-target"
+                          checked={targetTaskId === t.id}
+                          onChange={() => setTargetTaskId(t.id)}
+                          disabled={busy}
+                        />
+                        <span>{t.completed ? '✅ ' : ''}{t.title}</span>
+                      </label>
+                    ))}
+                </div>
+              )}
             </div>
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Zrušiť</button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => submit('move')}
-            disabled={busy || !targetTaskId}
-            title="Položka sa premiestni — u pôvodného kontaktu zmizne"
-          >
-            {busy ? '⏳' : '➡️'} Presunúť
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => submit('copy')}
-            disabled={busy || !targetTaskId}
-            title="Vytvorí sa nezávislá kópia vrátane príloh"
-          >
-            {busy ? '⏳' : '📋'} Kopírovať
-          </button>
+          {busy ? (
+            <button
+              className="btn btn-secondary"
+              onClick={() => { cancelRef.current = true; }}
+              title="Dokončí prebiehajúci kontakt a zastaví zvyšok"
+            >
+              ⏹ Zastaviť
+            </button>
+          ) : (
+            <button className="btn btn-secondary" onClick={onClose}>Zrušiť</button>
+          )}
+          {step === 1 ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => setStep(2)}
+              disabled={busy || targetContactIds.length === 0 || overLimit}
+            >
+              Pokračovať →
+            </button>
+          ) : (
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => submit('move')}
+                disabled={busy || !effectiveTargetTaskId || multi}
+                title={multi
+                  ? 'Presunúť sa dá len do jedného kontaktu — položka sa premiestňuje, nekopíruje'
+                  : 'Položka sa premiestni — u pôvodného kontaktu zmizne'}
+              >
+                {busy ? '⏳' : '➡️'} Presunúť
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => submit('copy')}
+                disabled={busy || !effectiveTargetTaskId}
+                title="Vytvorí sa nezávislá kópia vrátane príloh"
+              >
+                {busy ? '⏳' : '📋'} Kopírovať{multi ? ` (${targetContactIds.length}×)` : ''}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
