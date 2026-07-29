@@ -97,7 +97,7 @@ const tasksHelpTips = [
   {
     icon: '📤',
     title: 'Kopírovanie / presun do iného kontaktu',
-    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľové kontakty a projekt (alebo „ako nový projekt") a zvolíte Kopírovať alebo Presunúť. Kopírovať sa dá aj do VIACERÝCH kontaktov naraz (max 25) — zaškrtnite ich v prvom kroku a v každom vznikne nezávislá kópia ako nový projekt. Kontakty, ktoré už kópiu danej položky majú, sú v zozname označené „✓ už má kópiu" a nedajú sa vybrať znova — žiadne duplicity. Kópia prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami — ten má vždy jeden cieľ.'
+    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľové kontakty a cieľ a zvolíte Kopírovať alebo Presunúť. Úlohy sa defaultne vkladajú „ako v origináli" — v cieľovom kontakte pristanú pod projektom s rovnakým názvom, ako mali u zdroja (ak tam jeho kópia ešte nie je, vytvorí sa); ďalšie úlohy z toho istého projektu sa zbiehajú do jedného. Kopírovať sa dá aj do VIACERÝCH kontaktov naraz (max 25). Kontakty, ktoré už kópiu danej položky majú, sú označené „✓ už má kópiu" a nedajú sa vybrať znova. Kópia prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami — ten má vždy jeden cieľ.'
   },
   {
     icon: '🏁',
@@ -2227,7 +2227,7 @@ function Tasks() {
                 <div className="subtask-actions">
                   {task.source === 'contact' && task.contactId && (
                     <button
-                      onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id || task._id, subtaskId: subtask.id, title: subtask.title })}
+                      onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id || task._id, subtaskId: subtask.id, title: subtask.title, sourceTaskTitle: task.title })}
                       className="btn-icon-sm"
                       title="Kopírovať / presunúť do iného projektu"
                     >📤</button>

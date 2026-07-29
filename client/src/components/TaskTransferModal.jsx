@@ -16,19 +16,25 @@ const kontaktSklon = (n) => (n === 1 ? 'kontakt' : n < 5 ? 'kontakty' : 'kontakt
  * potom akcia Kopírovať / Presunúť.
  *
  * Viacero cieľov má zmysel len pri KOPÍROVANÍ (vznikne N nezávislých kópií).
- * Presun položku premiestňuje, takže má práve jeden cieľ. Pri viacerých
- * cieľoch sa vkladá vždy ako NOVÝ projekt (spoločný cieľový projekt medzi
- * kontaktmi neexistuje).
+ * Presun položku premiestňuje, takže má práve jeden cieľ.
+ *
+ * Cieľ pre ÚLOHU/PODÚLOHU je defaultne „ako v origináli" ('SOURCE'):
+ * v cieľovom kontakte pristane pod projektom zodpovedajúcim zdrojovému
+ * projektu (server ho nájde cez copiedFrom alebo vytvorí obal) — replikuje
+ * sa štruktúra kontakt → projekt → úloha. Celé PROJEKTY idú pri viacerých
+ * cieľoch ako nový projekt.
  *
  * Čiastočné zlyhanie NEZAVRIE modál — výber sa zúži na neúspešné kontakty,
  * aby sa dali zopakovať bez rizika duplikovania už úspešných kópií.
  *
- * item = { contactId, taskId, subtaskId?, title }
+ * item = { contactId, taskId, subtaskId?, title, sourceTaskTitle? }
  */
 function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
   const [targetContactIds, setTargetContactIds] = useState([]);
   const [step, setStep] = useState(1);
-  const [targetTaskId, setTargetTaskId] = useState(null); // 'NEW' = nový projekt
+  // 'NEW' = nový projekt, 'SOURCE' = ako v origináli (default pre úlohy)
+  const defaultTarget = item.subtaskId ? 'SOURCE' : null;
+  const [targetTaskId, setTargetTaskId] = useState(defaultTarget);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total } počas batchu
   // Synchrónny guard proti dvojkliku — busy state sa prejaví až po re-renderi
@@ -64,20 +70,21 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
   const singleContact = targetContactIds.length === 1
     ? contacts.find(c => contactId(c) === targetContactIds[0]) || null
     : null;
-  // Pri viacerých cieľoch je voľba pevne „nový projekt"
-  const effectiveTargetTaskId = multi ? 'NEW' : targetTaskId;
+  // Pri viacerých cieľoch: úlohy „ako v origináli", projekty ako nový projekt
+  const effectiveTargetTaskId = multi ? (item.subtaskId ? 'SOURCE' : 'NEW') : targetTaskId;
 
   const toggleContact = (cid) => {
     setTargetContactIds(prev =>
       prev.includes(cid) ? prev.filter(id => id !== cid) : [...prev, cid]
     );
-    setTargetTaskId(null); // zmena výberu kontaktov ruší voľbu projektu
+    setTargetTaskId(defaultTarget); // zmena výberu kontaktov ruší voľbu projektu
   };
 
   const submit = async (mode) => {
     if (targetContactIds.length === 0 || overLimit || !effectiveTargetTaskId || busy || submitRef.current) return;
     if (mode === 'move' && multi) return; // presun = práve jeden cieľ
     const isNew = effectiveTargetTaskId === 'NEW';
+    const isSource = effectiveTargetTaskId === 'SOURCE';
     // No-op: presun projektu „ako nový projekt" toho istého kontaktu
     if (mode === 'move' && isNew && !item.subtaskId && targetContactIds[0] === item.contactId) {
       alert('Projekt už patrí tomuto kontaktu.');
@@ -105,7 +112,9 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
         const res = await api.post(`/api/contacts/${item.contactId}/tasks/${item.taskId}/transfer`, {
           subtaskId: item.subtaskId || undefined,
           targetContactId: cid,
-          targetTaskId: isNew ? undefined : effectiveTargetTaskId,
+          targetTaskId: (isNew || isSource) ? undefined : effectiveTargetTaskId,
+          // „Ako v origináli" — server nájde/vytvorí kópiu zdrojového projektu
+          preserveProject: isSource || undefined,
           mode
         });
         ok++;
@@ -223,7 +232,7 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
                 <button
                   type="button"
                   className="btn-icon-sm"
-                  onClick={() => { setStep(1); setTargetTaskId(null); }}
+                  onClick={() => { setStep(1); setTargetTaskId(defaultTarget); }}
                   disabled={busy}
                   title="Späť na výber kontaktov"
                 >
@@ -235,12 +244,32 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
               </label>
 
               {multi ? (
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Vloží sa ako <strong>nový projekt</strong> do každého z vybraných
-                  kontaktov (každý má vlastné projekty, spoločný cieľ neexistuje).
-                </p>
+                item.subtaskId ? (
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                    Vloží sa <strong>ako v origináli</strong> — v každom vybranom
+                    kontakte pod projekt „{item.sourceTaskTitle || 'zdrojový projekt'}"
+                    (ak tam jeho kópia ešte nie je, vytvorí sa).
+                  </p>
+                ) : (
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                    Vloží sa ako <strong>nový projekt</strong> do každého z vybraných
+                    kontaktov (každý má vlastné projekty, spoločný cieľ neexistuje).
+                  </p>
+                )
               ) : (
                 <div className="multi-select-contacts">
+                  {item.subtaskId && (
+                    <label className="contact-checkbox">
+                      <input
+                        type="radio"
+                        name="transfer-target"
+                        checked={targetTaskId === 'SOURCE'}
+                        onChange={() => setTargetTaskId('SOURCE')}
+                        disabled={busy}
+                      />
+                      <span>🗂️ Ako v origináli — pod projekt „{item.sourceTaskTitle || 'zdrojový projekt'}"</span>
+                    </label>
+                  )}
                   <label className="contact-checkbox">
                     <input
                       type="radio"

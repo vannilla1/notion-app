@@ -1481,7 +1481,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
   const createdFiles = []; // bloby vytvorené TÝMTO requestom — pre error cleanup
   let idemKey = null;
   try {
-    const { subtaskId, targetContactId, targetTaskId, mode } = req.body || {};
+    const { subtaskId, targetContactId, targetTaskId, mode, preserveProject } = req.body || {};
 
     if (mode !== 'copy' && mode !== 'move') {
       return res.status(400).json({ message: 'Neplatný režim (copy/move)' });
@@ -1527,6 +1527,27 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       targetTask = targetContact.tasks[ti];
     }
 
+    // „Ako v origináli" — úloha má v cieľovom kontakte pristáť pod projektom
+    // zodpovedajúcim jej ZDROJOVÉMU projektu (replikuje sa štruktúra
+    // kontakt → projekt → úloha; úloha sa nepovyšuje na samostatný projekt).
+    // Existujúca kópia projektu sa nájde cez copiedFrom (taskId zdroja bez
+    // subtaskId) — ďalšie úlohy z toho istého projektu sa tak zbiehajú do
+    // JEDNÉHO obalu namiesto množenia projektov. Ak kópia nie je, vytvorí sa
+    // „obal": projekt s metadátami zdrojového projektu bez jeho ostatných úloh.
+    let createWrapper = false;
+    if (preserveProject === true && subtaskId && !targetTask) {
+      if (sameContact) {
+        // V rámci toho istého kontaktu je originál projektu priamo tu
+        targetTask = sourceTask;
+      } else {
+        const existingWrapper = targetContact.tasks.find(t =>
+          t.copiedFrom && t.copiedFrom.taskId === sourceTask.id && !t.copiedFrom.subtaskId
+        );
+        if (existingWrapper) targetTask = existingWrapper;
+        else createWrapper = true;
+      }
+    }
+
     // Nezmyselné kombinácie
     if (!subtaskId && targetTask && sameContact && targetTask.id === sourceTask.id) {
       return res.status(400).json({ message: 'Projekt nemožno vložiť do seba samého' });
@@ -1550,10 +1571,13 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       }
       // Aj KÓPIA ako nový projekt musí rešpektovať limit podúloh — inak by sa
       // opakovaným kopírovaním dal množiť obsah nad strop, ktorý bežné
-      // vytváranie vynucuje. Presun obsah nemení, preto sa nekontroluje.
+      // vytváranie vynucuje. Presun obsah nemení, preto sa (mimo obalu)
+      // nekontroluje. Pri obale „ako v origináli" sa vkladá CELÝ strom ako
+      // podúlohy nového projektu — kontroluje sa pre oba režimy.
       const subtaskLimits = { free: 10, team: 25, pro: Infinity };
       const maxSubtasks = subtaskLimits[plan] || 10;
-      if (mode === 'copy' && maxSubtasks !== Infinity && countTreeNodes(sourceNode) - 1 > maxSubtasks) {
+      const insertedCount = createWrapper ? countTreeNodes(sourceNode) : countTreeNodes(sourceNode) - 1;
+      if ((createWrapper || mode === 'copy') && maxSubtasks !== Infinity && insertedCount > maxSubtasks) {
         return res.status(403).json({
           message: isIosNativeApp(req)
             ? `Prenášaný projekt prekračuje limit ${maxSubtasks} úloh.`
@@ -1586,7 +1610,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     // spustil DRUHÚ plnú kópiu. S 10 min oknom retry dostane 409 (interceptor
     // 409 neopakuje). Kľúč sa pri chybe uvoľňuje, takže legitímny retry po
     // reálnom zlyhaní prejde.
-    idemKey = `transfer:${req.user.id}:${req.params.contactId}:${req.params.taskId}:${subtaskId || ''}:${targetContactId}:${targetTaskId || ''}:${mode}`;
+    idemKey = `transfer:${req.user.id}:${req.params.contactId}:${req.params.taskId}:${subtaskId || ''}:${targetContactId}:${targetTaskId || ''}:${mode}${preserveProject ? ':p' : ''}`;
     if (!claimMutationKey(idemKey, 10 * 60 * 1000)) {
       idemKey = null; // kľúč drží prvý request — v catch ho neuvoľňovať
       return res.status(409).json({
@@ -1622,6 +1646,43 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
 
     const now = new Date().toISOString();
     const copyStats = { skippedError: 0, skippedCapped: 0, bytes: 0, count: 0 };
+
+    // Obal „ako v origináli" — nový projekt v cieli s metadátami zdrojového
+    // projektu (bez jeho ostatných úloh). Nesie copiedFrom na zdrojový
+    // projekt, takže ďalšie kopírované úlohy z toho istého projektu sa doň
+    // zbiehajú. assignedTo úmyselne prázdne: obal je syntetický kontajner —
+    // kopírovaním jednej úlohy nesmieme kolegom „prideliť" celý projekt
+    // (zjavil by sa im v Mojich úlohách).
+    if (createWrapper) {
+      const wrapper = {
+        id: uuidv4(),
+        title: sourceTask.title,
+        description: sourceTask.description || '',
+        completed: false,
+        priority: sourceTask.priority || 'medium',
+        dueDate: sourceTask.dueDate || '',
+        dueTime: sourceTask.dueTime || '',
+        assignedTo: [],
+        subtasks: [],
+        files: [],
+        createdAt: now,
+        modifiedAt: now,
+        timeReminders: [],
+        timeRemindersSent: [],
+        reminderSent: false,
+        lastUrgencyLevel: null,
+        copiedFrom: {
+          contactId: String(sourceContact._id),
+          contactName: sourceContact.name || '',
+          taskId: sourceTask.id,
+          subtaskId: null,
+          copiedAt: now
+        }
+      };
+      targetContact.tasks.push(wrapper);
+      targetTask = wrapper;
+    }
+
     let insertedNode;
 
     if (mode === 'copy') {

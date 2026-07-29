@@ -17,6 +17,14 @@ import { isIosNativeApp } from './platform';
  */
 export const CHANGELOG = [
   {
+    v: 13,
+    date: '2026-07-30',
+    sections: ['tasks'],
+    icon: '🗂️',
+    title: 'Kopírovanie úloh „ako v origináli"',
+    description: 'Skopírovaná úloha už v cieľovom kontakte nepristane ako samostatný projekt — vloží sa pod projekt s rovnakým názvom, ako mala u zdroja (ak tam jeho kópia ešte nie je, automaticky sa vytvorí). Štruktúra kontakt → projekt → úloha tak ostáva zachovaná a ďalšie úlohy z toho istého projektu sa zbiehajú do jedného. V okne 📤 sa dá stále vybrať aj konkrétny projekt alebo „ako nový projekt".'
+  },
+  {
     v: 12,
     date: '2026-07-28',
     sections: ['tasks'],
