@@ -1510,11 +1510,17 @@ function Tasks() {
       setSelectedTask(prev => prev?.id === id ? null : prev);
     };
 
-    // When a contact is updated, refresh tasks (debounced to avoid rapid re-fetches)
+    // When a contact is updated, refresh tasks (debounced to avoid rapid
+    // re-fetches). Obnovujeme AJ contacts — transfer modál z nich počíta
+    // „✓ už má kópiu" (copiedFrom markery v contact.tasks); bez refetchu
+    // by po zmazaní kópie ostal kontakt označený ako už skopírovaný.
     let contactTimer = null;
     const handleContactUpdated = () => {
       if (contactTimer) clearTimeout(contactTimer);
-      contactTimer = setTimeout(() => fetchTasks(), 300);
+      contactTimer = setTimeout(() => {
+        fetchTasks();
+        fetchContacts();
+      }, 300);
     };
 
     socket.on('task-created', handleTaskCreated);
@@ -2227,7 +2233,12 @@ function Tasks() {
                 <div className="subtask-actions">
                   {task.source === 'contact' && task.contactId && (
                     <button
-                      onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id || task._id, subtaskId: subtask.id, title: subtask.title, sourceTaskTitle: task.title })}
+                      onClick={() => {
+                        // Čerstvé contacts pri otvorení — „✓ už má kópiu" sa
+                        // počíta z nich a nesmie ukazovať zmazané kópie
+                        fetchContacts();
+                        setTransferItem({ contactId: task.contactId, taskId: task.id || task._id, subtaskId: subtask.id, title: subtask.title, sourceTaskTitle: task.title });
+                      }}
                       className="btn-icon-sm"
                       title="Kopírovať / presunúť do iného projektu"
                     >📤</button>
@@ -3512,7 +3523,11 @@ function Tasks() {
                           <div className="task-actions">
                             {task.source === 'contact' && task.contactId && (
                               <button
-                                onClick={() => setTransferItem({ contactId: task.contactId, taskId: task.id, subtaskId: null, title: task.title })}
+                                onClick={() => {
+                                  // Čerstvé contacts pri otvorení — viď subtask variant
+                                  fetchContacts();
+                                  setTransferItem({ contactId: task.contactId, taskId: task.id, subtaskId: null, title: task.title });
+                                }}
                                 className="btn-icon"
                                 title="Kopírovať / presunúť do iného kontaktu"
                               >📤</button>
