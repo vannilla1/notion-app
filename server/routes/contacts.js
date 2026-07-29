@@ -1680,7 +1680,13 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         }
       };
       targetContact.tasks.push(wrapper);
-      targetTask = wrapper;
+      // KRITICKÉ: push do Mongoose DocumentArray plain objekt CASTNE na nový
+      // subdokument — pôvodná referencia `wrapper` NIE JE prvkom poľa. Keby
+      // sme nechali targetTask = wrapper, insertedNode by sa pushol do
+      // odpojeného objektu a kópia úlohy by sa NIKDY neuložila (prázdny obal
+      // — presne produkčný bug z 30.7., 19 prázdnych projektov). Preto
+      // referenciu berieme SPÄŤ z poľa.
+      targetTask = targetContact.tasks[targetContact.tasks.length - 1];
     }
 
     let insertedNode;
