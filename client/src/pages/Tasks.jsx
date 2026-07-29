@@ -1398,6 +1398,12 @@ function Tasks() {
         );
         const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
         if (ids.size > 0) {
+          // Zvýraznenie neprečítaných funguje len v strome projektov — viď
+          // komentár pri spracovaní pending highlightu.
+          setViewMode('list');
+          setContactFilter(null);
+          setFilter('all');
+          setSearchQuery('');
           setHighlightedTaskIds(ids);
           // Expand first highlighted task
           const firstId = [...ids][0];
@@ -1431,6 +1437,18 @@ function Tasks() {
 
     pendingHighlightRef.current = null;
     debug.log('[DeepLink] Tasks: processing pending', { taskId, subtaskId });
+
+    // Zvýraznenie žije LEN v strome projektov (list) — v „Moje úlohy" ani
+    // v kalendári taskRefs/[data-subtask-id] neexistujú, takže scroll aj
+    // highlight ticho zlyhali a user ostal visieť tam, kde bol (notifikácia
+    // sa medzitým označila ako prečítaná). Rovnako filtre: cieľ skrytý
+    // filtrom/hľadaním by sa nevykreslil. Klik na notifikáciu = "chcem
+    // vidieť túto úlohu", takže pohľad aj filtre uvedieme do stavu, v
+    // ktorom sa dá zobraziť.
+    setViewMode('list');
+    setContactFilter(null);
+    setFilter('all');
+    setSearchQuery('');
 
     setHighlightedTaskId(taskId);
     setExpandedTask(taskId);
