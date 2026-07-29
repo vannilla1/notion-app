@@ -22,7 +22,7 @@ export const CHANGELOG = [
     sections: ['tasks'],
     icon: '🗂️',
     title: 'Kopírovanie úloh „ako v origináli"',
-    description: 'Skopírovaná úloha už v cieľovom kontakte nepristane ako samostatný projekt — vloží sa pod projekt s rovnakým názvom, ako mala u zdroja (ak tam jeho kópia ešte nie je, automaticky sa vytvorí). Štruktúra kontakt → projekt → úloha tak ostáva zachovaná a ďalšie úlohy z toho istého projektu sa zbiehajú do jedného. V okne 📤 sa dá stále vybrať aj konkrétny projekt alebo „ako nový projekt".'
+    description: 'Skopírovaná úloha či podúloha v cieľovom kontakte pristane presne tam, kde je u zdroja — zreplikuje sa celá cesta projekt → úloha → podúloha (chýbajúce úrovne sa automaticky vytvoria, existujúce sa použijú). Ďalšie kopírovania z tej istej vetvy sa zbiehajú do jednej hierarchie. V okne 📤 sa dá stále vybrať aj konkrétny projekt alebo „ako nový projekt".'
   },
   {
     v: 12,

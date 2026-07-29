@@ -4,24 +4,27 @@
   <!-- Homepage / Landing Page -->
   <url>
     <loc>https://prplcrm.eu/</loc>
-    <lastmod>2026-04-07</lastmod>
+    <lastmod>2026-07-01</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="sk" href="https://prplcrm.eu/" />
   </url>
 
-  <!-- Privacy Policy (canonical URL with trailing slash — directory-style static HTML on Render) -->
+  <!-- Privacy Policy — trailing slash: /ochrana-udajov/ Render servíruje
+       natívne ako directory index (dist/ochrana-udajov/index.html) s reálnym
+       legal obsahom. Bare /ochrana-udajov padá do SPA catch-all (routing sa
+       nedá zmeniť push-om render.yaml), preto canonicalizujeme na slash formu. -->
   <url>
     <loc>https://prplcrm.eu/ochrana-udajov/</loc>
-    <lastmod>2026-04-18</lastmod>
+    <lastmod>2026-07-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
 
-  <!-- Terms of Service (canonical URL with trailing slash) -->
+  <!-- Terms of Service — trailing slash (directory index, reálny obsah). -->
   <url>
     <loc>https://prplcrm.eu/vop/</loc>
-    <lastmod>2026-04-18</lastmod>
+    <lastmod>2026-07-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>

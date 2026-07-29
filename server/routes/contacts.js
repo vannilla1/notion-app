@@ -202,6 +202,18 @@ const contactToPlainObject = (contact) => {
   return result;
 };
 
+// Cesta predkov podúlohy — od úrovne 1 po priameho rodiča cieľa (bez cieľa
+// samotného). null = podúloha v strome nie je. Používa transfer „ako v
+// origináli" na replikáciu celej hierarchie projekt → úloha → podúloha.
+const findSubtaskAncestorPath = (subs, id, path = []) => {
+  for (const s of (subs || [])) {
+    if (s.id === id) return path;
+    const deeper = findSubtaskAncestorPath(s.subtasks, id, [...path, s]);
+    if (deeper) return deeper;
+  }
+  return null;
+};
+
 // Helper function to find a subtask recursively
 const findSubtaskRecursive = (subtasks, subtaskId) => {
   if (!subtasks) return null;
@@ -1535,16 +1547,32 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     // JEDNÉHO obalu namiesto množenia projektov. Ak kópia nie je, vytvorí sa
     // „obal": projekt s metadátami zdrojového projektu bez jeho ostatných úloh.
     let createWrapper = false;
+    let insertParent = null;  // uzol, do ktorého .subtasks sa kópia vloží (default targetTask)
+    let ancestorPath = null;  // predkovia podúlohy v zdroji — replikuje sa CELÁ cesta
+    let shellsNeeded = 0;     // koľko medzičlánkov cesty bude treba v cieli vytvoriť
     if (preserveProject === true && subtaskId && !targetTask) {
+      ancestorPath = findSubtaskAncestorPath(sourceTask.subtasks, subtaskId) || [];
       if (sameContact) {
-        // V rámci toho istého kontaktu je originál projektu priamo tu
+        // Originál je priamo tu — kópia pristane vedľa originálu (rovnaký rodič)
         targetTask = sourceTask;
+        insertParent = ancestorPath.length > 0 ? ancestorPath[ancestorPath.length - 1] : sourceTask;
       } else {
         const existingWrapper = targetContact.tasks.find(t =>
           t.copiedFrom && t.copiedFrom.taskId === sourceTask.id && !t.copiedFrom.subtaskId
         );
         if (existingWrapper) targetTask = existingWrapper;
         else createWrapper = true;
+        // Bez mutácie spočítaj chýbajúce medzičlánky cesty — vstupujú do
+        // limitu podúloh. Existujúce úrovne sa spoznajú cez copiedFrom.
+        let probe = existingWrapper;
+        for (const anc of ancestorPath) {
+          const found = probe
+            ? (probe.subtasks || []).find(s =>
+                s.copiedFrom && s.copiedFrom.taskId === sourceTask.id && s.copiedFrom.subtaskId === anc.id)
+            : null;
+          if (found) { probe = found; }
+          else { shellsNeeded++; probe = null; }
+        }
       }
     }
 
@@ -1576,7 +1604,9 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       // podúlohy nového projektu — kontroluje sa pre oba režimy.
       const subtaskLimits = { free: 10, team: 25, pro: Infinity };
       const maxSubtasks = subtaskLimits[plan] || 10;
-      const insertedCount = createWrapper ? countTreeNodes(sourceNode) : countTreeNodes(sourceNode) - 1;
+      const insertedCount = createWrapper
+        ? shellsNeeded + countTreeNodes(sourceNode)
+        : countTreeNodes(sourceNode) - 1;
       if ((createWrapper || mode === 'copy') && maxSubtasks !== Infinity && insertedCount > maxSubtasks) {
         return res.status(403).json({
           message: isIosNativeApp(req)
@@ -1592,7 +1622,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         const maxSubtasks = subtaskLimits[plan] || 10;
         if (maxSubtasks !== Infinity) {
           const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
-          if (countSubtasks(targetTask.subtasks) + countTreeNodes(sourceNode) > maxSubtasks) {
+          if (countSubtasks(targetTask.subtasks) + shellsNeeded + countTreeNodes(sourceNode) > maxSubtasks) {
             return res.status(403).json({
               message: isIosNativeApp(req)
                 ? `Cieľový projekt by prekročil limit ${maxSubtasks} úloh.`
@@ -1689,6 +1719,54 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       targetTask = targetContact.tasks[targetContact.tasks.length - 1];
     }
 
+    // Replikácia cesty predkov („ako v origináli"): podúloha má v cieli
+    // pristáť PRESNE tam, kde je u zdroja — projekt → úloha → … → rodič.
+    // Chýbajúce medzičlánky sa vytvoria ako „shell" kópie (metadáta bez
+    // súrodencov a príloh), existujúce (podľa copiedFrom) sa POUŽIJÚ —
+    // opakované kopírovanie z rovnakej vetvy sa zbieha do jednej hierarchie.
+    if (preserveProject === true && subtaskId && !sameContact && ancestorPath && ancestorPath.length > 0) {
+      let container = targetTask; // koreň = obal/existujúca kópia projektu
+      for (const anc of ancestorPath) {
+        if (!container.subtasks) container.subtasks = [];
+        let next = container.subtasks.find(s =>
+          s.copiedFrom && s.copiedFrom.taskId === sourceTask.id && s.copiedFrom.subtaskId === anc.id
+        );
+        if (!next) {
+          container.subtasks.push({
+            id: uuidv4(),
+            title: anc.title,
+            completed: false,
+            dueDate: anc.dueDate || '',
+            dueTime: anc.dueTime || '',
+            notes: anc.notes || '',
+            priority: anc.priority ?? null,
+            assignedTo: [],
+            subtasks: [],
+            files: [],
+            createdAt: now,
+            modifiedAt: now,
+            timeReminders: [],
+            timeRemindersSent: [],
+            reminderSent: false,
+            lastUrgencyLevel: null,
+            copiedFrom: {
+              contactId: String(sourceContact._id),
+              contactName: sourceContact.name || '',
+              taskId: sourceTask.id,
+              subtaskId: anc.id,
+              copiedAt: now
+            }
+          });
+          // Mongoose cast (úroveň 1 = typovaný subdokument) — referenciu
+          // treba zobrať SPÄŤ z poľa; na hlbších úrovniach (plain Array)
+          // je to no-op, ale univerzálne bezpečné. Viď wrapper bug vyššie.
+          next = container.subtasks[container.subtasks.length - 1];
+        }
+        container = next;
+      }
+      insertParent = container;
+    }
+
     let insertedNode;
 
     if (mode === 'copy') {
@@ -1715,8 +1793,11 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     // Poradie zápisov: najprv vlož do cieľa, až potom (pri move) odstráň zo
     // zdroja — pri páde medzi zápismi radšej dočasný duplikát než stratený strom.
     if (targetTask) {
-      if (!targetTask.subtasks) targetTask.subtasks = [];
-      targetTask.subtasks.push(insertedNode);
+      // insertParent = replikovaný rodič v ceste predkov („ako v origináli");
+      // bez neho sa vkladá na najvyššiu úroveň projektu.
+      const parent = insertParent || targetTask;
+      if (!parent.subtasks) parent.subtasks = [];
+      parent.subtasks.push(insertedNode);
       targetTask.modifiedAt = now;
     } else {
       targetContact.tasks.push(insertedNode);
@@ -1743,7 +1824,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         } catch (e) {
           // Kompenzácia — odstráň vložený uzol z cieľa, nech nevznikne duplikát
           try {
-            const arr = targetTask ? targetTask.subtasks : targetContact.tasks;
+            const arr = targetTask ? (insertParent || targetTask).subtasks : targetContact.tasks;
             const i = arr.findIndex(n => n.id === insertedNode.id);
             if (i !== -1) arr.splice(i, 1);
             targetContact.markModified('tasks');

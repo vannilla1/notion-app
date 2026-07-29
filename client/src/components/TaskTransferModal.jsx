@@ -247,8 +247,9 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
                 item.subtaskId ? (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
                     Vloží sa <strong>ako v origináli</strong> — v každom vybranom
-                    kontakte pod projekt „{item.sourceTaskTitle || 'zdrojový projekt'}"
-                    (ak tam jeho kópia ešte nie je, vytvorí sa).
+                    kontakte na rovnaké miesto v projekte
+                    „{item.sourceTaskTitle || 'zdrojový projekt'}", vrátane
+                    nadradených úloh (chýbajúce úrovne sa vytvoria).
                   </p>
                 ) : (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -267,7 +268,7 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
                         onChange={() => setTargetTaskId('SOURCE')}
                         disabled={busy}
                       />
-                      <span>🗂️ Ako v origináli — pod projekt „{item.sourceTaskTitle || 'zdrojový projekt'}"</span>
+                      <span>🗂️ Ako v origináli — na rovnaké miesto v projekte „{item.sourceTaskTitle || 'zdrojový projekt'}" (aj s nadradenými úlohami)</span>
                     </label>
                   )}
                   <label className="contact-checkbox">

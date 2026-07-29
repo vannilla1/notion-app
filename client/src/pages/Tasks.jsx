@@ -97,7 +97,7 @@ const tasksHelpTips = [
   {
     icon: '📤',
     title: 'Kopírovanie / presun do iného kontaktu',
-    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľové kontakty a cieľ a zvolíte Kopírovať alebo Presunúť. Úlohy sa defaultne vkladajú „ako v origináli" — v cieľovom kontakte pristanú pod projektom s rovnakým názvom, ako mali u zdroja (ak tam jeho kópia ešte nie je, vytvorí sa); ďalšie úlohy z toho istého projektu sa zbiehajú do jedného. Kopírovať sa dá aj do VIACERÝCH kontaktov naraz (max 25). Kontakty, ktoré už kópiu danej položky majú, sú označené „✓ už má kópiu" a nedajú sa vybrať znova. Kópia prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami — ten má vždy jeden cieľ.'
+    description: 'Tlačidlo 📤 pri projekte alebo úlohe otvorí okno, kde v dvoch krokoch vyberiete cieľové kontakty a cieľ a zvolíte Kopírovať alebo Presunúť. Úlohy sa defaultne vkladajú „ako v origináli" — v cieľovom kontakte pristanú presne tam, kde sú u zdroja: zreplikuje sa celá cesta projekt → úloha → podúloha (chýbajúce úrovne sa vytvoria, existujúce sa použijú). Kopírovať sa dá aj do VIACERÝCH kontaktov naraz (max 25). Kontakty, ktoré už kópiu danej položky majú, sú označené „✓ už má kópiu" a nedajú sa vybrať znova. Kópia prenesie aj prílohy, termíny a priradenia; v detaile nesie odkaz „📌 Skopírované z" na originál. Presun položku premiestni aj so všetkými podúlohami — ten má vždy jeden cieľ.'
   },
   {
     icon: '🏁',
