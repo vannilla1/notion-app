@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import api from '../api/api';
 
-// Strop hromadného kopírovania — drží batch pod rate limitom (100 req/min)
-// a ohraničuje objem duplikovaných príloh na jeden klik.
-const MAX_TARGETS = 10;
+// Strop hromadného kopírovania — drží batch bezpečne pod rate limitom
+// (100 req/min aj s background refetchmi) a ohraničuje objem duplikovaných
+// príloh na jeden klik.
+const MAX_TARGETS = 25;
 
 // Slovenské skloňovanie: 1 kontakt / 2–4 kontakty / 5+ kontaktov
 const kontaktSklon = (n) => (n === 1 ? 'kontakt' : n < 5 ? 'kontakty' : 'kontaktov');
@@ -37,6 +38,26 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
 
   const contactId = (c) => c.id || c._id;
   const contactName = (cid) => contacts.find(c => contactId(c) === cid)?.name || 'kontakt';
+
+  // Kontakty, ktoré UŽ majú kópiu tejto položky — každá kópia nesie
+  // copiedFrom odkaz na zdroj (taskId + subtaskId), takže ich vieme nájsť
+  // bez akéhokoľvek ďalšieho ukladania. V zozname sa označia „už má kópiu"
+  // a nedajú sa zaškrtnúť — žiadne duplicitné kópie a user si nemusí
+  // pamätať, kam už kopíroval. Kópia môže byť projekt aj vnorená úloha
+  // (rekurzívny prechod); po zmazaní kópie sa kontakt sám sprístupní.
+  const alreadyCopiedSet = useMemo(() => {
+    const srcTaskId = item.taskId;
+    const srcSubtaskId = item.subtaskId || null;
+    const matches = (n) => n?.copiedFrom
+      && n.copiedFrom.taskId === srcTaskId
+      && (n.copiedFrom.subtaskId || null) === srcSubtaskId;
+    const walk = (nodes) => (nodes || []).some(n => matches(n) || walk(n.subtasks));
+    const set = new Set();
+    for (const c of contacts) {
+      if (walk(c.tasks)) set.add(contactId(c));
+    }
+    return set;
+  }, [contacts, item.taskId, item.subtaskId]);
   const multi = targetContactIds.length > 1;
   const overLimit = targetContactIds.length > MAX_TARGETS;
   // Pri jednom cieli vieme ponúknuť aj konkrétny projekt daného kontaktu
@@ -164,17 +185,24 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
               <div className="multi-select-contacts">
                 {contacts.map(c => {
                   const cid = contactId(c);
+                  const alreadyCopied = alreadyCopiedSet.has(cid);
                   return (
-                    <label key={cid} className="contact-checkbox">
+                    <label
+                      key={cid}
+                      className="contact-checkbox"
+                      style={alreadyCopied ? { opacity: 0.55, cursor: 'default' } : undefined}
+                      title={alreadyCopied ? 'Tento kontakt už má kópiu tejto položky' : undefined}
+                    >
                       <input
                         type="checkbox"
-                        checked={targetContactIds.includes(cid)}
+                        checked={alreadyCopied || targetContactIds.includes(cid)}
                         onChange={() => toggleContact(cid)}
-                        disabled={busy}
+                        disabled={busy || alreadyCopied}
                       />
                       <span>
                         {c.name || '(bez mena)'} {c.company ? `(${c.company})` : ''}
                         {cid === item.contactId ? ' — aktuálny kontakt' : ''}
+                        {alreadyCopied ? ' — ✓ už má kópiu' : ''}
                       </span>
                     </label>
                   );
