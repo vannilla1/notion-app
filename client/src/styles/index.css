@@ -3002,7 +3002,15 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   z-index: 1000;
-  overflow: hidden;
+  /* Menu (na mobile hostí aj zoznam prostredí) môže prerásť výšku obrazovky
+     — bez vlastného scrollu by spodné položky boli nedosiahnuteľné. 90px ≈
+     hlavička + medzera; vh fallback pre staršie WebView bez dvh. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  max-height: calc(100vh - 90px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 90px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
 }
 
 .user-menu-header {
