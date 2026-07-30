@@ -214,6 +214,19 @@ const findSubtaskAncestorPath = (subs, id, path = []) => {
   return null;
 };
 
+// Párovanie úrovní pri transfere „ako v origináli". Kontakty majú vlastné
+// ROVNAKO POMENOVANÉ štruktúry (napr. úloha „Prevádzka" v projekte každého
+// kontaktu), ktoré NEvznikli kopírovaním — copiedFrom na ne neukazuje.
+// Preto sa úroveň páruje: 1. cez copiedFrom (skoršie repliky — prežije aj
+// premenovanie), 2. podľa názvu (trim + case-insensitive).
+const normTitle = (s) => String(s || '').trim().toLocaleLowerCase('sk');
+const findTransferLevelMatch = (nodes, sourceTaskId, srcLevelId, srcTitle) => {
+  const arr = nodes || [];
+  return arr.find(n => n.copiedFrom && n.copiedFrom.taskId === sourceTaskId
+      && (n.copiedFrom.subtaskId || null) === (srcLevelId || null))
+    || arr.find(n => normTitle(n.title) === normTitle(srcTitle));
+};
+
 // Helper function to find a subtask recursively
 const findSubtaskRecursive = (subtasks, subtaskId) => {
   if (!subtasks) return null;
@@ -1539,17 +1552,23 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       targetTask = targetContact.tasks[ti];
     }
 
-    // „Ako v origináli" — úloha má v cieľovom kontakte pristáť pod projektom
-    // zodpovedajúcim jej ZDROJOVÉMU projektu (replikuje sa štruktúra
-    // kontakt → projekt → úloha; úloha sa nepovyšuje na samostatný projekt).
-    // Existujúca kópia projektu sa nájde cez copiedFrom (taskId zdroja bez
-    // subtaskId) — ďalšie úlohy z toho istého projektu sa tak zbiehajú do
-    // JEDNÉHO obalu namiesto množenia projektov. Ak kópia nie je, vytvorí sa
-    // „obal": projekt s metadátami zdrojového projektu bez jeho ostatných úloh.
+    // „Ako v origináli" — kópia má v cieľovom kontakte pristáť na ROVNAKOM
+    // MIESTE ako u zdroja: v úlohe s rovnakým názvom v jeho VLASTNOM projekte
+    // (kontakty majú rovnako pomenované štruktúry — napr. „Prevádzka" v
+    // projekte každého kontaktu). Vyberie sa projekt cieľa, ktorý už obsahuje
+    // najväčší kus cesty predkov (párovanie copiedFrom ALEBO názov, viď
+    // findTransferLevelMatch); chýbajúci zvyšok cesty sa dotvorí ako „shell"
+    // medzičlánky. Až keď cieľ nemá NIČ zodpovedajúce (ani rovnako pomenovaný
+    // projekt, ani prvú úroveň cesty), vytvorí sa replika zdrojového projektu.
     let createWrapper = false;
     let insertParent = null;  // uzol, do ktorého .subtasks sa kópia vloží (default targetTask)
-    let ancestorPath = null;  // predkovia podúlohy v zdroji — replikuje sa CELÁ cesta
+    let ancestorPath = null;  // predkovia podúlohy v zdroji — cesta, ktorá sa páruje/dotvára
     let shellsNeeded = 0;     // koľko medzičlánkov cesty bude treba v cieli vytvoriť
+    // Najvrchnejší uzol VYTVORENÝ týmto requestom (wrapper alebo prvý shell)
+    // — move-kompenzácia ho odstráni celý, aby po zlyhaní save zdroja
+    // neostali v cieli prázdne shell úlohy (odstránenie vrchného uzla
+    // zmaže aj všetko, čo request vytvoril pod ním).
+    let firstCreatedNode = null;
     if (preserveProject === true && subtaskId && !targetTask) {
       ancestorPath = findSubtaskAncestorPath(sourceTask.subtasks, subtaskId) || [];
       if (sameContact) {
@@ -1557,21 +1576,46 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         targetTask = sourceTask;
         insertParent = ancestorPath.length > 0 ? ancestorPath[ancestorPath.length - 1] : sourceTask;
       } else {
-        const existingWrapper = targetContact.tasks.find(t =>
-          t.copiedFrom && t.copiedFrom.taskId === sourceTask.id && !t.copiedFrom.subtaskId
-        );
-        if (existingWrapper) targetTask = existingWrapper;
-        else createWrapper = true;
-        // Bez mutácie spočítaj chýbajúce medzičlánky cesty — vstupujú do
-        // limitu podúloh. Existujúce úrovne sa spoznajú cez copiedFrom.
-        let probe = existingWrapper;
-        for (const anc of ancestorPath) {
-          const found = probe
-            ? (probe.subtasks || []).find(s =>
-                s.copiedFrom && s.copiedFrom.taskId === sourceTask.id && s.copiedFrom.subtaskId === anc.id)
-            : null;
-          if (found) { probe = found; }
-          else { shellsNeeded++; probe = null; }
+        // Ohodnoť projekty cieľa: koľko úrovní cesty predkov už obsahujú
+        // (chain) a či zodpovedajú zdrojovému projektu (selfMatch — replika
+        // cez copiedFrom alebo rovnaký názov). VLASTNÝ projekt kontaktu má
+        // absolútnu prednosť pred replikou z minulosti, len čo má akúkoľvek
+        // zhodu — užívateľ chce kópie vo svojej štruktúre a replika mu ich
+        // nesmie „ukradnúť" ani dlhším chainom (chýbajúce úrovne sa vo
+        // vlastnom projekte dotvoria). Medzi rovnocennými vyhráva dlhší
+        // chain, potom selfMatch, potom poradie. Bez mutácie — reálne
+        // úrovne nájde mutačná fáza ROVNAKÝM kritériom nižšie.
+        let best = null;
+        targetContact.tasks.forEach((t, idx) => {
+          const isReplica = !!(t.copiedFrom && t.copiedFrom.taskId === sourceTask.id && !t.copiedFrom.subtaskId);
+          const selfMatch = isReplica || normTitle(t.title) === normTitle(sourceTask.title);
+          let node = t;
+          let chainLen = 0;
+          for (const anc of ancestorPath) {
+            const next = node ? findTransferLevelMatch(node.subtasks, sourceTask.id, anc.id, anc.title) : null;
+            if (!next) break;
+            chainLen++;
+            node = next;
+          }
+          // Súťažia len KVALIFIKOVANÉ projekty (aspoň kus cesty alebo
+          // selfMatch) — inak by projekt bez akejkoľvek zhody „porazil"
+          // repliku len preto, že nie je replikou.
+          if (chainLen === 0 && !selfMatch) return;
+          const cand = { task: t, idx, isReplica, selfMatch, chainLen };
+          const better = !best
+            || (!cand.isReplica && best.isReplica)
+            || (cand.isReplica === best.isReplica && (
+              cand.chainLen > best.chainLen ||
+              (cand.chainLen === best.chainLen && cand.selfMatch && !best.selfMatch)
+            ));
+          if (better) best = cand;
+        });
+        if (best) {
+          targetTask = best.task;
+          shellsNeeded = ancestorPath.length - best.chainLen;
+        } else {
+          createWrapper = true;
+          shellsNeeded = ancestorPath.length;
         }
       }
     }
@@ -1717,20 +1761,21 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       // — presne produkčný bug z 30.7., 19 prázdnych projektov). Preto
       // referenciu berieme SPÄŤ z poľa.
       targetTask = targetContact.tasks[targetContact.tasks.length - 1];
+      firstCreatedNode = { arr: targetContact.tasks, id: targetTask.id };
     }
 
-    // Replikácia cesty predkov („ako v origináli"): podúloha má v cieli
-    // pristáť PRESNE tam, kde je u zdroja — projekt → úloha → … → rodič.
-    // Chýbajúce medzičlánky sa vytvoria ako „shell" kópie (metadáta bez
-    // súrodencov a príloh), existujúce (podľa copiedFrom) sa POUŽIJÚ —
-    // opakované kopírovanie z rovnakej vetvy sa zbieha do jednej hierarchie.
+    // Dotvorenie cesty predkov („ako v origináli"): podúloha má v cieli
+    // pristáť PRESNE tam, kde je u zdroja — v úlohe s rovnakým názvom.
+    // Existujúce úrovne sa POUŽIJÚ (párovanie copiedFrom alebo názov —
+    // ROVNAKÉ kritérium ako výber projektu vyššie, inak by sa shellsNeeded
+    // rozišiel s realitou), len chýbajúce sa vytvoria ako „shell" kópie
+    // (metadáta bez súrodencov a príloh). Vlastné úlohy cieľa sa NEMENIA —
+    // len sa do nich vloží; copiedFrom sa im nepridáva.
     if (preserveProject === true && subtaskId && !sameContact && ancestorPath && ancestorPath.length > 0) {
-      let container = targetTask; // koreň = obal/existujúca kópia projektu
+      let container = targetTask; // koreň = vybraný projekt cieľa (alebo replika)
       for (const anc of ancestorPath) {
         if (!container.subtasks) container.subtasks = [];
-        let next = container.subtasks.find(s =>
-          s.copiedFrom && s.copiedFrom.taskId === sourceTask.id && s.copiedFrom.subtaskId === anc.id
-        );
+        let next = findTransferLevelMatch(container.subtasks, sourceTask.id, anc.id, anc.title);
         if (!next) {
           container.subtasks.push({
             id: uuidv4(),
@@ -1761,6 +1806,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
           // treba zobrať SPÄŤ z poľa; na hlbších úrovniach (plain Array)
           // je to no-op, ale univerzálne bezpečné. Viď wrapper bug vyššie.
           next = container.subtasks[container.subtasks.length - 1];
+          if (!firstCreatedNode) firstCreatedNode = { arr: container.subtasks, id: next.id };
         }
         container = next;
       }
@@ -1822,11 +1868,19 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         try {
           await sourceContact.save();
         } catch (e) {
-          // Kompenzácia — odstráň vložený uzol z cieľa, nech nevznikne duplikát
+          // Kompenzácia — odstráň z cieľa všetko, čo tento request vytvoril:
+          // celý wrapper/prvý shell (vrátane uzla vloženého pod ním), inak
+          // len vložený uzol. Bez toho by po zlyhaní save zdroja ostali v
+          // cieľovom projekte prázdne shell úlohy.
           try {
-            const arr = targetTask ? (insertParent || targetTask).subtasks : targetContact.tasks;
-            const i = arr.findIndex(n => n.id === insertedNode.id);
-            if (i !== -1) arr.splice(i, 1);
+            if (firstCreatedNode) {
+              const i = firstCreatedNode.arr.findIndex(n => n.id === firstCreatedNode.id);
+              if (i !== -1) firstCreatedNode.arr.splice(i, 1);
+            } else {
+              const arr = targetTask ? (insertParent || targetTask).subtasks : targetContact.tasks;
+              const i = arr.findIndex(n => n.id === insertedNode.id);
+              if (i !== -1) arr.splice(i, 1);
+            }
             targetContact.markModified('tasks');
             await targetContact.save();
           } catch { /* best-effort */ }

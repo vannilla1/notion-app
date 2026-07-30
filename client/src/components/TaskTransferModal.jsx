@@ -246,10 +246,20 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
               {multi ? (
                 item.subtaskId ? (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                    Vloží sa <strong>ako v origináli</strong> — v každom vybranom
-                    kontakte na rovnaké miesto v projekte
-                    „{item.sourceTaskTitle || 'zdrojový projekt'}", vrátane
-                    nadradených úloh (chýbajúce úrovne sa vytvoria).
+                    {item.sourceParentTitle ? (
+                      <>
+                        Vloží sa <strong>ako v origináli</strong> — v každom vybranom
+                        kontakte do úlohy „{item.sourceParentTitle}" (rovnako
+                        pomenovanej ako u zdroja). Ak ju kontakt nemá, chýbajúca
+                        časť štruktúry sa vytvorí.
+                      </>
+                    ) : (
+                      <>
+                        Vloží sa <strong>ako v origináli</strong> — v každom vybranom
+                        kontakte do rovnako pomenovaného projektu ako u zdroja.
+                        Ak ho kontakt nemá, vytvorí sa.
+                      </>
+                    )}
                   </p>
                 ) : (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -268,7 +278,11 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
                         onChange={() => setTargetTaskId('SOURCE')}
                         disabled={busy}
                       />
-                      <span>🗂️ Ako v origináli — na rovnaké miesto v projekte „{item.sourceTaskTitle || 'zdrojový projekt'}" (aj s nadradenými úlohami)</span>
+                      <span>
+                        {item.sourceParentTitle
+                          ? `🗂️ Ako v origináli — do úlohy „${item.sourceParentTitle}" ako u zdroja (rovnako pomenovaná sa použije, chýbajúca vytvorí)`
+                          : '🗂️ Ako v origináli — do rovnako pomenovaného projektu ako u zdroja (ak chýba, vytvorí sa)'}
+                      </span>
                     </label>
                   )}
                   <label className="contact-checkbox">
