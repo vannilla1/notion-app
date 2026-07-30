@@ -7,7 +7,9 @@
  *   import { debug } from '../utils/debug';
  *   debug.log('[DeepLink] Tasks: processing', id);
  *
- * Pre skutočné chyby pouzi console.error/console.warn — tie idú cez Sentry.
+ * Pre skutočné chyby použi reportError() z utils/reportError — ide do
+ * in-house Diagnostiky v AdminPaneli. Samotné console.error/warn sa nikam
+ * neposielajú (Sentry je odstránený).
  */
 const noop = () => {};
 

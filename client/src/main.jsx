@@ -35,9 +35,8 @@ installGlobalErrorHandlers();
   } catch { /* never break boot */ }
 })();
 
-// Minimal local error boundary — renders fallback UI without requiring the
-// Sentry bundle on first paint. Sentry still captures errors via its global
-// handlers once it finishes loading (see deferred init below).
+// Minimal local error boundary — renders fallback UI a chybu hlási cez
+// reportError() do in-house Diagnostiky (viď componentDidCatch nižšie).
 class AppErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

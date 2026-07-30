@@ -17,8 +17,6 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: info
-      - key: SENTRY_DSN
-        sync: false
       - key: MONGODB_URI
         sync: false
       - key: VAPID_PUBLIC_KEY
