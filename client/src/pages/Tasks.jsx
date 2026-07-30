@@ -3479,10 +3479,12 @@ function Tasks() {
                             </div>
                           </div>
                         ) : (
-                          {/* stopPropagation: klik by inak zbublal aj na onClick
-                              rodiča .task-main a toggle by sa vykonal DVAKRÁT
-                              (otvoriť+zavrieť = „nefunguje rozklik") */}
-                          <div className="task-content" onClick={(e) => { e.stopPropagation(); toggleTaskExpanded(task.id); }}>
+                          <div className="task-content" onClick={(e) => {
+                            // Klik by inak zbublal aj na onClick rodiča .task-main
+                            // a toggle by bežal DVAKRÁT (otvoriť+zavrieť = mŕtvy rozklik)
+                            e.stopPropagation();
+                            toggleTaskExpanded(task.id);
+                          }}>
                             <div className="task-title">{task.title}</div>
                             <div className="task-meta">
                               <span
