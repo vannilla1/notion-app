@@ -3,41 +3,94 @@ const { sendAdminEmail } = require('../services/adminEmailService');
 const logger = require('../utils/logger');
 
 /**
- * Error alerting — každú hodinu pozrie koľko NOVÝCH fingerprintov vzniklo
- * za posledných 60 min. Ak > threshold → pošle súhrný email SuperAdminovi.
+ * Error alerting — každú hodinu vyhodnotí dve nezávislé podmienky a pri
+ * ktorejkoľvek pošle súhrnný email SuperAdminovi (ADMIN_EMAIL):
  *
- * Prečo nie "koľko errorov celkovo": jedna chyba z divokej slučky by
- * spamovala alerty. Nás zaujíma RÔZNORODOSŤ (nový druh chyby po deploy-i =
- * regresia), nie opakovanie toho istého.
+ *  1. NOVÉ DRUHY chýb: > NEW_THRESHOLD nových fingerprintov za hodinu.
+ *     Nový druh chyby po deployi = regresia. Zámerne cez firstSeen, takže
+ *     re-opened chyby (posunutý lastSeen, pôvodný firstSeen) sa nerátajú.
  *
- * Prečo email a nie push: alert by mal prekľuchnúť cez poľa (aj keď user
- * zatvoril PWA), push sa stráca mimo appky.
+ *  2. NÁRAST VÝSKYTOV: celkový počet výskytov (suma `count` naprieč
+ *     fingerprintmi) narástol od minulého behu o > SPIKE_THRESHOLD.
+ *     Pokrýva scenár, ktorý podmienka 1 nevidí: JEDNA známa chyba začne
+ *     po deployi padať stovky ráz za hodinu (0 nových fingerprintov).
+ *     Baseline žije v pamäti procesu — po reštarte servera prvý beh len
+ *     založí baseline a spike nevyhodnocuje (deploy tak sám o sebe alert
+ *     nespustí). TTL mazanie starých dokumentov môže sumu znížiť —
+ *     záporná delta sa berie ako 0 a baseline sa preloží nižšie.
+ *
+ * Prečo email a nie push: alert má prekĺznuť aj keď je appka zavretá;
+ * push sa mimo appky stráca.
  */
 
 const INTERVAL_MS = 60 * 60 * 1000; // 1h
 const LOOKBACK_MS = INTERVAL_MS; // pozri poslednú hodinu
-const DEFAULT_THRESHOLD = 10; // > 10 nových fingerprintov / h = alert
 
-async function checkAndAlert(threshold = DEFAULT_THRESHOLD) {
+// Prahy sa dajú prestaviť bez deployu kódu cez env (Render dashboard).
+const NEW_THRESHOLD = parseInt(process.env.ERROR_ALERT_THRESHOLD, 10) || 10;
+const SPIKE_THRESHOLD = parseInt(process.env.ERROR_ALERT_SPIKE_THRESHOLD, 10) || 100;
+
+// Baseline pre spike detekciu — { total, docCount } z minulého behu.
+// null = ešte nebol beh (po boote) → prvý beh len založí baseline.
+let occurrenceBaseline = null;
+
+/** Suma všetkých výskytov + počet dokumentov (jeden aggregate roundtrip). */
+async function readOccurrenceTotals() {
+  const agg = await ServerError.aggregate([
+    { $group: { _id: null, total: { $sum: '$count' }, docCount: { $sum: 1 } } }
+  ]);
+  return agg[0] ? { total: agg[0].total, docCount: agg[0].docCount } : { total: 0, docCount: 0 };
+}
+
+async function checkAndAlert(threshold = NEW_THRESHOLD, spikeThreshold = SPIKE_THRESHOLD) {
   try {
     const since = new Date(Date.now() - LOOKBACK_MS);
 
-    // Nové fingerprinty = firstSeen v poslednom okne.
-    // Toto zámerne vynecháva re-open-ed chyby (lastSeen sa posunie, ale
-    // firstSeen zostáva pôvodný) — chceme signalizovať iba NOVÉ druhy chýb.
-    const newErrors = await ServerError.find(
-      { firstSeen: { $gte: since } },
-      { name: 1, message: 1, source: 1, path: 1, count: 1, statusCode: 1 }
-    ).sort({ count: -1 }).limit(20).lean();
+    // ── Podmienka 1: nové fingerprinty za poslednú hodinu ──
+    // countDocuments zvlášť — limit(20) na liste by pri väčšom náraze
+    // skreslil vykazovaný počet (visel by na "20").
+    const newCount = await ServerError.countDocuments({ firstSeen: { $gte: since } });
+    const newErrors = newCount > 0
+      ? await ServerError.find(
+          { firstSeen: { $gte: since } },
+          { name: 1, message: 1, source: 1, path: 1, count: 1, statusCode: 1 }
+        ).sort({ count: -1 }).limit(15).lean()
+      : [];
 
-    if (newErrors.length <= threshold) {
-      logger.info('[ErrorAlerter] No alert', { newFingerprints: newErrors.length, threshold });
-      return { alerted: false, count: newErrors.length };
+    // ── Podmienka 2: nárast celkových výskytov od minulého behu ──
+    const totals = await readOccurrenceTotals();
+    let spikeDelta = null; // null = baseline ešte nebola (prvý beh po boote)
+    if (occurrenceBaseline !== null) {
+      spikeDelta = Math.max(0, totals.total - occurrenceBaseline.total);
+    }
+    occurrenceBaseline = totals;
+
+    const newTripped = newCount > threshold;
+    const spikeTripped = spikeDelta !== null && spikeDelta > spikeThreshold;
+
+    if (!newTripped && !spikeTripped) {
+      logger.info('[ErrorAlerter] No alert', {
+        newFingerprints: newCount, threshold,
+        occurrenceDelta: spikeDelta, spikeThreshold
+      });
+      return { alerted: false, newCount, spikeDelta };
     }
 
-    // Zostav HTML — jednoduchá tabuľka, inline styles (väčšina mail klientov
-    // ignoruje <style> bloky).
-    const rows = newErrors.slice(0, 15).map(e => `
+    // Pri spike-u bez nových fingerprintov ukáž, ČO prší — chyby aktívne
+    // v poslednej hodine (lastSeen), zoradené podľa kumulatívneho count.
+    const activeErrors = (spikeTripped && newErrors.length === 0)
+      ? await ServerError.find(
+          { lastSeen: { $gte: since } },
+          { name: 1, message: 1, source: 1, path: 1, count: 1, statusCode: 1 }
+        ).sort({ count: -1 }).limit(15).lean()
+      : [];
+
+    const listed = newErrors.length > 0 ? newErrors : activeErrors;
+    const listLabel = newErrors.length > 0 ? 'Nové chyby' : 'Aktívne chyby (posledná hodina)';
+
+    // Jednoduchá tabuľka s inline styles — väčšina mail klientov ignoruje
+    // <style> bloky.
+    const rows = listed.map(e => `
       <tr>
         <td style="padding:6px 10px;border-bottom:1px solid #eee">
           <span style="background:${e.source === 'client' ? '#dbeafe' : '#fee2e2'};padding:2px 6px;border-radius:3px;font-size:11px">
@@ -59,14 +112,22 @@ async function checkAndAlert(threshold = DEFAULT_THRESHOLD) {
       </tr>
     `).join('');
 
+    const reasons = [];
+    if (newTripped) {
+      reasons.push(`<strong>${newCount}</strong> nových druhov chýb (limit ${threshold})`);
+    }
+    if (spikeTripped) {
+      reasons.push(`<strong>+${spikeDelta}</strong> výskytov spolu (limit ${spikeThreshold})`);
+    }
+
     const html = `
       <div style="font-family:system-ui,sans-serif;max-width:640px">
         <h2 style="color:#dc2626;margin-bottom:4px">⚠️ Nový náraz chýb v Prpl CRM</h2>
         <p style="color:#64748b;margin-top:0">
-          Za poslednú hodinu pribudlo <strong>${newErrors.length}</strong> nových fingerprintov
-          (threshold = ${threshold}). Najčastejšie:
+          Za poslednú hodinu: ${reasons.join(' a ')}.
         </p>
-        <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <p style="color:#475569;font-size:13px;margin:12px 0 0">${listLabel}:</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:6px">
           <thead>
             <tr style="background:#f8fafc;text-align:left">
               <th style="padding:6px 10px;font-size:12px;color:#475569">Zdroj</th>
@@ -87,9 +148,15 @@ async function checkAndAlert(threshold = DEFAULT_THRESHOLD) {
       </div>
     `;
 
-    await sendAdminEmail(`⚠️ ${newErrors.length} nových chýb za 1h`, html);
-    logger.warn('[ErrorAlerter] Alert sent', { newFingerprints: newErrors.length, threshold });
-    return { alerted: true, count: newErrors.length };
+    const subjectParts = [];
+    if (newTripped) subjectParts.push(`${newCount} nových chýb`);
+    if (spikeTripped) subjectParts.push(`+${spikeDelta} výskytov`);
+    await sendAdminEmail(`⚠️ ${subjectParts.join(', ')} za 1h`, html);
+    logger.warn('[ErrorAlerter] Alert sent', {
+      newFingerprints: newCount, threshold,
+      occurrenceDelta: spikeDelta, spikeThreshold
+    });
+    return { alerted: true, newCount, spikeDelta };
   } catch (err) {
     logger.error('[ErrorAlerter] Check failed', { error: err.message, stack: err.stack });
     return { alerted: false, error: err.message };
@@ -107,12 +174,11 @@ function escapeHtml(s) {
 }
 
 /**
- * Schedule každú hodinu. Prvé spustenie za 10 min po bootu servera
- * (dá čas stabilne zapnutému procesu).
+ * Schedule každú hodinu. Prvé spustenie za 10 min po boote servera —
+ * založí spike baseline a nechá procesu čas na stabilizáciu (errory
+ * z cold-cache boot problémov nespustia alert hneď po deployi).
  */
 function scheduleErrorAlerter() {
-  // Delay prvého spustenia aby sme neposielali alert hneď po deploy-i
-  // (keď sa počas boot-u nahromadili errory z cold cache problémov).
   setTimeout(() => {
     checkAndAlert().catch(() => {});
   }, 10 * 60 * 1000);
@@ -121,7 +187,7 @@ function scheduleErrorAlerter() {
     checkAndAlert().catch(() => {});
   }, INTERVAL_MS);
 
-  logger.info('[ErrorAlerter] Scheduled — every 1h, threshold=' + DEFAULT_THRESHOLD + ' new fingerprints');
+  logger.info(`[ErrorAlerter] Scheduled — every 1h, new>${NEW_THRESHOLD} fingerprints alebo +${SPIKE_THRESHOLD} výskytov`);
 }
 
 module.exports = {

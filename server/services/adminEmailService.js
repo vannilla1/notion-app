@@ -50,6 +50,7 @@ const sendAdminEmail = async (subject, html) => {
       from: process.env.SMTP_FROM || '"PrplCRM System" <hello@prplcrm.eu>',
       to: adminEmail,
       subject: `[PrplCRM Admin] ${subject}`,
+      text: htmlToText(html), // multipart/alternative — viď komentár pri htmlToText
       html
     });
   } catch (err) {
