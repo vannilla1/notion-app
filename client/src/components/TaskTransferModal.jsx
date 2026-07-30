@@ -307,7 +307,14 @@ function TaskTransferModal({ item, contacts, onClose, onDone, onRefresh }) {
                           onChange={() => setTargetTaskId(t.id)}
                           disabled={busy}
                         />
-                        <span>{t.completed ? '✅ ' : ''}{t.title}</span>
+                        <span>
+                          {t.completed ? '✅ ' : ''}{t.title}
+                          {item.subtaskId && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                              {' '}— vloží sa ako nová úloha navrch tohto projektu
+                            </span>
+                          )}
+                        </span>
                       </label>
                     ))}
                 </div>
