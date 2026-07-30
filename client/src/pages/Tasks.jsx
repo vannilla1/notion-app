@@ -1304,6 +1304,21 @@ function Tasks() {
     }
   }, []);
 
+  // Rozbalenie projektu kliknutím. Akordeón (otvorený max jeden) pri
+  // rozkliknutí zbalí predtým otvorený projekt — ak bol NAD klikaným a mal
+  // veľký strom, obsah sa posunie o stovky pixelov a rozkliknutý projekt
+  // „ujde" z obrazovky. Po prekreslení ho preto pritiahni do záberu;
+  // block:'nearest' nescrolluje, keď už viditeľný je (žiadne zbytočné skoky).
+  const toggleTaskExpanded = useCallback((taskId) => {
+    setExpandedTask(prev => (prev === taskId ? null : taskId));
+    if (expandedTask !== taskId) {
+      setTimeout(() => {
+        const el = taskRefs.current[taskId];
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+    }
+  }, [expandedTask]);
+
   // Scroll to a subtask DOM element (data-subtask-id). Retries because the
   // subtask only appears after its ancestor chain is expanded (animation +
   // re-render). 30 × 100ms = 3s window.
@@ -3347,7 +3362,7 @@ function Tasks() {
                         // Only expand if clicking on the main area, not on buttons/checkbox/drag handle
                         if (e.target.closest('.task-checkbox-styled, .drag-handle, .task-actions, .btn-icon, .task-edit-form, .contact-badge-clickable')) return;
                         if (editingTask === task.id) return;
-                        setExpandedTask(expandedTask === task.id ? null : task.id);
+                        toggleTaskExpanded(task.id);
                       }}>
                         {editingTask !== task.id && <span className="drag-handle" {...dragListeners}>⠿</span>}
                         <div
@@ -3464,7 +3479,7 @@ function Tasks() {
                             </div>
                           </div>
                         ) : (
-                          <div className="task-content" onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}>
+                          <div className="task-content" onClick={() => toggleTaskExpanded(task.id)}>
                             <div className="task-title">{task.title}</div>
                             <div className="task-meta">
                               <span
