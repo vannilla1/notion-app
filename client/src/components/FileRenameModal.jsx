@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { removeKeyboardPrimers } from '../utils/keyboardPrimer';
 
 /**
  * FileRenameModal — pri vkladaní prílohy umožní prepísať názov súboru.
@@ -36,11 +37,15 @@ export default function FileRenameModal({ file, fileName, title, confirmLabel, o
 
   useEffect(() => {
     // Auto-focus + označ celý základ názvu, nech sa dá hneď prepísať.
+    // Klávesnicu na mobile otvoril „primer" input už v handleri gesta
+    // (viď utils/keyboardPrimer) — tu sa fokus len prenesie na skutočné
+    // pole (prenos medzi inputmi klávesnicu nezatvára) a primer sa uprace.
     const t = setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
+      removeKeyboardPrimers();
     }, 50);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); removeKeyboardPrimers(); };
   }, []);
 
   const submit = () => {

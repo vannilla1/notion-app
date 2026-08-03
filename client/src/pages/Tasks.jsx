@@ -6,6 +6,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
@@ -2315,7 +2316,7 @@ function Tasks() {
                     <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                     <span className="task-file-size">{formatFileSize(file.size)}</span>
                     <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName, subtask.id)} title="Stiahnuť">⬇️</button>
-                    <button className="btn-icon-sm" onClick={() => setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName, subtaskId: subtask.id })} title="Premenovať">✏️</button>
+                    <button className="btn-icon-sm" onClick={() => { primeMobileKeyboard(); setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName, subtaskId: subtask.id }); }} title="Premenovať">✏️</button>
                     <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id, subtask.id)} title="Vymazať">×</button>
                   </div>
                 );
@@ -2596,7 +2597,9 @@ function Tasks() {
     const file = e.target.files[0];
     if (!file || !activeFileTarget) return;
     // Najprv otvor modal na pomenovanie (kvôli "image.jpg" z fotoaparátu).
-    // Upload sa spustí až po potvrdení v modale.
+    // Upload sa spustí až po potvrdení v modale. Primer ešte V RÁMCI gesta
+    // otvorí mobilnú klávesnicu — modal si fokus prenesie.
+    primeMobileKeyboard();
     setPendingUpload({ file, taskId: activeFileTarget.taskId, subtaskId: activeFileTarget.subtaskId });
     e.target.value = '';
   };
@@ -3608,7 +3611,7 @@ function Tasks() {
                                       <span className="task-file-name task-file-name-clickable" title={file.originalName} onClick={() => setPreviewFile({ file, downloadUrl: dlUrl })}>{file.originalName}</span>
                                       <span className="task-file-size">{formatFileSize(file.size)}</span>
                                       <button className="btn-icon-sm" onClick={() => handleFileDownload(task.id || task._id, file.id, file.originalName)} title="Stiahnuť">⬇️</button>
-                                      <button className="btn-icon-sm" onClick={() => setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName })} title="Premenovať">✏️</button>
+                                      <button className="btn-icon-sm" onClick={() => { primeMobileKeyboard(); setRenamingFile({ taskId: task.id || task._id, fileId: file.id, currentName: file.originalName }); }} title="Premenovať">✏️</button>
                                       <button className="btn-icon-sm btn-delete" onClick={() => handleFileDelete(task.id || task._id, file.id)} title="Vymazať">×</button>
                                     </div>
                                   );

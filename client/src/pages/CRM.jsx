@@ -15,6 +15,7 @@ import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -1896,7 +1897,9 @@ function CRM() {
                                     const f = e.target.files[0];
                                     // Otvor modal na pomenovanie (kvôli "image.jpg" z fotoaparátu);
                                     // upload sa spustí až po potvrdení.
-                                    if (f) setPendingUpload({ file: f, contactId: contact.id });
+                                    // Primer ešte V RÁMCI gesta otvorí mobilnú
+                                    // klávesnicu — rename modal si fokus prenesie
+                                    if (f) { primeMobileKeyboard(); setPendingUpload({ file: f, contactId: contact.id }); }
                                     e.target.value = '';
                                   }}
                                   disabled={uploadingFile === contact.id}
@@ -1943,7 +1946,7 @@ function CRM() {
                                         {downloadingFileId === file.id ? '⏳' : '⬇️'}
                                       </button>
                                       <button
-                                        onClick={() => setRenamingFile({ contactId: contact.id, fileId: file.id, currentName: file.originalName })}
+                                        onClick={() => { primeMobileKeyboard(); setRenamingFile({ contactId: contact.id, fileId: file.id, currentName: file.originalName }); }}
                                         className="btn-icon-sm"
                                         title="Premenovať"
                                       >
