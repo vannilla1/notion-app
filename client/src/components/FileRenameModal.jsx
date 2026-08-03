@@ -44,6 +44,11 @@ export default function FileRenameModal({ file, fileName, title, confirmLabel, o
       inputRef.current?.focus();
       inputRef.current?.select();
       removeKeyboardPrimers();
+      // Android shell: po výbere súboru v natívnom pickeri nie je fokus
+      // gestom a WebView klávesnicu neotvorí — bridge ju vyžiada natívne.
+      // iOS shell rieši to isté swizzle v ContentView (WKKeyboardDisplayFix),
+      // web mimo shellov ostáva pri primer triku.
+      try { window.NativeBridge?.showKeyboard?.(); } catch { /* web/iOS */ }
     }, 50);
     return () => { clearTimeout(t); removeKeyboardPrimers(); };
   }, []);

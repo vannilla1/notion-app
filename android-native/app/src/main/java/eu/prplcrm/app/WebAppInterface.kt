@@ -62,6 +62,24 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
 
     /**
+     * Otvorenie soft klávesnice pre input fokusnutý z JS. WebView otvorí
+     * klávesnicu len pri fokuse z priameho gesta používateľa — po výbere
+     * súboru v natívnom pickeri (galéria/kamera) už gesto nie je, takže
+     * modal na pomenovanie prílohy síce input fokusne, ale klávesnica sa
+     * neukáže. Web appka preto po prenesení fokusu zavolá tento bridge.
+     * webView.post — JavascriptInterface metódy bežia mimo UI vlákna.
+     */
+    @JavascriptInterface
+    fun showKeyboard() {
+        webView.post {
+            webView.requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(webView, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    /**
      * Identifikácia prostredia pre web appku. React kód môže detect-núť
      * že beží v natívnom Kotlin wrapperi (vs. Chrome / TWA) a podľa toho
      * sa správať — napr. použiť natívny token bridge namiesto localStorage.

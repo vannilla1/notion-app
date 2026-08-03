@@ -253,6 +253,35 @@ struct ErrorView: View {
     }
 }
 
+// MARK: - Klávesnica pri programovom fokuse (WKWebView)
+//
+// WKWebView otvorí soft klávesnicu len pri fokuse, ktorý vznikol v priamom
+// geste používateľa. Po výbere súboru v natívnom pickeri (galéria/kamera)
+// gesto nie je — modal na pomenovanie prílohy síce input fokusne, ale
+// klávesnica sa neukáže. Štandardný fix (Capacitor/Cordova ho používajú
+// roky, App Review bežne prechádza): swizzle interného _elementDidFocus
+// tak, aby userIsInteracting bolo vždy true → focus() vždy otvorí
+// klávesnicu. Selector platí pre iOS 13+ (deployment target appky je vyšší).
+private typealias ElementDidFocusClosure = @convention(c) (Any, Selector, UnsafeRawPointer, Bool, Bool, Bool, Any?) -> Void
+
+enum WKKeyboardDisplayFix {
+    private static var applied = false
+
+    static func apply() {
+        guard !applied else { return }
+        applied = true
+        guard let contentViewClass: AnyClass = NSClassFromString("WKContentView") else { return }
+        let selector = sel_getUid("_elementDidFocus:userIsInteracting:blurPreviousNode:activityStateChanges:userObject:")
+        guard let method = class_getInstanceMethod(contentViewClass, selector) else { return }
+        let originalImp = method_getImplementation(method)
+        let block: @convention(block) (Any, UnsafeRawPointer, Bool, Bool, Bool, Any?) -> Void = { target, node, _, blurPrevious, changes, userObject in
+            let original = unsafeBitCast(originalImp, to: ElementDidFocusClosure.self)
+            original(target, selector, node, true, blurPrevious, changes, userObject)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(block))
+    }
+}
+
 struct WebView: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -264,6 +293,10 @@ struct WebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        // Fix zobrazenia klávesnice pri programovom fokuse — musí bežať
+        // pred vytvorením WKWebView (swizzluje WKContentView triedu).
+        WKKeyboardDisplayFix.apply()
+
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
