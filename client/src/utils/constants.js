@@ -161,10 +161,22 @@ export const PROFILE_COLORS = [
   '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'
 ];
 
-// File size limits (in bytes)
+// File size limits (in bytes) — MUSIA zrkadliť multer limity na serveri
+// (auth.js avatar 5 MB, contacts.js + tasks.js 50 MB, messages.js 10 MB).
+// Používajú sa na pre-check PRED uploadom — bez neho by user čakal na
+// prenos celého súboru, len aby dostal chybu zo servera.
 export const FILE_SIZE_LIMITS = {
-  AVATAR: 5 * 1024 * 1024,       // 5MB
-  CONTACT_FILE: 10 * 1024 * 1024  // 10MB
+  AVATAR: 5 * 1024 * 1024,          // 5 MB  — base64 v User doc (Mongo)
+  CONTACT_FILE: 50 * 1024 * 1024,   // 50 MB — blob v R2
+  TASK_FILE: 50 * 1024 * 1024,      // 50 MB — blob v R2
+  MESSAGE_FILE: 10 * 1024 * 1024    // 10 MB — base64 v Message doc (Mongo)
+};
+
+// Ľudsky čitateľná veľkosť pre chybové hlášky pre-checku
+export const formatFileSize = (bytes) => {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1).replace('.0', '')} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} kB`;
+  return `${bytes} B`;
 };
 
 // Allowed file types for avatars

@@ -24,7 +24,7 @@ const authHeaders = () => {
   if (wsId) h['X-Workspace-Id'] = wsId;
   return h;
 };
-import { getWorkspaceRoleLabel } from '../utils/constants';
+import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 
 const translateErrorMessage = (message) => {
   if (!message) return 'Neznáma chyba';
@@ -1085,6 +1085,13 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // Pre-check PRED prenosom — server limit avatara je 5 MB (auth.js)
+    if (file.size > FILE_SIZE_LIMITS.AVATAR) {
+      setErrors({ general: `Obrázok má ${formatFileSize(file.size)} — maximum je ${formatFileSize(FILE_SIZE_LIMITS.AVATAR)}.` });
+      e.target.value = '';
+      return;
+    }
 
     setErrors({});
     setMessage('');

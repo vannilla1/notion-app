@@ -14,6 +14,7 @@ import AnnouncementBanner from '../components/AnnouncementBanner';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
+import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -602,6 +603,13 @@ function CRM() {
   const handleFileUpload = async (contactId, file, customName) => {
     if (!file) return;
 
+    // Pre-check veľkosti PRED prenosom — server by veľký súbor aj tak
+    // odmietol, ale až po uploade celého obsahu (zlé UX na mobilnej sieti)
+    if (file.size > FILE_SIZE_LIMITS.CONTACT_FILE) {
+      alert(`Súbor má ${formatFileSize(file.size)} — maximum je ${formatFileSize(FILE_SIZE_LIMITS.CONTACT_FILE)}.`);
+      return;
+    }
+
     setUploadingFile(contactId);
 
     const token = getStoredToken();
@@ -651,7 +659,7 @@ function CRM() {
 
       xhr.open('POST', uploadUrl);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      xhr.timeout = 60000; // 60 seconds
+      xhr.timeout = 300000; // 5 min — 50 MB súbor na pomalšej sieti sa do 60 s nestihne
 
       const formData = new FormData();
       // customName PRED file-om, nech ho multer zaradí do req.body.

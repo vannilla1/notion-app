@@ -11,6 +11,7 @@ const Workspace = require('../models/Workspace');
 const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
+const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -146,7 +147,9 @@ router.use((req, res, next) => {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  // 50 MB — bloby idú do R2 (10 GB free tier), Mongo nesie len metadata.
+  // Musí sedieť s FILE_SIZE_LIMITS.CONTACT_FILE na klientovi (constants.js).
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
     const ext = file.originalname.toLowerCase().split('.').pop();
@@ -1699,11 +1702,9 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     if (mode === 'copy') {
       const incomingBytes = collectFileBytesFromNode(sourceNode);
       if (incomingBytes > 0) {
-        const storageLimits = { team: 1024 * 1024 * 1024, pro: 10 * 1024 * 1024 * 1024 };
-        const storageBytes = storageLimits[plan];
+        const storageBytes = STORAGE_LIMITS[plan];
         if (storageBytes) {
-          const wsContacts = await Contact.find({ workspaceId: req.workspaceId }, 'files.size').lean();
-          const usedBytes = wsContacts.reduce((sum, c) => sum + (c.files || []).reduce((s, f) => s + (f.size || 0), 0), 0);
+          const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);
           if (usedBytes + incomingBytes > storageBytes) {
             const usedMb = Math.round(usedBytes / (1024 * 1024));
             const limitMb = Math.round(storageBytes / (1024 * 1024));
@@ -2018,7 +2019,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       // Handle multer errors
       if (err) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 10MB.' });
+          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 50 MB.' });
         }
         return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
       }
@@ -2044,14 +2045,18 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         return res.status(400).json({ message: 'No file uploaded' });
       }
 
+      // R2 výpadok: base64 fallback do Monga znesie len malé súbory (16 MB
+      // BSON strop, base64 +33 %) — veľké čisto odmietni namiesto pádu save().
+      if (!fileStorage.isR2Available() && req.file.size > 10 * 1024 * 1024) {
+        return res.status(503).json({ message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
+      }
+
       // Per-plan total storage quota check (workspace-scope). Tím = 1 GB,
-      // Pro = 10 GB. Sčítame size existujúcich files všetkých kontaktov vo
-      // workspace + chystaný upload size.
-      const storageLimits = { team: 1024 * 1024 * 1024, pro: 10 * 1024 * 1024 * 1024 };
-      const storageBytes = storageLimits[uploaderPlan];
+      // Pro = 10 GB. Počíta VŠETKY prílohy workspace-u (kontakty + tasky +
+      // globálne Tasky) cez zdieľaný helper — nie len contact.files.
+      const storageBytes = STORAGE_LIMITS[uploaderPlan];
       if (storageBytes) {
-        const wsContacts = await Contact.find({ workspaceId: req.workspaceId }, 'files.size').lean();
-        const usedBytes = wsContacts.reduce((sum, c) => sum + (c.files || []).reduce((s, f) => s + (f.size || 0), 0), 0);
+        const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);
         if (usedBytes + req.file.size > storageBytes) {
           const usedMb = Math.round(usedBytes / (1024 * 1024));
           const limitMb = Math.round(storageBytes / (1024 * 1024));
@@ -2062,8 +2067,6 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         }
       }
 
-      // Convert file buffer to Base64
-      const base64Data = req.file.buffer.toString('base64');
       const fileId = uuidv4();
 
       // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
@@ -2094,10 +2097,12 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         });
         logger.debug('[Contact upload] Stored in R2', { fileId, r2Key, size: req.file.size });
       } else {
+        // base64 sa počíta AŽ tu vo fallbacku — nepodmienená konverzia
+        // držala v RAM ~2,4× veľkosť súboru na každý upload zbytočne.
         await ContactFile.create({
           contactId: contact._id,
           fileId: fileId,
-          data: base64Data
+          data: req.file.buffer.toString('base64')
         });
         logger.warn('[Contact upload] R2 unavailable, stored as base64 in MongoDB', { fileId });
       }

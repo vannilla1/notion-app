@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
-import { getWorkspaceRoleLabel } from '../utils/constants';
+import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
@@ -2506,6 +2506,12 @@ function Tasks() {
   };
 
   const handleFileUpload = async (taskId, subtaskId, file, customName) => {
+    // Pre-check veľkosti PRED prenosom — server by 50+ MB súbor aj tak
+    // odmietol, ale až po uploade celého obsahu (zlé UX na mobilnej sieti)
+    if (file && file.size > FILE_SIZE_LIMITS.TASK_FILE) {
+      alert(`Súbor má ${formatFileSize(file.size)} — maximum je ${formatFileSize(FILE_SIZE_LIMITS.TASK_FILE)}.`);
+      return;
+    }
     const key = subtaskId || taskId;
     setUploadingFile(key);
     try {
@@ -2516,7 +2522,8 @@ function Tasks() {
       const url = subtaskId
         ? `/api/tasks/${taskId}/files?subtaskId=${subtaskId}`
         : `/api/tasks/${taskId}/files`;
-      await api.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+      // 5 min — 50 MB video na pomalšej mobilnej sieti sa do 60 s nestihne
+      await api.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
       await fetchTasks();
     } catch (error) {
       alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');

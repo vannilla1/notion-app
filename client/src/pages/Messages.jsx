@@ -14,6 +14,7 @@ import AnnouncementBanner from '../components/AnnouncementBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
+import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 
 const messagesHelpTips = [
   {
@@ -370,9 +371,20 @@ function Messages() {
     } catch (err) { /* ignore */ }
   };
 
+  // Pre-check veľkosti prílohy PRED prenosom — správy držia prílohy base64
+  // v Mongo dokumente, limit je preto nižší (10 MB) než pri úlohách (R2).
+  const msgFileTooBig = (file) => {
+    if (file && file.size > FILE_SIZE_LIMITS.MESSAGE_FILE) {
+      alert(`Súbor má ${formatFileSize(file.size)} — maximum pre správy je ${formatFileSize(FILE_SIZE_LIMITS.MESSAGE_FILE)}.`);
+      return true;
+    }
+    return false;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.toUserId || !form.subject.trim()) return;
+    if (msgFileTooBig(attachment)) return;
     setSubmitting(true);
 
     try {
@@ -440,6 +452,7 @@ function Messages() {
   const handleComment = async (id) => {
     if (!commentText.trim()) return;
     if (submittingComment) return; // Guard proti double-submit (napr. opakovaný Enter)
+    if (msgFileTooBig(commentAttachment)) return;
     setSubmittingComment(true);
     try {
       const formData = new FormData();
@@ -499,6 +512,7 @@ function Messages() {
   };
 
   const handleEdit = async (id, editData) => {
+    if (msgFileTooBig(editData.newAttachment)) return;
     try {
       const formData = new FormData();
       formData.append('subject', editData.subject);
@@ -603,6 +617,7 @@ function Messages() {
   };
 
   const handleMsgFileUpload = async (messageId, file) => {
+    if (msgFileTooBig(file)) return;
     setUploadingFile(true);
     try {
       const formData = new FormData();

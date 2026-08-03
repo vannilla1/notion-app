@@ -11,6 +11,7 @@ const ContactFile = require('../models/ContactFile');
 const fileStorage = require('../services/fileStorage');
 const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
+const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
 const EXCLUDE_FILE_DATA = {
@@ -24,7 +25,10 @@ const EXCLUDE_FILE_DATA = {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  // 50 MB — bloby idú do R2 (10 GB free tier), Mongo nesie len metadata.
+  // Musí sedieť s FILE_SIZE_LIMITS.TASK_FILE na klientovi (constants.js).
+  // Strop drží RAM: memoryStorage buffruje celý súbor v pamäti inštancie.
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
     const ext = file.originalname.toLowerCase().split('.').pop();
@@ -2828,7 +2832,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
   upload.single('file')(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ message: 'Súbor je príliš veľký (max 5MB)' });
+        return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 50 MB.' });
       }
       return res.status(400).json({ message: err.message });
     }
@@ -2838,7 +2842,38 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const { taskId } = req.params;
       const subtaskId = req.query.subtaskId;
 
-      const base64Data = req.file.buffer.toString('base64');
+      // R2 výpadok: base64 fallback do Monga znesie len malé súbory (16 MB
+      // BSON strop dokumentu, base64 +33 % expanzia) — veľké čisto odmietni,
+      // inak by save() padol až po prenose celého súboru.
+      if (!fileStorage.isR2Available() && req.file.size > 10 * 1024 * 1024) {
+        return res.status(503).json({ message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
+      }
+
+      // Plan gate + storage kvóta — zrkadlí POST /contacts/:id/files.
+      // Historicky task upload nemal ani jedno (prílohy sa dali nahrávať
+      // mimo plánu aj mimo kvóty cez 📎 pri úlohe).
+      const uploader = await User.findById(req.user.id).select('subscription').lean();
+      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
+        const message = isIosNativeApp(req)
+          // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
+          ? 'Táto funkcia nie je dostupná.'
+          : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+        return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+      }
+      const storageBytes = STORAGE_LIMITS[uploaderPlan];
+      if (storageBytes) {
+        const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);
+        if (usedBytes + req.file.size > storageBytes) {
+          const usedMb = Math.round(usedBytes / (1024 * 1024));
+          const limitMb = Math.round(storageBytes / (1024 * 1024));
+          const message = isIosNativeApp(req)
+            ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
+            : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
+          return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
+        }
+      }
+
       const fileId = uuidv4();
 
       // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
@@ -2857,6 +2892,8 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
 
       // Helper — uloženie file content-u. R2 ak je k dispozícii, inak base64
       // do MongoDB. Pri R2 chybe (rate limit, sieť) hodí — caller catchne.
+      // base64 sa počíta AŽ vo fallbacku — nepodmienená konverzia držala
+      // v RAM ~2,4× veľkosť súboru na každý upload úplne zbytočne.
       const persistFile = async (contactId = null) => {
         if (fileStorage.isR2Available()) {
           const r2Key = fileStorage.contactFileKey(fileId);
@@ -2864,7 +2901,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
           await ContactFile.create({ contactId, fileId, r2Key, data: null });
           logger.debug('[Task upload] Stored in R2', { fileId, r2Key, size: req.file.size });
         } else {
-          await ContactFile.create({ contactId, fileId, data: base64Data });
+          await ContactFile.create({ contactId, fileId, data: req.file.buffer.toString('base64') });
           logger.warn('[Task upload] R2 unavailable, stored as base64', { fileId });
         }
       };
