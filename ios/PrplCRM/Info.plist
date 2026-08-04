@@ -57,7 +57,9 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Prpl CRM potrebuje pristup ku kamere na pridavanie fotiek k projektom a kontaktom.</string>
+	<string>Prpl CRM potrebuje pristup ku kamere na pridavanie fotiek a videi k projektom a kontaktom.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Prpl CRM potrebuje pristup k mikrofonu pri nahravani videa k priloham projektov a kontaktov.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Prpl CRM používa Face ID na rýchle a bezpečné prihlásenie do aplikácie.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
