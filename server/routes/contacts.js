@@ -2124,13 +2124,29 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         logger.warn('[Contact upload] R2 unavailable, stored as base64 in MongoDB', { fileId });
       }
 
-      // Only store metadata in Contact (no data field)
-      contact.files.push(fileData);
-      await contact.save();
+      // Only store metadata in Contact (no data field).
+      // Retry na VersionError (optimistic lock): medzi načítaním kontaktu
+      // a save() beží pomalý R2 upload (pri 50 MB sekundy) — ak medzitým
+      // kontakt zmenil iný request, save() cez staršiu verziu zlyhá.
+      // Blob v R2 už je; stačí znova načítať čerstvý dokument, pridať
+      // metadáta a uložiť.
+      let docToSave = contact;
+      for (let attempt = 0; ; attempt++) {
+        docToSave.files.push(fileData);
+        try {
+          await docToSave.save();
+          break;
+        } catch (e) {
+          if (e.name !== 'VersionError' || attempt >= 3) throw e;
+          logger.warn('[Contact upload] VersionError — retry na čerstvom dokumente', { attempt: attempt + 1, contactId: String(contact._id) });
+          docToSave = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+          if (!docToSave) return res.status(404).json({ message: 'Contact not found' });
+        }
+      }
 
       const io = req.app.get('io');
       if (io) {
-        io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+        io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(docToSave));
       }
 
       // Don't send the data field back to client (too large)

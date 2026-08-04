@@ -2914,22 +2914,60 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         }
       };
 
+      // Aplikácia metadát na dokument (Task alebo Contact) — vytiahnuté do
+      // helpera, lebo pri VersionError retry sa musí zopakovať na ČERSTVOM
+      // dokumente. Vráti false, ak úloha/podúloha v dokumente už nie je.
+      const applyMetaToTask = (taskDoc) => {
+        if (subtaskId) {
+          const subtask = findSubtaskById(taskDoc.subtasks, subtaskId);
+          if (!subtask) return false;
+          if (!subtask.files) subtask.files = [];
+          subtask.files.push(fileMeta);
+          if (taskDoc.markModified) taskDoc.markModified('subtasks');
+        } else {
+          if (!taskDoc.files) taskDoc.files = [];
+          taskDoc.files.push(fileMeta);
+        }
+        return true;
+      };
+
+      // Uloženie s retry na VersionError (optimistic lock). Medzi načítaním
+      // dokumentu a save() beží pomalý R2 upload (pri 50 MB sekundy) — ak
+      // medzitým dokument zmenil iný request (kolega odklikol úlohu, ďalší
+      // upload), save() cez staršiu verziu zlyhá. Blob v R2 už je; stačí
+      // znova načítať čerstvý dokument, aplikovať metadáta a uložiť.
+      const saveWithVersionRetry = async (doc, refetch, apply) => {
+        for (let attempt = 0; ; attempt++) {
+          if (!apply(doc)) return null; // cieľ medzitým zmizol
+          try {
+            await doc.save();
+            return doc;
+          } catch (e) {
+            if (e.name !== 'VersionError' || attempt >= 3) throw e;
+            logger.warn('[Task upload] VersionError — retry na čerstvom dokumente', { attempt: attempt + 1, taskId });
+            doc = await refetch();
+            if (!doc) return null;
+          }
+        }
+      };
+
       // Try global Task first (only if taskId is a valid ObjectId)
       if (mongoose.Types.ObjectId.isValid(taskId)) {
         const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
         if (task) {
+          // Podúloha sa overuje PRED nahraním blobu — inak by 404 nechala
+          // v R2 sirotu bez metadát.
+          if (subtaskId && !findSubtaskById(task.subtasks, subtaskId)) {
+            return res.status(404).json({ message: 'Úloha nenájdená' });
+          }
           await persistFile(null); // global task — no contactId
 
-          if (subtaskId) {
-            const subtask = findSubtaskById(task.subtasks, subtaskId);
-            if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-            if (!subtask.files) subtask.files = [];
-            subtask.files.push(fileMeta);
-            task.markModified('subtasks');
-          } else {
-            task.files.push(fileMeta);
-          }
-          await task.save();
+          const saved = await saveWithVersionRetry(
+            task,
+            () => Task.findOne({ _id: taskId, workspaceId: req.workspaceId }),
+            (doc) => applyMetaToTask(doc)
+          );
+          if (!saved) return res.status(404).json({ message: 'Úloha nenájdená' });
           return res.json({ message: 'Súbor nahraný', file: fileMeta });
         }
       }
@@ -2943,20 +2981,25 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
 
       const contactTask = contact.tasks.find(t => t.id === taskId);
       if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+      if (subtaskId && !findSubtaskById(contactTask.subtasks, subtaskId)) {
+        return res.status(404).json({ message: 'Úloha nenájdená' });
+      }
 
       await persistFile(contact._id);
 
-      if (subtaskId) {
-        const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
-        if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-        if (!subtask.files) subtask.files = [];
-        subtask.files.push(fileMeta);
-      } else {
-        if (!contactTask.files) contactTask.files = [];
-        contactTask.files.push(fileMeta);
-      }
-      contact.markModified('tasks');
-      await contact.save();
+      const applyMetaToContact = (doc) => {
+        const t = doc.tasks.find(x => x.id === taskId);
+        if (!t) return false;
+        if (!applyMetaToTask(t)) return false;
+        doc.markModified('tasks');
+        return true;
+      };
+      const savedContact = await saveWithVersionRetry(
+        contact,
+        () => Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': taskId }),
+        applyMetaToContact
+      );
+      if (!savedContact) return res.status(404).json({ message: 'Projekt nenájdený' });
 
       res.json({ message: 'Súbor nahraný', file: fileMeta });
     } catch (error) {
