@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { getStoredToken, removeStoredToken, isNativeIOSApp } from '../utils/authStorage';
 import { getStoredWorkspaceId, removeStoredWorkspaceId } from '../utils/workspaceStorage';
+import { handlePlanGateError } from '../utils/planGate';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -53,6 +54,12 @@ api.interceptors.response.use(
       await new Promise(r => setTimeout(r, delay));
       return api(config);
     }
+
+    // Plánové limity (FEATURE_NOT_IN_PLAN / PLAN_LIMIT / STORAGE_LIMIT) —
+    // vystrelí event pre UpgradeModal a označí error, aby catch bloky
+    // (alertUnlessPlanGate) nezobrazovali duplicitný alert. Error sa ďalej
+    // normálne rejectne — volajúci si rieši svoj cleanup.
+    handlePlanGateError(error);
 
     // 403 NOT_MEMBER = lokálny X-Workspace-Id ukazuje na workspace, z ktorého
     // ma user medzitým vyhodili (membership zmena na inom zariadení, admin remove).

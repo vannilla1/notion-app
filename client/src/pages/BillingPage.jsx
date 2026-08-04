@@ -287,7 +287,7 @@ function BillingPage() {
                 onClick={() => setBillingPeriod('yearly')}
               >
                 Ročne
-                <span className="period-save-badge">-17%</span>
+                <span className="period-save-badge">2 mesiace zadarmo</span>
               </button>
             </div>
 

@@ -15,6 +15,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { alertUnlessPlanGate } from '../utils/planGate';
 
 const messagesHelpTips = [
   {
@@ -628,7 +629,7 @@ function Messages() {
       setSelectedMessage(res.data);
       fetchMessages();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+      alertUnlessPlanGate(error, 'Chyba pri nahrávaní súboru');
     } finally {
       setUploadingFile(false);
     }

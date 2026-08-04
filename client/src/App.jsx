@@ -4,6 +4,7 @@ import { useAuth } from './context/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
 import NotificationToast from './components/NotificationToast';
 import PushPermissionBanner from './components/PushPermissionBanner';
+import UpgradeModal from './components/UpgradeModal';
 import BottomNav from './components/BottomNav';
 import api from './api/api';
 import { useSocket } from './hooks/useSocket';
@@ -496,6 +497,9 @@ function AppContent() {
           APNs tam rieši permission cez systémovú Swift vrstvu (UNUserNotificationCenter).
           Na `/admin*` banner tiež nie — viď komentár pri NotificationToast. */}
       {isAuthenticated && !isIosNativeApp() && !isAdminRoute && <PushPermissionBanner />}
+      {/* Centrálny upsell modal — reaguje na 'plan-gate' event z axios
+          interceptora (utils/planGate). Mimo admin rozhrania. */}
+      {isAuthenticated && !isAdminRoute && <UpgradeModal />}
       {/* BottomNav je user-app navigácia — admin panel má vlastný tab-bar, takže
           na `/admin*` by bol BottomNav vizuálne rušivý aj zavádzajúci. */}
       {isAuthenticated && !isAdminRoute && <BottomNav unreadCounts={unreadCounts} />}

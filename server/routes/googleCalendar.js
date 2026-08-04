@@ -7,6 +7,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
+const { logPlanGateHit } = require('../utils/planGate');
 const Task = require('../models/Task');
 const Contact = require('../models/Contact');
 const WorkspaceMember = require('../models/WorkspaceMember');
@@ -222,6 +223,7 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       const message = isIosNativeApp(req)
         ? 'Táto funkcia nie je dostupná.'
         : 'Synchronizácia s Google Calendar je dostupná v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      logPlanGateHit(req, { code: 'FEATURE_NOT_IN_PLAN', feature: 'google-sync' });
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 

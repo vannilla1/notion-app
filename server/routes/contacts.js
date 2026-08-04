@@ -12,6 +12,7 @@ const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
+const { logPlanGateHit } = require('../utils/planGate');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -471,6 +472,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
       const message = isIosNativeApp(req)
         ? 'Táto funkcia nie je dostupná.'
         : 'Export do CSV je dostupný v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+      logPlanGateHit(req, { code: 'FEATURE_NOT_IN_PLAN', feature: 'csv-export' });
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
     const contacts = await Contact.find(
@@ -577,7 +579,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
         const message = isIosNativeApp(req)
           ? `Dosiahli ste limit ${maxContacts} kontaktov pre toto prostredie.`
           : `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.`;
-        return res.status(403).json({ message });
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'contacts', limit: maxContacts });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
       }
     }
 
@@ -1313,7 +1316,12 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     if (maxSubtasks !== Infinity) {
       const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
       if (countSubtasks(contact.tasks[taskIndex].subtasks) >= maxSubtasks) {
-        return res.status(403).json({ message: `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.` });
+        // Apple 3.1.1 — iOS bez zmienky o pláne
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxSubtasks} úloh na projekt.`
+          : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`;
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'subtasks', limit: maxSubtasks });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
       }
     }
 
@@ -1638,10 +1646,12 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
       const taskLimits = { free: 5, team: 25, pro: Infinity };
       const maxTasks = taskLimits[plan] || 5;
       if (maxTasks !== Infinity && (targetContact.tasks?.length || 0) >= maxTasks) {
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
         return res.status(403).json({
           message: isIosNativeApp(req)
             ? `Cieľový kontakt dosiahol limit ${maxTasks} projektov.`
-            : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`
+            : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`,
+          code: 'PLAN_LIMIT'
         });
       }
       // Aj KÓPIA ako nový projekt musí rešpektovať limit podúloh — inak by sa
@@ -1655,10 +1665,12 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         ? shellsNeeded + countTreeNodes(sourceNode)
         : countTreeNodes(sourceNode) - 1;
       if ((createWrapper || mode === 'copy') && maxSubtasks !== Infinity && insertedCount > maxSubtasks) {
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'subtasks', limit: maxSubtasks });
         return res.status(403).json({
           message: isIosNativeApp(req)
             ? `Prenášaný projekt prekračuje limit ${maxSubtasks} úloh.`
-            : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`
+            : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`,
+          code: 'PLAN_LIMIT'
         });
       }
     } else {
@@ -1670,10 +1682,12 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
         if (maxSubtasks !== Infinity) {
           const countSubtasks = (subs) => (subs || []).reduce((sum, s) => sum + 1 + countSubtasks(s.subtasks), 0);
           if (countSubtasks(targetTask.subtasks) + shellsNeeded + countTreeNodes(sourceNode) > maxSubtasks) {
+            logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'subtasks', limit: maxSubtasks });
             return res.status(403).json({
               message: isIosNativeApp(req)
                 ? `Cieľový projekt by prekročil limit ${maxSubtasks} úloh.`
-                : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`
+                : `Váš plán umožňuje max. ${maxSubtasks} úloh na projekt. Pre viac prejdite na vyšší plán.`,
+              code: 'PLAN_LIMIT'
             });
           }
         }
@@ -1708,6 +1722,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
           if (usedBytes + incomingBytes > storageBytes) {
             const usedMb = Math.round(usedBytes / (1024 * 1024));
             const limitMb = Math.round(storageBytes / (1024 * 1024));
+            logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
             return res.status(403).json({
               message: isIosNativeApp(req)
                 ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
@@ -2033,6 +2048,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
           ? 'Táto funkcia nie je dostupná.'
           : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
+        logPlanGateHit(req, { code: 'FEATURE_NOT_IN_PLAN', feature: 'attachments' });
         return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
       }
 
@@ -2063,6 +2079,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           const message = isIosNativeApp(req)
             ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
             : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
+          logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
           return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
         }
       }

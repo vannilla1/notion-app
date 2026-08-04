@@ -16,6 +16,7 @@ import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
+import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -212,7 +213,7 @@ function CRM() {
       );
       // Kópia je v INOM prostredí — v aktuálnom CRM ju nevidno, netreba refetch.
     } catch (error) {
-      alert(error.response?.data?.message || 'Kopírovanie kontaktu zlyhalo');
+      alertUnlessPlanGate(error, 'Kopírovanie kontaktu zlyhalo');
     } finally {
       copyReqRef.current = false;
       setCopyBusy(false);
@@ -585,7 +586,7 @@ function CRM() {
       });
       setShowForm(false);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní kontaktu');
+      alertUnlessPlanGate(error, 'Chyba pri vytváraní kontaktu');
     } finally {
       setSubmitting(false);
     }
@@ -629,7 +630,20 @@ function CRM() {
             // Silent fail - contacts will refresh on next action
           }
         } else {
-          alert('Chyba pri nahrávaní: ' + (xhr.responseText || xhr.status));
+          // XHR obchádza axios interceptor — plánový limit treba spracovať
+          // ručne, inak by upload len vypísal surový JSON namiesto modalu.
+          let handled = false;
+          try {
+            const data = JSON.parse(xhr.responseText || '{}');
+            if (PLAN_GATE_CODES.has(data.code)) {
+              dispatchPlanGate({ code: data.code, message: data.message });
+              handled = true;
+            } else if (data.message) {
+              alert(data.message);
+              handled = true;
+            }
+          } catch { /* nie JSON — fallback nižšie */ }
+          if (!handled) alert('Chyba pri nahrávaní: ' + (xhr.responseText || xhr.status));
         }
         setUploadingFile(null);
         resolve();
@@ -682,7 +696,7 @@ function CRM() {
     try {
       await api.delete(`/api/contacts/${contactId}/files/${fileId}`);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri mazaní súboru');
+      alertUnlessPlanGate(error, 'Chyba pri mazaní súboru');
     }
   };
 
@@ -695,7 +709,7 @@ function CRM() {
     try {
       await api.patch(`/api/contacts/${contactId}/files/${fileId}`, { originalName: finalName });
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri premenovaní súboru');
+      alertUnlessPlanGate(error, 'Chyba pri premenovaní súboru');
     }
   };
 
@@ -871,7 +885,7 @@ function CRM() {
       fetchGlobalTasks();
       fetchContacts();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri duplikovaní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri duplikovaní projektu');
     }
   };
 
@@ -893,7 +907,7 @@ function CRM() {
       await api.put(`/api/contacts/${contactId}`, editForm);
       setEditingContact(null);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní kontaktu');
+      alertUnlessPlanGate(error, 'Chyba pri ukladaní kontaktu');
     }
   };
 
@@ -913,7 +927,7 @@ function CRM() {
       setTaskDueDates(prev => ({ ...prev, [contact.id]: '' }));
       await fetchContacts();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri vytváraní projektu');
     }
   };
 
@@ -994,7 +1008,7 @@ function CRM() {
       setEditTaskDueDate('');
       setEditTaskDescription('');
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri ukladaní projektu');
     }
   };
 
@@ -1079,7 +1093,7 @@ function CRM() {
       setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
       setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytvarani ulohy');
+      alertUnlessPlanGate(error, 'Chyba pri vytvarani ulohy');
     }
   };
 
@@ -1175,7 +1189,7 @@ function CRM() {
       setEditSubtaskDueDate('');
       setEditSubtaskDueTime('');
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
+      alertUnlessPlanGate(error, 'Chyba pri ukladani ulohy');
     }
   };
 
@@ -1206,7 +1220,7 @@ function CRM() {
         await fetchContacts();
       }
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri nastavovaní termínu');
+      alertUnlessPlanGate(error, 'Chyba pri nastavovaní termínu');
     }
   };
 

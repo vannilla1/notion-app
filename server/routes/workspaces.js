@@ -7,6 +7,7 @@ const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const { isIosNativeApp } = require('../utils/platform');
+const { logPlanGateHit } = require('../utils/planGate');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
@@ -145,7 +146,8 @@ router.post('/', authenticateToken, async (req, res) => {
         const message = isIosNativeApp(req)
           ? `Dosiahli ste limit ${maxOwnedWorkspaces} pracovných prostredí.`
           : `Váš plán umožňuje vlastniť max. ${maxOwnedWorkspaces} pracovných prostredí. Pre viac prejdite na vyšší plán.`;
-        return res.status(403).json({ message, code: 'WORKSPACE_OWNERSHIP_LIMIT' });
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'workspaces', limit: maxOwnedWorkspaces });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
       }
     }
 
@@ -253,7 +255,12 @@ router.post('/join', authenticateToken, async (req, res) => {
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
-          return res.status(403).json({ message: `Váš plán umožňuje max. ${baseSeatLimit} používateľov v tíme. Pre viac členov prejdite na vyšší plán.` });
+          // Apple 3.1.1 — iOS bez zmienky o pláne
+          const message = isIosNativeApp(req)
+            ? `Dosiahli ste limit ${baseSeatLimit} používateľov v tíme.`
+            : `Váš plán umožňuje max. ${baseSeatLimit} používateľov v tíme. Pre viac členov prejdite na vyšší plán.`;
+          logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
+          return res.status(403).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }
@@ -799,7 +806,12 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
-          return res.status(400).json({ message: `Váš plán umožňuje max. ${baseSeatLimit} členov. Pre viac členov prejdite na vyšší plán.` });
+          // Apple 3.1.1 — iOS bez zmienky o pláne
+          const message = isIosNativeApp(req)
+            ? `Dosiahli ste limit ${baseSeatLimit} členov v tíme.`
+            : `Váš plán umožňuje max. ${baseSeatLimit} členov. Pre viac členov prejdite na vyšší plán.`;
+          logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
+          return res.status(400).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }

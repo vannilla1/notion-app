@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
+import { alertUnlessPlanGate } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
@@ -1694,7 +1695,7 @@ function Tasks() {
       });
       setShowForm(false);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytváraní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri vytváraní projektu');
     } finally {
       setSubmitting(false);
     }
@@ -1790,7 +1791,7 @@ function Tasks() {
       });
       closeDuplicateModal();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri duplikovaní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri duplikovaní projektu');
     }
   };
 
@@ -1828,7 +1829,7 @@ function Tasks() {
       await fetchTasks();
       setEditingTask(null);
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladaní projektu');
+      alertUnlessPlanGate(error, 'Chyba pri ukladaní projektu');
     }
   };
 
@@ -1862,7 +1863,7 @@ function Tasks() {
       setShowSubtaskAssignInput(prev => ({ ...prev, [inputKey]: false }));
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri vytvarani ulohy');
+      alertUnlessPlanGate(error, 'Chyba pri vytvarani ulohy');
     }
   };
 
@@ -1950,7 +1951,7 @@ function Tasks() {
       setEditSubtaskTimeReminders([]);
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri ukladani ulohy');
+      alertUnlessPlanGate(error, 'Chyba pri ukladani ulohy');
     }
   };
 
@@ -2527,7 +2528,7 @@ function Tasks() {
       await api.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri nahrávaní súboru');
+      alertUnlessPlanGate(error, 'Chyba pri nahrávaní súboru');
     } finally {
       setUploadingFile(null);
     }
@@ -2581,7 +2582,7 @@ function Tasks() {
       await api.patch(url, { originalName: finalName });
       await fetchTasks();
     } catch (error) {
-      alert(error.response?.data?.message || 'Chyba pri premenovaní súboru');
+      alertUnlessPlanGate(error, 'Chyba pri premenovaní súboru');
     }
   };
 
