@@ -13,6 +13,7 @@ const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
+const { attachmentFileFilter } = require('../utils/uploadFilter');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -151,26 +152,9 @@ const upload = multer({
   // 50 MB — bloby idú do R2 (10 GB free tier), Mongo nesie len metadata.
   // Musí sedieť s FILE_SIZE_LIMITS.CONTACT_FILE na klientovi (constants.js).
   limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
-    const ext = file.originalname.toLowerCase().split('.').pop();
-    const extAllowed = allowedExtensions.test(ext);
-
-    const allowedMimetypes = [
-      'image/', 'application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument',
-      'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
-      'text/', 'audio/', 'video/',
-      'application/zip', 'application/x-rar', 'application/x-7z-compressed',
-      'application/json', 'application/xml'
-    ];
-    const mimeAllowed = allowedMimetypes.some(type => file.mimetype.startsWith(type) || file.mimetype === type);
-
-    if (extAllowed || mimeAllowed) {
-      return cb(null, true);
-    }
-    cb(new Error('Nepovolený typ súboru'));
-  }
+  // Blocklist namiesto allowlistu — dokumentový sklad musí zobrať aj HEIC,
+  // ODT, EML a pod.; blokujú sa len spustiteľné súbory. Viď uploadFilter.js.
+  fileFilter: attachmentFileFilter
 });
 
 // Validation helpers

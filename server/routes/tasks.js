@@ -13,6 +13,7 @@ const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
+const { attachmentFileFilter } = require('../utils/uploadFilter');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
 const EXCLUDE_FILE_DATA = {
@@ -30,12 +31,9 @@ const upload = multer({
   // Musí sedieť s FILE_SIZE_LIMITS.TASK_FILE na klientovi (constants.js).
   // Strop drží RAM: memoryStorage buffruje celý súbor v pamäti inštancie.
   limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z|mp3|mp4|wav|avi|mov/;
-    const ext = file.originalname.toLowerCase().split('.').pop();
-    if (allowedExtensions.test(ext)) return cb(null, true);
-    cb(new Error('Nepovolený typ súboru'));
-  }
+  // Blocklist namiesto allowlistu — dokumentový sklad musí zobrať aj HEIC,
+  // ODT, EML a pod.; blokujú sa len spustiteľné súbory. Viď uploadFilter.js.
+  fileFilter: attachmentFileFilter
 });
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
