@@ -14,6 +14,7 @@ import AnnouncementBanner from '../components/AnnouncementBanner';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
+import { getStoredWorkspaceId } from '../utils/workspaceStorage';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
@@ -674,6 +675,13 @@ function CRM() {
 
       xhr.open('POST', uploadUrl);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      // KRITICKÉ: surový XHR obchádza axios interceptor, ktorý inak pridáva
+      // X-Workspace-Id. Bez hlavičky server spadne na fallback
+      // User.currentWorkspaceId z DB (posledné prostredie podľa DB, nie to,
+      // v ktorom user práve JE) → pri viacerých prostrediach „Contact not
+      // found", hoci kontakt na obrazovke vidí.
+      const wsId = getStoredWorkspaceId();
+      if (wsId) xhr.setRequestHeader('X-Workspace-Id', wsId);
       xhr.timeout = 300000; // 5 min — 50 MB súbor na pomalšej sieti sa do 60 s nestihne
 
       const formData = new FormData();

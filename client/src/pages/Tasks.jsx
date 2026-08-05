@@ -28,6 +28,7 @@ import FileRenameModal from '../components/FileRenameModal';
 import TaskTransferModal from '../components/TaskTransferModal';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
+import { getStoredWorkspaceId } from '../utils/workspaceStorage';
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -753,8 +754,14 @@ function Tasks() {
   // Define fetch functions early so they can be used in useEffects
   const exportTasksCsv = () => {
     const token = getStoredToken();
+    // Surový fetch obchádza axios interceptor — X-Workspace-Id treba pridať
+    // ručne, inak server spadne na DB fallback a exportuje INÉ prostredie.
+    const wsId = getStoredWorkspaceId();
     fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        ...(wsId ? { 'X-Workspace-Id': wsId } : {})
+      }
     })
       .then(response => response.blob())
       .then(blob => {
