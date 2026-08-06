@@ -599,6 +599,12 @@ struct WebView: UIViewRepresentable {
                 name: UIApplication.didReceiveMemoryWarningNotification,
                 object: nil
             )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appDidEnterBackground),
+                name: UIApplication.didEnterBackgroundNotification,
+                object: nil
+            )
             // Direct deep-link receiver — bypasses SwiftUI @Published/updateUIView.
             // AppDelegate posts this whenever a notification tap arrives
             // (cold-start via launchOptions, hot-start via didReceive).
@@ -692,12 +698,42 @@ struct WebView: UIViewRepresentable {
             }
         }
 
+        @objc private func appDidEnterBackground() {
+            // Značka odchodu do pozadia — appWillEnterForeground podľa nej
+            // rozhodne, či bol pobyt na pozadí dosť dlhý na preventívny reload.
+            lastBackgroundAt = Date()
+        }
+
         @objc private func appWillEnterForeground() {
             // Značka návratu do popredia — didTerminate handler podľa nej
             // rozlíši jetsam NA POZADÍ (iOS bežne reclaimuje web procesy
             // suspendovaných appiek; handler sa spustí až pri prebudení)
             // od jetsamu POČAS aktívneho používania.
             lastForegroundAt = Date()
+            // „Zamrznutá appka" po dlhom pozadí: keď iOS zabije WebContent
+            // proces, didTerminate handler stránku obnoví. Keď ale proces
+            // PREŽIJE a iOS medzitým reclaimol len SIEŤOVÝ proces, stránka
+            // po prebudení žije, no všetky requesty ticho visia — každá
+            // sekcia točí spinner donekonečna a pomôže len force-quit.
+            // Preto po pobyte na pozadí > 15 min WebView preventívne
+            // reloadneme (reload zachová aktuálnu URL; rozrobený stav po
+            // štvrťhodine mimo appky je zanedbateľná strata). Deep-link
+            // cyklus má prednosť — rovnaká 0.5s kontrola ako OAuth vetva.
+            let backgroundFor = lastBackgroundAt.map { Date().timeIntervalSince($0) } ?? 0
+            if backgroundFor > 15 * 60 {
+                debugLog("[Foreground] \(Int(backgroundFor))s na pozadí — preventívny reload proti mŕtvemu network procesu")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self else { return }
+                    if self.didHandleDeepLinkThisCycle {
+                        debugLog("[Foreground] Skipping stale-reload — deep link handled this cycle")
+                        self.didHandleDeepLinkThisCycle = false
+                        return
+                    }
+                    self.webView?.reload()
+                }
+                didOpenExternalAuth = false
+                return
+            }
             // Po návrate zo Safari (napr. OAuth flow) bol fallback reload WebView,
             // aby sa stránka dozvedela aktuálny stav integrácie. S Universal Links
             // ale deep link (prplcrm.eu/tasks?google_tasks=connected) sám navigačne
@@ -974,6 +1010,9 @@ struct WebView: UIViewRepresentable {
         private let terminationWindow: TimeInterval = 90 // s
         // Posledný návrat appky do popredia — na klasifikáciu background reclaimu
         fileprivate var lastForegroundAt: Date?
+        // Posledný odchod do pozadia — na detekciu dlhého pobytu na pozadí
+        // (preventívny reload proti mŕtvemu network procesu)
+        fileprivate var lastBackgroundAt: Date?
 
         // Fires when iOS kills the WebContent process (memory pressure, etc.)
         // Without this handler, WKWebView stays blank or gets reloaded from

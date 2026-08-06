@@ -290,6 +290,36 @@ function AppContent() {
     }
   }, [isAuthenticated, isAdminRoute]);
 
+  // Mŕtvy sieťový stack po dlhom pozadí (mobilné WebView): stránka po
+  // prebudení žije, ale requesty ticho visia — všetky sekcie točia spinner
+  // a pomôže len reload. Po návrate z pozadia dlhšieho než 15 min spravíme
+  // rýchly health ping (same-origin, bez cache); ak do 5 s nezaberie,
+  // JEDNORAZOVO reloadneme. Guard proti slučke: max jeden reload na
+  // životnosť stránky — po reloade beží čerstvý stack, takže ďalší už
+  // nebude treba. iOS shell má navyše vlastný natívny reload po 15 min.
+  useEffect(() => {
+    let hiddenAt = null;
+    let reloadedThisCycle = false;
+    const onVisibility = async () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (away < 15 * 60 * 1000 || reloadedThisCycle) return;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        // Akákoľvek odpoveď = sieť žije (aj 404 na dev serveri je odpoveď)
+        await fetch('/health', { signal: ctrl.signal, cache: 'no-store' });
+        clearTimeout(t);
+      } catch {
+        reloadedThisCycle = true;
+        window.location.reload();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   // Modal scroll-lock: prevent body scroll behind open modals (iOS-safe).
   // Uses a local `isLocked` flag (not the body class) as source of truth, so
   // class desync can never trigger a stray window.scrollTo. Throttles via rAF
