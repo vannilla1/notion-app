@@ -18,7 +18,6 @@ import { getStoredWorkspaceId } from '../utils/workspaceStorage';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
-import { compareTasksForDisplay } from '../utils/taskSort';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -495,9 +494,7 @@ function CRM() {
       contactId: contact.id
     }));
 
-    // Rovnaké poradie ako na stránke Projekty: nedokončené → priorita →
-    // abeceda v rámci priority (jednotný komparátor, utils/taskSort)
-    return [...embedded, ...globalForContact].sort(compareTasksForDisplay);
+    return [...embedded, ...globalForContact];
   };
 
   useEffect(() => {
