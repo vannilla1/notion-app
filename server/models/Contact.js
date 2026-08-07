@@ -42,7 +42,13 @@ const subtaskSchema = new mongoose.Schema({
   // Time-of-day reminders — viď Task.js subtaskSchema komentár.
   timeReminders: { type: [Number], default: [] },
   timeRemindersSent: { type: [Number], default: [] },
-  copiedFrom: { type: copiedFromSchema, default: null }
+  copiedFrom: { type: copiedFromSchema, default: null },
+  // Drag & drop poradie (PUT /api/tasks/reorder-subtasks). KRITICKÉ: pole
+  // MUSÍ byť v schéme — Mongoose strict mode neznáme polia pri save() TICHO
+  // zahodí, takže reorder sa roky tváril uložený, ale po refetchi zmizol
+  // (Task.js order má odjakživa, Contact.js nie — preto globálne projekty
+  // poradie držali a kontaktové nie).
+  order: { type: Number, default: 0 }
 }, { _id: false });
 
 const taskSchema = new mongoose.Schema({
@@ -63,7 +69,10 @@ const taskSchema = new mongoose.Schema({
   reminderSent: { type: Boolean, default: false }, // legacy
   timeReminders: { type: [Number], default: [] },
   timeRemindersSent: { type: [Number], default: [] },
-  copiedFrom: { type: copiedFromSchema, default: null }
+  copiedFrom: { type: copiedFromSchema, default: null },
+  // Drag & drop poradie projektov kontaktu (PUT /api/tasks/reorder) — viď
+  // komentár pri subtaskSchema.order vyššie.
+  order: { type: Number, default: 0 }
 }, { _id: false });
 
 const contactSchema = new mongoose.Schema({
