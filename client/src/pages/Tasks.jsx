@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
+import { compareTasksForDisplay } from '../utils/taskSort';
 import { alertUnlessPlanGate } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -89,8 +90,8 @@ const tasksHelpTips = [
   },
   {
     icon: '↕️',
-    title: 'Drag-and-drop poradie',
-    description: 'Default zoradenie: najprv podľa priority (Vysoká → Stredná → Nízka), dokončené na konci. Pre vlastné poradie chytite ikonu ⠿ (šesť bodiek vľavo) a presuňte projekt na nové miesto. Funguje aj pre úlohy a podúlohy v rámci ich nadradeného projektu.'
+    title: 'Poradie projektov a úloh',
+    description: 'Projekty sú zoradené automaticky: najprv podľa priority (Vysoká → Stredná → Nízka), v rámci priority abecedne, dokončené na konci. Úlohy a podúlohy V RÁMCI projektu si môžete usporiadať vlastne — chytite ikonu ⠿ (šesť bodiek vľavo) a presuňte na nové miesto.'
   },
   {
     icon: '📎',
@@ -2711,23 +2712,13 @@ function Tasks() {
     return true;
   }), [tasks, contactFilter, searchQuery, filter, user]);
 
-  // Sort tasks: incomplete first, then by priority (high→medium→low), then by order, completed at the end
-  const priorityOrder = { high: 0, medium: 1, low: 2 };
-  const sortedFilteredTasks = useMemo(() => [...filteredTasks].sort((a, b) => {
-    const aCompleted = a.completed === true;
-    const bCompleted = b.completed === true;
-    if (aCompleted && !bCompleted) return 1;
-    if (!aCompleted && bCompleted) return -1;
-    // Within same completion status, sort by priority
-    const priA = priorityOrder[a.priority] ?? 1;
-    const priB = priorityOrder[b.priority] ?? 1;
-    if (priA !== priB) return priA - priB;
-    // Then by order
-    const orderA = a.order || 0;
-    const orderB = b.order || 0;
-    if (orderA !== orderB) return orderA - orderB;
-    return 0;
-  }), [filteredTasks]);
+  // Poradie projektov: nedokončené → priorita → ABECEDA v rámci priority
+  // (jednotný komparátor, viď utils/taskSort). Ručné drag poradie projektov
+  // už o poradí nerozhoduje — preto je aj rúčka ⠿ pri projektoch skrytá.
+  const sortedFilteredTasks = useMemo(
+    () => [...filteredTasks].sort(compareTasksForDisplay),
+    [filteredTasks]
+  );
 
   // DnD sensors
   const sensors = useSensors(
@@ -3382,7 +3373,9 @@ function Tasks() {
                         if (editingTask === task.id) return;
                         toggleTaskExpanded(task.id);
                       }}>
-                        {editingTask !== task.id && <span className="drag-handle" {...dragListeners}>⠿</span>}
+                        {/* Rúčka ⠿ pri projektoch odstránená — poradie je vždy
+                            priorita + abeceda, ručné presúvanie by sa hneď
+                            vrátilo späť. Drag podúloh v projekte ostáva. */}
                         <div
                           className="task-checkbox-styled"
                           onClick={() => (!task.completed || user?.role === 'admin') && toggleTask(task)}
