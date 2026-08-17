@@ -22,6 +22,7 @@ const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CRM = lazy(() => import('./pages/CRM'));
 const Tasks = lazy(() => import('./pages/Tasks'));
+const Attachments = lazy(() => import('./pages/Attachments'));
 const WorkspaceMembers = lazy(() => import('./pages/WorkspaceMembers'));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
@@ -567,6 +568,10 @@ function AppContent() {
         <Route
           path="/tasks"
           element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/prilohy"
+          element={isAuthenticated ? <Attachments /> : <Navigate to="/login" />}
         />
         <Route
           path="/workspace/members"

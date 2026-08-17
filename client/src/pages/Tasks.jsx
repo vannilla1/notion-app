@@ -2873,6 +2873,15 @@ function Tasks() {
           >
             Správy
           </button>
+          {/* Hromadné sťahovanie príloh — desktop; na mobile sa skryje
+              (sťahovanie ZIP-u v shelloch zatiaľ nie je doriešené) */}
+          <button
+            className="btn btn-secondary btn-nav-contacts"
+            onClick={() => navigate('/prilohy')}
+            title="Prehľad a hromadné stiahnutie príloh"
+          >
+            📎 Prílohy
+          </button>
           <AnnouncementBanner />
           <NotificationBell />
           <UserMenu

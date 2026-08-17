@@ -110,6 +110,19 @@ async function downloadFile(key) {
  * Vymaže file z R2. Bezpečné aj keď file neexistuje (R2 vráti 204 buď
  * tak buď tak). Idempotentné.
  */
+/**
+ * Stiahnutie file-u z R2 ako STREAM (bez bufferovania v RAM). Používa
+ * hromadný ZIP export, kde by načítanie celých súborov do pamäte zložilo
+ * inštanciu — archiver si stream prečíta postupne a rovno ho posiela klientovi.
+ * Pre jednotlivé súbory ostáva downloadFile() (potrebuje Buffer pre res.send).
+ */
+async function getFileStream(key) {
+  if (!isConfigured) throw new Error('R2 not configured');
+  const cmd = new GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
+  const response = await s3Client.send(cmd);
+  return response.Body; // Node Readable
+}
+
 async function deleteFile(key) {
   if (!isConfigured) return;
   try {
@@ -210,6 +223,7 @@ module.exports = {
   isR2Available,
   uploadFile,
   downloadFile,
+  getFileStream,
   deleteFile,
   getPresignedUrl,
   fileExists,
