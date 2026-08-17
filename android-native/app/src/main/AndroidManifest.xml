@@ -17,6 +17,14 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Ukladanie stiahnutých príloh do priečinka Stiahnuté. Od Androidu 10
+         (API 29) je to scoped storage cez MediaStore.Downloads BEZ permission —
+         preto maxSdkVersion=28. Na starších verziách (minSdk 24) sa zapisuje
+         do verejného priečinka, kde permission ešte potrebná je. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <!-- AD_ID — Android 13+ vyžaduje deklaráciu permission ak appka používa
          Advertising ID. Naša appka NEPOUŽÍVA reklamy, ale Firebase Analytics
          (transitively cez firebase-messaging) ho automaticky deklaruje. Tu

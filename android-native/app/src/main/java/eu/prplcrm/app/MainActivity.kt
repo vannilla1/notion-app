@@ -2,15 +2,20 @@ package eu.prplcrm.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.URLUtil
+import android.widget.Toast
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -246,6 +251,41 @@ class MainActivity : AppCompatActivity() {
         // kvôli Google OAuth redirectom.
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+
+        // Sťahovanie z priamej URL (hromadný ZIP export príloh). DownloadManager
+        // streamuje na disk mimo WebView — pamäť appky sa nezaťaží ani pri
+        // stovkách MB, na rozdiel od base64 mosta (NativeBridge.saveFile),
+        // ktorý je pre bežné prílohy. Bez tohto listenera WebView odpoveď
+        // s Content-Disposition: attachment jednoducho zahodí.
+        //
+        // Auth: ZIP odkaz nesie jednorazový token priamo v URL, takže
+        // DownloadManager (beží mimo WebView, hlavičky nedostane) prejde.
+        // Preto sem púšťame LEN našu doménu — cudzí odkaz by sme sťahovali
+        // bez kontroly obsahu.
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            try {
+                val uri = Uri.parse(url)
+                if (!isOurHost(url)) {
+                    android.util.Log.w("PrplCRM", "[Download] Odmietnutý cudzí host: ${uri.host}")
+                    return@setDownloadListener
+                }
+                val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                val request = DownloadManager.Request(uri).apply {
+                    setMimeType(mimeType)
+                    setTitle(fileName)
+                    setDescription("Prpl CRM")
+                    addRequestHeader("User-Agent", userAgent)
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                }
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                dm.enqueue(request)
+                Toast.makeText(this, "Sťahujem $fileName…", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.util.Log.e("PrplCRM", "[Download] Zlyhalo", e)
+                Toast.makeText(this, "Sťahovanie zlyhalo", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /**

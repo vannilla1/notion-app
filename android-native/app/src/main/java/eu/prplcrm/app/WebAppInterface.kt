@@ -62,6 +62,74 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
 
     /**
+     * Uloženie súboru z web appky do priečinka Stiahnuté.
+     *
+     * Android WebView bez tohto nevie stiahnuť NIČ — blob: URL ani
+     * `<a download>` nikam nevedú a klik je tichý no-op (do 1.0.5 bola
+     * teda každá príloha na Androide nestiahnuteľná). Ekvivalent iOS
+     * handleru 'fileDownload' v ContentView.swift.
+     *
+     * base64 sa posiela cez JS most, takže sa hodí na bežné prílohy;
+     * veľké ZIP-y idú priamo cez DownloadListener v MainActivity
+     * (streamované DownloadManagerom, bez záťaže pamäte WebView).
+     *
+     * Vráti "ok" / "error: …" — klient podľa toho zobrazí hlášku a vie
+     * rozlíšiť starú verziu appky (metóda chýba → undefined).
+     */
+    @JavascriptInterface
+    fun saveFile(base64: String?, fileName: String?, mimetype: String?): String {
+        if (base64.isNullOrEmpty()) return "error: no data"
+        val safeName = sanitizeFileName(fileName)
+        return try {
+            val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+            val mime = if (mimetype.isNullOrBlank()) "application/octet-stream" else mimetype
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                // Android 10+ — scoped storage, žiadne permissions netreba
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, mime)
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return "error: insert failed"
+                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return "error: stream failed"
+                values.clear()
+                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } else {
+                // Android 7–9 — legacy verejný priečinok (permission v manifeste
+                // s maxSdkVersion=28)
+                @Suppress("DEPRECATION")
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                if (!dir.exists()) dir.mkdirs()
+                java.io.File(dir, safeName).outputStream().use { it.write(bytes) }
+            }
+            webView.post {
+                android.widget.Toast.makeText(context, "Uložené do Stiahnuté: $safeName", android.widget.Toast.LENGTH_LONG).show()
+            }
+            "ok"
+        } catch (e: Exception) {
+            android.util.Log.e("PrplCRM", "saveFile failed", e)
+            "error: ${e.message}"
+        }
+    }
+
+    /** Názov bez ciest a riadiacich znakov — nikdy nesmie uniknúť z Downloads. */
+    private fun sanitizeFileName(name: String?): String {
+        val cleaned = (name ?: "")
+            .replace(Regex("[/\\\\]"), "-")
+            .replace(Regex("[\\x00-\\x1f\\x7f]"), "")
+            .trimStart('.')
+            .trim()
+            .take(120)
+        return if (cleaned.isBlank()) "subor" else cleaned
+    }
+
+    /**
      * Otvorenie soft klávesnice pre input fokusnutý z JS. WebView otvorí
      * klávesnicu len pri fokuse z priameho gesta používateľa — po výbere
      * súboru v natívnom pickeri (galéria/kamera) už gesto nie je, takže
