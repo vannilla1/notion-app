@@ -94,6 +94,9 @@ describe('/api/workspaces route', () => {
 
   describe('POST /', () => {
     it('vytvorí workspace + auto-assign owner + nastaví currentWorkspaceId', async () => {
+      // Free plán smie vlastniť len 1 prostredie (owner už jedno má) —
+      // tento test overuje vytváranie, nie plánový limit.
+      await User.findByIdAndUpdate(ownerCtx.user._id, { 'subscription.plan': 'pro' });
       const res = await request(app)
         .post('/api/workspaces')
         .set(authHeader(ownerCtx.token))
@@ -135,6 +138,7 @@ describe('/api/workspaces route', () => {
     });
 
     it('slug je auto-generovaný a unikátny (counter suffix)', async () => {
+      await User.findByIdAndUpdate(ownerCtx.user._id, { 'subscription.plan': 'pro' });
       const r1 = await request(app)
         .post('/api/workspaces')
         .set(authHeader(ownerCtx.token))
@@ -413,18 +417,30 @@ describe('/api/workspaces route', () => {
       expect(fresh.name).toBe('Primary');
     });
 
-    it('manager MÔŽE updatnúť (canAdmin() = true)', async () => {
+    it('manager MÔŽE updatnúť popis/farbu, ale NIE názov (owner-only)', async () => {
       const managerCtx = await addMember(ownerCtx.workspace._id, {
         username: 'manager', email: 'mgr@test.com', role: 'manager'
       });
 
-      const res = await request(app)
+      // Popis a farba — manager smie
+      const ok = await request(app)
+        .put('/api/workspaces/current')
+        .set(authHeader(managerCtx.token))
+        .send({ description: 'Popis od managera', color: '#00ff00' });
+
+      expect(ok.status).toBe(200);
+      expect(ok.body.description).toBe('Popis od managera');
+
+      // Názov — výlučne vlastník (zámerná reštrikcia, viď PUT /current)
+      const denied = await request(app)
         .put('/api/workspaces/current')
         .set(authHeader(managerCtx.token))
         .send({ name: 'Renamed by Manager' });
 
-      expect(res.status).toBe(200);
-      expect(res.body.name).toBe('Renamed by Manager');
+      expect(denied.status).toBe(403);
+      expect(denied.body.code).toBe('OWNER_ONLY');
+      const fresh = await Workspace.findById(ownerCtx.workspace._id);
+      expect(fresh.name).toBe('Primary');
     });
 
     it('owner updatuje name + description + color', async () => {

@@ -100,7 +100,10 @@ describe('/api/google-calendar route', () => {
     user = await User.create({
       username: 'gcaluser',
       email: 'gcal@test.com',
-      password: 'hashed'
+      password: 'hashed',
+      // Google sync je funkcia plánov Tím+ — bez toho vráti route 403
+      // (plan-feature gate). Tieto testy overujú sync flow, nie gating.
+      subscription: { plan: 'pro' }
     });
     token = jwt.sign({ id: user._id.toString() }, process.env.JWT_SECRET, { expiresIn: '1h' });
 

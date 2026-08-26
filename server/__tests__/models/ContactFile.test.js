@@ -78,10 +78,13 @@ describe('ContactFile model', () => {
       ).rejects.toThrow();
     });
 
-    it('should enforce data as required', async () => {
-      await expect(
-        ContactFile.create({ contactId: contact._id, fileId: 'uuid-1' })
-      ).rejects.toThrow();
+    it('allows data=null — obsah žije v R2, nie v Mongu (r2Key)', async () => {
+      // Pôvodne bolo `data` povinné (base64 v Mongu). Po migrácii na R2 je
+      // blob v object storage a v dokumente ostáva len r2Key; `data` slúži
+      // už len pre legacy záznamy, preto MUSÍ byť voliteľné.
+      const doc = await ContactFile.create({ contactId: contact._id, fileId: 'uuid-1' });
+      expect(doc.data).toBeNull();
+      expect(doc.r2Key).toBeNull();
     });
 
     it('should allow contactId=null (pre-uploaded file before assignment)', async () => {

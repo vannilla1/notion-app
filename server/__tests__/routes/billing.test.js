@@ -97,11 +97,11 @@ describe('/api/billing route', () => {
       expect(ids).toEqual(['free', 'team', 'pro']);
     });
 
-    it('Free plán limits: 5 kontaktov, 10 projektov, 2 členovia', async () => {
+    it('Free plán limits: 5 kontaktov, 5 projektov, 2 členovia', async () => {
       const res = await request(app).get('/api/billing/plans');
       const free = res.body.plans.find(p => p.id === 'free');
       expect(free.limits.contacts).toBe(5);
-      expect(free.limits.projectsPerContact).toBe(10);
+      expect(free.limits.projectsPerContact).toBe(5);
       expect(free.limits.members).toBe(2);
     });
 

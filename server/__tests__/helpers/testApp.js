@@ -70,12 +70,17 @@ const createUserWithWorkspace = async ({
   email = 'test@test.com',
   role = 'member', // owner | manager | member
   workspaceName = 'Test Workspace',
-  workspaceSlug = null
+  workspaceSlug = null,
+  // Plán vlastníka — rozhoduje o limitoch (počet prostredí, členov,
+  // kontaktov) aj o prístupe k funkciám Tím+ (Google sync, prílohy).
+  // Testy, ktoré limity NEtestujú, si vyžiadajú 'pro'.
+  plan = 'free'
 } = {}) => {
   const user = await User.create({
     username,
     email,
-    password: 'hashedpw-not-real-for-tests'
+    password: 'hashedpw-not-real-for-tests',
+    subscription: { plan }
   });
 
   const workspace = await Workspace.create({

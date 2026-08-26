@@ -47,7 +47,7 @@ describe('/api/auth route', () => {
     it('vytvorí nového usera + hashne heslo + vráti JWT', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'alice', email: 'alice@test.com', password: 'secret123' });
+        .send({ username: 'alice', email: 'alice@test.com', password: 'Kr4sn0hOrsk3!x' });
 
       expect(res.status).toBe(201);
       expect(res.body.token).toBeDefined();
@@ -60,8 +60,8 @@ describe('/api/auth route', () => {
       const dbUser = await User.findOne({ email: 'alice@test.com' });
       expect(dbUser).not.toBeNull();
       // heslo je hashnuté, nie plaintext
-      expect(dbUser.password).not.toBe('secret123');
-      expect(await bcrypt.compare('secret123', dbUser.password)).toBe(true);
+      expect(dbUser.password).not.toBe('Kr4sn0hOrsk3!x');
+      expect(await bcrypt.compare('Kr4sn0hOrsk3!x', dbUser.password)).toBe(true);
     });
 
     it('400 ak chýba username/email/password', async () => {
@@ -77,7 +77,7 @@ describe('/api/auth route', () => {
         .post('/api/auth/register')
         .send({ username: 'bob', email: 'b@test.com', password: '12345' });
       expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/6 znakov/);
+      expect(res.body.message).toMatch(/8 znakov/);
     });
 
     it('duplicate email a duplicate username vracajú IDENTICKÝ generic message (anti-enumeration)', async () => {
@@ -88,11 +88,11 @@ describe('/api/auth route', () => {
 
       const dupEmail = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'new-name', email: 'dup@test.com', password: 'secret123' });
+        .send({ username: 'new-name', email: 'dup@test.com', password: 'Kr4sn0hOrsk3!x' });
 
       const dupUsername = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'existing-name', email: 'new@test.com', password: 'secret123' });
+        .send({ username: 'existing-name', email: 'new@test.com', password: 'Kr4sn0hOrsk3!x' });
 
       expect(dupEmail.status).toBe(400);
       expect(dupUsername.status).toBe(400);
@@ -104,7 +104,7 @@ describe('/api/auth route', () => {
     it('BLOKUJE registráciu support@prplcrm.eu (super admin reserved)', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'fake-admin', email: 'support@prplcrm.eu', password: 'secret123' });
+        .send({ username: 'fake-admin', email: 'support@prplcrm.eu', password: 'Kr4sn0hOrsk3!x' });
 
       expect(res.status).toBe(400);
       expect(await User.countDocuments({ email: 'support@prplcrm.eu' })).toBe(0);
@@ -113,7 +113,7 @@ describe('/api/auth route', () => {
     it('všetci noví useri majú role="user" (admin sa dá nastaviť len cez seed)', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'wannabe', email: 'w@test.com', password: 'secret123', role: 'admin' });
+        .send({ username: 'wannabe', email: 'w@test.com', password: 'Kr4sn0hOrsk3!x', role: 'admin' });
 
       expect(res.status).toBe(201);
       expect(res.body.user.role).toBe('user');
@@ -125,7 +125,7 @@ describe('/api/auth route', () => {
     it('JWT token je podpísaný JWT_SECRET a obsahuje user.id', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ username: 'jwt-user', email: 'j@test.com', password: 'secret123' });
+        .send({ username: 'jwt-user', email: 'j@test.com', password: 'Kr4sn0hOrsk3!x' });
 
       expect(res.status).toBe(201);
       const decoded = jwt.verify(res.body.token, process.env.JWT_SECRET);
@@ -309,12 +309,12 @@ describe('/api/auth route', () => {
       const res = await request(app)
         .put('/api/auth/password')
         .set(authHeader(token))
-        .send({ currentPassword: currentPw, newPassword: 'newpass456' });
+        .send({ currentPassword: currentPw, newPassword: 'N0v3Hesl0!2026' });
 
       expect(res.status).toBe(200);
 
       const dbUser = await User.findById(user._id);
-      expect(await bcrypt.compare('newpass456', dbUser.password)).toBe(true);
+      expect(await bcrypt.compare('N0v3Hesl0!2026', dbUser.password)).toBe(true);
       expect(await bcrypt.compare(currentPw, dbUser.password)).toBe(false);
     });
 
@@ -322,7 +322,7 @@ describe('/api/auth route', () => {
       const res = await request(app)
         .put('/api/auth/password')
         .set(authHeader(token))
-        .send({ currentPassword: 'wrong', newPassword: 'newpass456' });
+        .send({ currentPassword: 'wrong', newPassword: 'N0v3Hesl0!2026' });
 
       expect(res.status).toBe(400);
 
@@ -465,17 +465,19 @@ describe('/api/auth route', () => {
       token = jwt.sign({ id: user._id.toString() }, process.env.JWT_SECRET, { expiresIn: '1h' });
     });
 
-    it('GET vráti všetky 4 toggles s defaultmi false pre nového usera', async () => {
+    it('GET vráti všetky toggles s defaultmi (dnes true) + marketingEmails', async () => {
       const res = await request(app)
         .get('/api/auth/notification-preferences')
         .set(authHeader(token));
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        pushTeamActivity: false,
-        pushDeadlines: false,
-        pushOverdue: false,
-        pushNewMember: false
+        pushTeamActivity: true,
+        pushDeadlines: true,
+        pushOverdue: true,
+        pushNewMember: true,
+        // marketingEmails ide v rovnakom payloade (opt-out by default)
+        marketingEmails: true
       });
     });
 
@@ -492,9 +494,10 @@ describe('/api/auth route', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.pushDeadlines).toBe(true);
-      expect(res.body.pushTeamActivity).toBe(false);
-      expect(res.body.pushOverdue).toBe(false);
-      expect(res.body.pushNewMember).toBe(false);
+      // ostatné ostávajú na defaulte (dnes true — opt-out model)
+      expect(res.body.pushTeamActivity).toBe(true);
+      expect(res.body.pushOverdue).toBe(true);
+      expect(res.body.pushNewMember).toBe(true);
 
       // Persisted to DB
       const fresh = await User.findById(user._id);

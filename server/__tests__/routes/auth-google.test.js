@@ -88,7 +88,7 @@ describe('auth-google routes', () => {
       const url = new URL(res.headers.location);
       const state = url.searchParams.get('state');
       const decoded = oauthService.verifyState(state);
-      expect(decoded.returnUrl).toBe('/app/dashboard'); // sanitize fallback
+      expect(decoded.returnUrl).toBe('/app'); // sanitize fallback (evil.com zahodený)
     });
   });
 

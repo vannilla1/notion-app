@@ -158,7 +158,8 @@ describe('/api/admin route', () => {
         .set(authHeader(superAdminToken));
 
       expect(res.status).toBe(200);
-      const emails = res.body.map(u => u.email);
+      // Endpoint je stránkovaný — pole je v res.body.users
+      const emails = res.body.users.map(u => u.email);
       expect(emails).not.toContain(SUPER_ADMIN_EMAIL);
       expect(emails).toContain('reg@test.com');
     });
@@ -168,7 +169,7 @@ describe('/api/admin route', () => {
         .get('/api/admin/users')
         .set(authHeader(superAdminToken));
       expect(res.status).toBe(200);
-      res.body.forEach((u) => {
+      res.body.users.forEach((u) => {
         expect(u.password).toBeUndefined();
       });
     });
@@ -233,8 +234,8 @@ describe('/api/admin route', () => {
       expect(res.status).toBe(400);
     });
 
-    it('akceptuje iba free|team|pro|trial', async () => {
-      for (const plan of ['free', 'team', 'pro', 'trial']) {
+    it('akceptuje iba free|team|pro (trial bol odstránený)', async () => {
+      for (const plan of ['free', 'team', 'pro']) {
         const res = await request(app)
           .put(`/api/admin/users/${regularUser._id}/plan`)
           .set(authHeader(superAdminToken))
@@ -243,7 +244,14 @@ describe('/api/admin route', () => {
       }
 
       const updated = await User.findById(regularUser._id);
-      expect(updated.subscription.plan).toBe('trial');
+      expect(updated.subscription.plan).toBe('pro');
+
+      // 'trial' už nie je platný plán — bol z aplikácie odstránený
+      const trialRes = await request(app)
+        .put(`/api/admin/users/${regularUser._id}/plan`)
+        .set(authHeader(superAdminToken))
+        .send({ plan: 'trial' });
+      expect(trialRes.status).toBe(400);
     });
 
     it('audit log entry s kategóriou billing', async () => {

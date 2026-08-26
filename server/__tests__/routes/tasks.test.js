@@ -279,7 +279,7 @@ describe('/api/tasks route', () => {
 
       // Aktuálne správanie: 6. task blocked s 403 GLOBAL_TASK_LIMIT.
       expect(res.status).toBe(403);
-      expect(res.body.code).toBe('GLOBAL_TASK_LIMIT');
+      expect(res.body.code).toBe('PLAN_LIMIT');
       expect(await Task.countDocuments({ workspaceId: ownerCtx.workspace._id })).toBe(5);
     });
   });
