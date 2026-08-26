@@ -14,6 +14,7 @@ const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
 const { attachmentFileFilter } = require('../utils/uploadFilter');
+const { trackUploadAbort } = require('../utils/uploadTracking');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -117,17 +118,7 @@ const autoDeleteTaskTreeFromGoogle = (task) => {
 // klienta, zatiaľ čo server request v tichosti dokončí — retry potom vyrobí
 // druhú kópiu. In-memory mapa stačí (API beží ako single instance). Kľúč sa
 // pri reálnej chybe uvoľní, aby legitímny retry prešiel.
-const recentMutationKeys = new Map(); // key -> expiresAt (ms)
-const claimMutationKey = (key, ttlMs) => {
-  const now = Date.now();
-  for (const [k, exp] of recentMutationKeys) {
-    if (exp <= now) recentMutationKeys.delete(k);
-  }
-  if (recentMutationKeys.has(key)) return false;
-  recentMutationKeys.set(key, now + ttlMs);
-  return true;
-};
-const releaseMutationKey = (key) => recentMutationKeys.delete(key);
+const { claimMutationKey, releaseMutationKey } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -2013,6 +2004,9 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
 
 // Upload file to contact (stored in MongoDB as Base64)
 router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
+  // Prerušené prenosy boli neviditeľné — teraz sa zapíšu do audit logu
+  trackUploadAbort(req, { target: 'príloha kontaktu' });
+  let uploadIdemKey = null;
   upload.single('file')(req, res, async (err) => {
     try {
       // Handle multer errors
@@ -2065,6 +2059,19 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
             : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
           logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
           return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
+        }
+      }
+
+      // Idempotencia pre frontu nahrávaní (client/src/utils/uploadQueue):
+      // ak sa odpoveď stratila a klient pošle ten istý uploadId znova,
+      // nevytvoríme druhú kópiu prílohy. Kľúč sa pri chybe uvoľňuje nižšie,
+      // takže legitímne opakovanie po zlyhaní prejde.
+      const uploadId = String(req.body.uploadId || '').trim().slice(0, 100);
+      if (uploadId) {
+        uploadIdemKey = `upload:${req.user.id}:${uploadId}`;
+        if (!claimMutationKey(uploadIdemKey, 30 * 60 * 1000)) {
+          uploadIdemKey = null; // kľúč drží prvý request — v catch neuvoľňovať
+          return res.status(200).json({ message: 'Súbor už bol nahraný', duplicate: true });
         }
       }
 
@@ -2144,6 +2151,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       res.status(201).json(responseData);
     } catch (error) {
+      if (uploadIdemKey) releaseMutationKey(uploadIdemKey);
       logger.error('File upload error', { error: error.message });
       res.status(500).json({ message: 'Chyba servera' });
     }

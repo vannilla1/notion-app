@@ -5,6 +5,8 @@ import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
 import NotificationToast from './components/NotificationToast';
 import PushPermissionBanner from './components/PushPermissionBanner';
 import UpgradeModal from './components/UpgradeModal';
+import UploadQueueIndicator from './components/UploadQueueIndicator';
+import { startUploadQueue } from './utils/uploadQueue';
 import BottomNav from './components/BottomNav';
 import api from './api/api';
 import { useSocket } from './hooks/useSocket';
@@ -291,6 +293,12 @@ function AppContent() {
     }
   }, [isAuthenticated, isAdminRoute]);
 
+  // Fronta nahrávaní príloh — dokončí prenosy prerušené zavretím appky
+  // alebo výpadkom siete. Štartuje sa raz, po prihlásení.
+  useEffect(() => {
+    if (isAuthenticated) startUploadQueue();
+  }, [isAuthenticated]);
+
   // Mŕtvy sieťový stack po dlhom pozadí (mobilné WebView): stránka po
   // prebudení žije, ale requesty ticho visia — všetky sekcie točia spinner
   // a pomôže len reload. Po návrate z pozadia dlhšieho než 15 min spravíme
@@ -531,6 +539,8 @@ function AppContent() {
       {/* Centrálny upsell modal — reaguje na 'plan-gate' event z axios
           interceptora (utils/planGate). Mimo admin rozhrania. */}
       {isAuthenticated && !isAdminRoute && <UpgradeModal />}
+      {/* Stav nahrávania príloh (priebeh, čakajúce, zlyhané) */}
+      {isAuthenticated && !isAdminRoute && <UploadQueueIndicator />}
       {/* BottomNav je user-app navigácia — admin panel má vlastný tab-bar, takže
           na `/admin*` by bol BottomNav vizuálne rušivý aj zavádzajúci. */}
       {isAuthenticated && !isAdminRoute && <BottomNav unreadCounts={unreadCounts} />}

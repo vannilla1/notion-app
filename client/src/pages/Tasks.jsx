@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
+import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import { alertUnlessPlanGate } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -747,6 +748,14 @@ function Tasks() {
   // Transfer modal — kopírovanie/presun projektu alebo úlohy do projektu
   // iného kontaktu. { contactId, taskId, subtaskId?, title } | null
   const [transferItem, setTransferItem] = useState(null);
+
+  // Fronta nahrávaní beží mimo tejto stránky — projekty obnovíme až keď
+  // príloha reálne dorazí na server.
+  useEffect(() => onUploadSettled(({ ok, item, message }) => {
+    if (item?.kind !== 'task') return;
+    if (ok) fetchTasks();
+    else if (message) alert(`Prílohu „${item.fileName}" sa nepodarilo nahrať: ${message}`);
+  }), []);
 
   // Google Calendar notification
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
@@ -2521,24 +2530,9 @@ function Tasks() {
       alert(`Súbor má ${formatFileSize(file.size)} — maximum je ${formatFileSize(FILE_SIZE_LIMITS.TASK_FILE)}.`);
       return;
     }
-    const key = subtaskId || taskId;
-    setUploadingFile(key);
-    try {
-      const formData = new FormData();
-      // customName posielame PRED file-om, nech ho multer určite zaradí do req.body.
-      if (customName && customName.trim()) formData.append('customName', customName.trim());
-      formData.append('file', file);
-      const url = subtaskId
-        ? `/api/tasks/${taskId}/files?subtaskId=${subtaskId}`
-        : `/api/tasks/${taskId}/files`;
-      // 5 min — 50 MB video na pomalšej mobilnej sieti sa do 60 s nestihne
-      await api.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
-      await fetchTasks();
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri nahrávaní súboru');
-    } finally {
-      setUploadingFile(null);
-    }
+    // Do fronty (IndexedDB) — prežije zavretie appky aj výpadok siete;
+    // priebeh a stav ukazuje UploadQueueIndicator.
+    await enqueueUpload({ kind: 'task', taskId, subtaskId, file, customName });
   };
 
   const handleFileDownload = async (taskId, fileId, fileName, subtaskId) => {

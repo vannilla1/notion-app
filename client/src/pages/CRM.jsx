@@ -13,11 +13,10 @@ import NotificationBell from '../components/NotificationBell';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
-import { getStoredToken } from '../utils/authStorage';
-import { getStoredWorkspaceId } from '../utils/workspaceStorage';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
-import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
+import { alertUnlessPlanGate } from '../utils/planGate';
+import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -180,6 +179,17 @@ function CRM() {
 
   // File states
   const [uploadingFile, setUploadingFile] = useState(null);
+
+  // Fronta nahrávaní beží mimo tejto stránky (aj po jej opustení), takže
+  // zoznam kontaktov obnovíme až keď príloha reálne dorazí na server.
+  useEffect(() => onUploadSettled(({ ok, item, message }) => {
+    if (item?.kind !== 'contact') return;
+    if (ok) {
+      api.get('/api/contacts').then(r => setContacts(r.data)).catch(() => {});
+    } else if (message) {
+      alert(`Prílohu „${item.fileName}" sa nepodarilo nahrať: ${message}`);
+    }
+  }), []);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
   // Po dokončení poslednej podúlohy globálneho projektu — potvrdenie uzavretia
@@ -613,83 +623,11 @@ function CRM() {
       return;
     }
 
-    setUploadingFile(contactId);
-
-    const token = getStoredToken();
-    const uploadUrl = `${api.defaults.baseURL}/api/contacts/${contactId}/files`;
-
-    return new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.addEventListener('load', async () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          // Refresh contacts
-          try {
-            const contactsRes = await api.get('/api/contacts');
-            setContacts(contactsRes.data);
-          } catch (e) {
-            // Silent fail - contacts will refresh on next action
-          }
-        } else {
-          // XHR obchádza axios interceptor — plánový limit treba spracovať
-          // ručne, inak by upload len vypísal surový JSON namiesto modalu.
-          let handled = false;
-          try {
-            const data = JSON.parse(xhr.responseText || '{}');
-            if (PLAN_GATE_CODES.has(data.code)) {
-              dispatchPlanGate({ code: data.code, message: data.message });
-              handled = true;
-            } else if (data.message) {
-              alert(data.message);
-              handled = true;
-            }
-          } catch { /* nie JSON — fallback nižšie */ }
-          if (!handled) alert('Chyba pri nahrávaní: ' + (xhr.responseText || xhr.status));
-        }
-        setUploadingFile(null);
-        resolve();
-      });
-
-      xhr.addEventListener('error', () => {
-        // Check if Safari
-        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-        if (isSafari) {
-          alert('Safari má problémy s nahrávaním súborov. Použite prosím Chrome alebo Firefox.');
-        } else {
-          alert('Chyba siete pri nahrávaní súboru');
-        }
-        setUploadingFile(null);
-        resolve();
-      });
-
-      xhr.addEventListener('abort', () => {
-        setUploadingFile(null);
-        resolve();
-      });
-
-      xhr.addEventListener('timeout', () => {
-        alert('Časový limit vypršal');
-        setUploadingFile(null);
-        resolve();
-      });
-
-      xhr.open('POST', uploadUrl);
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      // KRITICKÉ: surový XHR obchádza axios interceptor, ktorý inak pridáva
-      // X-Workspace-Id. Bez hlavičky server spadne na fallback
-      // User.currentWorkspaceId z DB (posledné prostredie podľa DB, nie to,
-      // v ktorom user práve JE) → pri viacerých prostrediach „Contact not
-      // found", hoci kontakt na obrazovke vidí.
-      const wsId = getStoredWorkspaceId();
-      if (wsId) xhr.setRequestHeader('X-Workspace-Id', wsId);
-      xhr.timeout = 300000; // 5 min — 50 MB súbor na pomalšej sieti sa do 60 s nestihne
-
-      const formData = new FormData();
-      // customName PRED file-om, nech ho multer zaradí do req.body.
-      if (customName && customName.trim()) formData.append('customName', customName.trim());
-      formData.append('file', file);
-      xhr.send(formData);
-    });
+    // Súbor ide do fronty (IndexedDB) a odosiela sa na pozadí s priebehom
+    // aj opakovaním. Kľúčové: keď používateľ zavrie appku uprostred prenosu,
+    // príloha sa NESTRATÍ — odošle sa pri ďalšom otvorení. Priebeh a stav
+    // ukazuje UploadQueueIndicator, preto tu netreba vlastný spinner.
+    await enqueueUpload({ kind: 'contact', contactId, file, customName });
   };
 
   const confirmPendingUpload = (finalName) => {

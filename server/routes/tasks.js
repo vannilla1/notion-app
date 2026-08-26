@@ -14,6 +14,8 @@ const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
 const { attachmentFileFilter } = require('../utils/uploadFilter');
+const { trackUploadAbort } = require('../utils/uploadTracking');
+const { claimMutationKey, releaseMutationKey } = require('../utils/idempotency');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
 const EXCLUDE_FILE_DATA = {
@@ -2833,6 +2835,8 @@ const findSubtaskById = (subtasks, subtaskId) => {
 
 // Upload file to task
 router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
+  trackUploadAbort(req, { target: 'príloha úlohy' });
+  let uploadIdemKey = null;
   upload.single('file')(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
@@ -2845,6 +2849,17 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
     try {
       const { taskId } = req.params;
       const subtaskId = req.query.subtaskId;
+
+      // Idempotencia pre frontu nahrávaní — opakovanie po prerušenom
+      // prenose nesmie vytvoriť druhú kópiu prílohy.
+      const uploadId = String(req.body.uploadId || '').trim().slice(0, 100);
+      if (uploadId) {
+        uploadIdemKey = `upload:${req.user.id}:${uploadId}`;
+        if (!claimMutationKey(uploadIdemKey, 30 * 60 * 1000)) {
+          uploadIdemKey = null;
+          return res.json({ message: 'Súbor už bol nahraný', duplicate: true });
+        }
+      }
 
       // R2 výpadok: base64 fallback do Monga znesie len malé súbory (16 MB
       // BSON strop dokumentu, base64 +33 % expanzia) — veľké čisto odmietni,
@@ -3001,6 +3016,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
 
       res.json({ message: 'Súbor nahraný', file: fileMeta });
     } catch (error) {
+      if (uploadIdemKey) releaseMutationKey(uploadIdemKey);
       logger.error('Task file upload error', { error: error.message });
       // Zaznamenaj SKUTOČNÝ error (stack + message) do Diagnostiky — inak by
       // captureResponseErrors finish-hook zachytil len generický "HTTP 500"
