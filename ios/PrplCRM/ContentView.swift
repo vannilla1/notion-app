@@ -559,7 +559,7 @@ struct WebView: UIViewRepresentable {
         return URL(string: "\(urlString)\(sep)_t=\(ts)")
     }
 
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
         var parent: WebView
         weak var webView: WKWebView?
         var hasFinishedInitialLoad = false
@@ -1013,6 +1013,8 @@ struct WebView: UIViewRepresentable {
         // Posledný odchod do pozadia — na detekciu dlhého pobytu na pozadí
         // (preventívny reload proti mŕtvemu network procesu)
         fileprivate var lastBackgroundAt: Date?
+        // Prebiehajúce natívne sťahovania → cieľový súbor (WKDownloadDelegate)
+        fileprivate var downloadDestinations: [WKDownload: URL] = [:]
 
         // Fires when iOS kills the WebContent process (memory pressure, etc.)
         // Without this handler, WKWebView stays blank or gets reloaded from
@@ -1199,6 +1201,94 @@ struct WebView: UIViewRepresentable {
             } else {
                 decisionHandler(.allow)
             }
+        }
+
+        // MARK: - Natívne sťahovanie súborov (WKDownload)
+        //
+        // Hromadný ZIP export príloh sa spúšťa navigáciou na odkaz s
+        // Content-Disposition: attachment. Bez tohto by WKWebView takú
+        // odpoveď ticho zahodil (na iOS sa nedá stiahnuť ani cez blob:
+        // ani cez <a download>) a sťahovanie by v appke nefungovalo.
+        //
+        // Prečo nie existujúci JS most (base64): ten drží súbor naraz ako
+        // Blob + base64 string + Data — cca 4× jeho veľkosť v pamäti, čo
+        // pri stovkách MB spoľahlivo zabije WebContent proces. WKDownload
+        // streamuje rovno na disk, takže pamäť ostáva plochá.
+
+        func webView(_ webView: WKWebView,
+                     decidePolicyFor navigationResponse: WKNavigationResponse,
+                     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            let disposition = (navigationResponse.response as? HTTPURLResponse)?
+                .value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
+            if disposition.contains("attachment") {
+                debugLog("[Download] attachment → natívne stiahnutie")
+                decisionHandler(.download)
+                return
+            }
+            decisionHandler(.allow)
+        }
+
+        func webView(_ webView: WKWebView,
+                     navigationResponse: WKNavigationResponse,
+                     didBecome download: WKDownload) {
+            download.delegate = self
+        }
+
+        func download(_ download: WKDownload,
+                      decideDestinationUsing response: URLResponse,
+                      suggestedFilename: String,
+                      completionHandler: @escaping (URL?) -> Void) {
+            // Vlastný podpriečinok — cieľ nesmie existovať a zároveň sa tým
+            // vyhneme prepísaniu pri zhodnom názve z predošlého sťahovania.
+            let name = sanitizeDownloadName(suggestedFilename)
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("downloads/\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            } catch {
+                debugLog("[Download] Nepodarilo sa vytvoriť priečinok: \(error)")
+                completionHandler(nil)
+                return
+            }
+            let dest = dir.appendingPathComponent(name)
+            downloadDestinations[download] = dest
+            completionHandler(dest)
+        }
+
+        func downloadDidFinish(_ download: WKDownload) {
+            guard let url = downloadDestinations.removeValue(forKey: download) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let vc = self?.webView?.window?.rootViewController else { return }
+                let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                if let popover = activityVC.popoverPresentationController {
+                    popover.sourceView = vc.view
+                    popover.sourceRect = CGRect(x: vc.view.bounds.midX, y: vc.view.bounds.midY, width: 0, height: 0)
+                    popover.permittedArrowDirections = []
+                }
+                vc.present(activityVC, animated: true)
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            downloadDestinations.removeValue(forKey: download)
+            debugLog("[Download] Zlyhalo: \(error.localizedDescription)")
+            DispatchQueue.main.async { [weak self] in
+                guard let vc = self?.webView?.window?.rootViewController else { return }
+                let alert = UIAlertController(title: "Sťahovanie zlyhalo",
+                                              message: "Súbor sa nepodarilo stiahnuť. Skúste to znova.",
+                                              preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                vc.present(alert, animated: true)
+            }
+        }
+
+        /// Názov bez ciest a riadiacich znakov — nesmie uniknúť z temp priečinka.
+        private func sanitizeDownloadName(_ name: String) -> String {
+            let cleaned = name
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: "\\", with: "-")
+                .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+            return cleaned.isEmpty ? "subor" : String(cleaned.prefix(120))
         }
     }
 }
