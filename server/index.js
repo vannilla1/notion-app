@@ -183,9 +183,35 @@ app.get('/api/version', (req, res) => {
 
 // DB readiness check - return 503 if DB not connected yet (frontend will retry)
 const mongoose = require('mongoose');
+// Kedy sa spojenie s DB naposledy stratilo — odlišuje krátky reconnect blip
+// od skutočného výpadku. Mongoose sa vie sám prepojiť (replica set failover,
+// sieťový blip) a počas tých pár sekúnd vraciame 503; to NIE JE chyba appky,
+// klient request zopakuje. Zaznamenávať každý takýto 503 do Diagnostiky by
+// ju zaplavilo šumom (presne to sa stalo 26. 8.).
+let dbUnreadySince = null;
+let dbOutageReported = false;
+const DB_OUTAGE_ALERT_MS = 60 * 1000;
+
 app.use('/api', (req, res, next) => {
   if (mongoose.connection.readyState !== 1) {
+    if (dbUnreadySince === null) dbUnreadySince = Date.now();
+    const outageMs = Date.now() - dbUnreadySince;
+    // Krátky blip → ticho degradujeme. Dlhší výpadok už chceme vidieť, ale
+    // nahlásime ho RAZ, nie pri každom requeste.
+    res.locals.__dbNotReady = outageMs < DB_OUTAGE_ALERT_MS;
+    if (!res.locals.__dbNotReady && !dbOutageReported) {
+      dbOutageReported = true;
+      logger.error('[DB] Spojenie s databázou je nedostupné dlhšie než minútu', {
+        outageSec: Math.round(outageMs / 1000),
+        readyState: mongoose.connection.readyState
+      });
+    }
     return res.status(503).json({ message: 'Server sa spúšťa, skúste o chvíľu...', retryable: true });
+  }
+  if (dbUnreadySince !== null) {
+    logger.info('[DB] Spojenie obnovené', { outageSec: Math.round((Date.now() - dbUnreadySince) / 1000) });
+    dbUnreadySince = null;
+    dbOutageReported = false;
   }
   next();
 });

@@ -214,6 +214,11 @@ function captureResponseErrors(req, res, next) {
     if (status < 500) return;
     // Startup 503 = boot artifact, nie chyba.
     if (status === 503 && Date.now() - CAPTURE_BOOT_TIME < CAPTURE_STARTUP_GRACE_MS) return;
+    // DB readiness 503 = krátky reconnect blip (replica set failover, sieťový
+    // výpadok) MIMO štartu. Appka sa zachovala správne — degradovala a klient
+    // request zopakuje. Dlhší výpadok si middleware ohlási sám cez logger.error,
+    // takže tu ho už netreba duplikovať do Diagnostiky.
+    if (status === 503 && res.locals && res.locals.__dbNotReady) return;
     // Už recordnuté so skutočným stackom cez errorMiddleware → nezdvojuj.
     if (res.locals && res.locals.__errorRecorded) return;
     const err = new Error(`HTTP ${status} ${req.method} ${req.originalUrl || req.url}`);
