@@ -12,7 +12,9 @@ const {
   registerLimiter,
   passwordChangeLimiter,
   forgotPasswordLimiter,
-  resetPasswordLimiter
+  resetPasswordLimiter,
+  restoreLimiter,
+  restoreTokenLimiter
 } = require('../middleware/rateLimiter');
 const auditService = require('../services/auditService');
 const {
@@ -22,6 +24,12 @@ const {
 } = require('../services/adminEmailService');
 const logger = require('../utils/logger');
 const { validatePassword } = require('../utils/passwordPolicy');
+const {
+  issueRestoreToken,
+  consumeRestoreToken,
+  revokeRestoreToken,
+  revokeAllRestoreTokens
+} = require('../utils/restoreTokens');
 
 const router = express.Router();
 
@@ -286,6 +294,8 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
     user.resetPasswordTokenHash = null;
     user.resetPasswordExpires = null;
     await user.save();
+    // Reset hesla = zneplatniť všetky Block Store obnovovacie tokeny (Android).
+    await revokeAllRestoreTokens(user._id);
 
     logger.auth('password-reset', user._id, user.username, true, req.ip);
 
@@ -430,6 +440,145 @@ router.post('/login', loginLimiter, loginEmailLimiter, async (req, res) => {
 // Get current user
 router.get('/me', authenticateToken, (req, res) => {
   res.json(req.user);
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Google Play zero-tap sign-in (Block Store) — obnovovacie tokeny Android
+// appky. Dizajn: docs/superpowers/specs/2026-09-02-play-zero-tap-block-store-design.md
+//   POST   /restore-token  (JWT)      → vydá 180-dňový jednorazový token
+//   POST   /restore        (verejný)  → token → nový JWT + rotovaný token
+//   DELETE /restore-token  (verejný)  → zruší token (dôkaz vlastníctvom,
+//                                      funguje aj po expirácii JWT pri logoute)
+// Plaintext tokenu sa nikdy neloguje ani neukladá.
+// ─────────────────────────────────────────────────────────────────────
+
+const RESTORE_TOKEN_MIN = 32;
+const RESTORE_TOKEN_MAX = 128;
+const isRestoreTokenShape = (t) =>
+  typeof t === 'string' && t.length >= RESTORE_TOKEN_MIN && t.length <= RESTORE_TOKEN_MAX;
+
+const publicUser = (user) => ({
+  id: user._id,
+  username: user.username,
+  email: user.email,
+  color: user.color,
+  avatar: user.avatar,
+  role: user.role
+});
+
+router.post('/restore-token', authenticateToken, restoreTokenLimiter, async (req, res) => {
+  try {
+    if (String(req.user.email || '').toLowerCase() === 'support@prplcrm.eu') {
+      return res.status(403).json({ message: 'Nedostupné pre tento účet' });
+    }
+    const deviceLabel = typeof req.body?.deviceLabel === 'string' ? req.body.deviceLabel : '';
+    const issued = await issueRestoreToken(req.user.id, deviceLabel);
+    if (!issued) {
+      return res.status(401).json({ message: 'Neplatný token' });
+    }
+
+    auditService.logAction({
+      userId: req.user.id.toString(),
+      username: req.user.username,
+      email: req.user.email,
+      action: 'auth.restore_token_issued',
+      category: 'auth',
+      targetType: 'user',
+      targetId: req.user.id.toString(),
+      details: { deviceLabel: deviceLabel.slice(0, 120) },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.json({ restoreToken: issued.plaintext, expiresAt: issued.expiresAt });
+  } catch (error) {
+    logger.error('Restore token issue error', { error: error.message, ip: req.ip });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.post('/restore', restoreLimiter, async (req, res) => {
+  try {
+    const { restoreToken } = req.body || {};
+    if (!isRestoreTokenShape(restoreToken)) {
+      return res.status(400).json({ message: 'Obnovovací token je povinný' });
+    }
+
+    const consumed = await consumeRestoreToken(restoreToken);
+    if (!consumed.ok) {
+      auditService.logAction({
+        action: 'auth.restore_failed',
+        category: 'auth',
+        details: { reason: consumed.reason },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+      return res.status(401).json({ message: 'Neplatný alebo expirovaný obnovovací token' });
+    }
+
+    const { user, entry } = consumed;
+    if (String(user.email || '').toLowerCase() === 'support@prplcrm.eu') {
+      return res.status(401).json({ message: 'Neplatný alebo expirovaný obnovovací token' });
+    }
+
+    const deviceLabel = entry?.deviceLabel || '';
+    const rotated = await issueRestoreToken(user._id, deviceLabel);
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    logger.auth('restore', user._id, user.username, true, req.ip);
+    auditService.logAction({
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email,
+      action: 'auth.restore',
+      category: 'auth',
+      targetType: 'user',
+      targetId: user._id.toString(),
+      targetName: user.username,
+      details: { deviceLabel },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
+
+    res.json({
+      token,
+      restoreToken: rotated ? rotated.plaintext : null,
+      expiresAt: rotated ? rotated.expiresAt : null,
+      user: publicUser(user)
+    });
+  } catch (error) {
+    logger.error('Restore error', { error: error.message, ip: req.ip });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
+});
+
+router.delete('/restore-token', restoreLimiter, async (req, res) => {
+  try {
+    const { restoreToken } = req.body || {};
+    if (isRestoreTokenShape(restoreToken)) {
+      const owner = await revokeRestoreToken(restoreToken);
+      if (owner) {
+        auditService.logAction({
+          userId: owner._id.toString(),
+          username: owner.username,
+          email: owner.email,
+          action: 'auth.restore_token_revoked',
+          category: 'auth',
+          targetType: 'user',
+          targetId: owner._id.toString(),
+          details: {},
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')
+        });
+      }
+    }
+    // Idempotentné — klient (logout) nepotrebuje rozlišovať.
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Restore token revoke error', { error: error.message, ip: req.ip });
+    res.status(500).json({ message: 'Chyba servera' });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -734,6 +883,8 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
     await User.findByIdAndUpdate(userId, { password: hashedPassword });
+    // Zmena hesla = zneplatniť všetky Block Store obnovovacie tokeny (Android).
+    await revokeAllRestoreTokens(userId);
 
     logger.auth('password-change', userId, user.username, true, req.ip);
 

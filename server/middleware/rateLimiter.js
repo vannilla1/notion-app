@@ -226,6 +226,41 @@ const adminLoginLimiter = rateLimit({
   skip: skipInDev
 });
 
+// Obnova prihlásenia z Block Store (Android zero-tap sign-in). Verejné
+// endpointy chránené len tokenom → 10 pokusov / 15 min / IP.
+const restoreLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: {
+    message: 'Príliš veľa pokusov o obnovu prihlásenia. Skúste znova o 15 minút.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: restore', { ip: req.ip });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'restore' });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: skipInDev
+});
+
+// Vydanie obnovovacieho tokenu (autentifikované) — 20 / hod / IP.
+const restoreTokenLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  message: {
+    message: 'Príliš veľa požiadaviek. Skúste znova o hodinu.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: restore token issue', { ip: req.ip });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'restore_token' });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: skipInDev
+});
+
 module.exports = {
   loginLimiter,
   loginEmailLimiter,
@@ -235,5 +270,7 @@ module.exports = {
   forgotPasswordLimiter,
   resetPasswordLimiter,
   apiLimiter,
-  errorReportLimiter
+  errorReportLimiter,
+  restoreLimiter,
+  restoreTokenLimiter
 };

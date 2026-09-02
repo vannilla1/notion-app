@@ -345,6 +345,22 @@ const userSchema = new mongoose.Schema({
     quotaResetDate: { type: Date, default: null },
     // Sync token for incremental task list (only changes since last poll)
     syncToken: { type: String, default: null }
+  },
+  // Google Play zero-tap sign-in (Block Store) — obnovovacie tokeny Android
+  // appky. V DB len SHA-256 hash; plaintext má iba zariadenie (Block Store).
+  // `select: false` = nikdy sa nevracia v bežných dopytoch (/me, /profile,
+  // admin zoznamy) — routes, ktoré ich potrebujú, si vyžiadajú '+restoreTokens'.
+  // Dizajn: docs/superpowers/specs/2026-09-02-play-zero-tap-block-store-design.md
+  restoreTokens: {
+    type: [{
+      tokenHash: { type: String, required: true },
+      expiresAt: { type: Date, required: true },
+      createdAt: { type: Date, default: Date.now },
+      lastUsedAt: { type: Date, default: null },
+      deviceLabel: { type: String, default: '', maxlength: 120 }
+    }],
+    default: [],
+    select: false
   }
 }, {
   timestamps: true,
@@ -399,6 +415,9 @@ const ENCRYPTED_TOKEN_PATHS = [
   'googleTasks.accessToken',
   'googleTasks.refreshToken',
 ];
+
+// Lookup obnovovacieho tokenu (POST /api/auth/restore) — multikey index.
+userSchema.index({ 'restoreTokens.tokenHash': 1 }, { sparse: true });
 
 // pre('save'): pri ukladaní zaszifruj všetky modifikované token polia.
 // `.isModified(path)` zaručí že nešifrujeme legacy tokeny pri každom save
