@@ -29,8 +29,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 207      // production.8 — sťahovanie súborov (saveFile bridge + DownloadListener)
-        versionName = "1.0.6"
+        versionCode = 208      // production.9 — Google Play zero-tap sign-in (Block Store obnova prihlásenia)
+        versionName = "1.0.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -108,6 +108,11 @@ dependencies {
 
     // OkHttp — HTTP klient pre register FCM token na náš backend (/api/push/fcm/register).
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Block Store (Google Play services) — obnova prihlásenia po reinštalácii /
+    // na novom telefóne. Google Play požiadavka „zero-tap sign-in" (v produkcii
+    // do 30. 9. 2026). Dizajn: docs/superpowers/specs/2026-09-02-play-zero-tap-block-store-design.md
+    implementation("com.google.android.gms:play-services-auth-blockstore:16.4.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

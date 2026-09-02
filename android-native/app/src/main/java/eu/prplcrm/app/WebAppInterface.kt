@@ -40,6 +40,9 @@ class WebAppInterface(private val context: Context, private val webView: WebView
                         }
                     }
                 }
+            // Google Play zero-tap sign-in: po každom novom logine vydaj obnovovací
+            // token a ulož ho do Block Store (prežije reinštaláciu / nový telefón).
+            RestoreSession.issueAfterLogin(context, token)
         }
     }
 
@@ -49,7 +52,12 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     /** Per-device workspace context — synchronizuje sa s X-Workspace-Id hlavičkou. */
     @JavascriptInterface
     fun setCurrentWorkspaceId(workspaceId: String?) {
+        val previous = TokenStore.getCurrentWorkspaceId(context)
         TokenStore.setCurrentWorkspaceId(context, workspaceId)
+        // Block Store drží aj workspace, aby obnova otvorila správne prostredie.
+        if (!workspaceId.isNullOrEmpty() && workspaceId != previous) {
+            RestoreCredentialStore.saveWorkspaceId(context, workspaceId)
+        }
     }
 
     @JavascriptInterface
@@ -58,6 +66,16 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     /** Na logout zmažeme všetko — JS zavolá clearAll() pri removeStoredToken(). */
     @JavascriptInterface
     fun clearAll() {
+        // Web volá clearAll() aj pri VYNÚTENOM odhlásení po expirácii 7-dňového
+        // JWT (401 → prpl:force-logout). Vtedy Block Store token NECHÁVAME —
+        // je to jediná cesta, ako sa pri ďalšom štarte prihlásiť bez hesla
+        // (zero-tap). Skutočný logout (platný JWT) token zruší aj na serveri.
+        val jwt = TokenStore.getAuthToken(context)
+        if (!JwtUtils.isExpired(jwt)) {
+            RestoreSession.revokeAndClear(context)
+        } else {
+            android.util.Log.i("WebAppInterface", "clearAll: expirovaná session → Block Store ponechaný")
+        }
         TokenStore.clearAll(context)
     }
 

@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash MUSÍ byť pred super.onCreate() inak nefunguje.
-        installSplashScreen()
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
 
         webView = WebView(this).apply {
@@ -142,8 +142,30 @@ class MainActivity : AppCompatActivity() {
         // Načítaj web appku — alebo deep link URL z intentu ak appka bola otvorená
         // kliknutím na notifikáciu.
         val startUrl = resolveStartUrl(intent) ?: getString(R.string.webapp_url)
-        webView.loadUrl(startUrl)
 
+        // Google Play zero-tap sign-in: bez platného JWT (nový telefón,
+        // reinštalácia, expirovaný 7-dňový token) skús obnovu z Block Store
+        // EŠTE PRED načítaním webu — user nabootuje rovno prihlásený, bez
+        // login obrazovky. Splash ostáva, kým sa nerozhodne (max 3 s).
+        // Dizajn: docs/superpowers/specs/2026-09-02-play-zero-tap-block-store-design.md
+        if (JwtUtils.isExpired(TokenStore.getAuthToken(this))) {
+            var restoring = true
+            splash.setKeepOnScreenCondition { restoring }
+            RestoreSession.tryRestore(
+                this,
+                onLateSuccess = { if (!isFinishing && !isDestroyed) webView.reload() }
+            ) { _ ->
+                restoring = false
+                proceedToWeb(startUrl)
+            }
+        } else {
+            proceedToWeb(startUrl)
+        }
+    }
+
+    /** Načíta web appku a spustí veci, ktoré potrebujú (prípadne obnovený) auth token. */
+    private fun proceedToWeb(startUrl: String) {
+        webView.loadUrl(startUrl)
         maybeRequestNotificationPermission()
         ensureFcmTokenRegistered()
     }
