@@ -29,8 +29,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 208      // production.9 — Google Play zero-tap sign-in (Block Store obnova prihlásenia)
-        versionName = "1.0.7"
+        versionCode = 209      // production.10 — skladacie telefóny: configChanges smallestScreenSize|density + save/restore stavu WebView
+        versionName = "1.0.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

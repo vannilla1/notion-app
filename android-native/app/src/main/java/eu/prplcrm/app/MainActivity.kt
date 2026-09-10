@@ -63,6 +63,12 @@ class MainActivity : AppCompatActivity() {
     // (inak by crash recovery vždy hodil usera na /app namiesto jeho stránky).
     private var lastLoadedUrl: String? = null
 
+    // Stav WebView (URL + história) uložený systémom pri zničení Activity
+    // (skladací telefón bez obsluhy danej konfigurácie, zmena jazyka, low-memory
+    // kill s obnovou…). V proceedToWeb() má prednosť pred startUrl, aby sa
+    // používateľ vrátil presne tam, kde bol, a nie na /app.
+    private var pendingWebViewState: Bundle? = null
+
     /** Requestuje notification permission pri prvom spustení na Android 13+. */
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -103,6 +109,7 @@ class MainActivity : AppCompatActivity() {
         // Install splash MUSÍ byť pred super.onCreate() inak nefunguje.
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        pendingWebViewState = savedInstanceState?.getBundle(KEY_WEBVIEW_STATE)
 
         webView = WebView(this).apply {
             layoutParams = android.view.ViewGroup.LayoutParams(
@@ -165,9 +172,23 @@ class MainActivity : AppCompatActivity() {
 
     /** Načíta web appku a spustí veci, ktoré potrebujú (prípadne obnovený) auth token. */
     private fun proceedToWeb(startUrl: String) {
-        webView.loadUrl(startUrl)
+        // Rekonštrukcia Activity (viď KEY_WEBVIEW_STATE): obnov poslednú stránku
+        // a históriu namiesto štartu z /app. restoreState vráti null, ak je
+        // bundle prázdny/nekompatibilný — vtedy fallback na startUrl.
+        val restored = pendingWebViewState?.let { webView.restoreState(it) } != null
+        pendingWebViewState = null
+        if (!restored) webView.loadUrl(startUrl)
         maybeRequestNotificationPermission()
         ensureFcmTokenRegistered()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::webView.isInitialized) {
+            val state = Bundle()
+            webView.saveState(state)
+            outState.putBundle(KEY_WEBVIEW_STATE, state)
+        }
     }
 
     /**
@@ -615,6 +636,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val KEY_WEBVIEW_STATE = "prpl_webview_state"
         const val EXTRA_DEEP_LINK = "deep_link"
 
         /**

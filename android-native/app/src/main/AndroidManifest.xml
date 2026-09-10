@@ -55,12 +55,26 @@
         android:usesCleartextTraffic="false"
         tools:targetApi="31">
 
-        <!-- Hlavná Activity — WebView wrapper nad https://prplcrm.eu/app -->
+        <!-- Hlavná Activity — WebView wrapper nad https://prplcrm.eu/app
+
+             Skladacie telefóny / tablety / multi-window: configChanges musí
+             obsahovať minimálne screenSize|smallestScreenSize|screenLayout|
+             orientation (oficiálne minimum), inak Android pri rozložení /
+             zložení telefónu Activity zničí a znova vytvorí → WebView sa načíta
+             odznova z /app a používateľ stratí rozpracovanú stránku.
+             `smallestScreenSize` je práve tá hodnota, ktorá sa mení pri fyzickej
+             zmene veľkosti obrazovky (rozloženie). `density` pridané, lebo
+             vnútorný a vonkajší displej mávajú inú hustotu — pre čistý WebView
+             (žiadne density-qualified resources v Activity) je vlastná obsluha
+             bezpečná. Zvyšné prípady rekonštrukcie kryje saveState/restoreState
+             v MainActivity. resizeableActivity=true je explicitné (default od
+             targetSdk 24), nech je zámer čitateľný. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.PrplCrm.Splash">
 
