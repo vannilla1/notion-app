@@ -2870,7 +2870,7 @@ function Tasks() {
           {/* Hromadné sťahovanie príloh — desktop; na mobile sa skryje
               (sťahovanie ZIP-u v shelloch zatiaľ nie je doriešené) */}
           <button
-            className="btn btn-secondary btn-nav-contacts"
+            className="btn btn-secondary btn-nav-files"
             onClick={() => navigate('/prilohy')}
             title="Prehľad a hromadné stiahnutie príloh"
           >

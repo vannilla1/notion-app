@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import api from '@/api/api';
+import api, { isSessionInvalidError } from '@/api/api';
 import {
   getStoredToken,
   setStoredToken,
@@ -28,6 +28,8 @@ export const AuthProvider = ({ children }) => {
   // nového tabu), nechceme ho hneď odpáliť na /login — držíme loading=true.
   const [loading, setLoading] = useState(true);
   const nativeIOS = isNativeIOSApp();
+  const fetchUserRetryRef = useRef(null); // timer opakovania /me pri prechodnej chybe
+  const fetchUserRunRef = useRef(0);      // generácia — zahodí odpoveď zastaraného /me (iný token, unmount)
 
   // ── Bootstrap: ak nemáme token, spýtaj sa ostatných tabov ───────────────
   // Nový web tab (napr. Ctrl+T a otvorenie appky) nemá vlastnú sessionStorage
@@ -103,6 +105,15 @@ export const AuthProvider = ({ children }) => {
     } else {
       setLoading(false);
     }
+    // Návrat siete počas čakania na ďalší pokus → skús hneď.
+    const onOnline = () => { if (token && fetchUserRetryRef.current) fetchUser(); };
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      clearTimeout(fetchUserRetryRef.current);
+      fetchUserRetryRef.current = null;
+      fetchUserRunRef.current += 1; // zneplatni prípadný rozbehnutý /me
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -115,16 +126,40 @@ export const AuthProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [token]);
 
-  const fetchUser = async () => {
+  // Načítanie usera pri štarte. Odhlasujeme LEN keď server session definitívne
+  // odmietne (401). Prechodné zlyhanie (429 rate limit, 5xx, 503 pri štarte DB,
+  // timeout, offline cold start v natívnej appke) NESMIE zmazať token — do
+  // 9/2026 tu bol holý `catch → removeStoredToken()`, takže krátky výpadok
+  // servera odhlásil všetkých, ktorí práve otvárali appku (na Androide vrátane
+  // zmazania TokenStore a zrušenia Block Store tokenu). Namiesto toho držíme
+  // loading=true (LoadingGate má po 20 s únikové tlačidlá) a skúšame znova
+  // s exponenciálnym odstupom; návrat siete (`online`) spustí pokus hneď.
+  const fetchUser = async (attempt = 0) => {
+    clearTimeout(fetchUserRetryRef.current);
+    fetchUserRetryRef.current = null;
+    const myRun = ++fetchUserRunRef.current;
     try {
-      const res = await api.get('/api/auth/me');
+      // _noRetry: interceptor inak sám opakuje sieť/503 (3+6+9 s) — dve vnorené
+      // slučky by dali nepredvídateľné odstupy a `online` by sa počas nich stratil.
+      const res = await api.get('/api/auth/me', { _noRetry: true });
+      if (myRun !== fetchUserRunRef.current) return; // medzitým iný token / cleanup
       setUser(res.data);
-    } catch {
-      removeStoredToken();
-      setToken(null);
-      setUser(null);
-    } finally {
       setLoading(false);
+    } catch (err) {
+      if (myRun !== fetchUserRunRef.current) return;
+      if (isSessionInvalidError(err)) {
+        removeStoredToken();
+        setToken(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      if (!getStoredToken()) { // medzitým prebehol logout — nepokračuj
+        setLoading(false);
+        return;
+      }
+      const delay = Math.min(30000, 2000 * 2 ** attempt); // 2s, 4s, 8s, 16s, 30s…
+      fetchUserRetryRef.current = setTimeout(() => fetchUser(attempt + 1), delay);
     }
   };
 

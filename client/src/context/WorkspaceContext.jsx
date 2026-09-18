@@ -61,7 +61,17 @@ export const WorkspaceProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
 
-  const fetchWorkspaces = useCallback(async () => {
+  // Timer opakovania pri prechodnej chybe načítania prostredí (viď catch nižšie).
+  const retryTimerRef = useRef(null);
+  useEffect(() => {
+    if (!isAuthenticated) clearTimeout(retryTimerRef.current);
+    return () => clearTimeout(retryTimerRef.current);
+  }, [isAuthenticated]);
+
+  const fetchWorkspaces = useCallback(async (attemptArg) => {
+    // Volá sa aj bez argumentu / ako event handler → berieme len číslo.
+    const attempt = typeof attemptArg === 'number' ? attemptArg : 0;
+    clearTimeout(retryTimerRef.current);
     // Loading=true držíme aj keď nie sme authenticated — App.jsx gate kontroluje
     // workspaceLoading iba pri isAuthenticated=true, takže to nespôsobí blok,
     // ale zabráni 1-frame flashu medzi auth-resolved a workspace-fetch-started.
@@ -136,11 +146,22 @@ export const WorkspaceProvider = ({ children }) => {
       if (err.response?.data?.code === 'NO_WORKSPACE') {
         setNeedsWorkspace(true);
       } else {
+        const status = err.response?.status;
+        const transient = !status || status === 429 || status >= 500;
+        // Prechodná chyba (429, 5xx, sieť): do 9/2026 sa appka odomkla s prázdnym
+        // zoznamom prostredí (hlavička bez názvu a prepínača) a ostala tak do
+        // ručného reloadu. Držíme loading (LoadingGate má po 20 s únikové
+        // tlačidlá) a skúšame znova: 2 s, 4 s, 8 s, 16 s — potom to vzdáme
+        // a zobrazíme pôvodné správanie, nech používateľ nikdy neostane visieť.
+        if (transient && attempt < 4) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = setTimeout(() => fetchWorkspaces(attempt + 1), 2000 * 2 ** attempt);
+          return; // loading ostáva true
+        }
         setError(err.response?.data?.message || 'Chyba pri načítavaní pracovných prostredí');
       }
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, [isAuthenticated]);
 
   // Tracking: bol user prihlásený v predchádzajúcom renderi? Rozlíšenie medzi:

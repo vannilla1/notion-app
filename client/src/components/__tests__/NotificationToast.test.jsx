@@ -294,9 +294,11 @@ describe('NotificationToast', () => {
       const toast = screen.getByText('New contact').closest('.toast');
       fireEvent.click(toast);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/crm', {
-        state: { expandContactId: 'contact-123' },
-      });
+      // Navigácia ide cez query parametre (deep-link formát zdieľaný s push
+      // notifikáciami a NotificationBell), `_t` je cache-buster pre opakovaný klik.
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/crm\?expandContact=contact-123&_t=\d+$/)
+      );
     });
 
     it('should navigate to tasks when clicking task notification', () => {
@@ -313,9 +315,9 @@ describe('NotificationToast', () => {
       const toast = screen.getByText('Task done').closest('.toast');
       fireEvent.click(toast);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/tasks', {
-        state: { highlightTaskId: 'task-456' },
-      });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/tasks\?highlightTask=task-456&_t=\d+$/)
+      );
     });
 
     it('should navigate to tasks when clicking subtask notification', () => {
@@ -332,9 +334,9 @@ describe('NotificationToast', () => {
       const toast = screen.getByText('Subtask added').closest('.toast');
       fireEvent.click(toast);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/tasks', {
-        state: { highlightTaskId: 'parent-task-789' },
-      });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/tasks\?highlightTask=parent-task-789&_t=\d+$/)
+      );
     });
 
     it('should remove toast after clicking', () => {

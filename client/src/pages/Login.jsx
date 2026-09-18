@@ -138,7 +138,7 @@ function Login() {
 
   return (
     <div className="login-container">
-      <div className="login-card">
+      <div className="login-card login-card--auth">
         <div className="login-logo">
           <img src="/icons/icon-96x96.png" alt="Prpl CRM" width="48" height="48" style={{ borderRadius: '12px' }} />
         </div>

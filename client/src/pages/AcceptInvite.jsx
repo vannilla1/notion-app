@@ -18,6 +18,15 @@ function AcceptInvite() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
+  // Verejná stránka nemá LoadingGate (únikové tlačidlá). AuthContext pri
+  // prechodnej chybe /me (429, 5xx, sieť) drží loading=true a skúša znova —
+  // bez tohto stropu by tu používateľ videl holý spinner bez východiska.
+  const [authWaitExpired, setAuthWaitExpired] = useState(false);
+  useEffect(() => {
+    if (!authLoading) return undefined;
+    const t = setTimeout(() => setAuthWaitExpired(true), 6000);
+    return () => clearTimeout(t);
+  }, [authLoading]);
 
   useEffect(() => {
     // Počkaj kým sa auth vyrieši. Inak by sme pri UŽ PRIJATEJ pozvánke ukázali
@@ -25,7 +34,7 @@ function AcceptInvite() {
     // beží, isAuthenticated je dočasne false) — to bol bug pri otvorení invite
     // linku z emailu v iOS appke: deep-link load → AcceptInvite mount → auth
     // ešte neresolvnutá → zlý screen namiesto presmerovania do workspace.
-    if (authLoading) return;
+    if (authLoading && !authWaitExpired) return;
 
     const fetchInvitation = async () => {
       try {
@@ -54,7 +63,7 @@ function AcceptInvite() {
       }
     };
     fetchInvitation();
-  }, [token, isAuthenticated, authLoading, switchWorkspace, navigate]);
+  }, [token, isAuthenticated, authLoading, authWaitExpired, switchWorkspace, navigate]);
 
   const handleAccept = async () => {
     setAccepting(true);

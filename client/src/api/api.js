@@ -34,6 +34,21 @@ api.interceptors.request.use(
   }
 );
 
+/**
+ * true = server definitívne odmietol session (HTTP 401). Všetko ostatné —
+ * 403 (oprávnenia / limity plánu), 429 (rate limit), 5xx, 503 (DB sa spúšťa),
+ * timeout, výpadok siete — je stav, pri ktorom používateľ ostáva prihlásený.
+ * Exportované kvôli AuthContext (bootstrap /me) a testom.
+ */
+export const isSessionInvalidError = (error) => error?.response?.status === 401;
+
+// 401 z týchto endpointov znamená „zlé prihlasovacie údaje", nie neplatnú
+// session — nesmie zmazať existujúci token ani presmerovať (napr. preklep
+// v hesle na /admin zmazal bežnú session v tom istom tabe a hlášku
+// „Nesprávne heslo" nebolo vidno, lebo stránka už navigovala na /login).
+const CREDENTIAL_ENDPOINTS = /\/api\/(admin\/login|auth\/(login|register|forgot-password|reset-password))(\?|$)/;
+const isCredentialRequest = (config) => CREDENTIAL_ENDPOINTS.test(String(config?.url || ''));
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -48,7 +63,8 @@ api.interceptors.response.use(
     const isNetwork = error.code === 'ERR_NETWORK' || (!error.response && error.message !== 'canceled');
     const is503 = error.response?.status === 503;
 
-    if (!isBlob && (isTimeout || isNetwork || is503) && config._retryCount < 3) {
+    // `_noRetry` — volajúci má vlastnú slučku opakovania (AuthContext.fetchUser).
+    if (!isBlob && !config._noRetry && (isTimeout || isNetwork || is503) && config._retryCount < 3) {
       config._retryCount += 1;
       const delay = config._retryCount * 3000; // 3s, 6s, 9s
       await new Promise(r => setTimeout(r, delay));
@@ -93,7 +109,14 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    // Odhlasujeme LEN pri 401 — to je jediný stav, ktorým server hlási neplatnú /
+    // expirovanú session (middleware/auth.js). 403 znamená „prihlásený, ale
+    // nemá oprávnenie / narazil na limit plánu" (FEATURE_NOT_IN_PLAN, PLAN_LIMIT,
+    // STORAGE_LIMIT, WORKSPACE_OVER_LIMIT, „vyžaduje sa rola owner"…). Do 9/2026
+    // sa tu odhlasovalo aj pri 403: free používateľ, ktorý narazil na limit,
+    // bol namiesto UpgradeModalu vyhodený na /login a v Android appke sa mu
+    // navyše zmazal TokenStore a zrušil Block Store obnovovací token.
+    if (isSessionInvalidError(error) && !isCredentialRequest(config)) {
       // removeStoredToken() maže z sessionStorage (web) alebo localStorage (iOS)
       // + cleanup legacy kľúčov (user, starý localStorage token z predošlej verzie).
       removeStoredToken();

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId } from '../utils/workspaceStorage';
@@ -19,6 +19,8 @@ const WorkspaceSwitcher = () => {
   const [unreadByWs, setUnreadByWs] = useState({});
   const [reordering, setReordering] = useState(false); // in-flight reorder guard
   const dropdownRef = useRef(null);
+  const panelRef = useRef(null); // samotný rozbalený zoznam (.workspace-dropdown)
+  const [alignLeft, setAlignLeft] = useState(false);
   const inputRef = useRef(null);
   const createInputRef = useRef(null);
 
@@ -46,6 +48,28 @@ const WorkspaceSwitcher = () => {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Strana ukotvenia zoznamu. Predvolene je zarovnaný na PRAVÝ okraj tlačidla
+  // (right:0) — to sedí na desktope, kde je prepínač vpravo. V kompaktnej
+  // hlavičke (tablet, foldable, split-screen 769–1279px) je ale prepínač pri
+  // ĽAVOM okraji a zoznam vychádzal mimo obrazovku (namerané x = -103px).
+  // Meriame po vykreslení a pri zmene veľkosti okna (fold/unfold bez reloadu).
+  useLayoutEffect(() => {
+    if (!isOpen) return undefined;
+    const place = () => {
+      const wrap = dropdownRef.current;
+      const panel = panelRef.current;
+      if (!wrap || !panel) return;
+      const btn = wrap.getBoundingClientRect();
+      const width = panel.offsetWidth;
+      const overflowsLeft = btn.right - width < 8;               // right:0 by pretieklo vľavo
+      const fitsFromLeft = btn.left + width <= window.innerWidth - 8;
+      setAlignLeft(overflowsLeft && fitsFromLeft);
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [isOpen, workspaces?.length]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -227,7 +251,7 @@ const WorkspaceSwitcher = () => {
       </button>
 
       {isOpen && (
-        <div className="workspace-dropdown">
+        <div ref={panelRef} className={`workspace-dropdown${alignLeft ? ' workspace-dropdown--left' : ''}`}>
           <div className="workspace-dropdown-header">
             Pracovné prostredia
           </div>

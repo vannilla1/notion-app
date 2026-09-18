@@ -9976,6 +9976,19 @@ body.ios-app {
     font-size: 18px !important;
   }
 
+  /* „📎 Prílohy" malo triedu btn-nav-contacts → pri šírke presne 768px (iPad
+     na výšku) boli v hlavičke Projektov dve rovnaké ikony 👥 s iným cieľom. */
+  .btn-nav-files {
+    font-size: 0 !important;
+    padding: 8px !important;
+    min-width: 36px !important;
+  }
+
+  .btn-nav-files::before {
+    content: "📎" !important;
+    font-size: 18px !important;
+  }
+
   /* Hide "Úlohy" text, show only ✓ icon */
   .btn-nav-tasks {
     font-size: 0 !important;
@@ -12842,4 +12855,305 @@ body.ios-app {
   .my-task-row { padding: 10px 12px; }
   /* Kontext môže byť dlhý — na mobile nech sa termín nezlomí mimo riadku */
   .my-task-meta .due-date { font-size: 11px; }
+}
+
+/* =============================================================================
+ * TABLET / FOLDABLE / SPLIT-SCREEN HEADER TIER  (769px – 1279px)
+ * =============================================================================
+ * Problém (namerané 9/2026 na živom webe v režime natívnej Android appky):
+ * do 768px platí mobilná hlavička, od 1280px sa zmestí desktopová. Medzi tým
+ * (10" tablet na výšku 800px, Galaxy Z Fold rozložený 829px, Pixel Fold 841px,
+ * 7" tablet na šírku 960px, telefón na šírku 800–930px, iPad, split-screen)
+ * sa použila PLNÁ desktopová hlavička, ktorá potrebuje až 1083px:
+ *   - .user-menu (avatar + meno + e-mail) bol celý mimo obrazovky → používateľ
+ *     sa nedostal k profilu, nastaveniam ani k odhláseniu,
+ *   - zvonček notifikácií bol odrezaný, logo sa lepilo na prepínač prostredí.
+ *
+ * Riešenie: medzistupeň „kompaktná hlavička" — rovnaké prvky, menej vzduchu:
+ *   [P Prpl CRM] ........ [prostredie ▾][Kontakty][Projekty][Správy][✨][🔔][(M)▾]
+ *   - user menu = len avatar + šípka (meno/e-mail sú v dropdowne),
+ *   - oznamovacia pilulka = len ikona,
+ *   - tesnejšie paddingy a medzery, nav tlačidlá bez zalamovania,
+ *   - prepínač prostredí je JEDINÝ pružný prvok (ellipsis), takže dlhý názov
+ *     prostredia hlavičku nikdy neroztiahne za okraj.
+ * Rozpočet šírky pri 769px (najhorší prípad Dashboard / Projekty):
+ *   padding 32 + logo ~150 + gap 12 + prepínač ≤140 + 3 tlačidlá ~230 +
+ *   pilulka 36 + zvonček 44 + user 64 + 6×gap 8 = ~756px  ✓
+ * Overené 88 meraniami (11 šírok × 4 stránky × krátky/dlhý názov prostredia).
+ *
+ * Blok je ZÁMERNE na konci súboru — musí vyhrať nad `@media (max-width:1023px)`
+ * (padding 14px 20px) aj nad staršími landscape pravidlami. Pod 769px ani nad
+ * 1279px nemení nič. Horná hranica 1279 (nie 1199): s dlhým názvom prostredia
+ * bola plná hlavička pri 1200–1279px natesno.
+ * Padding drží env(safe-area-inset-top) — inak by shorthand prebil staršie
+ * `@supports … .crm-header { padding-top: calc(env(…) + 16px) }` a hlavička by
+ * na edge-to-edge Androide vliezla pod status bar. V prehliadači je env() 0.
+ * ============================================================================= */
+@media (min-width: 769px) and (max-width: 1279px) {
+  .crm-header {
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
+    gap: 12px;
+    flex-wrap: nowrap;
+  }
+
+  .crm-header-left {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .crm-header-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Nič sa nezmršťuje… */
+  .crm-header-right > * {
+    flex-shrink: 0;
+  }
+
+  /* …okrem prepínača prostredí — ten pruží a skracuje názov ellipsou. */
+  .crm-header-right > .workspace-switcher {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .crm-header-right .workspace-switcher-btn {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .crm-header-right .workspace-switcher-btn .workspace-name {
+    max-width: 110px;
+    min-width: 0;
+  }
+
+  /* Len navigačné tlačidlá (priame deti) — `.crm-header .btn-secondary` by
+     zasiahlo aj tlačidlá v modáloch UserMenu, ktoré sa renderujú v hlavičke. */
+  .crm-header-right > .btn-secondary {
+    padding: 8px 12px;
+    font-size: 14px;
+    white-space: nowrap; /* „📎 Prílohy" sa inak lámalo na dva riadky */
+  }
+
+  .crm-header-right .user-menu-trigger .user-menu-info {
+    display: none;
+  }
+
+  .crm-header-right .user-menu-trigger {
+    padding: 4px 8px 4px 4px;
+    gap: 6px;
+  }
+
+  .crm-header-right .announcement-pill-label {
+    display: none;
+  }
+
+  .crm-header-right .announcement-pill {
+    padding: 6px 8px;
+  }
+}
+
+/* Telefón otočený na šírku (napr. 800×360, 915×412) spadá šírkou do vrstvy
+   vyššie, ale má len ~360px na výšku — hlavička musí byť čo najnižšia a statický
+   sidebar nesmie niesť 56px horný padding určený pre mobilný drawer. */
+@media (min-width: 769px) and (max-width: 1279px) and (max-height: 500px) {
+  .crm-header {
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 12px 6px;
+    min-height: 48px;
+  }
+
+  .crm-header-right > .btn-secondary {
+    padding: 6px 10px;
+  }
+
+  .crm-sidebar {
+    padding-top: 12px;
+  }
+}
+
+/* =============================================================================
+ * ROZBAĽOVACIE PANELY HLAVIČKY — nesmú pretiecť cez výšku obrazovky
+ * =============================================================================
+ * Panely žijú v hlavičke a `.crm-container { overflow:hidden }` ich orezáva;
+ * telo stránky sa neskroluje. `.user-menu-dropdown` mal viewport clamp už
+ * predtým, tieto dva nie → na nízkych obrazovkách (telefón na šírku 360px,
+ * tablet s vysunutou klávesnicou, split-screen) sa nedalo doskrolovať na
+ * posledné notifikácie / „Zobraziť ďalšie" ani na spodné prostredia
+ * a „+ Nové prostredie". Platí pre všetky šírky — na vysokých obrazovkách
+ * sa nič nemení (460px, resp. prirodzená výška, sú menšie než clamp).
+ * ============================================================================= */
+/* Od 481px — do 480px má panel vlastný fixed layout (top/bottom kotvy,
+   max-height:none), ktorý sa nesmie prebiť. */
+@media (min-width: 481px) {
+  .notif-panel {
+    max-height: min(460px, calc(100vh - 72px));
+    max-height: min(460px, calc(100dvh - 72px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+  }
+}
+
+.crm-header-right .workspace-dropdown {
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px);
+  max-height: calc(100dvh - 80px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Strana ukotvenia sa vyberá pri otvorení (WorkspaceSwitcher.jsx) podľa toho,
+   kde je tlačidlo: pri ľavom okraji (tablet/foldable hlavička) by pôvodné
+   `right:0` vytlačilo zoznam mimo obrazovku vľavo (namerané x = -103px). */
+.workspace-dropdown.workspace-dropdown--left {
+  left: 0;
+  right: auto;
+}
+
+/* Globálne dotykové pravidlo `button { min-height/min-width: 44px }` nafúklo
+   dvojicu šípok ▲▼ na 2×44px → každý riadok prostredia mal ~112px a zoznam
+   pretiekol už pri 3 prostrediach. Šípky dáme vedľa seba, 36×36 (stále
+   pohodlný cieľ), riadok má potom bežnú výšku. */
+@media (hover: none) and (pointer: coarse) {
+  .workspace-reorder {
+    flex-direction: row;
+    gap: 4px;
+  }
+
+  .workspace-reorder .workspace-reorder-btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+/* =============================================================================
+ * LOGIN — široké, ale nízke obrazovky
+ * =============================================================================
+ * Všetko je viazané na `.login-card--auth` (len stránka Login.jsx). Trieda
+ * `.login-card`, `.login-subtitle`, `.form-group`, `.form-input` a OAuth
+ * tlačidlá sa totiž používajú aj na ForgotPassword / ResetPassword /
+ * v modáli „Pripojené účty" a v bežných formulároch appky — neviazané
+ * pravidlá by tam na notebooku 1366×768 skryli inštrukcie a zhustili polia.
+ *
+ * (a) 761–860px na výšku (notebook/Chromebook 1366×768 na celej obrazovke,
+ *     tablet na šírku 1280×800, iPad na šírku): plná karta má ~780px
+ *     a pretŕčala cez spodok. Kompaktná (~650px) sa zmestí a ostane v strede.
+ *     Pôvodný blok `@media (max-height: 760px)` ostáva nedotknutý — telefóny
+ *     sa správajú presne ako doteraz.
+ * ============================================================================= */
+@media (min-width: 768px) and (min-height: 761px) and (max-height: 860px) {
+  .login-card.login-card--auth {
+    padding: 24px 24px;
+    animation: none;
+  }
+
+  .login-card--auth .login-logo {
+    margin-bottom: 12px;
+  }
+
+  .login-card--auth .login-logo img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .login-card--auth .login-title {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+
+  .login-card--auth .login-subtitle {
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+
+  .login-card--auth .form-group {
+    margin-bottom: 10px;
+  }
+
+  .login-card--auth .form-input {
+    padding: 10px 12px;
+  }
+
+  .login-card--auth .btn {
+    padding: 10px 16px;
+  }
+}
+
+/* (b) ≤680px na výšku pri šírke ≥768px (7" tablet na šírku 960×600, rozložený
+ *     foldable na šírku 829×690, split-screen, klávesnica na tablete): ani
+ *     kompaktná karta sa nezmestí → bez podtitulku a Google/Apple vedľa seba
+ *     (~540px). Container má naďalej overflow-y:auto, takže pri ešte menšej
+ *     výške (telefón na šírku) sa karta dá normálne skrolovať. */
+@media (min-width: 768px) and (max-height: 680px) {
+  .login-card--auth .login-subtitle {
+    display: none;
+  }
+
+  .login-card--auth .login-title {
+    margin-bottom: 14px;
+  }
+
+  .login-card--auth .oauth-buttons {
+    flex-direction: row !important; /* prebíja inline style komponentu */
+    flex-wrap: wrap !important;
+    margin-top: 14px !important;
+  }
+
+  .login-card--auth .oauth-buttons .oauth-divider {
+    flex: 0 0 100%;
+    margin-bottom: 0 !important;
+  }
+
+  .login-card--auth .oauth-buttons .oauth-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    white-space: nowrap;
+  }
+
+  .login-card--auth .login-footer {
+    margin-top: 14px;
+  }
+}
+
+/* =============================================================================
+ * DOTYK NA VEĽKÝCH OBRAZOVKÁCH
+ * =============================================================================
+ * Tablety a foldables dostávajú od 769px desktopové rozloženie, ale nemajú
+ * hover. Existujúce fallbacky sú pod `(hover:none) and (pointer:coarse)`, čo
+ * nechytí hybridy s myšou/klávesnicou ako primárnym vstupom (Chromebook
+ * s dotykovým displejom, iPad s Magic Keyboard) — tam ostávali akcie úloh
+ * a súborov pre prst neviditeľné. `any-pointer: coarse` = „zariadenie má aj
+ * dotyk". Úchyt na presúvanie je od 769px na dotyku jemne viditeľný (pod 768px
+ * ho existujúce pravidlo skrýva úplne).
+ * ============================================================================= */
+@media (any-pointer: coarse) {
+  .task-actions,
+  .file-actions {
+    opacity: 1;
+  }
+}
+
+@media (any-pointer: coarse) and (min-width: 769px) {
+  .drag-handle {
+    opacity: 0.45;
+  }
+}
+
+/* Denný kalendár: `max-height: calc(100vh - 280px)` dávalo na telefóne na šírku
+   (360px) viditeľných 80px a s klávesnicou 0px. Spodná hranica 320px — okolitý
+   `.crm-main` sa skroluje, takže sa k nemu dá vždy dostať. */
+.calendar-day-timeline {
+  max-height: max(320px, calc(100vh - 280px));
+  max-height: max(320px, calc(100dvh - 280px));
+}
+
+/* Plávajúce tlačidlo pomocníka „?" (position:fixed, z-index 1000, portál v body)
+   prekrývalo roh rozbaleného user menu / panela notifikácií / zoznamu prostredí,
+   lebo tie žijú v stacking contexte hlavičky (z-index 10). Všetky tri sú v DOM
+   len kým sú otvorené — vtedy pošleme „?" pod hlavičku. Bez podpory :has()
+   sa nič nemení. */
+body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn {
+  z-index: 5;
 }

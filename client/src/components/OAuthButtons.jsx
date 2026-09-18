@@ -80,8 +80,8 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
   };
 
   return (
-    <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div style={{
+    <div className="oauth-buttons" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="oauth-divider" style={{
         display: 'flex',
         alignItems: 'center',
         gap: '12px',
@@ -97,6 +97,7 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
       {/* Google — biele s farebným G logom (Google branding guidelines) */}
       <button
         type="button"
+        className="oauth-btn oauth-btn-google"
         onClick={() => handleProvider('google')}
         disabled={!!busy}
         style={{
@@ -127,6 +128,7 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
       {/* Apple — čierne s bielym Apple logom */}
       <button
         type="button"
+        className="oauth-btn oauth-btn-apple"
         onClick={() => handleProvider('apple')}
         disabled={!!busy}
         style={{

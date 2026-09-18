@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api/api';
-import { isIosNativeApp } from '../utils/platform';
+import { isIosNativeApp, isNativeApp } from '../utils/platform';
 
 /**
  * AnnouncementBanner — universal in-app announcement system.
@@ -54,12 +54,20 @@ export default function AnnouncementBanner() {
   // tretie platformy v iOS binary). Heuristika je defensívna: detekujeme
   // typické markery v kind / id / title.
   const inIosShell = isIosNativeApp();
-  const visibleAnnouncements = inIosShell
-    ? announcements.filter((a) => {
-        const blob = `${a.kind || ''} ${a.id || ''} ${a.title || ''} ${a.body || ''}`.toLowerCase();
-        return !/google.?play|android|play\.google\.com/.test(blob);
-      })
-    : announcements;
+  // Oznam „Nové: Mobilná appka" (id mobile_app_v1, v2…) nemá v natívnej appke
+  // čo robiť — používateľ ju práve používa. Server ho síce skrýva podľa
+  // zaregistrovaného FCM/APNs zariadenia, ale to zlyhá pri odmietnutých
+  // notifikáciách alebo hneď po prvom prihlásení (token ešte nie je
+  // zaregistrovaný) — a na tablete/foldable zbytočne zaberá miesto v hlavičke.
+  const inNativeShell = isNativeApp();
+  const visibleAnnouncements = announcements.filter((a) => {
+    if (inNativeShell && /^mobile_app/i.test(String(a.id || ''))) return false;
+    if (inIosShell) {
+      const blob = `${a.kind || ''} ${a.id || ''} ${a.title || ''} ${a.body || ''}`.toLowerCase();
+      if (/google.?play|android|play\.google\.com/.test(blob)) return false;
+    }
+    return true;
+  });
 
   if (visibleAnnouncements.length === 0) return null;
 

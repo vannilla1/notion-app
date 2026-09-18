@@ -92,9 +92,26 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ message: 'Prístupový token je povinný' });
   }
 
+  // 1) Overenie podpisu — JEDINÉ miesto, kde chyba znamená neplatnú session (401).
+  let decoded;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    let user = await getCachedUser(decoded.id);
+    decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch (err) {
+    // Neplatný / expirovaný / forged JWT. Spike z jednej IP = credential
+    // stuffing alebo skúšanie forged tokenov. Durable stopa (throttled per IP).
+    logSecurityEvent('security.token_invalid', req, { reason: err.name === 'TokenExpiredError' ? 'expired' : 'invalid' });
+    return res.status(401).json({ message: 'Neplatný alebo expirovaný token' });
+  }
+
+  // 2) Načítanie usera. Zlyhanie DB / Redis tu NIE JE chyba prihlásenia — do
+  //    9/2026 jeden spoločný try/catch vracal 401 aj pri timeoute Mongo alebo
+  //    failoveri Atlasu (readyState ostáva 1, takže 503 guard v index.js to
+  //    nezachytí). Klient pri 401 maže token a na Androide ruší aj Block Store
+  //    obnovovací token → krátky výpadok DB odhlásil každého, kto práve niečo
+  //    robil. Teraz 503 + retryable: klient request zopakuje a session drží.
+  let user;
+  try {
+    user = await getCachedUser(decoded.id);
 
     if (!user) {
       // Validný podpis, ale user neexistuje → token pre zmazaný účet alebo
@@ -120,21 +137,25 @@ const authenticateToken = async (req, res, next) => {
       }
     }
 
-    req.user = {
-      id: user._id,
-      username: user.username,
-      email: user.email,
-      color: user.color,
-      avatar: user.avatar,
-      role: user.role
-    };
-    next();
   } catch (err) {
-    // Neplatný / expirovaný / forged JWT. Spike z jednej IP = credential
-    // stuffing alebo skúšanie forged tokenov. Durable stopa (throttled per IP).
-    logSecurityEvent('security.token_invalid', req, { reason: err.name === 'TokenExpiredError' ? 'expired' : 'invalid' });
-    return res.status(401).json({ message: 'Neplatný alebo expirovaný token' });
+    logger.error('[Auth] Načítanie používateľa zlyhalo (DB/Redis) — vraciam 503, nie 401', {
+      error: err.message,
+      path: req.originalUrl
+    });
+    return res.status(503).json({ message: 'Server je dočasne nedostupný, skúste o chvíľu...', retryable: true });
   }
+
+  req.user = {
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    color: user.color,
+    avatar: user.avatar,
+    role: user.role
+  };
+  // next() je zámerne MIMO try/catch — synchrónna výnimka z ďalšieho handlera
+  // sa nesmie premeniť na 401/503 z auth middleware.
+  next();
 };
 
 const authenticateSocket = async (socket, next) => {
