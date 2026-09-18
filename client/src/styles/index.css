@@ -6132,7 +6132,10 @@ body.ios-app {
   
   /* User menu */
   .user-menu-dropdown {
-    right: -10px;
+    /* -4px (predtým -10px): hlavička má na telefóne padding 8px, takže -10px
+       vytláčalo menu 2px za pravý okraj obrazovky (hlavička sa dala vodorovne
+       posunúť). */
+    right: -4px;
     min-width: 180px;
   }
 }
