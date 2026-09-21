@@ -716,6 +716,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* dvh: v mobilnom prehliadači s dynamickou lištou je 100vh „veľký" viewport
+     a spodných ~56px (koniec zoznamu, sidebar) ostávalo pod lištou. V natívnych
+     appkách sú obe hodnoty rovnaké. */
+  height: 100dvh;
   background: var(--bg-secondary);
   overflow: hidden;
 }
@@ -774,7 +778,13 @@ body {
   gap: 12px;
 }
 
-@media (max-width: 767px) {
+/* Hranica mobilného rozloženia je JEDNOTNE 768px (do 9/2026 mali hamburger,
+   drawer sidebar, BottomNav a názov prostredia v hlavičke 767px, zatiaľ čo
+   mobilná hlavička a 20+ ďalších blokov 768px → pri šírke presne 768px, teda
+   iPad na výšku, vznikal hybrid: mobilná hlavička bez prepínača prostredí,
+   ale bez hamburgera, bez BottomNav a so statickým sidebarom). Kompaktná
+   tabletová vrstva začína tesne nad tým (min-width: 768.1px). */
+@media (max-width: 768px) {
   .btn-menu {
     display: flex;
   }
@@ -2274,7 +2284,7 @@ body {
 }
 
 /* Tablets portrait (600px - 767px) */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   /* CRM Layout - Sidebar becomes collapsible overlay */
   .crm-content {
     position: relative;
@@ -4334,7 +4344,7 @@ a.detail-value:hover {
   line-height: 1;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .header-workspace-name {
     display: flex;
   }
@@ -7951,7 +7961,7 @@ body.ios-app {
 }
 
 /* Sidebar mobile improvements */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .crm-main {
     padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   }
@@ -11487,7 +11497,7 @@ body.ios-app {
   display: none;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .bottom-nav {
     display: flex;
     position: fixed;
@@ -11552,8 +11562,14 @@ body.ios-app {
   }
 
 
-  /* Hide header nav buttons on mobile — bottom nav replaces them */
-  .crm-header-right .btn-secondary {
+  /* Hide header nav buttons on mobile — bottom nav replaces them.
+     LEN priame deti (`>`): modály UserMenu (Môj profil, Zmeniť heslo,
+     Synchronizácia kalendára, Zmazať účet) sa renderujú VNÚTRI
+     .crm-header-right bez portálu, takže pôvodný selektor potomka im na
+     telefónoch skrýval „Nahrať fotku", „Zavrieť" a „Zrušiť" — avatar sa na
+     mobile nedal nahrať a v potvrdení zmazania účtu ostalo len deštruktívne
+     tlačidlo. Navigačné tlačidlá sú na všetkých stránkach priame deti. */
+  .crm-header-right > .btn-secondary {
     display: none !important;
   }
 
@@ -12201,7 +12217,7 @@ body.ios-app {
 }
 
 /* Responsive */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .billing-page {
     padding: 16px 12px 100px;
   }
@@ -12854,14 +12870,14 @@ body.ios-app {
 }
 .my-task-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .my-task-row { padding: 10px 12px; }
   /* Kontext môže byť dlhý — na mobile nech sa termín nezlomí mimo riadku */
   .my-task-meta .due-date { font-size: 11px; }
 }
 
 /* =============================================================================
- * TABLET / FOLDABLE / SPLIT-SCREEN HEADER TIER  (769px – 1279px)
+ * TABLET / FOLDABLE / SPLIT-SCREEN HEADER TIER  (nad 768px – 1279px)
  * =============================================================================
  * Problém (namerané 9/2026 na živom webe v režime natívnej Android appky):
  * do 768px platí mobilná hlavička, od 1280px sa zmestí desktopová. Medzi tým
@@ -12892,7 +12908,7 @@ body.ios-app {
  * `@supports … .crm-header { padding-top: calc(env(…) + 16px) }` a hlavička by
  * na edge-to-edge Androide vliezla pod status bar. V prehliadači je env() 0.
  * ============================================================================= */
-@media (min-width: 769px) and (max-width: 1279px) {
+@media (min-width: 768.1px) and (max-width: 1279px) {
   .crm-header {
     padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
     gap: 12px;
@@ -12961,7 +12977,7 @@ body.ios-app {
 /* Telefón otočený na šírku (napr. 800×360, 915×412) spadá šírkou do vrstvy
    vyššie, ale má len ~360px na výšku — hlavička musí byť čo najnižšia a statický
    sidebar nesmie niesť 56px horný padding určený pre mobilný drawer. */
-@media (min-width: 769px) and (max-width: 1279px) and (max-height: 500px) {
+@media (min-width: 768.1px) and (max-width: 1279px) and (max-height: 500px) {
   .crm-header {
     padding: calc(env(safe-area-inset-top, 0px) + 6px) 12px 6px;
     min-height: 48px;
@@ -13138,7 +13154,7 @@ body.ios-app {
   }
 }
 
-@media (any-pointer: coarse) and (min-width: 769px) {
+@media (any-pointer: coarse) and (min-width: 768.1px) {
   .drag-handle {
     opacity: 0.45;
   }
@@ -13159,4 +13175,30 @@ body.ios-app {
    sa nič nemení. */
 body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn {
   z-index: 5;
+}
+
+/* iOS shell má `body.ios-app { position: fixed; overflow: hidden }`, takže stránky
+   mimo .crm-container (prvé vytvorenie prostredia, prijatie pozvánky) sa nemali
+   ako skrolovať — na iPhone otočenom na šírku (375–440px na výšku) bola karta
+   (~525px) orezaná hore aj dole a tlačidlo nedosiahnuteľné. Vzor z login stránky:
+   kontajner skroluje, karta má margin:auto → v strede, keď sa zmestí; odhora
+   a skrolovateľná, keď nie (align-items:center by odrezalo vrch). */
+.ios-app .workspace-setup,
+.ios-app .invite-page {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  align-items: flex-start;
+  /* WebView siaha pod status bar / Dynamic Island (shell ignoruje safe area
+     hore aj dole) — pretekajúca karta by inak začínala pod ním. box-sizing je
+     border-box, takže 100dvh stále platí a margin:auto centruje v bezpečnej zóne. */
+  padding-top: max(20px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+}
+
+.ios-app .workspace-setup-card,
+.ios-app .invite-card {
+  margin: auto;
 }

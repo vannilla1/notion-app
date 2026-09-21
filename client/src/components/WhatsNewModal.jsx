@@ -256,7 +256,7 @@ function WhatsNewModal() {
           box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
         }
 
-        @media (max-width: 767px) {
+        @media (max-width: 768px) {
           .whats-new-modal {
             max-height: 84vh;
             max-height: calc(100dvh - 110px);

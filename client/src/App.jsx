@@ -543,7 +543,9 @@ function AppContent() {
       {isAuthenticated && !isAdminRoute && <UploadQueueIndicator />}
       {/* BottomNav je user-app navigácia — admin panel má vlastný tab-bar, takže
           na `/admin*` by bol BottomNav vizuálne rušivý aj zavádzajúci. */}
-      {isAuthenticated && !isAdminRoute && <BottomNav unreadCounts={unreadCounts} />}
+      {/* Na stránke pozvánky (/invite/:token) spodná navigácia nemá čo robiť —
+          na iPhone na šírku prekrývala tlačidlo „Prijať pozvánku". */}
+      {isAuthenticated && !isAdminRoute && !location.pathname.startsWith('/invite/') && <BottomNav unreadCounts={unreadCounts} />}
       <RouteErrorBoundary>
       <Suspense fallback={<RouteFallback />}>
       <Routes>

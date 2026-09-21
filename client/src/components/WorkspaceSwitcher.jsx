@@ -39,14 +39,26 @@ const WorkspaceSwitcher = () => {
     return () => clearInterval(interval);
   }, [fetchUnreadByWs]);
 
+  // Rovnaký predikát ako CSS (`@media (max-width: 768px)`). innerWidth je celé
+  // číslo, media query ráta so zlomkovou šírkou — pri šírke 768,1–769px (zoom,
+  // neobvyklá hustota displeja) by CSS už použilo tabletovú hlavičku, JS by
+  // prepínač ešte skryl a mobilné náhrady skrýva CSS → žiadny prepínač prostredí.
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768);
+    if (typeof window.matchMedia !== 'function') {
+      const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+      checkMobile();
+      window.addEventListener('resize', checkMobile);
+      return () => window.removeEventListener('resize', checkMobile);
+    }
+    const mq = window.matchMedia('(max-width: 768px)');
+    const onChange = (e) => setIsMobile(e.matches);
+    setIsMobile(mq.matches);
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange); // staršie WebView
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
     };
-
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   // Strana ukotvenia zoznamu. Predvolene je zarovnaný na PRAVÝ okraj tlačidla
