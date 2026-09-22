@@ -4,8 +4,13 @@
 //
 // Two signals, either is sufficient:
 //  1. Custom user agent suffix injected by Swift (`PrplCRM-iOS/...`)
-//  2. window.webkit.messageHandlers — only present in WKWebView with
-//     scriptMessageHandlers configured (which our Swift app does)
+//  2. window.webkit.messageHandlers.iosNative — NÁŠ handler, registrovaný
+//     v ContentView.swift od prvej verzie. Samotné `messageHandlers` nestačí:
+//     má ho každý WKWebView s hocijakým handlerom (in-app prehliadače
+//     Gmail/Outlook/LinkedIn/Facebook na iOS, shimy v cudzích Android
+//     appkách) a tie by sme omylom prepli do režimu iOS appky (IAP namiesto
+//     Stripe, skrytý cookie banner, vypnutá analytika, natívne login flow).
+//     Rovnaká logika je inline v client/index.html (beží pred bundlom).
 //
 // Use this for hiding web-specific UI in the iOS native app:
 //  - duplicate in-app notification toasts (APNs banner already shows them)
@@ -24,7 +29,8 @@ export const isIosNativeApp = () => {
       /PrplCRM-iOS/.test(navigator.userAgent) ||
       !!(typeof window !== 'undefined' &&
          window.webkit &&
-         window.webkit.messageHandlers)
+         window.webkit.messageHandlers &&
+         window.webkit.messageHandlers.iosNative)
     );
   } catch {
     cached = false;

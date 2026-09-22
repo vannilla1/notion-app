@@ -11,14 +11,30 @@
     <script>
       (function () {
         try {
+          // Detekcia NÁŠHO iOS shellu: UA suffix zo Swiftu, alebo náš handler
+          // `iosNative` (registrovaný od prvej verzie). Samotná existencia
+          // window.webkit.messageHandlers NESTAČÍ — má ju každý WKWebView
+          // s ľubovoľným handlerom (in-app prehliadače Gmail/Outlook/LinkedIn…
+          // aj shimy v cudzích Android appkách), a tie by sme omylom prepli
+          // do režimu iOS appky. Rovnaká logika: client/src/utils/platform.js.
           var isIos = /PrplCRM-iOS/.test(navigator.userAgent) ||
-                      !!(window.webkit && window.webkit.messageHandlers);
+                      !!(window.webkit && window.webkit.messageHandlers &&
+                         window.webkit.messageHandlers.iosNative);
           window.__iosNative = isIos;
           if (!isIos) return;
           if ('serviceWorker' in navigator) {
-            // Neutralize register() BEFORE registerSW.js runs
+            // Neutralize register() BEFORE registerSW.js runs. Odmietnutie
+            // vraciame už s pripojeným catch-om: VitePWA inline registrácia
+            // výsledok nespracúva, takže neošetrené odmietnutie končilo ako
+            // "unhandledrejection: SW disabled in iOS native app" v Diagnostike.
+            // (WKWebView bez app-bound domains SW spravidla vôbec nevystavuje,
+            // takže tu blok často ani nebeží — guard držíme pre prostredia,
+            // ktoré ho vystavia, a preto, že f77a175 ním reálne vyriešil
+            // reload-loop pri scrollovaní.)
             navigator.serviceWorker.register = function () {
-              return Promise.reject(new Error('SW disabled in iOS native app'));
+              var rejected = Promise.reject(new Error('SW disabled in iOS native app'));
+              rejected.catch(function () {});
+              return rejected;
             };
 
             // If a previous SW is controlling this page, it's intercepting

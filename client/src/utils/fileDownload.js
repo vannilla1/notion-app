@@ -12,6 +12,8 @@
  * priamo na odkaz a shell si to zoberie natívne (iOS share sheet /
  * Android DownloadManager), bez base64 v pamäti.
  */
+import { isIosNativeApp } from './platform';
+
 const toBase64 = (blob) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(String(reader.result).split(',')[1]);
@@ -20,8 +22,11 @@ const toBase64 = (blob) => new Promise((resolve, reject) => {
 });
 
 export function downloadBlob(blob, fileName) {
-  // iOS shell
-  if (window.webkit?.messageHandlers?.fileDownload) {
+  // iOS shell. Gate na isIosNativeApp(): samotný názov handlera nestačí —
+  // cudzí WKWebView (in-app prehliadač inej appky) môže mať svoj handler
+  // s rovnakým menom a náš base64 payload by zmizol bez stiahnutia súboru.
+  // Náš shell registruje iosNative aj fileDownload spolu (ContentView.swift).
+  if (isIosNativeApp() && window.webkit?.messageHandlers?.fileDownload) {
     toBase64(blob).then(base64 => {
       window.webkit.messageHandlers.fileDownload.postMessage({
         data: base64,

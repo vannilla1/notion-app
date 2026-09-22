@@ -6557,6 +6557,8 @@ ${JSON.stringify(err.context || {}, null, 2)}
 
 User: ${err.userId?.email || 'nezalogovaný'}
 Workspace: ${err.workspaceId || 'N/A'}
+URL: ${err.url || '—'}
+User agent: ${err.userAgent || '—'}
 `;
     navigator.clipboard.writeText(prompt).then(() => {
       alert('Skopírované do schránky. Vlož do Claude Code.');

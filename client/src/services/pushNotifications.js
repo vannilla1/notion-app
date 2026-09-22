@@ -1,10 +1,11 @@
 import api from '../api/api';
+import { isIosNativeApp } from '../utils/platform';
 
 const PUSH_SW_PATH = '/sw-push.js';
 
-export const isNativeIOSApp = () => {
-  return !!(window.webkit?.messageHandlers);
-};
+// Jedna detekcia pre celý klient (UA suffix alebo náš handler `iosNative`);
+// holé `window.webkit.messageHandlers` má aj Gmail/Outlook in-app prehliadač.
+export const isNativeIOSApp = () => isIosNativeApp();
 
 export const isPushSupported = () => {
   // Skip web push in native iOS app — APNs handles push notifications there

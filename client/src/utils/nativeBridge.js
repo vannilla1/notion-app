@@ -18,7 +18,9 @@
 export const isNativeIOSApp = () => {
   if (typeof window === 'undefined') return false;
   if (/PrplCRM-iOS/.test(navigator.userAgent)) return true;
-  return !!(window.webkit && window.webkit.messageHandlers);
+  // Len NÁŠ handler `iosNative` — holé `messageHandlers` má každý WKWebView
+  // (in-app prehliadače cudzích appiek). Viď utils/platform.js.
+  return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative);
 };
 
 export const isNativeAndroidApp = () => {

@@ -88,7 +88,10 @@ function BillingPage() {
 
   // Open URL externally — uses native bridge on iOS, window.open on web
   const openExternal = (url) => {
-    if (window.webkit?.messageHandlers?.openExternal) {
+    // isIosNativeApp() najprv — 'openExternal' je generický názov, ktorý môže
+    // mať aj in-app prehliadač cudzej appky; bez gate-u by sa Stripe checkout
+    // odoslal do cudzieho handlera a používateľovi by sa nestalo nič.
+    if (isIosNativeApp() && window.webkit?.messageHandlers?.openExternal) {
       window.webkit.messageHandlers.openExternal.postMessage(url);
     } else {
       window.open(url, '_blank');

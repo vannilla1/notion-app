@@ -361,7 +361,13 @@ struct WebView: UIViewRepresentable {
         webView.backgroundColor = UIColor(red: 99/255, green: 102/255, blue: 241/255, alpha: 1)
 
         // Set mobile user agent
-        webView.customUserAgent = "PrplCRM-iOS/1.0 " + (webView.value(forKey: "userAgent") as? String ?? "")
+        // Verzia z bundlu (nie natvrdo "1.0") — klientsky error reporter z nej
+        // odvodzuje `release` do Diagnostiky, takže chyby z appky sa dajú
+        // rozlíšiť od webu a od starších buildov. Prefix musí ostať
+        // "PrplCRM-iOS/" — na ňom stojí detekcia shellu v klientovi.
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        webView.customUserAgent = "PrplCRM-iOS/\(appVersion).\(appBuild) " + (webView.value(forKey: "userAgent") as? String ?? "")
 
         // Restore token from Keychain BEFORE page JS runs — ONLY if localStorage is
         // empty. WKUserScript source is baked in at WebView-init time and runs on

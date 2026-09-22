@@ -132,6 +132,24 @@ function isThirdPartyStack(stack) {
   return false;
 }
 
+/**
+ * Verzia pre Diagnostiku. VITE_RELEASE_SHA v builde nie je nastavené, takže
+ * doteraz išli VŠETKY JS chyby ako 'web' — aj tie, ktoré vznikli vnútri
+ * natívnych shellov (tie načítavajú ten istý bundle z prplcrm.eu). V paneli
+ * sa potom nedalo rozlíšiť „padá to na webe" od „padá to v appke".
+ * Verziu vieme z UA suffixu, ktorý si shelly pridávajú samy:
+ * `PrplCRM-iOS/<verzia>` a `PrplCRM-Android/<verzia>`.
+ */
+function resolveRelease() {
+  try {
+    if (import.meta.env.VITE_RELEASE_SHA) return import.meta.env.VITE_RELEASE_SHA;
+    const m = String(navigator.userAgent).match(/PrplCRM-(iOS|Android)\/([\w.]+)/);
+    return m ? `${m[1].toLowerCase()}-${m[2]}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function hashKey(payload) {
   // Jednoduchý kľúč — message + first line of stack + pathname
   const stackFirstLine = (payload.stack || '').split('\n')[0] || '';
@@ -179,7 +197,7 @@ export function reportError(payload) {
       column: payload.column,
       url: location.href,
       userAgent: navigator.userAgent,
-      release: import.meta.env.VITE_RELEASE_SHA || undefined,
+      release: resolveRelease(),
       // Snímka posledných ~30 breadcrumbs (navigation, fetch, clicks, console).
       // Server ich uloží do ServerError.context.breadcrumbs.
       breadcrumbs: getBreadcrumbs()
