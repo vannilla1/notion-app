@@ -4,6 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.widget.FrameLayout
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -54,6 +58,14 @@ import com.google.firebase.messaging.FirebaseMessaging
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    // Koreňový kontajner: WebView + natívne prekrytie pri zlyhaní načítania.
+    private lateinit var rootLayout: FrameLayout
+    private lateinit var loadErrorOverlay: LoadErrorOverlay
+    // true = aktuálna navigácia hlavného rámca zlyhala (sieť / HTTP 5xx). WebView
+    // po chybe aj tak zavolá onPageFinished (pre svoju chybovú stránku), takže
+    // prekrytie sa smie skryť len keď táto navigácia NEzlyhala.
+    private var mainFrameFailed = false
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     // Prediktívny back (targetSdk 36): enabled sa synchronizuje s
     // webView.canGoBack() v doUpdateVisitedHistory + po crash-recovery.
     private var backCallback: OnBackPressedCallback? = null
@@ -117,7 +129,11 @@ class MainActivity : AppCompatActivity() {
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
-        setContentView(webView)
+        rootLayout = FrameLayout(this).apply { addView(webView) }
+        setContentView(rootLayout)
+        // Prekrytie „Nepodarilo sa pripojiť" (view_load_error.xml) — leží nad
+        // WebView, zobrazí sa len pri zlyhaní hlavnej stránky (viď WebViewClient).
+        loadErrorOverlay = LoadErrorOverlay(rootLayout) { retryMainFrameLoad() }
 
         // Späť = navigácia vo WebView, nie zatvorenie appky. Od targetSdk 36
         // je prediktívne spätné gesto zapnuté DEFAULTNE a systém na Androide
@@ -355,7 +371,7 @@ class MainActivity : AppCompatActivity() {
         try {
             // webView.url je na mŕtvom rendereri null → použijeme trackovanú URL.
             val lastUrl = lastLoadedUrl ?: getString(R.string.webapp_url)
-            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            rootLayout.removeView(webView)
             webView.destroy()
             webView = WebView(this).apply {
                 layoutParams = android.view.ViewGroup.LayoutParams(
@@ -363,7 +379,7 @@ class MainActivity : AppCompatActivity() {
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 )
             }
-            setContentView(webView)
+            rootLayout.addView(webView, 0) // index 0 = pod prekrytím chyby
             configureWebView()
             setupWebViewClients()
             // Nový WebView = prázdna história — resync prediktívneho backu
@@ -417,6 +433,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                mainFrameFailed = false // nová navigácia hlavného rámca
 
                 // Defence-in-depth hostname guard na NativeBridge:
                 // Ak sa WebView akýmkoľvek spôsobom dostal na cudziu doménu (napr. OAuth
@@ -470,18 +487,43 @@ class MainActivity : AppCompatActivity() {
                     "code=${error?.errorCode} desc=${error?.description} url=$safeUrl",
                     safeUrl
                 )
+                // Bez siete / DNS / timeout → namiesto Chrome „Webpage not available"
+                // ukáž natívne prekrytie s automatickým opakovaním. LEN pre chyby,
+                // ktoré má zmysel opakovať: prerušená navigácia (ERR_ABORTED —
+                // presmerovanie, window.location počas načítania, OAuth návrat) alebo
+                // zlá/zablokovaná URL nie sú výpadok a prekrytie by len preblikávalo.
+                if (isRetryableLoadError(error)) {
+                    mainFrameFailed = true
+                    loadErrorOverlay.show(offline = !isOnline())
+                }
             }
 
             override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
                 super.onReceivedHttpError(view, request, errorResponse)
                 if (request?.isForMainFrame != true) return
                 val safeUrl = sanitizeUrlForReport(request.url)
+                val status = errorResponse?.statusCode ?: 0
                 NativeErrorReporter.report(
                     this@MainActivity,
                     "AndroidWebViewHttpError",
-                    "status=${errorResponse?.statusCode} url=$safeUrl",
+                    "status=$status url=$safeUrl",
                     safeUrl
                 )
+                // 5xx (Render/Cloudflare 502/503/504, výpadok, deploy) → WebView by
+                // inak zobrazil surovú chybovú stránku Cloudflare bez cesty von.
+                // 4xx nechávame (statický web servíruje index.html pre všetky cesty,
+                // takže na hlavnom rámci reálne nenastáva).
+                if (status >= 500) {
+                    mainFrameFailed = true
+                    loadErrorOverlay.show(offline = false)
+                }
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // Volá sa aj pre chybovú stránku po zlyhaní — skry prekrytie LEN
+                // keď táto navigácia prešla.
+                if (!mainFrameFailed) loadErrorOverlay.hide()
             }
 
             // História sa zmenila (aj SPA pushState) → synchronizuj prediktívny
@@ -604,9 +646,81 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Návrat siete → okamžitý pokus (namiesto čakania na odpočet prekrytia).
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread { if (loadErrorOverlay.isShowing) loadErrorOverlay.retryNow() }
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "registerDefaultNetworkCallback failed", e)
+        }
+    }
+
+    override fun onStop() {
+        networkCallback?.let { cb ->
+            try {
+                (getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)?.unregisterNetworkCallback(cb)
+            } catch (e: Exception) { /* už odregistrované */ }
+        }
+        networkCallback = null
+        super.onStop()
+    }
+
+    /**
+     * Chyby hlavného rámca, pri ktorých má zmysel ukázať prekrytie a opakovať:
+     * sieť (DNS, spojenie, I/O, timeout, SSL handshake), preťažený server,
+     * ERROR_UNKNOWN len ak nejde o prerušenie (net::ERR_ABORTED / ERR_BLOCKED_BY_*).
+     */
+    private fun isRetryableLoadError(error: WebResourceError?): Boolean {
+        val desc = error?.description?.toString().orEmpty()
+        if (desc.contains("ERR_ABORTED") || desc.contains("ERR_BLOCKED_BY")) return false
+        return when (error?.errorCode) {
+            WebViewClient.ERROR_HOST_LOOKUP,
+            WebViewClient.ERROR_CONNECT,
+            WebViewClient.ERROR_IO,
+            WebViewClient.ERROR_TIMEOUT,
+            WebViewClient.ERROR_FAILED_SSL_HANDSHAKE,
+            WebViewClient.ERROR_TOO_MANY_REQUESTS,
+            WebViewClient.ERROR_UNKNOWN -> true
+            else -> false
+        }
+    }
+
+    /** Je k dispozícii sieť s internetom? (ACCESS_NETWORK_STATE máme v manifeste.) */
+    private fun isOnline(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    /**
+     * Opakovanie po zlyhaní hlavnej stránky. WebView po chybe drží pôvodnú URL
+     * (aj pri Chrome chybovej stránke aj pri 5xx odpovedi), takže reload() načíta
+     * znova to, čo zlyhalo, a nepridá záznam do histórie (Späť nevedie na chybu).
+     */
+    private fun retryMainFrameLoad() {
+        if (isFinishing || isDestroyed) return
+        val current = webView.url
+        if (!current.isNullOrEmpty() && current.startsWith("http") && isOurHost(current)) {
+            webView.reload()
+        } else {
+            webView.loadUrl(lastLoadedUrl ?: getString(R.string.webapp_url))
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Návrat na popredie s prekrytím chyby → skús hneď (sieť sa mohla vrátiť
+        // kým bola appka na pozadí a callback už nemusel byť registrovaný).
+        if (loadErrorOverlay.isShowing) loadErrorOverlay.retryNow()
         // Appka ide na popredie → NotificationToast (WebSocket in-app toast)
         // preberá zobrazovanie notifikácií. PrstFcmService sa pozrie na tento
         // flag a ak je true, vypadne bez zobrazenia systémovej notifikácie
@@ -627,6 +741,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        loadErrorOverlay.destroy()
         webView.destroy()
         // Kill swiped alebo destroy → určite nie na popredí. Ak by onPause
         // nestihlo bežat (rare race), tento fallback zabezpečí že ďalšia push

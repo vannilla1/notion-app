@@ -9,6 +9,11 @@ struct ContentView: View {
     @State private var loadError = false
     @State private var isLocked = false
     @State private var biometricFailed = false
+    // Automatické opakovanie po zlyhaní prvého načítania (bez siete, server 5xx):
+    // 3, 5, 10, 20, 30 s… Používateľ nemusí klepať na „Skúsiť znova" — po návrate
+    // siete alebo odznení výpadku servera appka nabehne sama (parita s Androidom).
+    @State private var retryAttempt = 0
+    @State private var retryTask: Task<Void, Never>? = nil
 
     var body: some View {
         ZStack {
@@ -25,6 +30,7 @@ struct ContentView: View {
             }
             if loadError {
                 ErrorView(onRetry: {
+                    retryTask?.cancel()
                     loadError = false
                     isLoading = true
                 })
@@ -43,6 +49,19 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: isLoading)
         .animation(.easeInOut(duration: 0.3), value: loadError)
         .animation(.easeInOut(duration: 0.3), value: isLocked)
+        .onChange(of: loadError) { failed in
+            retryTask?.cancel()
+            guard failed else { retryAttempt = 0; return }
+            let delays: [UInt64] = [3, 5, 10, 20, 30]
+            let delay = delays[min(retryAttempt, delays.count - 1)]
+            retryAttempt += 1
+            retryTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                guard !Task.isCancelled, loadError else { return }
+                loadError = false
+                isLoading = true
+            }
+        }
         .onAppear {
             // If we have a saved token, require biometric auth
             if KeychainHelper.getToken() != nil {
@@ -233,10 +252,14 @@ struct ErrorView: View {
                     .font(.title2.bold())
                     .foregroundColor(.white)
 
-                Text("Skontrolujte internetové pripojenie\na skúste znova.")
+                Text("Skontrolujte internetové pripojenie\nalebo počkajte, server môže byť\ndočasne nedostupný.")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
+
+                Text("Skúsime to znova automaticky.")
+                    .font(.footnote)
+                    .foregroundColor(.white.opacity(0.6))
 
                 Button(action: onRetry) {
                     Text("Skúsiť znova")
@@ -483,7 +506,9 @@ struct WebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        if loadError == false && isLoading == true && webView.url == nil {
+        if loadError == false && isLoading == true
+            && (webView.url == nil || context.coordinator.needsRetryLoad) {
+            context.coordinator.needsRetryLoad = false
             webView.load(URLRequest(url: url))
         }
 
@@ -563,6 +588,10 @@ struct WebView: UIViewRepresentable {
         var parent: WebView
         weak var webView: WKWebView?
         var hasFinishedInitialLoad = false
+        // ErrorView je zobrazený a ďalší pokus musí načítať URL znova aj keď
+        // webView.url už nie je nil (napr. stránka sa stihla commitnúť a až
+        // následná navigácia zlyhala). Nuluje updateUIView pri opakovaní.
+        var needsRetryLoad = false
         private var didOpenExternalAuth = false
         // Nastavuje sa keď updateUIView stihne obslúžiť pendingDeepLink v tomto
         // foreground cykle — napr. Universal Link z OAuth redirectu. appWillEnter-
@@ -945,6 +974,7 @@ struct WebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            httpRetryAttempt = 0
             // Inject actual safe area inset values from native
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let window = webView.window {
@@ -986,7 +1016,9 @@ struct WebView: UIViewRepresentable {
             // window.location) supersedovala túto, alebo sme ju zámerne zrušili
             // v decidePolicyFor. NESMIE zobraziť "Nepodarilo sa pripojiť" ErrorView.
             if (error as NSError).code == NSURLErrorCancelled { return }
+            if Self.isPolicyCancel(error) { return } // 5xx zrušené nami — rieši handleMainFrameHttpError
             if !hasFinishedInitialLoad {
+                needsRetryLoad = true
                 parent.loadError = true
                 parent.isLoading = false
             }
@@ -1085,7 +1117,9 @@ struct WebView: UIViewRepresentable {
             // internet" ErrorView, hoci skutočná navigácia uspela (user skončil
             // vo workspace). -999 preto NESMIE nastaviť loadError ani sa logovať.
             if nsErr.code == NSURLErrorCancelled { return }
+            if Self.isPolicyCancel(error) { return } // 5xx zrušené nami — rieši handleMainFrameHttpError
             if !hasFinishedInitialLoad {
+                needsRetryLoad = true
                 parent.loadError = true
                 parent.isLoading = false
             }
@@ -1225,7 +1259,54 @@ struct WebView: UIViewRepresentable {
                 decisionHandler(.download)
                 return
             }
+            // Server 5xx na HLAVNEJ stránke (Render/Cloudflare 502/503/504, výpadok,
+            // deploy): WKWebView by inak vykreslil surovú chybovú stránku Cloudflare
+            // bez cesty von (Diagnostika: status=504 url=/app). Zrušíme a riešime
+            // ako výpadok siete — ErrorView + automatické opakovanie.
+            if navigationResponse.isForMainFrame,
+               let http = navigationResponse.response as? HTTPURLResponse,
+               http.statusCode >= 500 {
+                decisionHandler(.cancel)
+                handleMainFrameHttpError(webView, response: http)
+                return
+            }
             decisionHandler(.allow)
+        }
+
+        /// Navigáciu sme zrušili sami v decidePolicyFor (5xx) → WebKit ju ohlási
+        /// ako chybu `WebKitErrorDomain` kód 102 (FrameLoadInterruptedByPolicyChange;
+        /// legacy doména bez verejnej Swift konštanty). Nesmie sa hlásiť ako
+        /// „zlyhanie siete" ani duplicitne prepínať ErrorView.
+        static func isPolicyCancel(_ error: Error) -> Bool {
+            let e = error as NSError
+            return e.domain == "WebKitErrorDomain" && e.code == 102
+        }
+
+        private var httpRetryAttempt = 0
+
+        private func handleMainFrameHttpError(_ webView: WKWebView, response: HTTPURLResponse) {
+            let url = response.url ?? parent.url
+            let safe = Self.strippedOfQuery(url) ?? url
+            reportNativeError(name: "iOSMainFrameHttpError", message: "status=\(response.statusCode) url=\(safe.absoluteString)")
+            if !hasFinishedInitialLoad {
+                // Prvé načítanie: celoobrazovkový ErrorView s automatickým opakovaním
+                // (ContentView.onChange(loadError)); needsRetryLoad zaručí, že
+                // updateUIView pri ďalšom pokuse načíta URL znova.
+                needsRetryLoad = true
+                parent.loadError = true
+                parent.isLoading = false
+                return
+            }
+            // Po prvom načítaní (deep link, reload po 15 min na pozadí): pôvodná
+            // stránka ostáva zobrazená a použiteľná, len to skúsime ešte 3× znova
+            // s odstupom 4 s. Počítadlo sa nuluje pri úspešnom didFinish.
+            guard httpRetryAttempt < 3 else { return }
+            httpRetryAttempt += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self, weak webView] in
+                guard let self = self, let webView = webView else { return }
+                debugLog("[Load] retry #\(self.httpRetryAttempt) after HTTP \(response.statusCode)")
+                webView.load(URLRequest(url: url))
+            }
         }
 
         func webView(_ webView: WKWebView,

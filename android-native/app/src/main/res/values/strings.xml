@@ -22,4 +22,12 @@
     <string name="offline_title">Žiadne pripojenie</string>
     <string name="offline_message">Skontrolujte internetové pripojenie a skúste znova.</string>
     <string name="retry">Skúsiť znova</string>
+
+    <!-- Natívna obrazovka pri zlyhaní načítania hlavnej stránky (view_load_error.xml) -->
+    <string name="load_error_icon" translatable="false">📡</string>
+    <string name="load_error_title">Nepodarilo sa pripojiť</string>
+    <string name="load_error_message_offline">Skontrolujte internetové pripojenie. Hneď ako bude dostupné, pokračujeme automaticky.</string>
+    <string name="load_error_message_server">Server momentálne neodpovedá. Skúsime to znova automaticky.</string>
+    <string name="load_error_countdown">Automaticky skúsim znova o %1$d s</string>
+    <string name="load_error_countdown_now">Skúšam znova…</string>
 </resources>
