@@ -1,7 +1,13 @@
 import api from '../api/api';
 import { isIosNativeApp } from '../utils/platform';
 
-const PUSH_SW_PATH = '/sw-push.js';
+// Jediný service worker originu: /sw.js (VitePWA workbox), ktorý cez
+// workbox.importScripts načíta aj public/sw-push.js s push handlermi.
+// Samostatná registrácia /sw-push.js na scope '/' sa s ním bila o jednu
+// registráciu (viď komentár vo vite.config.js) — preto tu už nič
+// neregistrujeme, len siahneme po existujúcej registrácii.
+const APP_SW_PATH = '/sw.js';
+const SW_SCOPE = '/';
 
 // Jedna detekcia pre celý klient (UA suffix alebo náš handler `iosNative`);
 // holé `window.webkit.messageHandlers` má aj Gmail/Outlook in-app prehliadač.
@@ -32,15 +38,24 @@ export const requestPermission = async () => {
   return permission;
 };
 
-export const registerPushServiceWorker = async () => {
+/**
+ * Registrácia, na ktorej robíme push subscribe. Bežne už existuje (inline
+ * registrácia v index.html beží pri každom načítaní); ak by chýbala — napr.
+ * registrácia zlyhala kvôli sieti — zaregistrujeme ten istý /sw.js. Nikdy
+ * nie iný skript: iný scriptURL na tom istom scope by workera prepísal.
+ */
+export const getPushRegistration = async () => {
   if (!isPushSupported()) {
     throw new Error('Push notifications are not supported');
   }
 
-  const registration = await navigator.serviceWorker.register(PUSH_SW_PATH, {
-    scope: '/'
-  });
-
+  let registration = await navigator.serviceWorker.getRegistration(SW_SCOPE);
+  if (!registration) {
+    registration = await navigator.serviceWorker.register(APP_SW_PATH, { scope: SW_SCOPE });
+  }
+  // Počkaj na aktívneho workera — subscribe na registrácii bez aktívneho
+  // workera zlyhá.
+  await navigator.serviceWorker.ready;
   return registration;
 };
 
@@ -78,8 +93,7 @@ export const subscribeToPush = async () => {
     throw new Error('Notification permission not granted');
   }
 
-  const registration = await registerPushServiceWorker();
-  await navigator.serviceWorker.ready;
+  const registration = await getPushRegistration();
 
   const vapidPublicKey = await getVapidPublicKey();
   const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
@@ -95,7 +109,7 @@ export const subscribeToPush = async () => {
 };
 
 export const unsubscribeFromPush = async () => {
-  const registration = await navigator.serviceWorker.getRegistration(PUSH_SW_PATH);
+  const registration = await navigator.serviceWorker.getRegistration(SW_SCOPE);
 
   if (!registration) {
     return;
@@ -119,7 +133,7 @@ export const isSubscribedToPush = async () => {
     return false;
   }
 
-  const registration = await navigator.serviceWorker.getRegistration(PUSH_SW_PATH);
+  const registration = await navigator.serviceWorker.getRegistration(SW_SCOPE);
 
   if (!registration) {
     return false;

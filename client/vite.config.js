@@ -19,6 +19,18 @@ export default defineConfig({
       manifest: false, // We use our own manifest.json
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // JEDEN service worker pre celý origin. Push handlery (public/sw-push.js:
+        // push, notificationclick, pushsubscriptionchange) sa importujú sem,
+        // namiesto samostatnej registrácie /sw-push.js. Dôvod: scope '/' má
+        // len jednu registráciu — keď klient registroval /sw-push.js, prepísal
+        // tento workbox worker, a pri ďalšom načítaní ho inline registrácia
+        // /sw.js prepísala späť. Výsledok: po prvom reloade od zapnutia
+        // notifikácií bežal worker BEZ push handlera a notifikácie sa na webe
+        // nezobrazovali (subscription na serveri pritom ostala). Overené
+        // 22. 9. 2026 v Chrome na lokálnom dist buildе.
+        // sw-push.js ostáva aj v precache manifeste zámerne: jeho revízia mení
+        // bajty sw.js, takže každá zmena push handlerov spustí update workera.
+        importScripts: ['sw-push.js'],
         // Aktivuj nový SW okamžite — bez tohto stará verzia ďalej obsluhuje
         // všetky otvorené taby a userom sa zmeny po deploy nezobrazia, kým
         // všetky taby nezatvoria. clientsClaim() preberie kontrolu nad

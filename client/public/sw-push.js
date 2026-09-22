@@ -1,7 +1,12 @@
-// Push notification service worker
-// Version: 2.6 - Improved subscription change handling, URL validation
+// Push notification handlers — od 2.7 sa tento súbor NEREGISTRUJE ako
+// samostatný service worker. Importuje ho /sw.js (VitePWA workbox) cez
+// workbox.importScripts, takže origin má jedného workera s precache aj push.
+// Samostatná registrácia na scope '/' sa s workbox workerom striedavo
+// prepisovala a po prvom reloade od zapnutia notifikácií bežal worker bez
+// push handlera (viď vite.config.js).
+// Version: 2.7 - Imported into /sw.js instead of standalone registration
 
-const SW_VERSION = '2.6';
+const SW_VERSION = '2.7';
 
 // Debug logging - enabled temporarily for troubleshooting
 const DEBUG = true;
