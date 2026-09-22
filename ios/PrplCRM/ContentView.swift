@@ -623,7 +623,7 @@ struct WebView: UIViewRepresentable {
 
         @objc private func handleDeepLinkReceived(_ notification: Notification) {
             guard let urlString = notification.userInfo?["url"] as? String,
-                  let webView = webView else {
+                  webView != nil else {
                 debugLog("[Push] Coordinator.handleDeepLinkReceived: no URL or no webView")
                 return
             }

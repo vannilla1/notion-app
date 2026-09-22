@@ -424,7 +424,7 @@ export default function LandingPage() {
 
             <details className="lp-faq-item">
               <summary>Má Prpl CRM mobilnú aplikáciu?</summary>
-              <p>Áno, Prpl CRM má natívnu mobilnú aplikáciu pre iOS (s podporou Face ID) aj pre Android. Všetky dáta sa synchronizujú v reálnom čase medzi zariadeniami.</p>
+              <p>Áno, Prpl CRM má natívnu mobilnú aplikáciu pre iOS (s biometrickým odomknutím Face ID alebo Touch ID) aj pre Android. Všetky dáta sa synchronizujú v reálnom čase medzi zariadeniami.</p>
             </details>
 
             <details className="lp-faq-item">

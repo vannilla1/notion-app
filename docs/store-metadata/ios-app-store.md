@@ -38,7 +38,7 @@ Prestaňte hľadať informácie o zákazníkoch v e-mailoch, poznámkach a tabu�
 • Zdieľané pracovné prostredia — pracujte v tíme na spoločných kontaktoch a projektoch.
 • Google Kalendár a Google Tasks — obojsmerná synchronizácia, termíny máte vždy aktuálne.
 • Push notifikácie — všetko dôležité sa dozviete včas.
-• Face ID — rýchle a bezpečné prihlásenie.
+• Face ID / Touch ID — rýchle a bezpečné prihlásenie.
 • Prílohy — súbory a fotky priamo pri úlohách.
 • CSV export — vo vyšších plánoch si svoje dáta kedykoľvek vyexportujete.
 
@@ -93,7 +93,7 @@ FEATURES
 • Shared workspaces — invite your team and work on the same clients and projects together
 • Google Calendar and Google Tasks — two-way sync keeps your schedule up to date everywhere
 • Push notifications — get notified when something needs your attention
-• Face ID — sign in quickly and securely
+• Face ID / Touch ID — sign in quickly and securely
 • Attachments — add files and photos to your tasks
 • CSV export — export your data on higher plans
 • Web app included — everything syncs with prplcrm.eu, so you can keep working from any computer
