@@ -89,7 +89,75 @@ const endpointFor = (item) => {
   return `${API_BASE_URL}/api/contacts/${item.contactId}/files`;
 };
 
-const sendItem = (item) => new Promise((resolve) => {
+/**
+ * Súbor pripravený na odoslanie — VŽDY nový File s bajtmi v pamäti.
+ *
+ * WebKit (iOS/iPadOS appka aj Safari, Safari na Macu) posiela Blob načítaný
+ * z IndexedDB ako PRÁZDNE telo: XHR s FormData odíde s Content-Length 0, hoci
+ * blob.arrayBuffer() vráti všetky bajty. Server (busboy) potom hlási
+ * „Unexpected end of form" → 400 a príloha sa nenahrá. Od zavedenia fronty
+ * (26. 8. 2026) tak na iPhone nešla nahrať žiadna príloha. Overené 24. 9. 2026
+ * v iOS 27 simulátore s vygenerovaným JPEG aj s fotkou z knižnice Fotky;
+ * Chromium (Chrome, Edge, Android) to robí správne, ale kópia do pamäte mu
+ * neuškodí, takže cesta je jedna pre všetky platformy.
+ *
+ * Súbor, ktorý sa nedá prečítať (zmazaný z úložiska prehliadača, prázdny,
+ * iná veľkosť než pri výbere), NEPOSIELAME — prázdne telo by skončilo tou
+ * istou kryptickou 400-kou. Volajúci dostane UnreadableFileError.
+ */
+export class UnreadableFileError extends Error {
+  constructor(reason) {
+    super('Súbor sa v zariadení nepodarilo načítať. Vyberte ho prosím znova.');
+    this.name = 'UnreadableFileError';
+    this.reason = reason;
+  }
+}
+
+const readBytes = (blob) => {
+  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
+  // Staršie WebKity bez Blob.arrayBuffer()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+    reader.readAsArrayBuffer(blob);
+  });
+};
+
+export const toSendableFile = async (item) => {
+  const src = item.file;
+  if (!src || typeof src.size !== 'number') throw new UnreadableFileError('missing');
+  const type = src.type || 'application/octet-stream';
+  // Súbor bol prázdny už pri výbere — nie je čo čítať, pošleme prázdny súbor
+  // (nie je to chyba úložiska; server rozhodne sám).
+  if (item.size === 0) return new File([], item.fileName, { type });
+  let buf;
+  try {
+    buf = await readBytes(src);
+  } catch (e) {
+    throw new UnreadableFileError(`read-failed: ${e?.name || e?.message || 'unknown'}`);
+  }
+  // Pri výbere mal bajty, teraz nemá nič / má iný počet → úložisko prehliadača
+  // súbor stratilo alebo poškodilo. Staršie položky vo fronte size nemajú —
+  // tam je prázdny obsah jediný spoľahlivý signál.
+  if (!buf || buf.byteLength === 0) throw new UnreadableFileError('empty');
+  if (typeof item.size === 'number' && buf.byteLength !== item.size) {
+    throw new UnreadableFileError(`size-mismatch ${buf.byteLength}/${item.size}`);
+  }
+  return new File([buf], item.fileName, { type });
+};
+
+const sendItem = async (item) => {
+  let file;
+  try {
+    file = await toSendableFile(item);
+  } catch (e) {
+    return { ok: false, permanent: true, unreadable: true, message: e.message, reason: e.reason };
+  }
+  return sendFile(item, file);
+};
+
+const sendFile = (item, file) => new Promise((resolve) => {
   const xhr = new XMLHttpRequest();
   xhr.open('POST', endpointFor(item));
   xhr.setRequestHeader('Authorization', `Bearer ${getStoredToken()}`);
@@ -125,7 +193,7 @@ const sendItem = (item) => new Promise((resolve) => {
   const fd = new FormData();
   if (item.customName) fd.append('customName', item.customName);
   fd.append('uploadId', item.uploadId); // server-side idempotencia proti duplikátom
-  fd.append('file', item.file, item.fileName);
+  fd.append('file', file, item.fileName);
   xhr.send(fd);
 });
 
@@ -189,6 +257,7 @@ export const enqueueUpload = async ({ kind, contactId, taskId, subtaskId, file, 
     taskId: taskId || null,
     subtaskId: subtaskId || null,
     file,
+    size: file.size, // kontrola pri odoslaní — viď toSendableFile
     fileName: customName || file.name,
     customName: customName || '',
     workspaceId: getStoredWorkspaceId() || null,
