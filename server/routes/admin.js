@@ -22,6 +22,9 @@ const subscriptionEmailService = require('../services/subscriptionEmailService')
 const EmailLog = require('../models/EmailLog');
 const onlineUsers = require('../services/onlineUsers');
 const { getMetrics } = require('../services/apiMetrics');
+// Bloby príloh správ v R2 — pred kaskádovým Message.deleteMany ich treba
+// zmazať, po ňom už kľúče niet odkiaľ prečítať.
+const { deleteMessageBlobs } = require('../services/messageFiles');
 const healthMonitor = require('../jobs/healthMonitor');
 
 const router = express.Router();
@@ -598,6 +601,8 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
     const ownedWorkspaceIds = ownedWorkspaces.map(w => w._id);
 
     if (ownedWorkspaceIds.length > 0) {
+      // Bloby príloh správ (R2) PRED deleteMany — best-effort, nikdy nehádže
+      await deleteMessageBlobs({ workspaceId: { $in: ownedWorkspaceIds } });
       await Promise.all([
         Task.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
         Contact.deleteMany({ workspaceId: { $in: ownedWorkspaceIds } }),
@@ -1458,6 +1463,8 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
     const workspace = await Workspace.findById(id);
     if (!workspace) return res.status(404).json({ message: 'Workspace nenájdený' });
 
+    // Bloby príloh správ (R2) PRED deleteMany — best-effort, nikdy nehádže
+    await deleteMessageBlobs({ workspaceId: id });
     await Promise.all([
       Contact.deleteMany({ workspaceId: id }),
       Task.deleteMany({ workspaceId: id }),
@@ -4068,6 +4075,75 @@ router.get('/migration/contactfiles-to-r2/status', authenticateToken, requireAdm
     res.json({ ...status, pendingCount });
   } catch (err) {
     logger.error('[Admin] Migration status fetch failed', { error: err.message });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PRÍLOHY SPRÁV — base64 v Message dokumente → Cloudflare R2
+//
+// Rovnaký vzor ako contactfiles: POST kickne off async migráciu (202),
+// GET /status sa poll-uje z UI každé 2 s. Počíta sa v BLOBOCH (jedna správa
+// môže mať legacy prílohu, viac files aj prílohy komentárov).
+// ═══════════════════════════════════════════════════════════════════════
+const messageFileMigration = require('../services/messageFileMigration');
+
+router.post('/migration/messages-to-r2', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true;
+
+    // Ak už migrácia beží — 409 (Conflict), inak by sa pustila duplicitná.
+    const currentStatus = messageFileMigration.getStatus();
+    if (currentStatus.running) {
+      return res.status(409).json({
+        message: 'Migrácia už beží',
+        status: currentStatus
+      });
+    }
+
+    // Fire-and-forget — Render request timeout by synchrónny beh nezniesol.
+    // Catch, aby unhandledPromiseRejection nezhodil proces.
+    messageFileMigration.runMessageFileMigration({ dryRun })
+      .then((result) => {
+        logger.info('[Admin] Message migration finished', {
+          succeeded: result.succeeded,
+          skipped: result.skipped,
+          failed: result.failed
+        });
+      })
+      .catch((err) => {
+        logger.error('[Admin] Message migration crashed', { error: err.message });
+      });
+
+    auditService.logAction({
+      userId: req.user.id, username: req.adminUser.username, email: req.adminUser.email,
+      action: dryRun ? 'storage.message_migration_dryrun_started' : 'storage.message_migration_started',
+      category: 'system',
+      targetType: 'migration',
+      targetId: 'messages-to-r2',
+      details: { mode: dryRun ? 'dry-run' : 'live' },
+      ipAddress: req.ip
+    });
+
+    res.status(202).json({
+      message: dryRun ? 'Dry-run started' : 'Migration started',
+      status: messageFileMigration.getStatus()
+    });
+  } catch (err) {
+    logger.error('[Admin] Message migration start failed', { error: err.message });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/migration/messages-to-r2/status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    // pendingCount = počet inline blobov (DB agregácia). UI podľa neho
+    // rozhoduje, či migration card zobraziť (skryje sa keď 0).
+    const status = messageFileMigration.getStatus();
+    const pendingCount = await messageFileMigration.getPendingMigrationCount();
+    res.json({ ...status, pendingCount });
+  } catch (err) {
+    logger.error('[Admin] Message migration status fetch failed', { error: err.message });
     res.status(500).json({ message: err.message });
   }
 });

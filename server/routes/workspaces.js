@@ -740,8 +740,12 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
     const Contact = require('../models/Contact');
     const Task = require('../models/Task');
     const Message = require('../models/Message');
+    const { deleteMessageBlobs } = require('../services/messageFiles');
     await Contact.deleteMany({ workspaceId });
     await Task.deleteMany({ workspaceId });
+    // Bloby príloh správ (R2) PRED deleteMany — po ňom už kľúče niet odkiaľ
+    // prečítať. Best-effort, nikdy nehádže.
+    await deleteMessageBlobs({ workspaceId });
     await Message.deleteMany({ workspaceId });
     await Invitation.deleteMany({ workspaceId });
 

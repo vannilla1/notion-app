@@ -1026,6 +1026,10 @@ router.delete('/account', authenticateToken, async (req, res) => {
     const soleWorkspaceIds = ownedWorkspaces.map(ws => ws._id);
 
     if (soleWorkspaceIds.length > 0) {
+      // Bloby príloh správ (R2) PRED deleteMany — po ňom už kľúče niet odkiaľ
+      // prečítať. Best-effort, nikdy nehádže.
+      const { deleteMessageBlobs } = require('../services/messageFiles');
+      await deleteMessageBlobs({ workspaceId: { $in: soleWorkspaceIds } });
       await Promise.all([
         Task.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
         Contact.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),

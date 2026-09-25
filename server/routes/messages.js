@@ -11,6 +11,11 @@ const auditService = require('../services/auditService');
 const { recordError } = require('../services/serverErrorService');
 const logger = require('../utils/logger');
 const { attachmentFileFilter, sanitizeDisplayName, effectiveExtension } = require('../utils/uploadFilter');
+const fileStorage = require('../services/fileStorage');
+const { publicAttachment, isInlineAttachment, collectMessageR2Keys, deleteBlobs, R2_KEY_PROJECTION } = require('../services/messageFiles');
+const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
+const { logPlanGateHit } = require('../utils/planGate');
+const { isIosNativeApp } = require('../utils/platform');
 
 // Projection that excludes ALL Base64 blobs so comment CRUD never pulls
 // megabytes of existing attachments into Node memory. Root cause of
@@ -26,13 +31,19 @@ const router = express.Router();
 
 // ─── Prílohy správ: limity, filter, chyby ─────────────────────
 //
-// Správy (na rozdiel od kontaktov/úloh v R2) držia VŠETKY prílohy ako base64
-// priamo v jednom Mongo dokumente: files[], legacy attachment aj prílohy
-// komentárov. Base64 = +33 %, BSON strop dokumentu = 16 MB → reálne sa do
-// jednej správy zmestí ~12 MB súborov spolu. Presun do R2 je plánovaná
-// „fáza 2"; dovtedy tu strážime súčet PRED zápisom, inak Mongo zlyhá až po
-// prenose celého súboru a používateľ videl len „Chyba servera".
-const MESSAGE_FILE_LIMIT = 10 * 1024 * 1024; // 10 MB na jeden súbor
+// Prílohy správ (files[], legacy attachment, prílohy komentárov) žijú od
+// 9/2026 v Cloudflare R2 rovnako ako prílohy kontaktov/úloh — v Mongo
+// dokumente ostávajú len metadáta + r2Key (services/messageFiles.js).
+// Do migrácie (services/messageFileMigration.js) a bez R2 (lokálny vývoj,
+// testy) je blob base64 priamo v dokumente: +33 %, BSON strop 16 MB → do
+// jednej správy sa zmestí ~12 MB. Strop preto strážime PRED zápisom, ale
+// len pre INLINE prílohy — R2 prílohy dokument nezväčšujú.
+//
+// Limit na súbor: s R2 rovnaký ako pri úlohách (50 MB), bez R2 ostáva 10 MB.
+// Dostupnosť R2 je daná env pri štarte, takže sa vyhodnotí raz — multer
+// vzniká pri načítaní modulu.
+const MESSAGE_FILE_LIMIT = fileStorage.isR2Available() ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+const MESSAGE_FILE_LIMIT_MB = Math.round(MESSAGE_FILE_LIMIT / (1024 * 1024));
 const BSON_DOC_LIMIT = 16 * 1024 * 1024;
 // Rezerva na všetko okrem príloh (predmet, popis, komentáre, anketa, readBy,
 // BSON kľúče). Bez nej by sa správa naplnila po okraj a zlyhal by aj ďalší
@@ -49,18 +60,22 @@ const MESSAGE_TOO_LARGE_TEXT = 'Prílohy tejto správy by spolu presiahli limit 
 const encodedAttachmentBytes = (size) =>
   Math.ceil(Math.max(0, Number(size) || 0) / 3) * 4 + ATTACHMENT_META_OVERHEAD;
 
+// Ráta len INLINE prílohy (bez r2Key) — tie jediné sedia v dokumente.
+// Projekcie, ktoré sem posielajú metadáta, preto MUSIA niesť aj r2Key.
 const estimateMessageAttachmentBytes = (msg, { skipLegacyAttachment = false } = {}) => {
+  const inlineBytes = (att) => (isInlineAttachment(att) && att.size ? encodedAttachmentBytes(att.size) : 0);
   let total = 0;
-  if (!skipLegacyAttachment && msg?.attachment?.size) total += encodedAttachmentBytes(msg.attachment.size);
-  for (const f of msg?.files || []) total += encodedAttachmentBytes(f.size);
-  for (const c of msg?.comments || []) {
-    if (c?.attachment?.size) total += encodedAttachmentBytes(c.attachment.size);
-  }
+  if (!skipLegacyAttachment) total += inlineBytes(msg?.attachment);
+  for (const f of msg?.files || []) total += inlineBytes(f);
+  for (const c of msg?.comments || []) total += inlineBytes(c?.attachment);
   return total;
 };
 
-const wouldExceedMessageDocLimit = (msg, newFileSize, opts) =>
-  estimateMessageAttachmentBytes(msg, opts) + encodedAttachmentBytes(newFileSize) > MESSAGE_ATTACHMENT_BUDGET;
+const wouldExceedMessageDocLimit = (msg, newFileSize, opts) => {
+  // S R2 nový súbor do dokumentu nejde — strop sa ho netýka.
+  if (fileStorage.isR2Available()) return false;
+  return estimateMessageAttachmentBytes(msg, opts) + encodedAttachmentBytes(newFileSize) > MESSAGE_ATTACHMENT_BUDGET;
+};
 
 const rejectTooLarge = (res) =>
   res.status(413).json({ code: MESSAGE_TOO_LARGE_CODE, message: MESSAGE_TOO_LARGE_TEXT });
@@ -115,9 +130,10 @@ const handleMessageWriteError = (error, req, res, label) => {
   return res.status(500).json({ message: 'Chyba servera' });
 };
 
-// Videá zostávajú pre správy zakázané: aj krátke video z telefónu presiahne
-// 10 MB a base64 v Mongo dokumente by rýchlo vyčerpalo 16 MB strop. Kontrola
-// aj podľa prípony — Android/desktop niekedy pošle application/octet-stream.
+// Videá sú bez R2 zakázané: aj krátke video z telefónu presiahne 10 MB a
+// base64 v Mongo dokumente by rýchlo vyčerpalo 16 MB strop. S R2 idú ako
+// pri úlohách. Kontrola aj podľa prípony — Android/desktop niekedy pošle
+// application/octet-stream.
 const VIDEO_EXTENSIONS = new Set(['mov', 'mp4', 'm4v', 'avi', 'mkv', 'webm', '3gp', '3g2', 'wmv', 'flv', 'mpg', 'mpeg', 'mts', 'm2ts']);
 
 // Pôvodný allowlist prípon odmietal HEIC fotky z iPhonu/Macu, ODT/ODS, EML…
@@ -133,7 +149,7 @@ const messageFileFilter = (req, file, cb) => {
     // effectiveExtension: „video.mp4." sa uloží ako „video.mp4" — prípona
     // sa musí brať z názvu tak, ako bude uložený
     const ext = effectiveExtension(file.originalname);
-    if (mime.startsWith('video/') || VIDEO_EXTENSIONS.has(ext)) {
+    if (!fileStorage.isR2Available() && (mime.startsWith('video/') || VIDEO_EXTENSIONS.has(ext))) {
       const videoErr = new Error('Videá sa k správam nedajú priložiť. Pridajte video k úlohe alebo kontaktu.');
       videoErr.code = 'VIDEO_NOT_ALLOWED';
       return cb(videoErr);
@@ -188,7 +204,7 @@ const reportUploadRejection = (err, req, code) => {
 
 const respondUploadError = (err, req, res) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ code: 'FILE_TOO_LARGE', message: 'Súbor je príliš veľký. Maximum pre správy je 10 MB.' });
+    return res.status(400).json({ code: 'FILE_TOO_LARGE', message: `Súbor je príliš veľký. Maximum pre správy je ${MESSAGE_FILE_LIMIT_MB} MB.` });
   }
   if (err.code === 'BLOCKED_EXTENSION' || err.code === 'VIDEO_NOT_ALLOWED') {
     return res.status(400).json({ code: err.code, message: err.message });
@@ -207,6 +223,78 @@ const respondUploadError = (err, req, res) => {
 // Zobrazovaný názov prílohy: už opravené UTF-8 (fileFilter) + bez „/", „\"
 // a riadiacich znakov, ktoré rozbíjajú uloženie na zariadení.
 const storedFileName = (file) => sanitizeDisplayName(file.originalname) || file.originalname || 'priloha';
+
+/**
+ * Uloží nahraný súbor a vráti metadáta prílohy pre Message dokument.
+ * S R2: upload PRED zápisom do DB (ako tasks.js), v dokumente len r2Key.
+ * Bez R2: base64 inline (lokálny vývoj, testy). Ak zápis do DB potom zlyhá,
+ * volajúci blob zmaže cez deleteBlobs — inak by v R2 ostala sirota.
+ */
+const persistUpload = async (file) => {
+  const id = uuidv4();
+  const meta = {
+    id,
+    originalName: storedFileName(file),
+    mimetype: file.mimetype,
+    size: file.size,
+    uploadedAt: new Date()
+  };
+  if (fileStorage.isR2Available()) {
+    const r2Key = fileStorage.messageFileKey(id);
+    await fileStorage.uploadFile(r2Key, file.buffer, file.mimetype || 'application/octet-stream');
+    return { ...meta, r2Key };
+  }
+  return { ...meta, data: file.buffer.toString('base64') };
+};
+
+/**
+ * Plánová kvóta úložiska (Tím 1 GB / Pro 10 GB) — prílohy správ sa do nej
+ * rátajú od presunu do R2 (utils/storageQuota.js). Free/trial kvótu nemá a
+ * správy nikdy nemali plánovú bránu na prílohy, takže tam sa nič nemení.
+ * Vráti telo 403 alebo null.
+ */
+const messageStorageQuotaError = async (req, fileSize) => {
+  const uploader = await User.findById(req.user.id).select('subscription').lean();
+  const plan = uploader?.subscription?.plan || 'free';
+  const storageBytes = STORAGE_LIMITS[plan];
+  if (!storageBytes) return null;
+  const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);
+  if (usedBytes + fileSize <= storageBytes) return null;
+  const usedMb = Math.round(usedBytes / (1024 * 1024));
+  const limitMb = Math.round(storageBytes / (1024 * 1024));
+  const message = isIosNativeApp(req)
+    // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
+    ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
+    : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
+  logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
+  return { message, code: 'STORAGE_LIMIT' };
+};
+
+/**
+ * Odošle obsah prílohy: z R2 (r2Key) alebo z legacy base64 (data). Hlavičky
+ * (attachment + nosniff + cache/ETag od volajúceho) rovnako pre obe cesty.
+ * Chýbajúci objekt v R2 → 404, nie 500 — metadáta síce sú, ale súbor treba
+ * nahrať znova.
+ */
+const sendStoredAttachment = async (res, att, extraHeaders) => {
+  let buffer;
+  if (att.r2Key) {
+    try {
+      buffer = await fileStorage.downloadFile(att.r2Key);
+    } catch (err) {
+      if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
+        return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
+      }
+      throw err;
+    }
+  } else if (att.data) {
+    buffer = Buffer.from(att.data, 'base64');
+  } else {
+    return res.status(404).json({ message: 'Príloha nenájdená' });
+  }
+  setDownloadHeaders(res, att, { 'Content-Length': buffer.length, ...extraHeaders });
+  return res.send(buffer);
+};
 
 // Download hlavičky pre všetky prílohy správ: VŽDY attachment (RFC 6266
 // filename* s UTF-8 cez res.attachment) + nosniff, ako kontakty/úlohy.
@@ -240,42 +328,16 @@ const typeLabels = {
   poll: 'Anketa'
 };
 
-// Helper: strip attachment data for list views
+// Verejný tvar správy pre klienta: prílohy len ako metadáta + `inline`
+// (services/messageFiles.js publicAttachment) — nikdy base64 ani r2Key.
+// Funguje na Mongoose dokumente aj na lean objekte.
 const stripAttachmentData = (msg) => {
   const obj = msg.toObject ? msg.toObject() : { ...msg };
   obj.id = obj._id ? obj._id.toString() : obj.id;
-  if (obj.attachment && obj.attachment.data) {
-    obj.attachment = {
-      id: obj.attachment.id,
-      originalName: obj.attachment.originalName,
-      mimetype: obj.attachment.mimetype,
-      size: obj.attachment.size,
-      uploadedAt: obj.attachment.uploadedAt
-    };
-  }
-  // Strip files data
-  if (obj.files) {
-    obj.files = obj.files.map(f => ({
-      id: f.id,
-      originalName: f.originalName,
-      mimetype: f.mimetype,
-      size: f.size,
-      uploadedAt: f.uploadedAt
-    }));
-  }
-  // Strip comment attachment data too
-  if (obj.comments) {
-    obj.comments = obj.comments.map(c => {
-      if (c.attachment && c.attachment.data) {
-        c.attachment = {
-          originalName: c.attachment.originalName,
-          mimetype: c.attachment.mimetype,
-          size: c.attachment.size,
-          uploadedAt: c.attachment.uploadedAt
-        };
-      }
-      return c;
-    });
+  if (obj.attachment) obj.attachment = publicAttachment(obj.attachment);
+  if (Array.isArray(obj.files)) obj.files = obj.files.map(publicAttachment);
+  if (Array.isArray(obj.comments)) {
+    obj.comments = obj.comments.map(c => (c && c.attachment ? { ...c, attachment: publicAttachment(c.attachment) } : c));
   }
   return obj;
 };
@@ -305,24 +367,9 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       .limit(100)
       .lean();
 
-    // Add id field and strip any remaining base64 data from nested arrays
-    const result = messages.map(m => {
-      // Strip files.data (projection may not work on nested arrays in all MongoDB versions)
-      if (m.files?.length) {
-        m.files = m.files.map(f => { const { data, ...rest } = f; return rest; });
-      }
-      // Strip comments attachment data
-      if (m.comments?.length) {
-        m.comments = m.comments.map(c => {
-          if (c.attachment?.data) {
-            const { data, ...attRest } = c.attachment;
-            c.attachment = attRest;
-          }
-          return c;
-        });
-      }
-      return { ...m, id: m._id.toString() };
-    });
+    // Verejný tvar (id, metadáta príloh + inline; bez base64 a r2Key — projekcia
+    // vylúči data, r2Key by inak prešiel do klienta)
+    const result = messages.map(stripAttachmentData);
 
     res.json(result);
   } catch (error) {
@@ -341,13 +388,13 @@ router.get('/by-linked', authenticateToken, requireWorkspace, async (req, res) =
 
     const messages = await Message.find(
       { workspaceId: req.workspaceId, linkedType, linkedId },
-      { 'attachment.data': 0, 'files.data': 0 }
+      NO_BASE64_PROJECTION
     )
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
-    const result = messages.map(m => ({ ...m, id: m._id.toString() }));
+    const result = messages.map(stripAttachmentData);
     res.json(result);
   } catch (error) {
     logger.error('Get linked messages error', { error: error.message });
@@ -413,6 +460,10 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
+    // Blob už nahraný do R2, ale správa ešte nie je uložená — pri chybe ho
+    // treba zmazať. Po save() sa nuluje (prípadná neskoršia chyba, napr.
+    // notifikácia, blob NESMIE zmazať).
+    let uncommittedKey = null;
     try {
       const { toUserId, type, subject, description, linkedType, linkedId, linkedName, dueDate } = req.body;
 
@@ -463,14 +514,10 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       // Build attachment if file uploaded
       let attachment = null;
       if (req.file) {
-        attachment = {
-          id: uuidv4(),
-          originalName: storedFileName(req.file),
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          data: req.file.buffer.toString('base64'),
-          uploadedAt: new Date()
-        };
+        const quotaError = await messageStorageQuotaError(req, req.file.size);
+        if (quotaError) return res.status(403).json(quotaError);
+        attachment = await persistUpload(req.file);
+        uncommittedKey = attachment.r2Key || null;
       }
 
       const message = new Message({
@@ -493,6 +540,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       });
 
       await message.save();
+      uncommittedKey = null;
 
       // Send notification to recipient
       const typeLabel = typeLabels[type] || type;
@@ -543,6 +591,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         workspaceId: req.workspaceId || null
       });
     } catch (error) {
+      if (uncommittedKey) deleteBlobs([uncommittedKey]);
       handleMessageWriteError(error, req, res, 'Create message error');
     }
   });
@@ -553,6 +602,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
+    let uncommittedKey = null; // nový blob v R2 pred úspešným save()
     try {
       const message = await Message.findOne({
         _id: req.params.id,
@@ -577,27 +627,30 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
         message.linkedName = linkedName || null;
       }
 
-      // Handle attachment: new file replaces old, or remove existing
+      // Handle attachment: new file replaces old, or remove existing.
+      // Starý blob v R2 sa maže až PO úspešnom save() — keby zápis zlyhal,
+      // pôvodná príloha musí ostať funkčná.
+      let replacedKey = null;
       if (req.file) {
+        const quotaError = await messageStorageQuotaError(req, req.file.size);
+        if (quotaError) return res.status(403).json(quotaError);
         // Stará príloha sa nahrádza → do odhadu ju nerátame.
         if (wouldExceedMessageDocLimit(message, req.file.size, { skipLegacyAttachment: true })) {
           return rejectTooLarge(res);
         }
-        message.attachment = {
-          // Nové id pri KAŽDEJ výmene = nová verzia v URL (?v=) aj ETagu.
-          // Bez neho klient rok zobrazoval pôvodný súbor z HTTP cache.
-          id: uuidv4(),
-          originalName: storedFileName(req.file),
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          data: req.file.buffer.toString('base64'),
-          uploadedAt: new Date()
-        };
+        replacedKey = message.attachment?.r2Key || null;
+        // persistUpload dáva nové id pri KAŽDEJ výmene = nová verzia v URL
+        // (?v=) aj ETagu. Bez neho klient rok zobrazoval pôvodný súbor z cache.
+        message.attachment = await persistUpload(req.file);
+        uncommittedKey = message.attachment.r2Key || null;
       } else if (removeAttachment === 'true') {
+        replacedKey = message.attachment?.r2Key || null;
         message.attachment = undefined;
       }
 
       await message.save();
+      uncommittedKey = null;
+      if (replacedKey) deleteBlobs([replacedKey]);
 
       // Notify recipient about edit
       const io = req.app.get('io');
@@ -610,6 +663,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 
       res.json(stripAttachmentData(message));
     } catch (error) {
+      if (uncommittedKey) deleteBlobs([uncommittedKey]);
       handleMessageWriteError(error, req, res, 'Edit message error');
     }
   });
@@ -923,6 +977,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
+    let uncommittedKey = null; // blob v R2 pred úspešným updateOne
     try {
       const { text } = req.body;
 
@@ -944,8 +999,10 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         },
         {
           fromUserId: 1, toUserId: 1, status: 1, subject: 1,
-          // Len veľkosti príloh (bez base64) pre odhad 16 MB stropu.
-          'attachment.size': 1, 'files.size': 1, 'comments.attachment.size': 1
+          // Len veľkosti + r2Key príloh (bez base64) pre odhad 16 MB stropu —
+          // r2Key rozhoduje, ktoré prílohy sú ešte inline.
+          'attachment.size': 1, 'files.size': 1, 'comments.attachment.size': 1,
+          ...R2_KEY_PROJECTION
         }
       ).lean();
 
@@ -953,8 +1010,10 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         return res.status(404).json({ message: 'Odkaz nenájdený' });
       }
 
-      if (req.file && wouldExceedMessageDocLimit(meta, req.file.size)) {
-        return rejectTooLarge(res);
+      if (req.file) {
+        const quotaError = await messageStorageQuotaError(req, req.file.size);
+        if (quotaError) return res.status(403).json(quotaError);
+        if (wouldExceedMessageDocLimit(meta, req.file.size)) return rejectTooLarge(res);
       }
 
       const comment = {
@@ -965,15 +1024,10 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         createdAt: new Date()
       };
 
-      // Attach file if uploaded
+      // Attach file if uploaded (s id — potrebuje ho R2 kľúč aj klient)
       if (req.file) {
-        comment.attachment = {
-          originalName: storedFileName(req.file),
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          data: req.file.buffer.toString('base64'),
-          uploadedAt: new Date()
-        };
+        comment.attachment = await persistUpload(req.file);
+        uncommittedKey = comment.attachment.r2Key || null;
       }
 
       // Atomic $push — only the new comment is sent over the wire.
@@ -986,6 +1040,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
       }
 
       await Message.updateOne({ _id: meta._id }, update);
+      uncommittedKey = null;
 
       // Notify the other party
       const notifyUserId = meta.fromUserId.toString() === req.user.id.toString()
@@ -1020,6 +1075,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
       const updated = await Message.findById(meta._id, NO_BASE64_PROJECTION).lean();
       res.json(stripAttachmentData(updated));
     } catch (error) {
+      if (uncommittedKey) deleteBlobs([uncommittedKey]);
       handleMessageWriteError(error, req, res, 'Add comment error');
     }
   });
@@ -1082,6 +1138,22 @@ router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async
 // DELETE /api/messages/:id/comment/:commentId — delete comment (only author)
 router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
+    // R2 kľúč prílohy komentára treba prečítať PRED $pull — po ňom už niet
+    // odkiaľ. Rovnaký filter (vrátane autorstva) ako samotný $pull.
+    const pre = await Message.findOne(
+      {
+        _id: req.params.id,
+        workspaceId: req.workspaceId,
+        $or: [
+          { fromUserId: req.user.id },
+          { toUserId: req.user.id }
+        ],
+        comments: { $elemMatch: { _id: req.params.commentId, userId: req.user.id } }
+      },
+      { comments: { $elemMatch: { _id: req.params.commentId } } }
+    ).lean();
+    const commentBlobKey = pre?.comments?.[0]?.attachment?.r2Key || null;
+
     // PERF: atomic $pull with authorship check in filter. No full doc save.
     const pullResult = await Message.updateOne(
       {
@@ -1101,6 +1173,7 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
     if (pullResult.matchedCount === 0) {
       return res.status(404).json({ message: 'Komentár nenájdený alebo nie ste autor' });
     }
+    if (commentBlobKey) deleteBlobs([commentBlobKey]);
 
     // If status was 'commented' and no comments remain, revert to 'pending'.
     // Use conditional update — only fires if condition is met, no re-save.
@@ -1284,7 +1357,8 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
     // dotaz len na metadáta (bez base64): opakovaný náhľad → 304 bez
     // ťahania megabajtov z Monga.
     const meta = await Message.findOne(filter, {
-      'attachment.id': 1, 'attachment.uploadedAt': 1, 'attachment.size': 1
+      'attachment.id': 1, 'attachment.uploadedAt': 1, 'attachment.size': 1,
+      'attachment.originalName': 1, 'attachment.mimetype': 1, 'attachment.r2Key': 1
     }).lean();
     if (!meta || !meta.attachment) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
@@ -1307,26 +1381,32 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
       return res.status(304).end();
     }
 
-    // PERF: project only the main attachment — do NOT pull comments[].attachment.data
-    // or files[].data. A message with 5 other 10 MB attachments was previously
-    // shipping 50+ MB from Mongo just to return one file.
+    // R2 príloha: metadáta už máme, base64 z Monga netreba.
+    if (meta.attachment.r2Key) {
+      return await sendStoredAttachment(res, meta.attachment, {
+        'Cache-Control': cacheFor(metaVersion),
+        'ETag': metaEtag
+      });
+    }
+
+    // Legacy inline: PERF — project only the main attachment, do NOT pull
+    // comments[].attachment.data or files[].data. A message with 5 other 10 MB
+    // attachments was previously shipping 50+ MB from Mongo to return one file.
     const message = await Message.findOne(filter, { attachment: 1 }).lean();
 
-    if (!message || !message.attachment || !message.attachment.data) {
+    if (!message || !message.attachment || !(message.attachment.data || message.attachment.r2Key)) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
     }
 
     // Verziu počítame z dokumentu, ktorého bajty naozaj posielame (príloha
     // sa medzi dvoma dotazmi mohla vymeniť).
     const version = attachmentVersion(message.attachment);
-    const fileBuffer = Buffer.from(message.attachment.data, 'base64');
-    setDownloadHeaders(res, message.attachment, {
-      'Content-Length': fileBuffer.length,
+    return await sendStoredAttachment(res, message.attachment, {
       'Cache-Control': cacheFor(version),
       'ETag': `"msg-att-${version}"`
     });
-    res.send(fileBuffer);
   } catch (error) {
+    logger.error('Message attachment download error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1358,20 +1438,18 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
     }
 
     const comment = message.comments && message.comments[0];
-    if (!comment || !comment.attachment || !comment.attachment.data) {
+    if (!comment || !comment.attachment || !(comment.attachment.r2Key || comment.attachment.data)) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
     }
 
     // Príloha komentára sa nedá vymeniť (PUT komentára mení len text),
     // takže ETag podľa commentId ostáva nemenný.
-    const fileBuffer = Buffer.from(comment.attachment.data, 'base64');
-    setDownloadHeaders(res, comment.attachment, {
-      'Content-Length': fileBuffer.length,
+    return await sendStoredAttachment(res, comment.attachment, {
       'Cache-Control': 'private, max-age=31536000, immutable',
       'ETag': etag
     });
-    res.send(fileBuffer);
   } catch (error) {
+    logger.error('Comment attachment download error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1384,6 +1462,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
     if (err) return respondUploadError(err, req, res);
     if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
 
+    let uncommittedKey = null; // blob v R2 pred úspešným save()
     try {
       const message = await Message.findOne({
         _id: req.params.id,
@@ -1392,22 +1471,21 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
       });
       if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
+      const quotaError = await messageStorageQuotaError(req, req.file.size);
+      if (quotaError) return res.status(403).json(quotaError);
       if (wouldExceedMessageDocLimit(message, req.file.size)) {
         return rejectTooLarge(res);
       }
 
-      message.files.push({
-        id: uuidv4(),
-        originalName: storedFileName(req.file),
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        data: req.file.buffer.toString('base64'),
-        uploadedAt: new Date()
-      });
+      const stored = await persistUpload(req.file);
+      uncommittedKey = stored.r2Key || null;
+      message.files.push(stored);
 
       await message.save();
+      uncommittedKey = null;
       res.json(stripAttachmentData(message));
     } catch (error) {
+      if (uncommittedKey) deleteBlobs([uncommittedKey]);
       handleMessageWriteError(error, req, res, 'Add message file error');
     }
   });
@@ -1434,17 +1512,15 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
     const file = message.files && message.files[0];
-    if (!file || !file.data) return res.status(404).json({ message: 'Súbor nenájdený' });
+    if (!file || !(file.r2Key || file.data)) return res.status(404).json({ message: 'Súbor nenájdený' });
 
     // files[] majú pri každom nahraní nové id — obsah pod ním sa nemení.
-    const buffer = Buffer.from(file.data, 'base64');
-    setDownloadHeaders(res, file, {
-      'Content-Length': buffer.length,
+    return await sendStoredAttachment(res, file, {
       'Cache-Control': 'private, max-age=31536000, immutable',
       'ETag': etag
     });
-    res.send(buffer);
   } catch (error) {
+    logger.error('Message file download error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1459,10 +1535,14 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
     });
     if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
+    const removed = (message.files || []).find(f => f.id === req.params.fileId);
     message.files = message.files.filter(f => f.id !== req.params.fileId);
     await message.save();
+    // Blob v R2 až po uložení metadát — keby save() zlyhal, súbor ostane.
+    if (removed?.r2Key) deleteBlobs([removed.r2Key]);
     res.json(stripAttachmentData(message));
   } catch (error) {
+    logger.error('Delete message file error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1470,10 +1550,12 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 // DELETE /api/messages/:id — sender or workspace owner/manager can delete
 router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const message = await Message.findOne({
-      _id: req.params.id,
-      workspaceId: req.workspaceId
-    });
+    // Len to, čo treba: odosielateľ/príjemca + R2 kľúče príloh (bez base64
+    // a bez textu) — bloby sa mažú po deleteOne.
+    const message = await Message.findOne(
+      { _id: req.params.id, workspaceId: req.workspaceId },
+      { fromUserId: 1, toUserId: 1, ...R2_KEY_PROJECTION }
+    ).lean();
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
@@ -1487,6 +1569,8 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     await Message.deleteOne({ _id: req.params.id });
+    // Metadáta sú preč → bloby v R2 (best-effort, fire-and-forget)
+    deleteBlobs(collectMessageR2Keys(message));
 
     const io = req.app.get('io');
     if (io) {

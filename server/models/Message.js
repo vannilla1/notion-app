@@ -1,13 +1,38 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
-const fileSchema = new mongoose.Schema({
-  id: { type: String, default: () => uuidv4() },
+// Spoločný tvar prílohy správy (legacy `attachment`, `files[]`, príloha
+// komentára). Blob žije buď v Cloudflare R2 (`r2Key`, rovnako ako prílohy
+// kontaktov/úloh), alebo — len pri záznamoch spred migrácie a pri base64
+// fallbacku bez R2 — v `data`. Nikdy oboje: migrácia (services/
+// messageFileMigration.js) nastaví r2Key a `data` odstráni v jednom update.
+// Do klienta idú iba metadáta + príznak `inline` (routes/messages.js),
+// r2Key ani data sa nikdy nevracajú.
+const attachmentFields = {
   originalName: String,
   mimetype: String,
   size: Number,
-  data: String, // Base64
+  r2Key: { type: String, default: null },
+  data: String, // Legacy base64 — chýba/null, keď je blob v R2
+  uploadedAt: Date
+};
+
+const fileSchema = new mongoose.Schema({
+  id: { type: String, default: () => uuidv4() },
+  ...attachmentFields,
   uploadedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
+// Legacy príloha správy a príloha komentára sú JEDNODUCHÉ vnorené sub-dokumenty
+// (nie „nested path"): pri nested path by `default: null` na r2Key vytvoril
+// fantómový `attachment: { r2Key: null }` v každej správe bez prílohy a
+// všetky kontroly `if (!message.attachment)` by prestali platiť. Sub-schéma
+// ostáva undefined, kým sa príloha nenastaví; id sa pri nej negeneruje
+// automaticky (starým prílohám bez id by hydratácia menila verziu/ETag —
+// id im dopíše až migrácia spolu s r2Key).
+const attachmentSchema = new mongoose.Schema({
+  id: String,
+  ...attachmentFields
 }, { _id: false });
 
 const pollOptionSchema = new mongoose.Schema({
@@ -34,16 +59,26 @@ const commentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   username: { type: String, required: true },
   text: { type: String, required: true },
-  attachment: {
-    originalName: String,
-    mimetype: String,
-    size: Number,
-    data: String, // Base64
-    uploadedAt: Date
-  },
+  attachment: attachmentSchema,
   reactions: { type: [commentReactionSchema], default: [] },
   createdAt: { type: Date, default: Date.now }
 }, { _id: true });
+
+// Verejný tvar prílohy pre toJSON (poistka, keby niekto poslal dokument
+// priamo cez res.json bez stripAttachmentData): bez base64 aj bez r2Key.
+// Rovnaké pravidlo ako services/messageFiles.js publicAttachment (model
+// service nevyžaduje — kruhová závislosť).
+const publicAttachment = (att) => {
+  if (!att) return att;
+  return {
+    id: att.id,
+    originalName: att.originalName,
+    mimetype: att.mimetype,
+    size: att.size,
+    uploadedAt: att.uploadedAt,
+    inline: !att.r2Key
+  };
+};
 
 const messageSchema = new mongoose.Schema({
   workspaceId: {
@@ -83,14 +118,7 @@ const messageSchema = new mongoose.Schema({
     maxlength: 5000
   },
   // Legacy single attachment (kept for backward compatibility)
-  attachment: {
-    id: String,
-    originalName: String,
-    mimetype: String,
-    size: Number,
-    data: String, // Base64
-    uploadedAt: Date
-  },
+  attachment: attachmentSchema,
   // Multiple file attachments (same pattern as Tasks)
   files: { type: [fileSchema], default: [] },
   // Optional link to contact or task
@@ -127,15 +155,13 @@ const messageSchema = new mongoose.Schema({
     virtuals: true,
     transform: function(doc, ret) {
       ret.id = ret._id.toString();
-      // Strip attachment data from list views
-      if (ret.attachment && ret.attachment.data) {
-        ret.attachment = {
-          id: ret.attachment.id,
-          originalName: ret.attachment.originalName,
-          mimetype: ret.attachment.mimetype,
-          size: ret.attachment.size,
-          uploadedAt: ret.attachment.uploadedAt
-        };
+      // Strip attachment data (and R2 keys) from list views
+      if (ret.attachment) ret.attachment = publicAttachment(ret.attachment);
+      if (Array.isArray(ret.files)) ret.files = ret.files.map(publicAttachment);
+      if (Array.isArray(ret.comments)) {
+        ret.comments = ret.comments.map(c => (
+          c && c.attachment ? { ...c, attachment: publicAttachment(c.attachment) } : c
+        ));
       }
       return ret;
     }

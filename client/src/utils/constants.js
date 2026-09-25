@@ -162,14 +162,14 @@ export const PROFILE_COLORS = [
 ];
 
 // File size limits (in bytes) — MUSIA zrkadliť multer limity na serveri
-// (auth.js avatar 5 MB, contacts.js + tasks.js 50 MB, messages.js 10 MB).
+// (auth.js avatar 5 MB, contacts.js + tasks.js + messages.js 50 MB s R2).
 // Používajú sa na pre-check PRED uploadom — bez neho by user čakal na
 // prenos celého súboru, len aby dostal chybu zo servera.
 export const FILE_SIZE_LIMITS = {
   AVATAR: 5 * 1024 * 1024,          // 5 MB  — base64 v User doc (Mongo)
   CONTACT_FILE: 50 * 1024 * 1024,   // 50 MB — blob v R2
   TASK_FILE: 50 * 1024 * 1024,      // 50 MB — blob v R2
-  MESSAGE_FILE: 10 * 1024 * 1024    // 10 MB — base64 v Message doc (Mongo)
+  MESSAGE_FILE: 50 * 1024 * 1024    // 50 MB — blob v R2 (bez R2 server dovolí 10 MB a povie to sám)
 };
 
 // Ľudsky čitateľná veľkosť pre chybové hlášky pre-checku

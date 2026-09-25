@@ -176,6 +176,16 @@ function contactFileKey(fileId) {
 }
 
 /**
+ * Kľúč pre prílohu správy (legacy attachment, files[] aj príloha komentára).
+ * Vlastný prefix, aby sa v buckete dali odlíšiť od contactfiles/ — pri
+ * diagnostike sirôt vidno na prvý pohľad, odkiaľ blob pochádza. id je UUID v4
+ * prílohy (rovnaké ako v metadátach v Message dokumente).
+ */
+function messageFileKey(id) {
+  return `messagefiles/${id}`;
+}
+
+/**
  * Vráti aggregate stats pre celý bucket: počet objektov + total bytes.
  *
  * Implementácia: ListObjectsV2 s pagination (max 1000 objektov per call).
@@ -228,6 +238,7 @@ module.exports = {
   getPresignedUrl,
   fileExists,
   contactFileKey,
+  messageFileKey,
   getBucketStats,
   // Vystavujeme bucket name pre logging / diagnostiku
   bucket: R2_BUCKET

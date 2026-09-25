@@ -4017,57 +4017,47 @@ const STORAGE_COLL_LABELS = {
   invitations: '✉️ Pozvánky'
 };
 
-function StorageTab() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  // Per-workspace search + sort + paginácia
-  const [wsSearch, setWsSearch] = useState('');
-  const [wsSort, setWsSort] = useState('totalDocs');
-  const [wsOrder, setWsOrder] = useState('desc');
-  const [wsPage, setWsPage] = useState(1);
-  const wsPerPage = 50;
-
-  // ─────────────────────────────────────────────────────────────────────
-  // R2 Migration state — pre tlačidlo "Migrovať files do R2".
+/**
+ * R2MigrationCard — karta „migruj base64 bloby z MongoDB do R2" s dry-run
+ * a ostrým tlačidlom, pollingom stavu a výsledkom. Používa sa dvakrát
+ * (ContactFile.data a prílohy správ), preto je stav aj JSX tu a nie
+ * v StorageTab. Server API je pre obe migrácie rovnaké:
+ *   GET  `${endpoint}/status` → status objekt (+ pendingCount)
+ *   POST `${endpoint}` { dryRun } → 202 { status } / 409 keď už beží
+ *
+ * Karta sa zobrazí IBA ak existujú bloby čakajúce na migráciu
+ * (pendingCount > 0) ALEBO ak migrácia práve beží ALEBO ak práve
+ * dobehla (chceme ukázať výsledok). Po prvom úspešnom run-ne
+ * a opustení tabu sa skryje sama.
+ *
+ * `onSucceeded` sa volá po dobehnutí migrácie s aspoň jedným presunutým
+ * blobom — StorageTab si ním refreshne R2 štatistiky (count sa zmení).
+ */
+function R2MigrationCard({ endpoint, title, description, confirmDryRun, confirmLive, onSucceeded }) {
   // Polling intervalu si stráži cez ref, aby sa pri unmount zrušil.
-  // ─────────────────────────────────────────────────────────────────────
   const [migration, setMigration] = useState(null); // null = neload-nuté, inak status objekt
   const [migrationLoading, setMigrationLoading] = useState(false);
   const migrationPollRef = useRef(null);
 
   const fetchMigrationStatus = useCallback(async () => {
     try {
-      const r = await adminApi.get('/api/admin/migration/contactfiles-to-r2/status');
+      const r = await adminApi.get(`${endpoint}/status`);
       setMigration(r.data);
       return r.data;
     } catch (e) {
       // 404 znamená že endpoint ešte nie je deployed — silently skip
       return null;
     }
-  }, []);
+  }, [endpoint]);
 
   useEffect(() => { fetchMigrationStatus(); }, [fetchMigrationStatus]);
 
-  // ─────────────────────────────────────────────────────────────────────
-  // R2 bucket stats (paralela k Atlas tier usage).
-  // ─────────────────────────────────────────────────────────────────────
-  const [r2Stats, setR2Stats] = useState(null);
-  const fetchR2Stats = useCallback(async () => {
-    try {
-      const r = await adminApi.get('/api/admin/storage/r2');
-      setR2Stats(r.data);
-    } catch (e) {
-      setR2Stats({ configured: false, error: e.response?.data?.message || e.message });
-    }
-  }, []);
-  useEffect(() => { fetchR2Stats(); }, [fetchR2Stats]);
-  // Re-fetch po úspešnej migrácii (count sa zmení)
+  // Re-fetch R2 štatistík po úspešnej migrácii (count sa zmení)
   useEffect(() => {
     if (migration && !migration.running && migration.succeeded > 0) {
-      fetchR2Stats();
+      onSucceeded?.();
     }
-  }, [migration?.running, migration?.succeeded, fetchR2Stats]);
+  }, [migration?.running, migration?.succeeded, onSucceeded]);
 
   // Polling pri behu migrácie — 2s interval. Auto-stop keď migration.running=false.
   useEffect(() => {
@@ -4090,13 +4080,10 @@ function StorageTab() {
   }, [migration?.running, fetchMigrationStatus]);
 
   const startMigration = async (dryRun) => {
-    if (!window.confirm(dryRun
-      ? 'Spustiť dry-run? Žiadne zmeny sa neurobia, len uvidíš koľko files by sa migrovalo.'
-      : 'Spustiť OSTRÚ migráciu? Súbory sa presunú do Cloudflare R2. Trvá ~2-5 min.'
-    )) return;
+    if (!window.confirm(dryRun ? confirmDryRun : confirmLive)) return;
     setMigrationLoading(true);
     try {
-      const r = await adminApi.post('/api/admin/migration/contactfiles-to-r2', { dryRun });
+      const r = await adminApi.post(endpoint, { dryRun });
       setMigration(r.data.status);
     } catch (e) {
       if (e.response?.status === 409) {
@@ -4109,6 +4096,133 @@ function StorageTab() {
       setMigrationLoading(false);
     }
   };
+
+  if (!migration || !(migration.pendingCount > 0 || migration.running || (migration.finishedAt && migration.processed > 0))) {
+    return null;
+  }
+
+  return (
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border-color)', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 4px' }}>
+              {title}
+            </h3>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+              {description}
+            </p>
+          </div>
+          {!migration?.running && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '6px 12px' }}
+                disabled={migrationLoading}
+                onClick={() => startMigration(true)}
+              >
+                🧪 Dry-run
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 12, padding: '6px 12px' }}
+                disabled={migrationLoading}
+                onClick={() => startMigration(false)}
+              >
+                🚀 Spustiť migráciu
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Status display — ak migrácia beží alebo bola spustená predtým */}
+        {migration && (migration.running || migration.processed > 0 || migration.finishedAt) && (
+          <div style={{ marginTop: 14, padding: 12, background: 'var(--bg-primary)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>
+                {migration.running ? '🔄 Beží...' : (migration.finishedAt ? '✅ Dokončené' : 'Pripravené')}
+                {migration.mode && <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4, background: migration.mode === 'live' ? '#fee2e2' : '#dbeafe', color: migration.mode === 'live' ? '#dc2626' : '#1e40af' }}>{migration.mode}</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {migration.processed} / {migration.total}
+                {migration.failed > 0 && <span style={{ marginLeft: 6, color: '#dc2626' }}>({migration.failed} fail)</span>}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {migration.total > 0 && (
+              <div style={{ height: 8, background: 'var(--bg-secondary)', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
+                <div style={{
+                  width: `${Math.min(100, (migration.processed / migration.total) * 100)}%`,
+                  height: '100%',
+                  background: migration.failed > 0 ? '#f59e0b' : '#10b981',
+                  transition: 'width 0.5s ease'
+                }} />
+              </div>
+            )}
+
+            {/* Stats grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, fontSize: 11, marginBottom: 10 }}>
+              <div><strong>{migration.succeeded}</strong> OK</div>
+              <div style={{ color: migration.failed > 0 ? '#dc2626' : 'inherit' }}><strong>{migration.failed}</strong> fail</div>
+              <div><strong>{(migration.totalBytesMigrated / 1024 / 1024).toFixed(2)}</strong> MB → R2</div>
+              <div><strong>{migration.estimatedMongoFreedMB}</strong> MB freed</div>
+            </div>
+
+            {/* Errors (top 3) — ContactFile chyby nesú fileId, chyby príloh správ messageId */}
+            {migration.errors && migration.errors.length > 0 && (
+              <details style={{ marginBottom: 8 }}>
+                <summary style={{ fontSize: 11, color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}>
+                  {migration.errors.length} {migration.errors.length === 1 ? 'chyba' : 'chyby'} (klik pre detail)
+                </summary>
+                <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'monospace', background: '#fef2f2', padding: 6, borderRadius: 4, maxHeight: 100, overflow: 'auto' }}>
+                  {migration.errors.slice(0, 10).map((e, i) => (
+                    <div key={i}>• {e.fileId || e.messageId || 'global'}: {e.message}</div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {/* Live log */}
+            {migration.log && migration.log.length > 0 && (
+              <details>
+                <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  📋 Live log ({migration.log.length} riadkov)
+                </summary>
+                <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'monospace', background: 'var(--bg-secondary)', padding: 8, borderRadius: 4, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                  {migration.log.join('\n')}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+  );
+}
+
+function StorageTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  // Per-workspace search + sort + paginácia
+  const [wsSearch, setWsSearch] = useState('');
+  const [wsSort, setWsSort] = useState('totalDocs');
+  const [wsOrder, setWsOrder] = useState('desc');
+  const [wsPage, setWsPage] = useState(1);
+  const wsPerPage = 50;
+
+  // ─────────────────────────────────────────────────────────────────────
+  // R2 bucket stats (paralela k Atlas tier usage).
+  // ─────────────────────────────────────────────────────────────────────
+  const [r2Stats, setR2Stats] = useState(null);
+  const fetchR2Stats = useCallback(async () => {
+    try {
+      const r = await adminApi.get('/api/admin/storage/r2');
+      setR2Stats(r.data);
+    } catch (e) {
+      setR2Stats({ configured: false, error: e.response?.data?.message || e.message });
+    }
+  }, []);
+  useEffect(() => { fetchR2Stats(); }, [fetchR2Stats]);
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
@@ -4355,109 +4469,34 @@ function StorageTab() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          R2 MIGRATION CARD — presun ContactFile.data → Cloudflare R2.
-          Karta sa zobrazí IBA ak existujú files čakajúce na migráciu
-          (pendingCount > 0) ALEBO ak migrácia práve beží ALEBO ak práve
-          dobehla (chceme ukázať výsledok). Po prvom úspešnom run-ne
-          a opustení tabu sa skryje sama.
+          R2 MIGRATION CARDS — presun base64 blobov z MongoDB → Cloudflare R2.
+          Jedna karta pre ContactFile.data, druhá pre prílohy správ
+          (Message.attachment / files[] / comments[].attachment). Obe majú
+          rovnakú UX (R2MigrationCard), líšia sa len endpointom a textami.
           ───────────────────────────────────────────────────────────── */}
-      {migration && (migration.pendingCount > 0 || migration.running || (migration.finishedAt && migration.processed > 0)) && (
-      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border-color)', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 4px' }}>
-              ☁️ Migrácia files do Cloudflare R2
-            </h3>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Presun <code>ContactFile.data</code> (base64 v MongoDB) → R2 bucket. Idempotentné, verify-before-unset.
-              Po migrácii sa MongoDB storage uvoľní (data hneď, storage size do hodín — Atlas internal compaction).
-            </p>
-          </div>
-          {!migration?.running && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                className="btn btn-secondary"
-                style={{ fontSize: 12, padding: '6px 12px' }}
-                disabled={migrationLoading}
-                onClick={() => startMigration(true)}
-              >
-                🧪 Dry-run
-              </button>
-              <button
-                className="btn btn-primary"
-                style={{ fontSize: 12, padding: '6px 12px' }}
-                disabled={migrationLoading}
-                onClick={() => startMigration(false)}
-              >
-                🚀 Spustiť migráciu
-              </button>
-            </div>
-          )}
-        </div>
+      <R2MigrationCard
+        endpoint="/api/admin/migration/contactfiles-to-r2"
+        title="☁️ Migrácia files do Cloudflare R2"
+        description={<>
+          Presun <code>ContactFile.data</code> (base64 v MongoDB) → R2 bucket. Idempotentné, verify-before-unset.
+          Po migrácii sa MongoDB storage uvoľní (data hneď, storage size do hodín — Atlas internal compaction).
+        </>}
+        confirmDryRun="Spustiť dry-run? Žiadne zmeny sa neurobia, len uvidíš koľko files by sa migrovalo."
+        confirmLive="Spustiť OSTRÚ migráciu? Súbory sa presunú do Cloudflare R2. Trvá ~2-5 min."
+        onSucceeded={fetchR2Stats}
+      />
+      <R2MigrationCard
+        endpoint="/api/admin/migration/messages-to-r2"
+        title="☁️ Migrácia príloh správ do Cloudflare R2"
+        description={<>
+          Presun príloh správ (<code>Message.attachment</code>, <code>files[]</code>, <code>comments[].attachment</code> — base64 v MongoDB) → R2 bucket.
+          Idempotentné, verify-before-unset. Po migrácii zmizne 16 MB strop dokumentu správy a MongoDB storage sa uvoľní.
+        </>}
+        confirmDryRun="Spustiť dry-run? Žiadne zmeny sa neurobia, len uvidíš koľko príloh správ by sa migrovalo."
+        confirmLive="Spustiť OSTRÚ migráciu? Prílohy správ sa presunú do Cloudflare R2. Trvá ~2-5 min."
+        onSucceeded={fetchR2Stats}
+      />
 
-        {/* Status display — ak migrácia beží alebo bola spustená predtým */}
-        {migration && (migration.running || migration.processed > 0 || migration.finishedAt) && (
-          <div style={{ marginTop: 14, padding: 12, background: 'var(--bg-primary)', borderRadius: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>
-                {migration.running ? '🔄 Beží...' : (migration.finishedAt ? '✅ Dokončené' : 'Pripravené')}
-                {migration.mode && <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4, background: migration.mode === 'live' ? '#fee2e2' : '#dbeafe', color: migration.mode === 'live' ? '#dc2626' : '#1e40af' }}>{migration.mode}</span>}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {migration.processed} / {migration.total}
-                {migration.failed > 0 && <span style={{ marginLeft: 6, color: '#dc2626' }}>({migration.failed} fail)</span>}
-              </div>
-            </div>
-
-            {/* Progress bar */}
-            {migration.total > 0 && (
-              <div style={{ height: 8, background: 'var(--bg-secondary)', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
-                <div style={{
-                  width: `${Math.min(100, (migration.processed / migration.total) * 100)}%`,
-                  height: '100%',
-                  background: migration.failed > 0 ? '#f59e0b' : '#10b981',
-                  transition: 'width 0.5s ease'
-                }} />
-              </div>
-            )}
-
-            {/* Stats grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, fontSize: 11, marginBottom: 10 }}>
-              <div><strong>{migration.succeeded}</strong> OK</div>
-              <div style={{ color: migration.failed > 0 ? '#dc2626' : 'inherit' }}><strong>{migration.failed}</strong> fail</div>
-              <div><strong>{(migration.totalBytesMigrated / 1024 / 1024).toFixed(2)}</strong> MB → R2</div>
-              <div><strong>{migration.estimatedMongoFreedMB}</strong> MB freed</div>
-            </div>
-
-            {/* Errors (top 3) */}
-            {migration.errors && migration.errors.length > 0 && (
-              <details style={{ marginBottom: 8 }}>
-                <summary style={{ fontSize: 11, color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}>
-                  {migration.errors.length} {migration.errors.length === 1 ? 'chyba' : 'chyby'} (klik pre detail)
-                </summary>
-                <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'monospace', background: '#fef2f2', padding: 6, borderRadius: 4, maxHeight: 100, overflow: 'auto' }}>
-                  {migration.errors.slice(0, 10).map((e, i) => (
-                    <div key={i}>• {e.fileId || 'global'}: {e.message}</div>
-                  ))}
-                </div>
-              </details>
-            )}
-
-            {/* Live log */}
-            {migration.log && migration.log.length > 0 && (
-              <details>
-                <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  📋 Live log ({migration.log.length} riadkov)
-                </summary>
-                <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'monospace', background: 'var(--bg-secondary)', padding: 8, borderRadius: 4, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                  {migration.log.join('\n')}
-                </div>
-              </details>
-            )}
-          </div>
-        )}
-      </div>
-      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
         {/* Collection breakdown chart */}

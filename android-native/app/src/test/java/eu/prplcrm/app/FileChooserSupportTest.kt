@@ -43,7 +43,10 @@ class FileChooserSupportTest {
 
     @Test
     fun `spravy (accept bez videa) = fotka ano, video nie, filter bez video typov`() {
-        // client/src/pages/Messages.jsx MSG_FILE_ACCEPT — správy video neprijmú
+        // Historický scenár: správy do 9/2026 video neprijímali a Messages.jsx
+        // posielal accept bez video typov. Dnes prílohy správ žijú v R2, accept
+        // sa nenastavuje a video je povolené — test ostáva ako čistý buildSpec
+        // test pre accept bez videa.
         val s = spec("image/*", "application/*", "text/*", "audio/*", "message/*")
         assertTrue(s.offerPhoto)
         assertFalse(s.offerVideo)

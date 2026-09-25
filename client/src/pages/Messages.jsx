@@ -16,7 +16,6 @@ import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { alertUnlessPlanGate } from '../utils/planGate';
-import { isAndroidNativeApp } from '../utils/platform';
 
 // ─── Prílohy správ ────────────────────────────────────────────
 // Nahrávanie prílohy na slabom signáli trvá dlhšie ako predvolených 60 s
@@ -24,36 +23,32 @@ import { isAndroidNativeApp } from '../utils/platform';
 const MSG_UPLOAD_TIMEOUT_MS = 300000;
 const MSG_UPLOAD_TIMEOUT_TEXT = 'Nahrávanie trvalo príliš dlho — skúste to pri lepšom signáli.';
 
-// Rovnaké pravidlo ako server (routes/messages.js wouldExceedMessageDocLimit):
-// všetky prílohy správy (files, legacy attachment, prílohy komentárov) žijú
-// base64 v JEDNOM Mongo dokumente so 16 MB stropom. Kontrola PRED odoslaním
-// ušetrí prenos celého súboru, ktorý by server aj tak odmietol. Pri zmene
-// uprav obe miesta.
+// Prílohy správ žijú v Cloudflare R2 (routes/messages.js + services/fileStorage.js)
+// a v Mongo dokumente ostávajú len metadáta. Staršie, ešte nezmigrované prílohy
+// ale stále sedia base64 v JEDNOM dokumente so 16 MB stropom — server ich stráži
+// (wouldExceedMessageDocLimit) a v odpovedi ich označí príznakom `inline: true`.
+// Do súčtu preto rátame IBA inline prílohy: po migrácii je súčet nula a
+// varovanie sa nikdy neukáže; pri starej správe ušetrí prenos súboru, ktorý by
+// server bez R2 aj tak odmietol. Pri zmene uprav obe miesta.
+// (named export len kvôli testu — stránka sa importuje ako default)
 const MSG_ATTACHMENT_BUDGET = 16 * 1024 * 1024 - 512 * 1024;
 const MSG_ATTACHMENT_META_OVERHEAD = 1024;
 const MSG_TOO_LARGE_TEXT = 'Prílohy tejto správy by spolu presiahli limit približne 12 MB. Ďalšie súbory pridajte do novej správy alebo k úlohe.';
 const encodedAttachmentBytes = (size) =>
   Math.ceil(Math.max(0, Number(size) || 0) / 3) * 4 + MSG_ATTACHMENT_META_OVERHEAD;
-const msgAttachmentsWouldOverflow = (msg, newFile, { skipLegacyAttachment = false } = {}) => {
+const inlineAttachmentBytes = (att) =>
+  (att?.inline === true && att.size ? encodedAttachmentBytes(att.size) : 0);
+export const msgAttachmentsWouldOverflow = (msg, newFile, { skipLegacyAttachment = false } = {}) => {
   if (!msg || !newFile) return false;
   let total = 0;
-  if (!skipLegacyAttachment && msg.attachment?.size) total += encodedAttachmentBytes(msg.attachment.size);
-  for (const f of msg.files || []) total += encodedAttachmentBytes(f.size);
-  for (const c of msg.comments || []) {
-    if (c?.attachment?.size) total += encodedAttachmentBytes(c.attachment.size);
-  }
+  if (!skipLegacyAttachment) total += inlineAttachmentBytes(msg.attachment);
+  for (const f of msg.files || []) total += inlineAttachmentBytes(f);
+  for (const c of msg.comments || []) total += inlineAttachmentBytes(c?.attachment);
+  // Nič inline = dokument je prázdny a nový súbor ide do R2 (bez R2 ho ustráži
+  // 10 MB limit) — strop dokumentu sa ho netýka.
+  if (total === 0) return false;
   return total + encodedAttachmentBytes(newFile.size) > MSG_ATTACHMENT_BUDGET;
 };
-
-// Videá server k správam neprijme (base64 v Mongo dokumente) — povieme to
-// skôr, než sa celé video nahrá. Prípony = rovnaký zoznam ako na serveri.
-const MSG_VIDEO_EXT_RE = /\.(mov|mp4|m4v|avi|mkv|webm|3gp|3g2|wmv|flv|mpg|mpeg|mts|m2ts)$/i;
-
-// Android appka (1.0.10+) ponúka pri výbere súboru aj „Odfotiť / Nahrať video".
-// Správy video neprijmú, tak jej cez `accept` povieme, že video nechceme —
-// dialóg potom ukáže len Odfotiť / Vybrať súbor. Na webe a v iOS appke
-// `accept` nenastavujeme (desktopové dialógy by filtrovali súbory podľa typu).
-const MSG_FILE_ACCEPT = isAndroidNativeApp() ? 'image/*,application/*,text/*,audio/*,message/*' : undefined;
 
 // Timeout / žiadna odpoveď. api.js multipart upload po timeoute zámerne
 // neopakuje (duplicity), takže volajúci musí povedať, čo sa stalo.
@@ -438,24 +433,21 @@ function Messages() {
     } catch (err) { /* ignore */ }
   };
 
-  // Pre-check prílohy PRED prenosom — správy držia prílohy base64 v Mongo
-  // dokumente, limit je preto nižší (10 MB) než pri úlohách (R2) a videá
-  // server neprijme.
+  // Pre-check veľkosti PRED prenosom — bez neho by používateľ čakal na prenos
+  // celého súboru, len aby dostal FILE_TOO_LARGE zo servera. Typ súboru
+  // (vrátane videa) klient nefiltruje — prílohy správ sú v R2 rovnako ako pri
+  // úlohách a o výnimkách rozhoduje server (attachmentFileFilter).
   const msgFileRejected = (file) => {
     if (!file) return false;
     if (file.size > FILE_SIZE_LIMITS.MESSAGE_FILE) {
       alert(`Súbor má ${formatFileSize(file.size)} — maximum pre správy je ${formatFileSize(FILE_SIZE_LIMITS.MESSAGE_FILE)}.`);
       return true;
     }
-    if (/^video\//i.test(file.type || '') || MSG_VIDEO_EXT_RE.test(file.name || '')) {
-      alert('Videá sa k správam nedajú priložiť. Pridajte video k úlohe alebo kontaktu.');
-      return true;
-    }
     return false;
   };
 
-  // Súčet príloh správy by prekročil 16 MB strop dokumentu → povedz to
-  // hneď, nie až po prenose celého súboru.
+  // Stará (nezmigrovaná) správa s inline prílohami by prekročila 16 MB strop
+  // dokumentu → povedz to hneď, nie až po prenose celého súboru.
   const msgAttachmentsFull = (messageId, file, opts) => {
     const msg = [selectedMessage, ...allMessages].find(m => m && (m.id || m._id) === messageId);
     if (file && msgAttachmentsWouldOverflow(msg, file, opts)) {
@@ -1046,7 +1038,7 @@ function Messages() {
             />
           )}
         </div>
-        <input type="file" ref={msgFileInputRef} style={{ display: 'none' }} accept={MSG_FILE_ACCEPT} onChange={onMsgFileSelected} />
+        <input type="file" ref={msgFileInputRef} style={{ display: 'none' }} onChange={onMsgFileSelected} />
       </main>
       </div>
 
@@ -1183,7 +1175,7 @@ function Messages() {
               {/* Attachment */}
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Príloha (voliteľná)</label>
-                <input type="file" accept={MSG_FILE_ACCEPT} onChange={e => setAttachment(e.target.files[0] || null)}
+                <input type="file" onChange={e => setAttachment(e.target.files[0] || null)}
                   style={{ fontSize: '13px' }} />
                 {attachment && <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>{(attachment.size / 1024 / 1024).toFixed(1)} MB</span>}
               </div>
@@ -1419,7 +1411,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>× Odstrániť</button>
               </div>
             )}
-            <input type="file" accept={MSG_FILE_ACCEPT} onChange={e => setEditForm(f => ({ ...f, newAttachment: e.target.files[0] || null, removeAttachment: false }))}
+            <input type="file" onChange={e => setEditForm(f => ({ ...f, newAttachment: e.target.files[0] || null, removeAttachment: false }))}
               style={{ fontSize: '13px' }} />
           </div>
 
