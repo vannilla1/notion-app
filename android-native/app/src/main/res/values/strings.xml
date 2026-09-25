@@ -30,4 +30,17 @@
     <string name="load_error_message_server">Server momentálne neodpovedá. Skúsime to znova automaticky.</string>
     <string name="load_error_countdown">Automaticky skúsim znova o %1$d s</string>
     <string name="load_error_countdown_now">Skúšam znova…</string>
+
+    <!-- Výber prílohy (MainActivity.onShowFileChooser) — natívna voľba medzi
+         fotoaparátom a súbormi, lebo systémový výber súborov fotoaparát neponúka. -->
+    <string name="file_chooser_title_file">Pridať súbor</string>
+    <string name="file_chooser_title_photo">Pridať fotku</string>
+    <string name="file_chooser_take_photo">Odfotiť</string>
+    <string name="file_chooser_record_video">Nahrať video</string>
+    <string name="file_chooser_pick_file">Vybrať súbor</string>
+    <string name="file_chooser_system_title">Vyberte súbor</string>
+    <string name="file_chooser_camera_failed">Fotoaparát sa nepodarilo otvoriť.</string>
+    <string name="file_chooser_capture_empty">Fotoaparát záznam neuložil. Pridajte ho cez „Vybrať súbor“ z galérie.</string>
+    <string name="file_chooser_capture_lost">Záznam z fotoaparátu sa nepodarilo pripojiť. Skúste to prosím znova.</string>
+    <string name="file_chooser_picker_failed">Výber súboru sa nepodarilo otvoriť.</string>
 </resources>

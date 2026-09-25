@@ -13,8 +13,10 @@ const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
-const { attachmentFileFilter } = require('../utils/uploadFilter');
-const { trackUploadAbort } = require('../utils/uploadTracking');
+const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
+const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
+const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
+const { recordError } = require('../services/serverErrorService');
 const { isIosNativeApp } = require('../utils/platform');
 const { autoSyncTaskToCalendar, autoDeleteTaskFromCalendar } = require('./googleCalendar');
 const { autoSyncTaskToGoogleTasks, autoDeleteTaskFromGoogleTasks } = require('./googleTasks');
@@ -118,7 +120,7 @@ const autoDeleteTaskTreeFromGoogle = (task) => {
 // klienta, zatiaľ čo server request v tichosti dokončí — retry potom vyrobí
 // druhú kópiu. In-memory mapa stačí (API beží ako single instance). Kľúč sa
 // pri reálnej chybe uvoľní, aby legitímny retry prešiel.
-const { claimMutationKey, releaseMutationKey } = require('../utils/idempotency');
+const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../utils/idempotency');
 
 const router = express.Router();
 
@@ -1193,7 +1195,8 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       priority: priority !== undefined ? priority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
       assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
-      subtasks: req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks,
+      // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
+      subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks,
       createdAt: task.createdAt,
       modifiedAt: new Date().toISOString()
     };
@@ -2007,14 +2010,41 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
   // Prerušené prenosy boli neviditeľné — teraz sa zapíšu do audit logu
   trackUploadAbort(req, { target: 'príloha kontaktu' });
   let uploadIdemKey = null;
+  // Každá ne-2xx odpoveď po zabratí idempotentného kľúča ho musí uvoľniť —
+  // inak klientsky retry s tým istým uploadId dostane „200 duplicate",
+  // klient súbor z fronty zmaže a na serveri nie je nič.
+  const releaseIdem = () => {
+    if (uploadIdemKey) {
+      releaseMutationKey(uploadIdemKey);
+      uploadIdemKey = null;
+    }
+  };
+  const fail = (status, body) => {
+    releaseIdem();
+    return res.status(status).json(body);
+  };
   upload.single('file')(req, res, async (err) => {
     try {
-      // Handle multer errors
-      if (err) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 50 MB.' });
+      // multer/busboy chyby → 400 so slovenskou správou + `code` (predtým
+      // surové anglické „Unexpected end of form"); chyby prenosu idú aj do
+      // Diagnostiky. Viď uploadTracking.js.
+      if (err) return handleUploadError(err, req, res, 'contact');
+      if (!req.file) return rejectMissingFilePart(req, res, 'contact');
+
+      // Idempotencia pre frontu nahrávaní (client/src/utils/uploadQueue):
+      // ak sa odpoveď stratila a klient pošle ten istý uploadId znova,
+      // nevytvoríme druhú kópiu prílohy. Kľúč sa berie PRED bránami
+      // (plán/404/503/kvóta): retry po stratenej odpovedi musí dostať
+      // „duplicate", nie 403 STORAGE_LIMIT za súbor, ktorý kvóta už
+      // započítala. Každá ne-2xx odpoveď ho uvoľní (fail / catch nižšie).
+      const uploadId = String(req.body.uploadId || '').trim().slice(0, 100);
+      if (uploadId) {
+        const key = `upload:${req.user.id}:${uploadId}`;
+        if (!claimMutationKey(key, 30 * 60 * 1000)) {
+          // kľúč drží prvý request — tu ho neuvoľňovať
+          return respondToHeldUploadKey(res, key);
         }
-        return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
+        uploadIdemKey = key;
       }
 
       // Plan-feature gate: file attachments len pre Tím+. Plus per-plan
@@ -2027,22 +2057,18 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           ? 'Táto funkcia nie je dostupná.'
           : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
         logPlanGateHit(req, { code: 'FEATURE_NOT_IN_PLAN', feature: 'attachments' });
-        return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+        return fail(403, { message, code: 'FEATURE_NOT_IN_PLAN' });
       }
 
       const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
       if (!contact) {
-        return res.status(404).json({ message: 'Contact not found' });
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded' });
+        return fail(404, { message: 'Kontakt už neexistuje.' });
       }
 
       // R2 výpadok: base64 fallback do Monga znesie len malé súbory (16 MB
       // BSON strop, base64 +33 %) — veľké čisto odmietni namiesto pádu save().
       if (!fileStorage.isR2Available() && req.file.size > 10 * 1024 * 1024) {
-        return res.status(503).json({ message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
+        return fail(503, { message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
       }
 
       // Per-plan total storage quota check (workspace-scope). Tím = 1 GB,
@@ -2058,32 +2084,26 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
             ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
             : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
           logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
-          return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
-        }
-      }
-
-      // Idempotencia pre frontu nahrávaní (client/src/utils/uploadQueue):
-      // ak sa odpoveď stratila a klient pošle ten istý uploadId znova,
-      // nevytvoríme druhú kópiu prílohy. Kľúč sa pri chybe uvoľňuje nižšie,
-      // takže legitímne opakovanie po zlyhaní prejde.
-      const uploadId = String(req.body.uploadId || '').trim().slice(0, 100);
-      if (uploadId) {
-        uploadIdemKey = `upload:${req.user.id}:${uploadId}`;
-        if (!claimMutationKey(uploadIdemKey, 30 * 60 * 1000)) {
-          uploadIdemKey = null; // kľúč drží prvý request — v catch neuvoľňovať
-          return res.status(200).json({ message: 'Súbor už bol nahraný', duplicate: true });
+          return fail(403, { message, code: 'STORAGE_LIMIT' });
         }
       }
 
       const fileId = uuidv4();
 
       // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
-      // Frontend posiela hotový názov vrátane prípony. Fallback na pôvodný.
-      const customName = (req.body.customName || '').trim().slice(0, 200);
+      // Frontend posiela hotový názov vrátane prípony. Fallback na pôvodný
+      // (už opravený z latin1 v attachmentFileFilter). „/" a „\" sa nahradia
+      // — v názve by rozbili Stiahnuť v iOS appke (viď sanitizeDisplayName).
+      // Vlastný názov so spustiteľnou príponou („foto.exe") sa ignoruje —
+      // súbor prešiel blocklistom pod pôvodným názvom a tak sa aj uloží.
+      const customDisplay = sanitizeDisplayName((req.body.customName || '').trim().slice(0, 200));
+      const displayName = (customDisplay && !hasBlockedExtension(customDisplay) ? customDisplay : null)
+        || sanitizeDisplayName(req.file.originalname)
+        || 'súbor';
 
       const fileData = {
         id: fileId,
-        originalName: customName || req.file.originalname,
+        originalName: displayName,
         mimetype: req.file.mimetype,
         size: req.file.size,
         uploadedAt: new Date()
@@ -2131,7 +2151,10 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           if (e.name !== 'VersionError' || attempt >= 3) throw e;
           logger.warn('[Contact upload] VersionError — retry na čerstvom dokumente', { attempt: attempt + 1, contactId: String(contact._id) });
           docToSave = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
-          if (!docToSave) return res.status(404).json({ message: 'Contact not found' });
+          if (!docToSave) {
+            releaseIdem();
+            return res.status(404).json({ message: 'Kontakt už neexistuje.' });
+          }
         }
       }
 
@@ -2149,14 +2172,35 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
         uploadedAt: fileData.uploadedAt
       };
 
+      if (uploadIdemKey) markMutationDone(uploadIdemKey);
       res.status(201).json(responseData);
     } catch (error) {
-      if (uploadIdemKey) releaseMutationKey(uploadIdemKey);
+      releaseIdem();
       logger.error('File upload error', { error: error.message });
-      res.status(500).json({ message: 'Chyba servera' });
+      // SKUTOČNÝ error (stack) do Diagnostiky — finish-hook by inak zapísal
+      // len generické „HTTP 500" bez príčiny (rovnako ako tasks.js upload).
+      error.name = error.name === 'Error' ? 'ContactFileUploadError' : error.name;
+      recordError(error, req).catch(() => {});
+      if (res.locals) res.locals.__errorRecorded = true;
+      res.status(500).json({ message: 'Chyba pri nahrávaní súboru' });
     }
   });
 });
+
+// Blob (ContactFile) smie ísť von len vtedy, keď patrí do workspace
+// volajúceho. Nájdené metadáta nestačia — files[] v úlohách/podúlohách sú
+// klientom editovateľné (PUT task berie subtasks verbatim), takže cudzí
+// fileId sa dá „podstrčiť" do vlastného kontaktu a stiahnuť cez neho.
+//  - contactId == tento kontakt → ok
+//  - contactId iného kontaktu v TOM ISTOM workspace → ok (presun úlohy,
+//    pri ktorom prepnutie vlastníka blobu zlyhalo)
+//  - contactId null → legacy / globálna úloha; väzbu na workspace nenesie
+const blobBelongsToWorkspace = async (cfRow, ownerContactId, workspaceId) => {
+  if (!cfRow) return false;
+  if (!cfRow.contactId) return true;
+  if (ownerContactId && String(cfRow.contactId) === String(ownerContactId)) return true;
+  return !!(await Contact.exists({ _id: cfRow.contactId, workspaceId }));
+};
 
 // Download file (from ContactFile collection or legacy Contact.files.data)
 router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
@@ -2171,7 +2215,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     ).lean();
     if (!contact) {
       logger.warn('Contact file download: contact not found', { contactId });
-      return res.status(404).json({ message: 'Contact not found' });
+      return res.status(404).json({ message: 'Kontakt už neexistuje.' });
     }
 
     // Search in contact-level files first
@@ -2200,7 +2244,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
         contactFileCount: (contact.files || []).length,
         contactFileIds: (contact.files || []).map(f => f.id),
       });
-      return res.status(404).json({ message: 'File not found' });
+      return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
     // 3-tier resolution v poradí preference:
@@ -2211,8 +2255,12 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     let fileBuffer;
     const contactFile = await ContactFile.findOne(
       { fileId },
-      { r2Key: 1, data: 1 }
+      { r2Key: 1, data: 1, contactId: 1 }
     ).lean();
+    if (contactFile && !(await blobBelongsToWorkspace(contactFile, contact._id, req.workspaceId))) {
+      logger.warn('Contact file download: blob patrí inému workspace — odmietnuté', { contactId, fileId });
+      return res.status(404).json({ message: 'Súbor nenájdený' });
+    }
 
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
       // Modern path — fetch z R2
@@ -2238,7 +2286,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       ).catch(() => {});
     } else {
       logger.error('Contact file download: NO DATA anywhere', { contactId, fileId, fileName: fileMeta.originalName });
-      return res.status(404).json({ message: 'File data not found — file may need to be re-uploaded' });
+      return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
     res.set({
@@ -2259,12 +2307,14 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
   try {
     const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
     if (!contact) {
-      return res.status(404).json({ message: 'Contact not found' });
+      return res.status(404).json({ message: 'Kontakt už neexistuje.' });
     }
 
+    // Poradie (vlastník vo workspace → súbor v jeho files[] → save → až
+    // potom blob v rozsahu contactId) je zámerné — tasks.js ho teraz zrkadlí.
     const fileIndex = contact.files.findIndex(f => f.id === req.params.fileId);
     if (fileIndex === -1) {
-      return res.status(404).json({ message: 'File not found' });
+      return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
     const deletedFileId = contact.files[fileIndex].id;
@@ -2284,7 +2334,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
 
-    res.json({ message: 'File deleted' });
+    res.json({ message: 'Súbor vymazaný' });
   } catch (error) {
     res.status(500).json({ message: 'Chyba servera' });
   }
@@ -2294,14 +2344,21 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 // v dokumente (R2/ContactFile obsah ostáva, mení sa len zobrazovaný názov).
 router.patch('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const newName = (req.body.originalName || '').trim().slice(0, 200);
+    // „/" a „\" v názve by rozbili Stiahnuť v iOS appke — viď sanitizeDisplayName.
+    const newName = sanitizeDisplayName(String(req.body.originalName || '').trim().slice(0, 200));
     if (!newName) return res.status(400).json({ message: 'Názov nesmie byť prázdny' });
+    if (hasBlockedExtension(newName)) {
+      return res.status(400).json({
+        code: 'BLOCKED_EXTENSION',
+        message: 'Tento typ súboru nie je z bezpečnostných dôvodov povolený (spustiteľný súbor).'
+      });
+    }
 
     const contact = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
-    if (!contact) return res.status(404).json({ message: 'Contact not found' });
+    if (!contact) return res.status(404).json({ message: 'Kontakt už neexistuje.' });
 
     const file = (contact.files || []).find(f => f.id === req.params.fileId);
-    if (!file) return res.status(404).json({ message: 'File not found' });
+    if (!file) return res.status(404).json({ message: 'Súbor nenájdený' });
 
     file.originalName = newName;
     contact.markModified('files');

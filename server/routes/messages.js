@@ -8,7 +8,9 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
+const { recordError } = require('../services/serverErrorService');
 const logger = require('../utils/logger');
+const { attachmentFileFilter, sanitizeDisplayName, effectiveExtension } = require('../utils/uploadFilter');
 
 // Projection that excludes ALL Base64 blobs so comment CRUD never pulls
 // megabytes of existing attachments into Node memory. Root cause of
@@ -22,17 +24,212 @@ const NO_BASE64_PROJECTION = {
 
 const router = express.Router();
 
-// Multer for attachment uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    const allowedExtensions = /jpeg|jpg|png|gif|bmp|webp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml|zip|rar|7z/;
-    const ext = file.originalname.toLowerCase().split('.').pop();
-    if (allowedExtensions.test(ext)) return cb(null, true);
-    cb(new Error('Nepovolený typ súboru'));
+// ─── Prílohy správ: limity, filter, chyby ─────────────────────
+//
+// Správy (na rozdiel od kontaktov/úloh v R2) držia VŠETKY prílohy ako base64
+// priamo v jednom Mongo dokumente: files[], legacy attachment aj prílohy
+// komentárov. Base64 = +33 %, BSON strop dokumentu = 16 MB → reálne sa do
+// jednej správy zmestí ~12 MB súborov spolu. Presun do R2 je plánovaná
+// „fáza 2"; dovtedy tu strážime súčet PRED zápisom, inak Mongo zlyhá až po
+// prenose celého súboru a používateľ videl len „Chyba servera".
+const MESSAGE_FILE_LIMIT = 10 * 1024 * 1024; // 10 MB na jeden súbor
+const BSON_DOC_LIMIT = 16 * 1024 * 1024;
+// Rezerva na všetko okrem príloh (predmet, popis, komentáre, anketa, readBy,
+// BSON kľúče). Bez nej by sa správa naplnila po okraj a zlyhal by aj ďalší
+// čisto textový komentár.
+const MESSAGE_DOC_RESERVE = 512 * 1024;
+const MESSAGE_ATTACHMENT_BUDGET = BSON_DOC_LIMIT - MESSAGE_DOC_RESERVE;
+const ATTACHMENT_META_OVERHEAD = 1024; // názov, mimetype, id, dátum, kľúče
+const MESSAGE_TOO_LARGE_CODE = 'MESSAGE_ATTACHMENTS_TOO_LARGE';
+const MESSAGE_TOO_LARGE_TEXT = 'Prílohy tejto správy by spolu presiahli limit približne 12 MB. Ďalšie súbory pridajte do novej správy alebo k úlohe.';
+
+// Rovnaké pravidlo počíta aj klient (Messages.jsx msgAttachmentsWouldOverflow)
+// — z veľkostí v metadátach, takže netreba ťahať base64 z Monga. Pri zmene
+// ho uprav na OBOCH miestach.
+const encodedAttachmentBytes = (size) =>
+  Math.ceil(Math.max(0, Number(size) || 0) / 3) * 4 + ATTACHMENT_META_OVERHEAD;
+
+const estimateMessageAttachmentBytes = (msg, { skipLegacyAttachment = false } = {}) => {
+  let total = 0;
+  if (!skipLegacyAttachment && msg?.attachment?.size) total += encodedAttachmentBytes(msg.attachment.size);
+  for (const f of msg?.files || []) total += encodedAttachmentBytes(f.size);
+  for (const c of msg?.comments || []) {
+    if (c?.attachment?.size) total += encodedAttachmentBytes(c.attachment.size);
+  }
+  return total;
+};
+
+const wouldExceedMessageDocLimit = (msg, newFileSize, opts) =>
+  estimateMessageAttachmentBytes(msg, opts) + encodedAttachmentBytes(newFileSize) > MESSAGE_ATTACHMENT_BUDGET;
+
+const rejectTooLarge = (res) =>
+  res.status(413).json({ code: MESSAGE_TOO_LARGE_CODE, message: MESSAGE_TOO_LARGE_TEXT });
+
+// Poistka pre prípady, ktoré odhad nezachytí (súbežné nahrávania, veľa
+// textu v komentároch): Mongo „dokument je väčší ako 16 MB" → rovnaká 413
+// namiesto generickej 500. 10334 = BSONObjectTooLarge (aj „Resulting document
+// after update is larger than 16777216"), 17419/17420 = staršie varianty
+// update/upsert. RangeError ERR_OUT_OF_RANGE hodí BSON serializér ovládača,
+// keď dokument presiahne jeho ~17 MB buffer ešte pred odoslaním na server.
+const isDocTooLargeError = (err) => {
+  if (!err) return false;
+  if ([10334, 17419, 17420].includes(err.code)) return true;
+  if (err.codeName === 'BSONObjectTooLarge') return true;
+  if (err.code === 'ERR_OUT_OF_RANGE' && /offset/i.test(err.message || '')) return true;
+  return /larger than (the maximum size )?16777216|BSONObjectTooLarge/i.test(err.message || '');
+};
+
+// Diagnostika (recordError) ukladá req.body — pri správach je to predmet,
+// popis a text komentára, teda súkromná komunikácia medzi členmi tímu. Do
+// Diagnostiky pošleme namiesto toho len metadáta prílohy. Object.create
+// zachová všetko ostatné (method, path, user, UA, IP) cez prototyp.
+const diagnosticReq = (req) => Object.create(req, {
+  body: {
+    value: req.file ? { fileSize: req.file.size, mimetype: req.file.mimetype } : undefined,
+    enumerable: true
   }
 });
+
+// Zápis správy/prílohy zlyhal: plný dokument → 413 so slovenskou radou,
+// všetko ostatné → SKUTOČNÁ príčina do Diagnostiky (inak by captureResponseErrors
+// zachytil len syntetické „HTTP 500 POST /api/messages/:id/files" bez stacku).
+const handleMessageWriteError = (error, req, res, label) => {
+  // POST / po odpovedi ešte loguje audit — chyba tam už nesmie posielať
+  // druhú odpoveď (ERR_HTTP_HEADERS_SENT), len sa zaznamená.
+  if (res.headersSent) {
+    logger.error(label, { error: error.message, userId: req.user?.id });
+    recordError(error, diagnosticReq(req)).catch(() => {});
+    return undefined;
+  }
+  if (isDocTooLargeError(error)) {
+    logger.warn(`${label}: message document too large`, {
+      userId: req.user?.id,
+      fileSize: req.file?.size,
+      mongoCode: error.code
+    });
+    return rejectTooLarge(res);
+  }
+  logger.error(label, { error: error.message, userId: req.user?.id });
+  recordError(error, diagnosticReq(req)).catch(() => {});
+  if (res.locals) res.locals.__errorRecorded = true;
+  return res.status(500).json({ message: 'Chyba servera' });
+};
+
+// Videá zostávajú pre správy zakázané: aj krátke video z telefónu presiahne
+// 10 MB a base64 v Mongo dokumente by rýchlo vyčerpalo 16 MB strop. Kontrola
+// aj podľa prípony — Android/desktop niekedy pošle application/octet-stream.
+const VIDEO_EXTENSIONS = new Set(['mov', 'mp4', 'm4v', 'avi', 'mkv', 'webm', '3gp', '3g2', 'wmv', 'flv', 'mpg', 'mpeg', 'mts', 'm2ts']);
+
+// Pôvodný allowlist prípon odmietal HEIC fotky z iPhonu/Macu, ODT/ODS, EML…
+// (tie isté súbory k úlohe prešli). Teraz rovnaký blocklist ako kontakty
+// a úlohy — attachmentFileFilter zároveň opraví UTF-8 názov súboru
+// (multer ho dekóduje ako latin1 → „faktÃºra.pdf"). Download ide vždy
+// s Content-Disposition: attachment + nosniff, takže HTML/SVG sa nikdy
+// nevykreslí na API origine.
+const messageFileFilter = (req, file, cb) => {
+  attachmentFileFilter(req, file, (err, accepted) => {
+    if (err) return cb(err);
+    const mime = String(file.mimetype || '').toLowerCase();
+    // effectiveExtension: „video.mp4." sa uloží ako „video.mp4" — prípona
+    // sa musí brať z názvu tak, ako bude uložený
+    const ext = effectiveExtension(file.originalname);
+    if (mime.startsWith('video/') || VIDEO_EXTENSIONS.has(ext)) {
+      const videoErr = new Error('Videá sa k správam nedajú priložiť. Pridajte video k úlohe alebo kontaktu.');
+      videoErr.code = 'VIDEO_NOT_ALLOWED';
+      return cb(videoErr);
+    }
+    return cb(null, accepted);
+  });
+};
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MESSAGE_FILE_LIMIT },
+  fileFilter: messageFileFilter
+});
+
+// Chyby z multer/busboy → slovenská hláška + kód, ktorý klient vie rozlíšiť.
+// Do 9/2026 sa používateľovi zobrazil surový anglický text („Unexpected end
+// of form") a Diagnostika nedostala nič, lebo 4xx sa nezaznamenávajú.
+const UPLOAD_BODY_INCOMPLETE_RE = /Unexpected end of (form|multipart data)|Malformed part header|Boundary not found/i;
+
+// Technický kontext prenosu pre Diagnostiku — nikdy názov súboru, obsah
+// správy ani token (Authorization hlavičku nečítame).
+const uploadDiagContext = (req, err) => {
+  const headers = req.headers || {};
+  const ct = String(headers['content-type'] || '');
+  const ua = String((typeof req.get === 'function' && req.get('user-agent')) || '');
+  const shell = ua.match(/PrplCRM-(iOS|Android)\/[\w.]+/);
+  return {
+    upload: {
+      multerCode: err?.code || null,
+      contentLength: headers['content-length'] === undefined ? null : Number(headers['content-length']),
+      bodyBytes: typeof req.uploadBodyBytes === 'function' ? req.uploadBodyBytes() : null,
+      contentType: ct.split(';')[0].trim().slice(0, 60) || null,
+      hasBoundary: /boundary=/i.test(ct),
+      shell: shell ? shell[0] : 'web'
+    }
+  };
+};
+
+// Zápis do Diagnostiky BEZ obsahu správy a bez názvu súboru. Správa je
+// zámerne bez premenných hodnôt (tie idú do contextu) → fingerprint je
+// jeden riadok na druh chyby a opakovanie len zvýši count.
+const reportUploadRejection = (err, req, code) => {
+  try {
+    const e = new Error(`${code}: ${String(err?.message || 'Upload rejected').slice(0, 200)}`);
+    e.name = 'MessageUploadRejected';
+    e.status = 400;
+    recordError(e, diagnosticReq(req), uploadDiagContext(req, err)).catch(() => {});
+  } catch (_) {
+    // Sledovanie nesmie nikdy zhodiť samotnú odpoveď.
+  }
+};
+
+const respondUploadError = (err, req, res) => {
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ code: 'FILE_TOO_LARGE', message: 'Súbor je príliš veľký. Maximum pre správy je 10 MB.' });
+  }
+  if (err.code === 'BLOCKED_EXTENSION' || err.code === 'VIDEO_NOT_ALLOWED') {
+    return res.status(400).json({ code: err.code, message: err.message });
+  }
+  const incomplete = UPLOAD_BODY_INCOMPLETE_RE.test(err.message || '') || req.headers['content-length'] === '0';
+  const code = incomplete ? 'UPLOAD_BODY_INCOMPLETE' : 'UPLOAD_REJECTED';
+  reportUploadRejection(err, req, code);
+  return res.status(400).json({
+    code,
+    message: incomplete
+      ? 'Súbor sa na server nedostal celý. Vyberte ho prosím znova a nahrajte.'
+      : 'Súbor sa nepodarilo prijať. Skúste ho nahrať znova.'
+  });
+};
+
+// Zobrazovaný názov prílohy: už opravené UTF-8 (fileFilter) + bez „/", „\"
+// a riadiacich znakov, ktoré rozbíjajú uloženie na zariadení.
+const storedFileName = (file) => sanitizeDisplayName(file.originalname) || file.originalname || 'priloha';
+
+// Download hlavičky pre všetky prílohy správ: VŽDY attachment (RFC 6266
+// filename* s UTF-8 cez res.attachment) + nosniff, ako kontakty/úlohy.
+// Náhľad v appke to neovplyvní — FilePreviewModal aj ⬇️ sťahujú cez XHR blob
+// a náhľad zobrazujú z blob: URL, nie priamo z tejto adresy.
+const setDownloadHeaders = (res, meta, extra) => {
+  res.attachment(sanitizeDisplayName(meta.originalName) || 'priloha');
+  res.set({
+    'Content-Type': meta.mimetype || 'application/octet-stream',
+    'X-Content-Type-Options': 'nosniff',
+    ...extra
+  });
+};
+
+// Verzia legacy prílohy (message.attachment) pre URL ?v= a ETag. Príloha sa
+// dá v úprave správy nahradiť NA MIESTE — URL aj ETag podľa id správy by
+// vracali rok starý súbor z HTTP cache. Klient počíta to isté (Messages.jsx).
+const attachmentVersion = (att) => {
+  if (!att) return 'none';
+  if (att.id) return String(att.id);
+  const ts = att.uploadedAt ? new Date(att.uploadedAt).getTime() : NaN;
+  return Number.isFinite(ts) ? String(ts) : 'legacy';
+};
 
 // Type labels for notifications
 const typeLabels = {
@@ -214,12 +411,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 // POST /api/messages — create a new message
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
-    if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 10MB.' });
-      }
-      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní' });
-    }
+    if (err) return respondUploadError(err, req, res);
 
     try {
       const { toUserId, type, subject, description, linkedType, linkedId, linkedName, dueDate } = req.body;
@@ -273,7 +465,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       if (req.file) {
         attachment = {
           id: uuidv4(),
-          originalName: req.file.originalname,
+          originalName: storedFileName(req.file),
           mimetype: req.file.mimetype,
           size: req.file.size,
           data: req.file.buffer.toString('base64'),
@@ -351,8 +543,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         workspaceId: req.workspaceId || null
       });
     } catch (error) {
-      logger.error('Create message error', { error: error.message, userId: req.user.id });
-      res.status(500).json({ message: 'Chyba servera' });
+      handleMessageWriteError(error, req, res, 'Create message error');
     }
   });
 });
@@ -360,9 +551,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
 // PUT /api/messages/:id — edit message (only sender can edit)
 router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
-    if (err) {
-      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
-    }
+    if (err) return respondUploadError(err, req, res);
 
     try {
       const message = await Message.findOne({
@@ -390,8 +579,15 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 
       // Handle attachment: new file replaces old, or remove existing
       if (req.file) {
+        // Stará príloha sa nahrádza → do odhadu ju nerátame.
+        if (wouldExceedMessageDocLimit(message, req.file.size, { skipLegacyAttachment: true })) {
+          return rejectTooLarge(res);
+        }
         message.attachment = {
-          originalName: req.file.originalname,
+          // Nové id pri KAŽDEJ výmene = nová verzia v URL (?v=) aj ETagu.
+          // Bez neho klient rok zobrazoval pôvodný súbor z HTTP cache.
+          id: uuidv4(),
+          originalName: storedFileName(req.file),
           mimetype: req.file.mimetype,
           size: req.file.size,
           data: req.file.buffer.toString('base64'),
@@ -414,8 +610,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 
       res.json(stripAttachmentData(message));
     } catch (error) {
-      logger.error('Edit message error', { error: error.message, userId: req.user.id });
-      res.status(500).json({ message: 'Chyba servera' });
+      handleMessageWriteError(error, req, res, 'Edit message error');
     }
   });
 });
@@ -726,9 +921,7 @@ router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) =
 // POST /api/messages/:id/comment — add comment (with optional attachment)
 router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
-    if (err) {
-      return res.status(400).json({ message: err.message || 'Chyba pri nahrávaní súboru' });
-    }
+    if (err) return respondUploadError(err, req, res);
 
     try {
       const { text } = req.body;
@@ -749,11 +942,19 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
             { toUserId: req.user.id }
           ]
         },
-        { fromUserId: 1, toUserId: 1, status: 1, subject: 1 }
+        {
+          fromUserId: 1, toUserId: 1, status: 1, subject: 1,
+          // Len veľkosti príloh (bez base64) pre odhad 16 MB stropu.
+          'attachment.size': 1, 'files.size': 1, 'comments.attachment.size': 1
+        }
       ).lean();
 
       if (!meta) {
         return res.status(404).json({ message: 'Odkaz nenájdený' });
+      }
+
+      if (req.file && wouldExceedMessageDocLimit(meta, req.file.size)) {
+        return rejectTooLarge(res);
       }
 
       const comment = {
@@ -767,7 +968,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
       // Attach file if uploaded
       if (req.file) {
         comment.attachment = {
-          originalName: req.file.originalname,
+          originalName: storedFileName(req.file),
           mimetype: req.file.mimetype,
           size: req.file.size,
           data: req.file.buffer.toString('base64'),
@@ -819,7 +1020,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
       const updated = await Message.findById(meta._id, NO_BASE64_PROJECTION).lean();
       res.json(stripAttachmentData(updated));
     } catch (error) {
-      res.status(500).json({ message: 'Chyba servera' });
+      handleMessageWriteError(error, req, res, 'Add comment error');
     }
   });
 });
@@ -1065,40 +1266,64 @@ router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorksp
 // GET /api/messages/:id/attachment — download attachment
 router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    // PERF: early 304 short-circuit — if browser already has this blob
-    // cached (immutable files, deterministic ETag), skip Mongo + Node
-    // buffer allocation + network transfer entirely. Repeat preview = instant.
-    const etag = `"msg-${req.params.id}-attach"`;
-    if (req.headers['if-none-match'] === etag) {
+    if (!/^[0-9a-fA-F]{24}$/.test(req.params.id)) {
+      return res.status(404).json({ message: 'Príloha nenájdená' });
+    }
+    const filter = {
+      _id: req.params.id,
+      workspaceId: req.workspaceId,
+      $or: [
+        { fromUserId: req.user.id },
+        { toUserId: req.user.id }
+      ]
+    };
+
+    // Legacy príloha sa dá v úprave správy NAHRADIŤ na mieste, takže ETag
+    // aj cache musia niesť jej verziu (attachment.id), nie len id správy —
+    // inak prehliadač/WKWebView rok vracal pôvodný súbor. Najprv lacný
+    // dotaz len na metadáta (bez base64): opakovaný náhľad → 304 bez
+    // ťahania megabajtov z Monga.
+    const meta = await Message.findOne(filter, {
+      'attachment.id': 1, 'attachment.uploadedAt': 1, 'attachment.size': 1
+    }).lean();
+    if (!meta || !meta.attachment) {
+      return res.status(404).json({ message: 'Príloha nenájdená' });
+    }
+
+    // Immutable len keď klient pýta presne aktuálnu verziu (?v=). Bez v
+    // (staršia verzia appky) alebo so zastaranou v → no-cache, aby sa
+    // pod touto URL neuložila stará/nová verzia natrvalo.
+    const cacheFor = (version) => {
+      const requested = typeof req.query.v === 'string' ? req.query.v : '';
+      return requested && requested === version
+        ? 'private, max-age=31536000, immutable'
+        : 'private, no-cache';
+    };
+
+    const metaVersion = attachmentVersion(meta.attachment);
+    const metaEtag = `"msg-att-${metaVersion}"`;
+    if (req.headers['if-none-match'] === metaEtag) {
+      res.set({ 'ETag': metaEtag, 'Cache-Control': cacheFor(metaVersion) });
       return res.status(304).end();
     }
 
     // PERF: project only the main attachment — do NOT pull comments[].attachment.data
     // or files[].data. A message with 5 other 10 MB attachments was previously
     // shipping 50+ MB from Mongo just to return one file.
-    const message = await Message.findOne(
-      {
-        _id: req.params.id,
-        workspaceId: req.workspaceId,
-        $or: [
-          { fromUserId: req.user.id },
-          { toUserId: req.user.id }
-        ]
-      },
-      { attachment: 1 }
-    ).lean();
+    const message = await Message.findOne(filter, { attachment: 1 }).lean();
 
     if (!message || !message.attachment || !message.attachment.data) {
       return res.status(404).json({ message: 'Príloha nenájdená' });
     }
 
+    // Verziu počítame z dokumentu, ktorého bajty naozaj posielame (príloha
+    // sa medzi dvoma dotazmi mohla vymeniť).
+    const version = attachmentVersion(message.attachment);
     const fileBuffer = Buffer.from(message.attachment.data, 'base64');
-    res.set({
-      'Content-Type': message.attachment.mimetype,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(message.attachment.originalName)}"`,
+    setDownloadHeaders(res, message.attachment, {
       'Content-Length': fileBuffer.length,
-      'Cache-Control': 'private, max-age=31536000, immutable',
-      'ETag': etag
+      'Cache-Control': cacheFor(version),
+      'ETag': `"msg-att-${version}"`
     });
     res.send(fileBuffer);
   } catch (error) {
@@ -1137,10 +1362,10 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
       return res.status(404).json({ message: 'Príloha nenájdená' });
     }
 
+    // Príloha komentára sa nedá vymeniť (PUT komentára mení len text),
+    // takže ETag podľa commentId ostáva nemenný.
     const fileBuffer = Buffer.from(comment.attachment.data, 'base64');
-    res.set({
-      'Content-Type': comment.attachment.mimetype,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(comment.attachment.originalName)}"`,
+    setDownloadHeaders(res, comment.attachment, {
       'Content-Length': fileBuffer.length,
       'Cache-Control': 'private, max-age=31536000, immutable',
       'ETag': etag
@@ -1156,7 +1381,7 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
 // POST /api/messages/:id/files — add file to message
 router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
   upload.single('file')(req, res, async (err) => {
-    if (err) return res.status(400).json({ message: err.message });
+    if (err) return respondUploadError(err, req, res);
     if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
 
     try {
@@ -1167,10 +1392,13 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
       });
       if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
-      const { v4: uuidv4 } = require('uuid');
+      if (wouldExceedMessageDocLimit(message, req.file.size)) {
+        return rejectTooLarge(res);
+      }
+
       message.files.push({
         id: uuidv4(),
-        originalName: req.file.originalname,
+        originalName: storedFileName(req.file),
         mimetype: req.file.mimetype,
         size: req.file.size,
         data: req.file.buffer.toString('base64'),
@@ -1180,7 +1408,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
       await message.save();
       res.json(stripAttachmentData(message));
     } catch (error) {
-      res.status(500).json({ message: 'Chyba servera' });
+      handleMessageWriteError(error, req, res, 'Add message file error');
     }
   });
 });
@@ -1208,10 +1436,9 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
     const file = message.files && message.files[0];
     if (!file || !file.data) return res.status(404).json({ message: 'Súbor nenájdený' });
 
+    // files[] majú pri každom nahraní nové id — obsah pod ním sa nemení.
     const buffer = Buffer.from(file.data, 'base64');
-    res.set({
-      'Content-Type': file.mimetype,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(file.originalName)}"`,
+    setDownloadHeaders(res, file, {
       'Content-Length': buffer.length,
       'Cache-Control': 'private, max-age=31536000, immutable',
       'ETag': etag

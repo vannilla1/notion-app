@@ -941,40 +941,128 @@ struct WebView: UIViewRepresentable {
             }
         }
 
+        // Diagnostika zoskupuje chyby podľa názvu + URL cesty + správy. Pevná
+        // URL = jeden riadok pre všetky zlyhania bridge, nech bol user na
+        // ktorejkoľvek stránke (Úlohy, CRM, Správy).
+        private static let fileDownloadReportURL = "https://prplcrm.eu/native/file-download"
+
+        /// Web (client/src/utils/fileDownload.js) pošle prílohu ako base64 →
+        /// zapíšeme ju do tmp a otvoríme share sheet. postMessage je z pohľadu
+        /// webu fire-and-forget: čokoľvek tu zlyhá, web sa to nedozvie. Každé
+        /// zlyhanie preto MUSÍ skončiť hláškou pre usera a záznamom v Diagnostike
+        /// — do 1.0.18 len debugLog, takže „Stiahnuť" potichu neurobilo nič.
         private func handleFileDownload(_ message: WKScriptMessage) {
+            // message.body čítame na hlavnom vlákne (tu nás volá WebKit);
+            // dekódovanie a zápis (video = desiatky MB) už idú mimo UI vlákna.
             guard let body = message.body as? [String: Any],
-                  let base64Data = body["data"] as? String,
-                  let fileName = body["fileName"] as? String,
-                  let data = Data(base64Encoded: base64Data) else {
-                debugLog("[FileDownload] Invalid message data")
+                  let base64Data = body["data"] as? String else {
+                debugLog("[FileDownload] Neplatná správa z webu (chýba data)")
+                presentFileDownloadFailure()
                 return
             }
+            // Názov je od usera (FileRenameModal) — „Faktúra 3/2026.pdf" by bez
+            // čistenia ukazoval do neexistujúceho podpriečinka a zápis zlyhal.
+            let name = sanitizeDownloadName(body["fileName"] as? String ?? "")
+            let mimetype = String((body["mimetype"] as? String ?? "?").prefix(60))
 
-            // mimetype available as body["mimetype"] if needed
-
-            DispatchQueue.main.async {
-                let tempDir = FileManager.default.temporaryDirectory
-                let fileURL = tempDir.appendingPathComponent(fileName)
-
-                do {
-                    try data.write(to: fileURL)
-                    guard let viewController = self.webView?.window?.rootViewController else { return }
-
-                    let activityVC = UIActivityViewController(
-                        activityItems: [fileURL],
-                        applicationActivities: nil
-                    )
-
-                    // iPad requires popover presentation
-                    if let popover = activityVC.popoverPresentationController {
-                        popover.sourceView = viewController.view
-                        popover.sourceRect = CGRect(x: viewController.view.bounds.midX, y: viewController.view.bounds.midY, width: 0, height: 0)
-                        popover.permittedArrowDirections = []
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let data = Data(base64Encoded: base64Data) else {
+                    let base64Length = base64Data.utf8.count
+                    DispatchQueue.main.async {
+                        debugLog("[FileDownload] base64 sa nedá dekódovať (\(base64Length) B)")
+                        // Len typ — nikdy obsah súboru ani jeho názov. Dĺžka ide
+                        // len do debug logu: správa je súčasť fingerprintu
+                        // v Diagnostike a premenlivé číslo by jednu chybu
+                        // rozdrobilo na desiatky riadkov.
+                        NativeErrorReporter.report(
+                            name: "iOSFileDownloadDecodeFailed",
+                            message: "base64 decode failed mimetype=\(mimetype)",
+                            url: Self.fileDownloadReportURL
+                        )
+                        self?.presentFileDownloadFailure()
                     }
+                    return
+                }
 
-                    viewController.present(activityVC, animated: true)
+                Self.pruneStaleDownloadDirs()
+                // Vlastný podpriečinok (rovnako ako WKDownload cesta): cieľ
+                // neexistuje, takže sa neprepíše súbor zo share sheetu, ktorý
+                // ešte beží, a zhodné názvy dvoch príloh si neprekážajú.
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("downloads/\(UUID().uuidString)", isDirectory: true)
+                let fileURL = dir.appendingPathComponent(name)
+                do {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    try data.write(to: fileURL)
                 } catch {
-                    debugLog("[FileDownload] Failed to write temp file: \(error)")
+                    let nsError = error as NSError
+                    DispatchQueue.main.async {
+                        debugLog("[FileDownload] Zápis do tmp zlyhal: \(nsError.domain) \(nsError.code)")
+                        // Len doména + kód. localizedDescription obsahuje cestu
+                        // aj s názvom súboru od usera — ten do Diagnostiky nepatrí.
+                        NativeErrorReporter.report(
+                            name: "iOSFileDownloadWriteFailed",
+                            message: "\(nsError.domain) code=\(nsError.code)",
+                            url: Self.fileDownloadReportURL
+                        )
+                        self?.presentFileDownloadFailure()
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    self?.presentShareSheet(for: fileURL)
+                }
+            }
+        }
+
+        private func presentShareSheet(for fileURL: URL) {
+            guard let presenter = topPresenter() else { return }
+            let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+            // iPad requires popover presentation
+            if let popover = activityVC.popoverPresentationController {
+                popover.sourceView = presenter.view
+                popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            presenter.present(activityVC, animated: true)
+        }
+
+        private func presentFileDownloadFailure() {
+            guard let presenter = topPresenter() else { return }
+            let alert = UIAlertController(title: "Sťahovanie zlyhalo",
+                                          message: "Súbor sa nepodarilo pripraviť na zdieľanie.",
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            presenter.present(alert, animated: true)
+        }
+
+        /// Najvrchnejší zobrazený controller. rootViewController.present(...)
+        /// ticho zlyhá, keď už niečo prezentuje (napr. JS alert z predošlého
+        /// kroku) — share sheet ani hláška by sa neukázali.
+        private func topPresenter() -> UIViewController? {
+            var top = webView?.window?.rootViewController
+            while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+                top = presented
+            }
+            return top
+        }
+
+        /// tmp/downloads/<UUID>/ z predošlých sťahovaní. Každé sťahovanie má
+        /// vlastný priečinok, takže bez upratovania by sa opakované stiahnutie
+        /// toho istého videa hromadilo až do systémového čistenia tmp. Hodina
+        /// je bezpečne dlhšia ako akýkoľvek share sheet aj WKDownload ZIP-u.
+        private static func pruneStaleDownloadDirs() {
+            let fm = FileManager.default
+            let root = fm.temporaryDirectory.appendingPathComponent("downloads", isDirectory: true)
+            guard let entries = try? fm.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles]
+            ) else { return }
+            let cutoff = Date().addingTimeInterval(-3600)
+            for entry in entries {
+                let created = (try? entry.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+                if let created = created, created < cutoff {
+                    try? fm.removeItem(at: entry)
                 }
             }
         }
@@ -1370,12 +1458,36 @@ struct WebView: UIViewRepresentable {
         }
 
         /// Názov bez ciest a riadiacich znakov — nesmie uniknúť z temp priečinka.
+        /// Rovnaké pravidlá ako safeDownloadName v client/src/utils/fileDownload.js
+        /// (web čistí už pred odoslaním, tu je to poistka pre čokoľvek iné).
         private func sanitizeDownloadName(_ name: String) -> String {
-            let cleaned = name
-                .replacingOccurrences(of: "/", with: "-")
-                .replacingOccurrences(of: "\\", with: "-")
-                .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-            return cleaned.isEmpty ? "subor" : String(cleaned.prefix(120))
+            var scalars = String.UnicodeScalarView()
+            for scalar in name.unicodeScalars {
+                let isSeparatorOrControl = scalar == "/" || scalar == "\\"
+                    || scalar.value < 0x20 || scalar.value == 0x7F
+                scalars.append(isSeparatorOrControl ? "-" : scalar)
+            }
+            let cleaned = String(scalars)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".").union(.whitespaces))
+            guard !cleaned.isEmpty else { return "subor" }
+            return Self.truncateKeepingExtension(cleaned, maxBytes: 200)
+        }
+
+        /// APFS dovolí max 255 UTF-8 bajtov na názov — dlhší zápis zlyhá. Server
+        /// reže na 200 ZNAKOV, ale š/č/ž majú po 2 bajty. Skracujeme po celých
+        /// znakoch (nerozsekne diakritiku ani emoji) a príponu necháme — podľa
+        /// nej share sheet ponúkne „Uložiť obrázok" / „Uložiť video".
+        private static func truncateKeepingExtension(_ name: String, maxBytes: Int) -> String {
+            guard name.utf8.count > maxBytes else { return name }
+            let ext = (name as NSString).pathExtension
+            let keepExt = !ext.isEmpty && ext.count < 16
+            var base = keepExt ? (name as NSString).deletingPathExtension : name
+            let suffix = keepExt ? ".\(ext)" : ""
+            while !base.isEmpty && base.utf8.count + suffix.utf8.count > maxBytes {
+                base.removeLast()
+            }
+            base = base.trimmingCharacters(in: CharacterSet(charactersIn: ".").union(.whitespaces))
+            return (base.isEmpty ? "subor" : base) + suffix
         }
     }
 }

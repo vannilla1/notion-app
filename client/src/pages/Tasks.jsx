@@ -8,6 +8,7 @@ import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPendin
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
+import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
 import { alertUnlessPlanGate } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -750,11 +751,11 @@ function Tasks() {
   const [transferItem, setTransferItem] = useState(null);
 
   // Fronta nahrávaní beží mimo tejto stránky — projekty obnovíme až keď
-  // príloha reálne dorazí na server.
-  useEffect(() => onUploadSettled(({ ok, item, message }) => {
+  // príloha reálne dorazí na server. Zlyhania (aj plánové limity) ukazuje
+  // globálne UploadQueueIndicator na každej stránke; tu by boli duplicitné.
+  useEffect(() => onUploadSettled(({ ok, item }) => {
     if (item?.kind !== 'task') return;
     if (ok) fetchTasks();
-    else if (message) alert(`Prílohu „${item.fileName}" sa nepodarilo nahrať: ${message}`);
   }), []);
 
   // Google Calendar notification
@@ -1530,11 +1531,13 @@ function Tasks() {
     };
 
     const handleTaskUpdated = (updatedTask) => {
+      // mergeTaskUpdate: emity z podúloh/príloh neposielajú contactNames
+      // ani assignedUsers — nesmú ich zmazať (viď utils/mergeTaskUpdate.js)
       setTasks(prev => prev.map(t =>
-        t.id === updatedTask.id ? updatedTask : t
+        t.id === updatedTask.id ? mergeTaskUpdate(t, updatedTask) : t
       ));
       setSelectedTask(prev =>
-        prev?.id === updatedTask.id ? updatedTask : prev
+        prev?.id === updatedTask.id ? mergeTaskUpdate(prev, updatedTask) : prev
       );
     };
 
@@ -2567,6 +2570,12 @@ function Tasks() {
       await api.delete(url);
       await fetchTasks();
     } catch (error) {
+      // 404 = súbor už na serveri nie je (zmazal ho kolega / iné zariadenie)
+      // — cieľ je splnený, len obnovíme zoznam namiesto chybovej hlášky.
+      if (error?.response?.status === 404) {
+        await fetchTasks();
+        return;
+      }
       alert('Chyba pri mazaní súboru');
     }
   };

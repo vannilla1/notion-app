@@ -14,10 +14,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.MimeTypeMap
 import android.webkit.URLUtil
 import android.widget.Toast
 import android.webkit.RenderProcessGoneDetail
@@ -32,10 +34,14 @@ import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.firebase.messaging.FirebaseMessaging
+import java.io.File
+import java.util.Date
 
 /**
  * Hlavná Activity appky.
@@ -94,14 +100,28 @@ class MainActivity : AppCompatActivity() {
      * file chooseru a doručíme doň URIs vybratých súborov po návrate z Activity
      * resultu. Ak user chooser zruší, musíme zavolať callback s null, inak by
      * WebView ostal v "čaká na súbor" stave a ďalší klik na input by nefungoval.
+     *
+     * Doručuje sa VÝHRADNE cez completeFileChooser() — WebView pri druhom
+     * doručení toho istého callbacku hodí IllegalStateException („Duplicate
+     * showFileChooser result") a appka spadne.
      */
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /** Natívna voľba „Odfotiť / Nahrať video / Vybrať súbor", kým je otvorená. */
+    private var fileSourceDialog: AlertDialog? = null
+
+    /**
+     * Súbor, do ktorého práve zapisuje appka fotoaparátu. Ukladá sa aj do
+     * onSaveInstanceState: pri nedostatku RAM systém počas fotenia náš proces
+     * zabije a po návrate treba aspoň upratať súbor. WebView callback smrť
+     * procesu (ani znovuvytvorenie Activity) neprežije — user prílohu pridá znova.
+     */
+    private var pendingCapture: File? = null
 
     /** Picker pre `<input type="file">` — zvláda single aj multiple, všetky mime typy. */
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val callback = filePathCallback ?: return@registerForActivityResult
         val uris: Array<Uri>? = when {
             result.resultCode != android.app.Activity.RESULT_OK -> null
             result.data?.clipData != null -> {
@@ -112,9 +132,23 @@ class MainActivity : AppCompatActivity() {
             result.data?.data != null -> arrayOf(result.data!!.data!!)
             else -> null
         }
-        callback.onReceiveValue(uris)
-        filePathCallback = null
+        completeFileChooser(uris)
     }
+
+    /**
+     * „Odfotiť" / „Nahrať video" — systémová appka fotoaparátu zapíše záber do
+     * nášho FileProvider URI (práva na zápis pridá framework sám z EXTRA_OUTPUT).
+     * Launchery sú registrované pri konštrukcii Activity (pred STARTED, inak
+     * registerForActivityResult hodí výnimku) — vďaka tomu ActivityResultRegistry
+     * doručí výsledok aj novej inštancii po obnove Activity.
+     */
+    private val takePictureLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { saved -> onCaptureResult(saved, CaptureKind.PHOTO) }
+
+    private val captureVideoLauncher = registerForActivityResult(
+        SizeLimitedCaptureVideo(VIDEO_SIZE_LIMIT_BYTES)
+    ) { saved -> onCaptureResult(saved, CaptureKind.VIDEO) }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,6 +156,8 @@ class MainActivity : AppCompatActivity() {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         pendingWebViewState = savedInstanceState?.getBundle(KEY_WEBVIEW_STATE)
+        pendingCapture = savedInstanceState?.getString(KEY_PENDING_CAPTURE)?.let { File(it) }
+        cleanUpStaleCaptures()
 
         webView = WebView(this).apply {
             layoutParams = android.view.ViewGroup.LayoutParams(
@@ -205,6 +241,7 @@ class MainActivity : AppCompatActivity() {
             webView.saveState(state)
             outState.putBundle(KEY_WEBVIEW_STATE, state)
         }
+        pendingCapture?.let { outState.putString(KEY_PENDING_CAPTURE, it.absolutePath) }
     }
 
     /**
@@ -371,6 +408,12 @@ class MainActivity : AppCompatActivity() {
         try {
             // webView.url je na mŕtvom rendereri null → použijeme trackovanú URL.
             val lastUrl = lastLoadedUrl ?: getString(R.string.webapp_url)
+            // Rozbehnutý výber súboru patrí mŕtvemu WebView (render proces často
+            // padá práve pri otvorenom fotoaparáte — pamäť). Zahodíme ho, aby
+            // výsledok z fotoaparátu skončil hláškou „skúste znova", nie v prázdne.
+            filePathCallback = null
+            fileSourceDialog?.dismiss()
+            fileSourceDialog = null
             rootLayout.removeView(webView)
             webView.destroy()
             webView = WebView(this).apply {
@@ -562,51 +605,263 @@ class MainActivity : AppCompatActivity() {
             }
 
             // File chooser pre HTML input[type=file] — bez override-u WebView
-            // na Androide file inputs ignoruje. ACTION_OPEN_DOCUMENT (Storage
-            // Access Framework) zvláda obrázky aj dokumenty bez runtime permissions.
-            // Rešpektuje accept mime typy aj multiple atribút z HTML.
+            // na Androide file inputs ignoruje. Voľba fotoaparát / súbory a
+            // samotné spustenie je v handleFileChooser().
             override fun onShowFileChooser(
                 webView: WebView?,
                 callback: ValueCallback<Array<Uri>>?,
                 params: FileChooserParams?
-            ): Boolean {
-                // Ak už čakáme na iný picker, zatvoríme ho s null aby sa WebView
-                // neupchalo.
-                filePathCallback?.onReceiveValue(null)
-                filePathCallback = callback
-
-                // MIME typy podľa accept atribútu z HTML inputu.
-                val acceptTypes: Array<String> = params?.acceptTypes
-                    ?.filter { it.isNotBlank() }
-                    ?.toTypedArray()
-                    ?: emptyArray()
-
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-                intent.addCategory(Intent.CATEGORY_OPENABLE)
-                if (acceptTypes.isEmpty()) {
-                    intent.type = "*/*"
-                } else if (acceptTypes.size == 1) {
-                    intent.type = acceptTypes[0]
-                } else {
-                    intent.type = "*/*"
-                    intent.putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes)
-                }
-                if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                }
-
-                try {
-                    val chooser = Intent.createChooser(intent, "Vyberte súbor")
-                    filePickerLauncher.launch(chooser)
-                } catch (e: Exception) {
-                    android.util.Log.w("MainActivity", "File chooser launch failed", e)
-                    filePathCallback?.onReceiveValue(null)
-                    filePathCallback = null
-                    return false
-                }
-                return true
-            }
+            ): Boolean = handleFileChooser(callback, params)
         }
+    }
+
+    /**
+     * `<input type="file">` z WebView.
+     *
+     * Ak input prijíma obrázky/video (alebo nemá `accept`), najprv ponúkneme
+     * natívnu voľbu „Odfotiť / Nahrať video / Vybrať súbor" — systémový výber
+     * súborov (ACTION_OPEN_DOCUMENT) fotoaparát neponúka, takže prílohu sa na
+     * Androide nedalo odfotiť priamo z appky. Vlastný dialóg namiesto
+     * EXTRA_INITIAL_INTENTS v systémovom chooseri: právo zápisu do URI sa cez
+     * initial intents u niektorých výrobcov neprenesie a fotoaparát by nemal
+     * kam fotku uložiť.
+     *
+     * Kontrakt s WebView: keď vrátime true, callback MUSÍ byť doručený presne
+     * raz (completeFileChooser) — nedoručený = input ostane zaseknutý,
+     * doručený dvakrát = IllegalStateException a pád appky.
+     */
+    private fun handleFileChooser(
+        callback: ValueCallback<Array<Uri>>?,
+        params: WebChromeClient.FileChooserParams?
+    ): Boolean {
+        if (callback == null) return false
+        // Predošlý neukončený výber (picker / dialóg) uzavrieme s null, aby sa
+        // WebView neupchalo. Listener starého dialógu sa potom už nechytí —
+        // kontroluje, či je jeho callback stále aktuálny.
+        completeFileChooser(null)
+        fileSourceDialog?.dismiss()
+        fileSourceDialog = null
+        filePathCallback = callback
+
+        val captureRequested = params?.isCaptureEnabled == true
+        val spec = FileChooserSupport.buildSpec(params?.acceptTypes, captureRequested) { ext ->
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+        }
+        val multiple = params?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        val canPhoto = spec.offerPhoto && canCapture(MediaStore.ACTION_IMAGE_CAPTURE)
+        val canVideo = spec.offerVideo && canCapture(MediaStore.ACTION_VIDEO_CAPTURE)
+
+        when {
+            // HTML `capture` atribút = rovno fotoaparát, bez voľby (ako Chrome).
+            captureRequested && (canPhoto || canVideo) ->
+                launchCapture(if (canPhoto) CaptureKind.PHOTO else CaptureKind.VIDEO)
+            canPhoto || canVideo -> showFileSourceDialog(spec, multiple, canPhoto, canVideo)
+            else -> launchDocumentPicker(spec.mimeTypes, multiple)
+        }
+        // Vždy true: callback sme prevzali a doručíme ho sami, aj pri chybe.
+        // Predtým catch vrátil false po onReceiveValue(null) → WebView doručil
+        // ten istý callback druhýkrát a appka spadla („Duplicate showFileChooser result").
+        return true
+    }
+
+    /** Jediné miesto, ktoré doručuje výsledok do WebView — zaručí „presne raz". */
+    private fun completeFileChooser(uris: Array<Uri>?) {
+        val callback = filePathCallback ?: return
+        filePathCallback = null
+        callback.onReceiveValue(uris)
+    }
+
+    private fun showFileSourceDialog(
+        spec: FileChooserSupport.Spec,
+        multiple: Boolean,
+        canPhoto: Boolean,
+        canVideo: Boolean
+    ) {
+        if (isFinishing || isDestroyed) {
+            completeFileChooser(null)
+            return
+        }
+        val owner = filePathCallback
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        if (canPhoto) {
+            labels += getString(R.string.file_chooser_take_photo)
+            actions += { launchCapture(CaptureKind.PHOTO) }
+        }
+        if (canVideo) {
+            labels += getString(R.string.file_chooser_record_video)
+            actions += { launchCapture(CaptureKind.VIDEO) }
+        }
+        labels += getString(R.string.file_chooser_pick_file)
+        actions += { launchDocumentPicker(spec.mimeTypes, multiple) }
+
+        var chosen = false
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (spec.imagesOnly) R.string.file_chooser_title_photo else R.string.file_chooser_title_file)
+            .setItems(labels.toTypedArray()) { _, which ->
+                chosen = true
+                // Medzitým mohol prísť nový výber s iným callbackom — ten nie je náš.
+                if (filePathCallback === owner) actions[which]()
+            }
+            .create()
+        // Späť, ťuk mimo dialógu aj akékoľvek iné zatvorenie bez voľby → null.
+        // Listener beží asynchrónne až po dismiss(), preto porovnávame callback:
+        // nový výber mohol medzitým nastaviť iný a ten zatvárať nesmieme.
+        dialog.setOnDismissListener {
+            if (fileSourceDialog === dialog) fileSourceDialog = null
+            if (!chosen && filePathCallback === owner) completeFileChooser(null)
+        }
+        fileSourceDialog = dialog
+        try {
+            dialog.show()
+        } catch (e: Exception) {
+            // Okno Activity už neplatí (BadTokenException) — aspoň výber súborov.
+            android.util.Log.w("MainActivity", "File source dialog failed", e)
+            fileSourceDialog = null
+            launchDocumentPicker(spec.mimeTypes, multiple)
+        }
+    }
+
+    /**
+     * Systémový výber súborov (Storage Access Framework) — obrázky aj dokumenty
+     * bez runtime oprávnení. Rešpektuje accept typy aj multiple z HTML.
+     */
+    private fun launchDocumentPicker(mimeTypes: List<String>, multiple: Boolean) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            when (mimeTypes.size) {
+                0 -> type = "*/*"
+                1 -> type = mimeTypes[0]
+                else -> {
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
+                }
+            }
+            if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            filePickerLauncher.launch(
+                Intent.createChooser(intent, getString(R.string.file_chooser_system_title))
+            )
+        } catch (e: Exception) {
+            // Zariadenie bez použiteľného DocumentsUI / choosera, SecurityException…
+            android.util.Log.w("MainActivity", "File chooser launch failed", e)
+            NativeErrorReporter.report(
+                this,
+                "AndroidFileChooserLaunchFailed",
+                "${e.javaClass.simpleName}: ${e.message.orEmpty().take(300)} mimeTypes=${mimeTypes.size} multiple=$multiple"
+            )
+            Toast.makeText(this, R.string.file_chooser_picker_failed, Toast.LENGTH_SHORT).show()
+            completeFileChooser(null)
+        }
+    }
+
+    /**
+     * Vie zariadenie odfotiť / nahrať video? Chromebook bez kamery, tablet bez
+     * appky fotoaparátu… — vtedy voľbu vôbec neponúkneme. resolveActivity()
+     * potrebuje <queries> v manifeste (package visibility od Androidu 11).
+     */
+    private fun canCapture(action: String): Boolean = try {
+        packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) &&
+            Intent(action).resolveActivity(packageManager) != null
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Spustí systémovú appku fotoaparátu so zápisom do cacheDir/captures.
+     * Súbor má príponu .jpg / .mp4 — server aj web podľa nej určujú typ prílohy.
+     */
+    private fun launchCapture(kind: CaptureKind) {
+        var file: File? = null
+        try {
+            file = FileChooserSupport.newCaptureFile(
+                File(cacheDir, FileChooserSupport.CAPTURES_DIR), kind, Date()
+            )
+            val uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, file)
+            pendingCapture = file
+            when (kind) {
+                CaptureKind.PHOTO -> takePictureLauncher.launch(uri)
+                CaptureKind.VIDEO -> captureVideoLauncher.launch(uri)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Camera launch failed", e)
+            pendingCapture = null
+            file?.delete()
+            NativeErrorReporter.report(
+                this,
+                "AndroidCameraLaunchFailed",
+                "kind=${kind.name} ${e.javaClass.simpleName}: ${e.message.orEmpty().take(300)}"
+            )
+            Toast.makeText(this, R.string.file_chooser_camera_failed, Toast.LENGTH_SHORT).show()
+            completeFileChooser(null)
+        }
+    }
+
+    /** Výsledok z fotoaparátu → WebView (alebo upratanie pri zrušení). */
+    private fun onCaptureResult(saved: Boolean, kind: CaptureKind) {
+        val file = pendingCapture
+        pendingCapture = null
+        // Len úspech + neprázdny súbor. Prázdny súbor = appka fotoaparátu nič
+        // nezapísala a server by ho aj tak odmietol.
+        val captured = if (saved && file != null && file.length() > 0) file else null
+
+        if (filePathCallback == null) {
+            // Activity bola medzitým znovu vytvorená alebo proces zabitý — WebView
+            // callback (aj stránka, ktorá o súbor žiadala) je preč, záber sa
+            // pripojiť nedá. Uprac a povedz userovi, nech to skúsi znova.
+            file?.delete()
+            if (captured != null) {
+                Toast.makeText(this, R.string.file_chooser_capture_lost, Toast.LENGTH_LONG).show()
+                NativeErrorReporter.report(this, "AndroidCaptureResultLost", "kind=${kind.name}")
+            }
+            return
+        }
+        if (captured == null) {
+            file?.delete()
+            if (saved) {
+                // Appka fotoaparátu ohlásila úspech, ale do nášho súboru nič
+                // nezapísala (niektoré OEM fotoaparáty ignorujú EXTRA_OUTPUT
+                // pri videu a uložia záznam do galérie). Bez hlášky by sa
+                // „nič nestalo" pri každom pokuse — ponúkneme cestu cez galériu.
+                Toast.makeText(this, R.string.file_chooser_capture_empty, Toast.LENGTH_LONG).show()
+                NativeErrorReporter.report(this, "AndroidCaptureEmpty", "kind=${kind.name} fileNull=${file == null}")
+            }
+            // Inak zrušené fotenie (Späť v appke fotoaparátu).
+            completeFileChooser(null)
+            return
+        }
+        val uri = try {
+            FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, captured)
+        } catch (e: Exception) {
+            NativeErrorReporter.report(
+                this,
+                "AndroidCaptureUriFailed",
+                "kind=${kind.name} ${e.javaClass.simpleName} size=${captured.length()}"
+            )
+            null
+        }
+        if (uri == null) {
+            captured.delete()
+            completeFileChooser(null)
+            return
+        }
+        completeFileChooser(arrayOf(uri))
+    }
+
+    /**
+     * Zábery staršie ako deň zmaže mimo UI vlákna (I/O nesmie brzdiť štart).
+     * Hneď po odovzdaní do WebView ich mazať nemôžeme — web súbor číta až neskôr.
+     */
+    private fun cleanUpStaleCaptures() {
+        val dir = File(cacheDir, FileChooserSupport.CAPTURES_DIR)
+        Thread {
+            try {
+                FileChooserSupport.deleteStaleCaptures(dir, System.currentTimeMillis())
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Stale capture cleanup failed", e)
+            }
+        }.start()
     }
 
     private fun maybeRequestNotificationPermission() {
@@ -741,6 +996,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Otvorený dialóg by inak „unikol" (WindowLeaked). Callback patrí
+        // zanikajúcemu WebView — vynulujeme ho, aby ho dismiss listener už
+        // nedoručoval.
+        filePathCallback = null
+        fileSourceDialog?.dismiss()
+        fileSourceDialog = null
         loadErrorOverlay.destroy()
         webView.destroy()
         // Kill swiped alebo destroy → určite nie na popredí. Ak by onPause
@@ -752,6 +1013,16 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val KEY_WEBVIEW_STATE = "prpl_webview_state"
+        private const val KEY_PENDING_CAPTURE = "prpl_pending_capture"
+
+        /** MUSÍ sedieť s android:authorities FileProvidera v AndroidManifest.xml. */
+        private const val FILE_PROVIDER_AUTHORITY = "${BuildConfig.APPLICATION_ID}.fileprovider"
+
+        /**
+         * Strop pre video z fotoaparátu = najväčší limit prílohy na serveri
+         * (úlohy/kontakty 50 MB). Bez neho by pár minút videa server vždy odmietol.
+         */
+        private const val VIDEO_SIZE_LIMIT_BYTES = 50L * 1024 * 1024
         const val EXTRA_DEEP_LINK = "deep_link"
 
         /**
@@ -765,4 +1036,15 @@ class MainActivity : AppCompatActivity() {
         @Volatile
         var isAppInForeground: Boolean = false
     }
+}
+
+/**
+ * CaptureVideo s limitom veľkosti (MediaStore.EXTRA_SIZE_LIMIT) — väčšina
+ * systémových appiek fotoaparátu nahrávanie pri limite sama zastaví.
+ */
+private class SizeLimitedCaptureVideo(
+    private val maxBytes: Long
+) : ActivityResultContracts.CaptureVideo() {
+    override fun createIntent(context: Context, input: Uri): Intent =
+        super.createIntent(context, input).putExtra(MediaStore.EXTRA_SIZE_LIMIT, maxBytes)
 }

@@ -63,8 +63,17 @@ api.interceptors.response.use(
     const isNetwork = error.code === 'ERR_NETWORK' || (!error.response && error.message !== 'canceled');
     const is503 = error.response?.status === 503;
 
+    // Multipart upload (FormData) po timeoute / výpadku siete NEopakujeme.
+    // Nevieme, či telo na server nedorazilo celé — opakovanie by vytvorilo
+    // duplicitnú správu/prílohu. Na slabom signáli navyše každý pokus začal
+    // nahrávať od nuly a po ~4 min skončil rovnakou chybou. 503 opakovať
+    // smieme: DB-readiness middleware odmietol request skôr, než sa čokoľvek
+    // zapísalo.
+    const isUpload = typeof FormData !== 'undefined' && config.data instanceof FormData;
+    const retryable = is503 || (!isUpload && (isTimeout || isNetwork));
+
     // `_noRetry` — volajúci má vlastnú slučku opakovania (AuthContext.fetchUser).
-    if (!isBlob && !config._noRetry && (isTimeout || isNetwork || is503) && config._retryCount < 3) {
+    if (!isBlob && !config._noRetry && retryable && config._retryCount < 3) {
       config._retryCount += 1;
       const delay = config._retryCount * 3000; // 3s, 6s, 9s
       await new Promise(r => setTimeout(r, delay));

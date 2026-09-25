@@ -13,9 +13,10 @@ const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
 const { logPlanGateHit } = require('../utils/planGate');
-const { attachmentFileFilter } = require('../utils/uploadFilter');
-const { trackUploadAbort } = require('../utils/uploadTracking');
-const { claimMutationKey, releaseMutationKey } = require('../utils/idempotency');
+const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
+const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
+const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
+const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../utils/idempotency');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
 const EXCLUDE_FILE_DATA = {
@@ -1384,7 +1385,8 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               }));
             };
 
-            let updatedSubtasks = req.body.subtasks !== undefined ? req.body.subtasks : task.subtasks;
+            // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
+            let updatedSubtasks = req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks;
             if (completed === true) {
               updatedSubtasks = markAllSubtasksCompleted(updatedSubtasks);
             }
@@ -1653,7 +1655,8 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       }
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
-        task.subtasks = req.body.subtasks;
+        // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
+        task.subtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
       }
 
       // Auto-complete all subtasks when main task is completed
@@ -1820,7 +1823,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           priority: priority !== undefined ? priority : ctask.priority,
           completed: completed !== undefined ? completed : ctask.completed,
           assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
-          subtasks: req.body.subtasks !== undefined ? req.body.subtasks : ctask.subtasks,
+          subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, ctask.subtasks) : ctask.subtasks,
           createdAt: ctask.createdAt,
           modifiedAt: new Date().toISOString()
         };
@@ -2113,7 +2116,9 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     // Find original task - check global tasks first (only if valid ObjectId)
     if (isValidObjectId) {
-      const globalTask = await Task.findById(req.params.id);
+      // 🔒 len v rámci vlastného prostredia — findById bez workspaceId dovolil
+      // skopírovať cudziu úlohu (názov, popis, podúlohy) do svojho prostredia
+      const globalTask = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
       if (globalTask) {
         // Deep copy to ensure subtasks are properly copied
         originalTask = JSON.parse(JSON.stringify(globalTask.toObject()));
@@ -2143,6 +2148,9 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
     if (finalContactIds.length === 0) {
       // No contacts selected - create as global task
       const duplicatedTask = new Task({
+        // Bez workspaceId save() padal na validácii (500) — duplikovanie
+        // projektu bez kontaktov nefungovalo vôbec.
+        workspaceId: req.workspaceId,
         userId: req.user.id,
         title: originalTask.title + ' (kópia)',
         description: originalTask.description || '',
@@ -2340,8 +2348,13 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
       }
     }
 
-    // Try global tasks
-    const task = await Task.findById(req.params.taskId);
+    // Try global tasks — 🔒 len v rámci vlastného prostredia. findById bez
+    // workspaceId dovolil pridať/upraviť/zmazať podúlohu v úlohe CUDZIEHO
+    // prostredia a socket potom poslal celú cudziu úlohu (aj s fileId príloh)
+    // do miestnosti útočníka.
+    const task = mongoose.Types.ObjectId.isValid(req.params.taskId)
+      ? await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId })
+      : null;
     if (task) {
       // Plan-limit pre subtasks v global projektu
       if (isSubtaskLimited && countSubtasksRecursive(task.subtasks) >= maxSubtasks) {
@@ -2547,8 +2560,13 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
       }
     }
 
-    // Try global tasks
-    const task = await Task.findById(req.params.taskId);
+    // Try global tasks — 🔒 len v rámci vlastného prostredia. findById bez
+    // workspaceId dovolil pridať/upraviť/zmazať podúlohu v úlohe CUDZIEHO
+    // prostredia a socket potom poslal celú cudziu úlohu (aj s fileId príloh)
+    // do miestnosti útočníka.
+    const task = mongoose.Types.ObjectId.isValid(req.params.taskId)
+      ? await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId })
+      : null;
     if (task) {
       const result = updateSubtaskInTask(task);
       if (result) {
@@ -2755,8 +2773,13 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
       }
     }
 
-    // Try global tasks
-    const task = await Task.findById(req.params.taskId);
+    // Try global tasks — 🔒 len v rámci vlastného prostredia. findById bez
+    // workspaceId dovolil pridať/upraviť/zmazať podúlohu v úlohe CUDZIEHO
+    // prostredia a socket potom poslal celú cudziu úlohu (aj s fileId príloh)
+    // do miestnosti útočníka.
+    const task = mongoose.Types.ObjectId.isValid(req.params.taskId)
+      ? await Task.findOne({ _id: req.params.taskId, workspaceId: req.workspaceId })
+      : null;
     if (task) {
       const deletedSubtask = findAndDeleteSubtask(task);
       if (deletedSubtask) {
@@ -2833,39 +2856,157 @@ const findSubtaskById = (subtasks, subtaskId) => {
   return null;
 };
 
+// Uloženie s retry na VersionError (optimistic lock). Pri uploade medzi
+// načítaním dokumentu a save() beží pomalý R2 upload (pri 50 MB sekundy) —
+// ak medzitým dokument zmenil iný request (kolega odklikol úlohu, ďalší
+// upload), save() cez staršiu verziu zlyhá. Stačí znova načítať čerstvý
+// dokument, zopakovať zmenu (apply) a uložiť. apply vráti false, ak cieľ
+// (úloha/podúloha/súbor) v dokumente už nie je → výsledok null.
+const saveWithVersionRetry = async (doc, refetch, apply, logLabel, logContext = {}) => {
+  for (let attempt = 0; ; attempt++) {
+    if (!apply(doc)) return null;
+    try {
+      await doc.save();
+      return doc;
+    } catch (e) {
+      if (e.name !== 'VersionError' || attempt >= 3) throw e;
+      logger.warn(`${logLabel} VersionError — retry na čerstvom dokumente`, { attempt: attempt + 1, ...logContext });
+      doc = await refetch();
+      if (!doc) return null;
+    }
+  }
+};
+
+// Živá synchronizácia príloh — upload/delete/rename predtým neposielali
+// žiadnu socket udalosť, takže kolega (alebo ten istý používateľ na inom
+// zariadení) novú fotku nevidel, kým stránku neobnovil. Tvar je zhodný
+// s ostatnými mutáciami úloh. Volá sa až PO úspešnom uložení; chyba emitu
+// nesmie zmeniť úspešnú odpoveď na 500 (klient by upload zopakoval).
+const emitGlobalTaskFilesChanged = (req, task) => {
+  try {
+    const io = req.app.get('io');
+    if (!io) return;
+    io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(task, { source: 'global', id: task._id.toString() }));
+  } catch (e) {
+    logger.warn('[Task file] Socket emit zlyhal', { error: e.message });
+  }
+};
+
+const emitContactTaskFilesChanged = (req, contact, taskId) => {
+  try {
+    const io = req.app.get('io');
+    if (!io) return;
+    io.to(`workspace-${req.workspaceId}`).emit('contact-updated', contactToPlainObject(contact));
+    const contactTask = (contact.tasks || []).find(t => t.id === taskId);
+    if (contactTask) {
+      io.to(`workspace-${req.workspaceId}`).emit('task-updated', taskToPlainObject(contactTask, {
+        contactId: contact._id.toString(),
+        contactName: contact.name,
+        source: 'contact'
+      }));
+    }
+  } catch (e) {
+    logger.warn('[Task file] Socket emit zlyhal', { error: e.message });
+  }
+};
+
+// Zobrazovaný názov prílohy — nikdy s „/" či „\" (iOS Stiahnuť by ticho
+// zlyhalo, viď sanitizeDisplayName). Prázdny/neplatný vlastný názov →
+// pôvodný názov súboru (už opravený z latin1 v attachmentFileFilter).
+const attachmentDisplayName = (customName, fallbackName) => {
+  const custom = sanitizeDisplayName(String(customName || '').trim().slice(0, 200));
+  // Vlastný názov so spustiteľnou príponou („foto.exe") sa ignoruje — súbor
+  // prešiel blocklistom pod pôvodným názvom a tak sa aj uloží.
+  if (custom && !hasBlockedExtension(custom)) return custom;
+  return sanitizeDisplayName(fallbackName) || 'súbor';
+};
+
+// Blob (ContactFile) smie ísť von len vtedy, keď patrí do workspace
+// volajúceho. Samotná prítomnosť fileId v našich metadátach nestačí —
+// files[] v podúlohách sú klientom editovateľné (PUT berie subtasks
+// verbatim), takže cudzí fileId sa dá do vlastnej úlohy „podstrčiť".
+//  - contactId == vlastník → ok
+//  - contactId iného kontaktu v TOM ISTOM workspace → ok (presun úlohy,
+//    pri ktorom prepnutie vlastníka blobu zlyhalo — contacts.js transfer)
+//  - contactId null → globálna úloha / legacy migrácia; väzbu na workspace
+//    taký blob nenesie, autorizujú ho len metadáta nájdené v req.workspaceId
+const blobBelongsToWorkspace = async (cfRow, ownerContactId, workspaceId) => {
+  if (!cfRow) return false;
+  if (!cfRow.contactId) return true;
+  if (ownerContactId && String(cfRow.contactId) === String(ownerContactId)) return true;
+  return !!(await Contact.exists({ _id: cfRow.contactId, workspaceId }));
+};
+
+// Zmazanie blobu AŽ po úspešnom uložení metadát a len v rozsahu vlastníka
+// ({ fileId, contactId }) — globálne úlohy majú contactId null. Keď blob
+// v tomto rozsahu nie je, radšej ostane sirota v R2, než by sa zmazal
+// cudzí súbor. Chyba tu už nemení odpoveď — metadáta sú preč, pre
+// používateľa je súbor zmazaný.
+const deleteTaskFileBlob = async (fileId, ownerContactId) => {
+  const filter = { fileId, contactId: ownerContactId || null };
+  try {
+    const row = await ContactFile.findOne(filter, { r2Key: 1 }).lean();
+    if (!row) {
+      logger.warn('[Task file delete] Blob v rozsahu vlastníka nenájdený — ostáva', { fileId });
+      return;
+    }
+    if (row.r2Key && fileStorage.isR2Available()) {
+      fileStorage.deleteFile(row.r2Key).catch(() => {}); // fire-and-forget
+    }
+    await ContactFile.deleteOne(filter);
+  } catch (e) {
+    logger.warn('[Task file delete] Mazanie blobu zlyhalo (metadáta už zmazané)', { fileId, error: e.message });
+  }
+};
+
 // Upload file to task
 router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
   trackUploadAbort(req, { target: 'príloha úlohy' });
   let uploadIdemKey = null;
-  upload.single('file')(req, res, async (err) => {
-    if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ message: 'Súbor je príliš veľký. Maximum je 50 MB.' });
-      }
-      return res.status(400).json({ message: err.message });
+  // Každá ne-2xx odpoveď po zabratí idempotentného kľúča ho musí uvoľniť —
+  // inak klientsky retry s tým istým uploadId dostane „200 duplicate",
+  // klient súbor z fronty zmaže a na serveri nie je nič.
+  const releaseIdem = () => {
+    if (uploadIdemKey) {
+      releaseMutationKey(uploadIdemKey);
+      uploadIdemKey = null;
     }
-    if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
+  };
+  const fail = (status, body) => {
+    releaseIdem();
+    return res.status(status).json(body);
+  };
+
+  upload.single('file')(req, res, async (err) => {
+    // multer/busboy chyby → 400 so slovenskou správou + `code`; chyby
+    // prenosu (nie používateľa) idú aj do Diagnostiky. Viď uploadTracking.js.
+    if (err) return handleUploadError(err, req, res, 'task');
+    if (!req.file) return rejectMissingFilePart(req, res, 'task');
 
     try {
       const { taskId } = req.params;
       const subtaskId = req.query.subtaskId;
 
-      // Idempotencia pre frontu nahrávaní — opakovanie po prerušenom
-      // prenose nesmie vytvoriť druhú kópiu prílohy.
+      // Idempotencia pre frontu nahrávaní — opakovanie po prerušenom prenose
+      // nesmie vytvoriť druhú kópiu prílohy. Kľúč sa berie PRED bránami
+      // (503/plán/kvóta/404): keď prvý upload prešiel a stratila sa len
+      // odpoveď, retry musí dostať „duplicate", nie 403 STORAGE_LIMIT za
+      // súbor, ktorý už je nahraný (kvóta ho už započítala). Každá ne-2xx
+      // odpoveď kľúč uvoľní cez fail()/catch, takže retry po 503 prejde.
       const uploadId = String(req.body.uploadId || '').trim().slice(0, 100);
       if (uploadId) {
-        uploadIdemKey = `upload:${req.user.id}:${uploadId}`;
-        if (!claimMutationKey(uploadIdemKey, 30 * 60 * 1000)) {
-          uploadIdemKey = null;
-          return res.json({ message: 'Súbor už bol nahraný', duplicate: true });
+        const key = `upload:${req.user.id}:${uploadId}`;
+        if (!claimMutationKey(key, 30 * 60 * 1000)) {
+          return respondToHeldUploadKey(res, key);
         }
+        uploadIdemKey = key;
       }
 
       // R2 výpadok: base64 fallback do Monga znesie len malé súbory (16 MB
       // BSON strop dokumentu, base64 +33 % expanzia) — veľké čisto odmietni,
       // inak by save() padol až po prenose celého súboru.
       if (!fileStorage.isR2Available() && req.file.size > 10 * 1024 * 1024) {
-        return res.status(503).json({ message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
+        return fail(503, { message: 'Úložisko súborov je dočasne nedostupné — súbory nad 10 MB skúste neskôr.' });
       }
 
       // Plan gate + storage kvóta — zrkadlí POST /contacts/:id/files.
@@ -2879,7 +3020,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
           ? 'Táto funkcia nie je dostupná.'
           : 'Pripájanie súborov je dostupné v plánoch Tím a Pro. Upgradujte plán pre prístup.';
         logPlanGateHit(req, { code: 'FEATURE_NOT_IN_PLAN', feature: 'attachments' });
-        return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
+        return fail(403, { message, code: 'FEATURE_NOT_IN_PLAN' });
       }
       const storageBytes = STORAGE_LIMITS[uploaderPlan];
       if (storageBytes) {
@@ -2891,7 +3032,7 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
             ? `Dosiahli ste storage limit (${usedMb}/${limitMb} MB).`
             : `Dosiahli ste storage limit pre váš plán (${usedMb}/${limitMb} MB). Upgradujte plán pre vyšší limit.`;
           logPlanGateHit(req, { code: 'STORAGE_LIMIT', feature: 'storage', limit: limitMb });
-          return res.status(403).json({ message, code: 'STORAGE_LIMIT' });
+          return fail(403, { message, code: 'STORAGE_LIMIT' });
         }
       }
 
@@ -2899,13 +3040,10 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
 
       // customName — voliteľný vlastný názov z UI (user prepíše "image.jpg").
       // Frontend posiela hotový názov vrátane prípony. Fallback na pôvodný.
-      // Limit 200 znakov ako ochrana proti zneužitiu.
-      const customName = (req.body.customName || '').trim().slice(0, 200);
-
-      // Metadata only (no Base64 data in document — stored in ContactFile collection)
+      // Limit 200 znakov ako ochrana proti zneužitiu; „/" a „\" sa nahradia.
       const fileMeta = {
         id: fileId,
-        originalName: customName || req.file.originalname,
+        originalName: attachmentDisplayName(req.body.customName, req.file.originalname),
         mimetype: req.file.mimetype,
         size: req.file.size,
         uploadedAt: new Date()
@@ -2944,26 +3082,6 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         return true;
       };
 
-      // Uloženie s retry na VersionError (optimistic lock). Medzi načítaním
-      // dokumentu a save() beží pomalý R2 upload (pri 50 MB sekundy) — ak
-      // medzitým dokument zmenil iný request (kolega odklikol úlohu, ďalší
-      // upload), save() cez staršiu verziu zlyhá. Blob v R2 už je; stačí
-      // znova načítať čerstvý dokument, aplikovať metadáta a uložiť.
-      const saveWithVersionRetry = async (doc, refetch, apply) => {
-        for (let attempt = 0; ; attempt++) {
-          if (!apply(doc)) return null; // cieľ medzitým zmizol
-          try {
-            await doc.save();
-            return doc;
-          } catch (e) {
-            if (e.name !== 'VersionError' || attempt >= 3) throw e;
-            logger.warn('[Task upload] VersionError — retry na čerstvom dokumente', { attempt: attempt + 1, taskId });
-            doc = await refetch();
-            if (!doc) return null;
-          }
-        }
-      };
-
       // Try global Task first (only if taskId is a valid ObjectId)
       if (mongoose.Types.ObjectId.isValid(taskId)) {
         const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
@@ -2971,16 +3089,20 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
           // Podúloha sa overuje PRED nahraním blobu — inak by 404 nechala
           // v R2 sirotu bez metadát.
           if (subtaskId && !findSubtaskById(task.subtasks, subtaskId)) {
-            return res.status(404).json({ message: 'Úloha nenájdená' });
+            return fail(404, { message: 'Úloha nenájdená' });
           }
           await persistFile(null); // global task — no contactId
 
           const saved = await saveWithVersionRetry(
             task,
             () => Task.findOne({ _id: taskId, workspaceId: req.workspaceId }),
-            (doc) => applyMetaToTask(doc)
+            (doc) => applyMetaToTask(doc),
+            '[Task upload]',
+            { taskId }
           );
-          if (!saved) return res.status(404).json({ message: 'Úloha nenájdená' });
+          if (!saved) return fail(404, { message: 'Úloha nenájdená' });
+          emitGlobalTaskFilesChanged(req, saved);
+          if (uploadIdemKey) markMutationDone(uploadIdemKey);
           return res.json({ message: 'Súbor nahraný', file: fileMeta });
         }
       }
@@ -2990,12 +3112,12 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         workspaceId: req.workspaceId,
         'tasks.id': taskId
       });
-      if (!contact) return res.status(404).json({ message: 'Projekt nenájdený' });
+      if (!contact) return fail(404, { message: 'Projekt nenájdený' });
 
       const contactTask = contact.tasks.find(t => t.id === taskId);
-      if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+      if (!contactTask) return fail(404, { message: 'Projekt nenájdený' });
       if (subtaskId && !findSubtaskById(contactTask.subtasks, subtaskId)) {
-        return res.status(404).json({ message: 'Úloha nenájdená' });
+        return fail(404, { message: 'Úloha nenájdená' });
       }
 
       await persistFile(contact._id);
@@ -3010,13 +3132,17 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       const savedContact = await saveWithVersionRetry(
         contact,
         () => Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': taskId }),
-        applyMetaToContact
+        applyMetaToContact,
+        '[Task upload]',
+        { taskId }
       );
-      if (!savedContact) return res.status(404).json({ message: 'Projekt nenájdený' });
+      if (!savedContact) return fail(404, { message: 'Projekt nenájdený' });
 
+      emitContactTaskFilesChanged(req, savedContact, taskId);
+      if (uploadIdemKey) markMutationDone(uploadIdemKey);
       res.json({ message: 'Súbor nahraný', file: fileMeta });
     } catch (error) {
-      if (uploadIdemKey) releaseMutationKey(uploadIdemKey);
+      releaseIdem();
       logger.error('Task file upload error', { error: error.message });
       // Zaznamenaj SKUTOČNÝ error (stack + message) do Diagnostiky — inak by
       // captureResponseErrors finish-hook zachytil len generický "HTTP 500"
@@ -3035,6 +3161,9 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
     let fileMeta;
+    // Vlastník blobu podľa miesta, kde sme metadáta našli: null = globálna
+    // úloha, inak _id kontaktu (ContactFile.contactId pri uploade).
+    let ownerContactId = null;
 
     logger.info('Task file download request', { taskId, fileId, subtaskId });
 
@@ -3046,7 +3175,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       ).lean();
       if (task) {
         if (subtaskId) {
-          const subtask = findSubtaskById(task.subtasks, subtaskId);
+          const subtask = findSubtaskById(task.subtasks || [], subtaskId);
           if (subtask) fileMeta = (subtask.files || []).find(f => f.id === fileId);
         } else {
           fileMeta = (task.files || []).find(f => f.id === fileId);
@@ -3070,8 +3199,10 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         } else {
           fileMeta = (contactTask.files || []).find(f => f.id === fileId);
         }
-        if (fileMeta) logger.info('Task file download: found in contact task', { taskId, fileId });
-        else logger.warn('Task file download: contact task found but no file', {
+        if (fileMeta) {
+          ownerContactId = contact._id;
+          logger.info('Task file download: found in contact task', { taskId, fileId });
+        } else logger.warn('Task file download: contact task found but no file', {
           taskId, fileId, subtaskId,
           taskFiles: (contactTask.files || []).map(f => f.id),
           subtaskCount: (contactTask.subtasks || []).length
@@ -3081,34 +3212,34 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
 
     if (!fileMeta) {
       logger.warn('Task file download: file metadata not found anywhere', { taskId, fileId, subtaskId });
-
-      // Last resort: try ContactFile directly (file metadata may have been lost but data is safe).
-      // Aktualizované pre R2 — najprv pozri r2Key, ak je tam, fetch z R2.
-      const directCF = await ContactFile.findOne({ fileId }, { r2Key: 1, data: 1 }).lean();
-      if (directCF) {
-        logger.info('Task file download: found in ContactFile by direct lookup (metadata lost)', { fileId, hasR2: !!directCF.r2Key });
-        let fileBuffer;
-        if (directCF.r2Key && fileStorage.isR2Available()) {
-          fileBuffer = await fileStorage.downloadFile(directCF.r2Key);
-        } else if (directCF.data) {
-          fileBuffer = Buffer.from(directCF.data, 'base64');
-        } else {
-          return res.status(404).json({ message: 'Súbor nenájdený' });
+      // Kedysi tu bol „last resort" ContactFile.findOne({ fileId }) BEZ
+      // kontroly workspace — ktokoľvek prihlásený (aj vyhodený ex-člen)
+      // stiahol cudziu prílohu len so znalosťou fileId a ľubovoľným taskId.
+      // Teraz vždy 404. Ak blob existuje, ide záznam do Diagnostiky: buď
+      // sú to stratené metadáta (reálna strata dát), alebo pokus o cudzí
+      // súbor — oboje chce admin vidieť, nie ticho obslúžiť.
+      const orphan = await ContactFile.findOne({ fileId }, { contactId: 1, r2Key: 1 }).lean();
+      if (orphan) {
+        let blobScope = 'global-or-legacy';
+        if (orphan.contactId) {
+          const inWorkspace = await Contact.exists({ _id: orphan.contactId, workspaceId: req.workspaceId });
+          blobScope = inWorkspace ? 'this-workspace' : 'other-workspace';
         }
-        res.set({
-          'Content-Type': 'application/octet-stream',
-          'Content-Disposition': `attachment; filename="${fileId}"`,
-          'Content-Length': fileBuffer.length
-        });
-        return res.send(fileBuffer);
+        const metaErr = new Error('Task file metadata not found, blob exists');
+        metaErr.name = 'TaskFileMetaMissing';
+        metaErr.status = 404;
+        recordError(metaErr, req, { taskFile: { blobScope, hasR2: !!orphan.r2Key } }).catch(() => {});
       }
-
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
     // 3-tier resolution (R2 → ContactFile.data → fileMeta.data legacy)
     let fileBuffer;
-    const contactFile = await ContactFile.findOne({ fileId }, { r2Key: 1, data: 1 }).lean();
+    const contactFile = await ContactFile.findOne({ fileId }, { r2Key: 1, data: 1, contactId: 1 }).lean();
+    if (contactFile && !(await blobBelongsToWorkspace(contactFile, ownerContactId, req.workspaceId))) {
+      logger.warn('Task file download: blob patrí inému workspace — odmietnuté', { taskId, fileId });
+      return res.status(404).json({ message: 'Súbor nenájdený' });
+    }
 
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
       try {
@@ -3124,9 +3255,11 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     } else if (fileMeta.data) {
       fileBuffer = Buffer.from(fileMeta.data, 'base64');
       logger.info('Task file download: very-legacy embedded data, migrating', { fileId });
+      // contactId podľa vlastníka — bez neho by blob úlohy v kontakte
+      // vyzeral ako globálny a scoped delete by ho nenašiel.
       ContactFile.updateOne(
         { fileId },
-        { $setOnInsert: { fileId, data: fileMeta.data } },
+        { $setOnInsert: { fileId, contactId: ownerContactId, data: fileMeta.data } },
         { upsert: true }
       ).catch(() => {});
     } else {
@@ -3147,32 +3280,50 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
 });
 
 // Delete file from task
+//
+// Poradie je bezpečnostne podstatné: 1) vlastník (úloha/podúloha) v
+// req.workspaceId, 2) súbor v jej files[] (inak 404), 3) uloženie metadát
+// s VersionError retry, 4) AŽ POTOM blob, len v rozsahu vlastníka.
+// Predtým sa blob mazal ako PRVÝ a len podľa fileId — ktokoľvek prihlásený
+// vedel zmazať dáta cudzieho workspace (dostal 404, ale bajty už boli preč)
+// a aj vlastný 404/VersionError nechal prílohu v zozname bez dát.
 router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
 
-    // Delete z oboch vrstiev: R2 (ak existuje) + ContactFile row.
-    // Najprv lookup r2Key, potom paralelne mazanie.
-    const cfRow = await ContactFile.findOne({ fileId }, { r2Key: 1 }).lean();
-    if (cfRow?.r2Key && fileStorage.isR2Available()) {
-      fileStorage.deleteFile(cfRow.r2Key).catch(() => {}); // fire-and-forget
-    }
-    await ContactFile.deleteOne({ fileId }).catch(() => {});
+    const findHolder = (taskDoc) => (subtaskId ? findSubtaskById(taskDoc.subtasks || [], subtaskId) : taskDoc);
+    const hasFile = (holder) => (holder?.files || []).some(f => f.id === fileId);
+    const removeFrom = (taskDoc) => {
+      const holder = findHolder(taskDoc);
+      if (!hasFile(holder)) return false;
+      holder.files = holder.files.filter(f => f.id !== fileId);
+      return true;
+    };
 
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
       const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
       if (task) {
-        if (subtaskId) {
-          const subtask = findSubtaskById(task.subtasks, subtaskId);
-          if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-          subtask.files = (subtask.files || []).filter(f => f.id !== fileId);
-          task.markModified('subtasks');
-        } else {
-          task.files = task.files.filter(f => f.id !== fileId);
-        }
-        await task.save();
+        const holder = findHolder(task);
+        if (!holder) return res.status(404).json({ message: 'Úloha nenájdená' });
+        if (!hasFile(holder)) return res.status(404).json({ message: 'Súbor nenájdený' });
+
+        const saved = await saveWithVersionRetry(
+          task,
+          () => Task.findOne({ _id: taskId, workspaceId: req.workspaceId }),
+          (doc) => {
+            if (!removeFrom(doc)) return false;
+            doc.markModified(subtaskId ? 'subtasks' : 'files');
+            return true;
+          },
+          '[Task file delete]',
+          { taskId }
+        );
+        if (!saved) return res.status(404).json({ message: 'Súbor nenájdený' });
+
+        await deleteTaskFileBlob(fileId, null); // globálna úloha — contactId null
+        emitGlobalTaskFilesChanged(req, saved);
         return res.json({ message: 'Súbor vymazaný' });
       }
     }
@@ -3186,16 +3337,26 @@ router.delete('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asy
 
     const contactTask = contact.tasks.find(t => t.id === taskId);
     if (!contactTask) return res.status(404).json({ message: 'Projekt nenájdený' });
+    const holder = findHolder(contactTask);
+    if (!holder) return res.status(404).json({ message: 'Úloha nenájdená' });
+    if (!hasFile(holder)) return res.status(404).json({ message: 'Súbor nenájdený' });
 
-    if (subtaskId) {
-      const subtask = findSubtaskById(contactTask.subtasks, subtaskId);
-      if (!subtask) return res.status(404).json({ message: 'Úloha nenájdená' });
-      subtask.files = (subtask.files || []).filter(f => f.id !== fileId);
-    } else {
-      contactTask.files = (contactTask.files || []).filter(f => f.id !== fileId);
-    }
-    contact.markModified('tasks');
-    await contact.save();
+    const savedContact = await saveWithVersionRetry(
+      contact,
+      () => Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': taskId }),
+      (doc) => {
+        const t = doc.tasks.find(x => x.id === taskId);
+        if (!t || !removeFrom(t)) return false;
+        doc.markModified('tasks');
+        return true;
+      },
+      '[Task file delete]',
+      { taskId }
+    );
+    if (!savedContact) return res.status(404).json({ message: 'Súbor nenájdený' });
+
+    await deleteTaskFileBlob(fileId, savedContact._id);
+    emitContactTaskFilesChanged(req, savedContact, taskId);
     res.json({ message: 'Súbor vymazaný' });
   } catch (error) {
     logger.error('Task file delete error', { error: error.message });
@@ -3209,8 +3370,15 @@ router.patch('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asyn
   try {
     const { taskId, fileId } = req.params;
     const subtaskId = req.query.subtaskId;
-    const newName = (req.body.originalName || '').trim().slice(0, 200);
+    // „/" a „\" v názve by rozbili Stiahnuť v iOS appke — viď sanitizeDisplayName.
+    const newName = sanitizeDisplayName(String(req.body.originalName || '').trim().slice(0, 200));
     if (!newName) return res.status(400).json({ message: 'Názov nesmie byť prázdny' });
+    if (hasBlockedExtension(newName)) {
+      return res.status(400).json({
+        code: 'BLOCKED_EXTENSION',
+        message: 'Tento typ súboru nie je z bezpečnostných dôvodov povolený (spustiteľný súbor).'
+      });
+    }
 
     const applyRename = (files) => {
       const f = (files || []).find(x => x.id === fileId);
@@ -3235,6 +3403,7 @@ router.patch('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asyn
         }
         if (!ok) return res.status(404).json({ message: 'Súbor nenájdený' });
         await task.save();
+        emitGlobalTaskFilesChanged(req, task);
         return res.json({ message: 'Názov upravený', originalName: newName });
       }
     }
@@ -3256,6 +3425,7 @@ router.patch('/:taskId/files/:fileId', authenticateToken, requireWorkspace, asyn
     if (!ok) return res.status(404).json({ message: 'Súbor nenájdený' });
     contact.markModified('tasks');
     await contact.save();
+    emitContactTaskFilesChanged(req, contact, taskId);
     res.json({ message: 'Názov upravený', originalName: newName });
   } catch (error) {
     logger.error('Task file rename error', { error: error.message });

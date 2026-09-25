@@ -25,6 +25,7 @@ const authHeaders = () => {
   return h;
 };
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { downscaleImage } from '../utils/imageResize';
 
 const translateErrorMessage = (message) => {
   if (!message) return 'Neznáma chyba';
@@ -1083,8 +1084,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleAvatarUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const picked = e.target.files[0];
+    if (!picked) return;
+    // Fotka z fotoaparátu má bežne 3–8 MB, limit avatara je 5 MB — zmenšíme
+    // ju na 512 px ešte v zariadení (pri zlyhaní ide pôvodný súbor).
+    const file = await downscaleImage(picked);
 
     // Pre-check PRED prenosom — server limit avatara je 5 MB (auth.js)
     if (file.size > FILE_SIZE_LIMITS.AVATAR) {

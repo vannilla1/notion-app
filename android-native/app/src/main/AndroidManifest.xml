@@ -41,6 +41,22 @@
          bez použitia by znamenalo vysvetľovať "prečo" v Data Safety form bez
          dôvodu. -->
 
+    <!-- Fotoaparát pre prílohy (MainActivity.onShowFileChooser). ZÁMERNE bez
+         android.permission.CAMERA: fotí systémová appka fotoaparátu cez
+         ACTION_IMAGE_CAPTURE / ACTION_VIDEO_CAPTURE a tie oprávnenie nepotrebujú.
+         Keby sme CAMERA deklarovali, Android by pri týchto intentoch vyžadoval
+         jeho runtime udelenie a bez neho hodil SecurityException.
+         <queries> — od Androidu 11 (package visibility) by resolveActivity() bez
+         nich nevidel appku fotoaparátu a voľba „Odfotiť" by sa nikdy neponúkla. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.VIDEO_CAPTURE" />
+        </intent>
+    </queries>
+
 
     <application
         android:name=".PrplApplication"
@@ -109,6 +125,21 @@
                 <data android:scheme="https" android:host="prplcrm.eu" android:pathPrefix="/auth" />
             </intent-filter>
         </activity>
+
+        <!-- FileProvider pre zábery z fotoaparátu (príloha „Odfotiť"). Appka
+             fotoaparátu dostane dočasné právo zapisovať LEN do jedného súboru
+             v cacheDir/captures (viď res/xml/file_paths.xml); exported=false,
+             prístup ide výhradne cez grantUriPermissions pri spustení intentu.
+             Autorita MUSÍ sedieť s MainActivity.fileProviderAuthority. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- FCM Messaging Service — Firebase SDK ho hľadá podľa intent filtra. -->
         <service

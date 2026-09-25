@@ -17,6 +17,7 @@ import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { alertUnlessPlanGate } from '../utils/planGate';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
+import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
 import FileRenameModal from '../components/FileRenameModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -182,12 +183,12 @@ function CRM() {
 
   // Fronta nahrávaní beží mimo tejto stránky (aj po jej opustení), takže
   // zoznam kontaktov obnovíme až keď príloha reálne dorazí na server.
-  useEffect(() => onUploadSettled(({ ok, item, message }) => {
+  // Zlyhania (aj plánové limity) ukazuje globálne UploadQueueIndicator na
+  // každej stránke; alert tu by bol duplicitný.
+  useEffect(() => onUploadSettled(({ ok, item }) => {
     if (item?.kind !== 'contact') return;
     if (ok) {
       api.get('/api/contacts').then(r => setContacts(r.data)).catch(() => {});
-    } else if (message) {
-      alert(`Prílohu „${item.fileName}" sa nepodarilo nahrať: ${message}`);
     }
   }), []);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
@@ -543,8 +544,10 @@ function CRM() {
 
     const handleTaskUpdated = (updatedTask) => {
       if (updatedTask.source === 'global') {
+        // mergeTaskUpdate: emity z podúloh/príloh neposielajú contactNames
+        // ani assignedUsers — nesmú ich zmazať (viď utils/mergeTaskUpdate.js)
         setGlobalTasks(prev => prev.map(t =>
-          t.id === updatedTask.id ? updatedTask : t
+          t.id === updatedTask.id ? mergeTaskUpdate(t, updatedTask) : t
         ));
       }
     };
@@ -642,6 +645,12 @@ function CRM() {
     try {
       await api.delete(`/api/contacts/${contactId}/files/${fileId}`);
     } catch (error) {
+      // 404 = súbor už na serveri nie je (zmazal ho kolega / iné zariadenie)
+      // — cieľ je splnený, len obnovíme kontakty namiesto chybovej hlášky.
+      if (error?.response?.status === 404) {
+        fetchContacts();
+        return;
+      }
       alertUnlessPlanGate(error, 'Chyba pri mazaní súboru');
     }
   };

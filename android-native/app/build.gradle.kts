@@ -29,8 +29,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 210      // production.11 — natívna obrazovka „Nepodarilo sa pripojiť" + automatické opakovanie (sieť, server 5xx)
-        versionName = "1.0.9"
+        versionCode = 211      // production.12 — fotoaparát pri prílohách
+        versionName = "1.0.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

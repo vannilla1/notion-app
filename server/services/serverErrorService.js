@@ -70,6 +70,10 @@ function normalizeStack(stack) {
 function normalizePath(path) {
   if (!path) return '';
   return path
+    // UUID (úlohy v kontaktoch, fileId príloh) — MUSÍ byť pred číselným
+    // pravidlom: to by zjedlo len úvodné číslice („/3f1c…" → „/:idf1c…")
+    // a každá úloha by v Diagnostike dostala vlastný riadok s count 1.
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/|$|\?)/gi, '/:id')
     .replace(/\/[a-f0-9]{24}/gi, '/:id') // Mongo ObjectId
     .replace(/\/\d+/g, '/:id') // číselné ID
     .replace(/\?.*$/, ''); // strip query string
@@ -104,7 +108,9 @@ function computeClientFingerprint({ name, message, stack, url }) {
 function scrubBody(body) {
   if (!body || typeof body !== 'object') return undefined;
   const clone = {};
-  const sensitive = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'secret', 'creditCard', 'cardNumber', 'cvv'];
+  // customName / originalName = používateľom napísaný názov prílohy (môže
+  // niesť meno klienta, číslo faktúry…) — do Diagnostiky nepatrí.
+  const sensitive = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'secret', 'creditCard', 'cardNumber', 'cvv', 'customName', 'originalName'];
   for (const [k, v] of Object.entries(body)) {
     if (sensitive.includes(k)) {
       clone[k] = '[FILTERED]';
@@ -119,7 +125,13 @@ function scrubBody(body) {
   return clone;
 }
 
-async function recordError(err, req) {
+/**
+ * extraContext (voliteľné) — doplnkové polia do `context` NOVÉHO záznamu,
+ * napr. { upload: { multerCode, contentLength, … } } pri odmietnutom
+ * nahrávaní. Nesmie niesť tokeny, heslá ani obsah súborov. Existujúci
+ * záznam (rovnaký fingerprint) len zvýši count — context sa neprepisuje.
+ */
+async function recordError(err, req, extraContext) {
   try {
     const fingerprint = computeFingerprint(err, req);
     if (!shouldSample(fingerprint)) return;
@@ -153,7 +165,8 @@ async function recordError(err, req) {
         context: {
           query: req?.query && Object.keys(req.query).length ? req.query : undefined,
           body: scrubBody(req?.body),
-          params: req?.params && Object.keys(req.params).length ? req.params : undefined
+          params: req?.params && Object.keys(req.params).length ? req.params : undefined,
+          ...(extraContext && typeof extraContext === 'object' ? extraContext : {})
         },
         firstSeen: now,
         lastSeen: now,

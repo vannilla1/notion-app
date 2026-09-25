@@ -16,6 +16,69 @@ import FilePreviewModal from '../components/FilePreviewModal';
 import { linkifyText } from '../utils/linkify';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { alertUnlessPlanGate } from '../utils/planGate';
+import { isAndroidNativeApp } from '../utils/platform';
+
+// ─── Prílohy správ ────────────────────────────────────────────
+// Nahrávanie prílohy na slabom signáli trvá dlhšie ako predvolených 60 s
+// z api.js — rovnaký limit ako fronta príloh kontaktov/úloh (uploadQueue).
+const MSG_UPLOAD_TIMEOUT_MS = 300000;
+const MSG_UPLOAD_TIMEOUT_TEXT = 'Nahrávanie trvalo príliš dlho — skúste to pri lepšom signáli.';
+
+// Rovnaké pravidlo ako server (routes/messages.js wouldExceedMessageDocLimit):
+// všetky prílohy správy (files, legacy attachment, prílohy komentárov) žijú
+// base64 v JEDNOM Mongo dokumente so 16 MB stropom. Kontrola PRED odoslaním
+// ušetrí prenos celého súboru, ktorý by server aj tak odmietol. Pri zmene
+// uprav obe miesta.
+const MSG_ATTACHMENT_BUDGET = 16 * 1024 * 1024 - 512 * 1024;
+const MSG_ATTACHMENT_META_OVERHEAD = 1024;
+const MSG_TOO_LARGE_TEXT = 'Prílohy tejto správy by spolu presiahli limit približne 12 MB. Ďalšie súbory pridajte do novej správy alebo k úlohe.';
+const encodedAttachmentBytes = (size) =>
+  Math.ceil(Math.max(0, Number(size) || 0) / 3) * 4 + MSG_ATTACHMENT_META_OVERHEAD;
+const msgAttachmentsWouldOverflow = (msg, newFile, { skipLegacyAttachment = false } = {}) => {
+  if (!msg || !newFile) return false;
+  let total = 0;
+  if (!skipLegacyAttachment && msg.attachment?.size) total += encodedAttachmentBytes(msg.attachment.size);
+  for (const f of msg.files || []) total += encodedAttachmentBytes(f.size);
+  for (const c of msg.comments || []) {
+    if (c?.attachment?.size) total += encodedAttachmentBytes(c.attachment.size);
+  }
+  return total + encodedAttachmentBytes(newFile.size) > MSG_ATTACHMENT_BUDGET;
+};
+
+// Videá server k správam neprijme (base64 v Mongo dokumente) — povieme to
+// skôr, než sa celé video nahrá. Prípony = rovnaký zoznam ako na serveri.
+const MSG_VIDEO_EXT_RE = /\.(mov|mp4|m4v|avi|mkv|webm|3gp|3g2|wmv|flv|mpg|mpeg|mts|m2ts)$/i;
+
+// Android appka (1.0.10+) ponúka pri výbere súboru aj „Odfotiť / Nahrať video".
+// Správy video neprijmú, tak jej cez `accept` povieme, že video nechceme —
+// dialóg potom ukáže len Odfotiť / Vybrať súbor. Na webe a v iOS appke
+// `accept` nenastavujeme (desktopové dialógy by filtrovali súbory podľa typu).
+const MSG_FILE_ACCEPT = isAndroidNativeApp() ? 'image/*,application/*,text/*,audio/*,message/*' : undefined;
+
+// Timeout / žiadna odpoveď. api.js multipart upload po timeoute zámerne
+// neopakuje (duplicity), takže volajúci musí povedať, čo sa stalo.
+const isUploadTimeout = (err) =>
+  err?.code === 'ECONNABORTED' ||
+  (!!err && !err.response && err.code !== 'ERR_CANCELED' && err.message !== 'canceled');
+
+// Čo presne sa stalo: bez siete vs. pomalý prenos. Offline okamžite zlyhá
+// bez odpovede — hláška „trvalo príliš dlho" by tam klamala.
+const uploadFailureText = (err) => {
+  if (err?.code !== 'ECONNABORTED' && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'Ste offline — príloha sa neodoslala. Skúste to znova, keď budete pripojený.';
+  }
+  if (err?.code === 'ECONNABORTED') return MSG_UPLOAD_TIMEOUT_TEXT;
+  return 'Spojenie so serverom sa prerušilo — príloha sa možno neodoslala. Skontrolujte správu a prípadne to skúste znova.';
+};
+
+// Verzia legacy prílohy do URL (?v=) — po výmene prílohy v úprave správy
+// je to nová adresa, takže HTTP cache nevráti starý súbor. Server počíta
+// to isté (routes/messages.js attachmentVersion).
+const legacyAttachmentVersion = (att) => {
+  if (att?.id) return String(att.id);
+  const ts = att?.uploadedAt ? new Date(att.uploadedAt).getTime() : NaN;
+  return Number.isFinite(ts) ? String(ts) : 'legacy';
+};
 
 const messagesHelpTips = [
   {
@@ -158,6 +221,9 @@ function Messages() {
 
   // File attachments
   const [uploadingFile, setUploadingFile] = useState(false);
+  // Percento nahrávania prílohy (null = nič sa nenahráva / bez prílohy).
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); // { file, downloadUrl } for preview modal
   const msgFileInputRef = useRef(null);
   const [activeFileMessageId, setActiveFileMessageId] = useState(null);
@@ -372,20 +438,55 @@ function Messages() {
     } catch (err) { /* ignore */ }
   };
 
-  // Pre-check veľkosti prílohy PRED prenosom — správy držia prílohy base64
-  // v Mongo dokumente, limit je preto nižší (10 MB) než pri úlohách (R2).
-  const msgFileTooBig = (file) => {
-    if (file && file.size > FILE_SIZE_LIMITS.MESSAGE_FILE) {
+  // Pre-check prílohy PRED prenosom — správy držia prílohy base64 v Mongo
+  // dokumente, limit je preto nižší (10 MB) než pri úlohách (R2) a videá
+  // server neprijme.
+  const msgFileRejected = (file) => {
+    if (!file) return false;
+    if (file.size > FILE_SIZE_LIMITS.MESSAGE_FILE) {
       alert(`Súbor má ${formatFileSize(file.size)} — maximum pre správy je ${formatFileSize(FILE_SIZE_LIMITS.MESSAGE_FILE)}.`);
+      return true;
+    }
+    if (/^video\//i.test(file.type || '') || MSG_VIDEO_EXT_RE.test(file.name || '')) {
+      alert('Videá sa k správam nedajú priložiť. Pridajte video k úlohe alebo kontaktu.');
       return true;
     }
     return false;
   };
 
+  // Súčet príloh správy by prekročil 16 MB strop dokumentu → povedz to
+  // hneď, nie až po prenose celého súboru.
+  const msgAttachmentsFull = (messageId, file, opts) => {
+    const msg = [selectedMessage, ...allMessages].find(m => m && (m.id || m._id) === messageId);
+    if (file && msgAttachmentsWouldOverflow(msg, file, opts)) {
+      alert(MSG_TOO_LARGE_TEXT);
+      return true;
+    }
+    return false;
+  };
+
+  // Axios voľby pre request s prílohou: dlhší timeout + priebeh nahrávania.
+  // Bez prílohy ostáva predvolený timeout z api.js.
+  const uploadRequestOptions = (file) => (file ? {
+    timeout: MSG_UPLOAD_TIMEOUT_MS,
+    onUploadProgress: (e) => {
+      if (e.total) setUploadProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+    }
+  } : {});
+  const progressSuffix = uploadProgress != null ? ` ${uploadProgress} %` : '';
+
+  // Po timeoute nevieme, či server prílohu uložil — načítaj správu znova,
+  // aby používateľ videl skutočný stav a neposielal súbor dvakrát.
+  const refreshSelectedMessage = (messageId) => {
+    api.get(`/api/messages/${messageId}`)
+      .then(res => setSelectedMessage(cur => (cur && (cur.id || cur._id) === messageId ? res.data : cur)))
+      .catch(() => {});
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.toUserId || !form.subject.trim()) return;
-    if (msgFileTooBig(attachment)) return;
+    if (msgFileRejected(attachment)) return;
     setSubmitting(true);
 
     try {
@@ -407,7 +508,8 @@ function Messages() {
       if (attachment) formData.append('attachment', attachment);
 
       await api.post('/api/messages', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        ...uploadRequestOptions(attachment)
       });
 
       setShowForm(false);
@@ -415,9 +517,12 @@ function Messages() {
       // setTab triggers useEffect which fetches messages — no manual fetch needed
       setTab('sent');
     } catch (err) {
-      alert(err.response?.data?.message || 'Chyba pri odosielaní');
+      alert(attachment && isUploadTimeout(err)
+        ? uploadFailureText(err)
+        : (err.response?.data?.message || 'Chyba pri odosielaní'));
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -453,14 +558,16 @@ function Messages() {
   const handleComment = async (id) => {
     if (!commentText.trim()) return;
     if (submittingComment) return; // Guard proti double-submit (napr. opakovaný Enter)
-    if (msgFileTooBig(commentAttachment)) return;
+    if (msgFileRejected(commentAttachment)) return;
+    if (msgAttachmentsFull(id, commentAttachment)) return;
     setSubmittingComment(true);
     try {
       const formData = new FormData();
       formData.append('text', commentText.trim());
       if (commentAttachment) formData.append('attachment', commentAttachment);
       const res = await api.post(`/api/messages/${id}/comment`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        ...uploadRequestOptions(commentAttachment)
       });
       setSelectedMessage(res.data);
       setCommentText('');
@@ -468,9 +575,15 @@ function Messages() {
       fetchMessages();
       fetchPendingCount();
     } catch (err) {
-      alert(err.response?.data?.message || 'Chyba');
+      if (commentAttachment && isUploadTimeout(err)) {
+        alert(uploadFailureText(err));
+        refreshSelectedMessage(id);
+      } else {
+        alert(err.response?.data?.message || 'Chyba');
+      }
     } finally {
       setSubmittingComment(false);
+      setUploadProgress(null);
     }
   };
 
@@ -513,7 +626,11 @@ function Messages() {
   };
 
   const handleEdit = async (id, editData) => {
-    if (msgFileTooBig(editData.newAttachment)) return;
+    if (savingEdit) return; // Guard proti dvojkliku počas nahrávania prílohy
+    if (msgFileRejected(editData.newAttachment)) return;
+    // Pôvodná príloha sa nahrádza → do súčtu ju nerátame (rovnako server).
+    if (msgAttachmentsFull(id, editData.newAttachment, { skipLegacyAttachment: true })) return;
+    setSavingEdit(true);
     try {
       const formData = new FormData();
       formData.append('subject', editData.subject);
@@ -531,13 +648,19 @@ function Messages() {
         formData.append('removeAttachment', 'true');
       }
       const res = await api.put(`/api/messages/${id}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        ...uploadRequestOptions(editData.newAttachment)
       });
       setSelectedMessage(res.data);
       setEditing(false);
       fetchMessages();
     } catch (err) {
-      alert(err.response?.data?.message || 'Chyba pri ukladaní');
+      alert(editData.newAttachment && isUploadTimeout(err)
+        ? uploadFailureText(err)
+        : (err.response?.data?.message || 'Chyba pri ukladaní'));
+    } finally {
+      setSavingEdit(false);
+      setUploadProgress(null);
     }
   };
 
@@ -618,20 +741,28 @@ function Messages() {
   };
 
   const handleMsgFileUpload = async (messageId, file) => {
-    if (msgFileTooBig(file)) return;
+    if (msgFileRejected(file)) return;
+    if (msgAttachmentsFull(messageId, file)) return;
     setUploadingFile(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const res = await api.post(`/api/messages/${messageId}/files`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000
+        headers: { 'Content-Type': 'multipart/form-data' },
+        ...uploadRequestOptions(file)
       });
       setSelectedMessage(res.data);
       fetchMessages();
     } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri nahrávaní súboru');
+      if (isUploadTimeout(error)) {
+        alert(uploadFailureText(error));
+        refreshSelectedMessage(messageId);
+      } else {
+        alertUnlessPlanGate(error, 'Chyba pri nahrávaní súboru');
+      }
     } finally {
       setUploadingFile(false);
+      setUploadProgress(null);
     }
   };
 
@@ -881,6 +1012,8 @@ function Messages() {
               onFileDelete={handleMsgFileDelete}
               onPreviewFile={setPreviewFile}
               uploadingFile={uploadingFile}
+              uploadProgress={uploadProgress}
+              savingEdit={savingEdit}
               getFileIcon={getFileIcon}
               formatFileSize={formatFileSize}
               isImage={isImage}
@@ -913,7 +1046,7 @@ function Messages() {
             />
           )}
         </div>
-        <input type="file" ref={msgFileInputRef} style={{ display: 'none' }} onChange={onMsgFileSelected} />
+        <input type="file" ref={msgFileInputRef} style={{ display: 'none' }} accept={MSG_FILE_ACCEPT} onChange={onMsgFileSelected} />
       </main>
       </div>
 
@@ -1050,7 +1183,7 @@ function Messages() {
               {/* Attachment */}
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary)' }}>Príloha (voliteľná)</label>
-                <input type="file" onChange={e => setAttachment(e.target.files[0] || null)}
+                <input type="file" accept={MSG_FILE_ACCEPT} onChange={e => setAttachment(e.target.files[0] || null)}
                   style={{ fontSize: '13px' }} />
                 {attachment && <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>{(attachment.size / 1024 / 1024).toFixed(1)} MB</span>}
               </div>
@@ -1059,7 +1192,7 @@ function Messages() {
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => { setShowForm(false); resetForm(); }}>Zrušiť</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting}>
-                  {submitting ? 'Odosielam...' : 'Odoslať'}
+                  {submitting ? `Odosielam...${progressSuffix}` : 'Odoslať'}
                 </button>
               </div>
             </form>
@@ -1160,7 +1293,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1286,16 +1419,16 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '13px' }}>× Odstrániť</button>
               </div>
             )}
-            <input type="file" onChange={e => setEditForm(f => ({ ...f, newAttachment: e.target.files[0] || null, removeAttachment: false }))}
+            <input type="file" accept={MSG_FILE_ACCEPT} onChange={e => setEditForm(f => ({ ...f, newAttachment: e.target.files[0] || null, removeAttachment: false }))}
               style={{ fontSize: '13px' }} />
           </div>
 
           {/* Buttons */}
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
             <button className="btn btn-secondary" onClick={() => setEditing(false)}>Zrušiť</button>
-            <button className="btn btn-primary" disabled={!editForm.subject.trim()}
+            <button className="btn btn-primary" disabled={!editForm.subject.trim() || savingEdit}
               onClick={() => onEdit(msg.id || msg._id, editForm)}>
-              Uložiť zmeny
+              {savingEdit ? `Ukladám...${uploadProgress != null ? ` ${uploadProgress} %` : ''}` : 'Uložiť zmeny'}
             </button>
           </div>
         </div>
@@ -1439,7 +1572,9 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
             <div className="task-files-list">
               {/* Legacy single attachment */}
               {msg.attachment?.originalName && (() => {
-                const legacyDlUrl = `/api/messages/${msg.id || msg._id}/attachment`;
+                // ?v= = verzia prílohy: po jej výmene v úprave je to nová URL,
+                // takže HTTP cache (aj WKWebView) nevráti pôvodný súbor.
+                const legacyDlUrl = `/api/messages/${msg.id || msg._id}/attachment?v=${encodeURIComponent(legacyAttachmentVersion(msg.attachment))}`;
                 return (
                   <div className="task-file-item">
                     <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
@@ -1471,7 +1606,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           )}
 
           {uploadingFile && (
-            <p style={{ fontSize: '12px', color: 'var(--accent-color)', marginTop: '4px' }}>Nahrávam súbor...</p>
+            <p style={{ fontSize: '12px', color: 'var(--accent-color)', marginTop: '4px' }}>Nahrávam súbor...{uploadProgress != null ? ` ${uploadProgress} %` : ''}</p>
           )}
         </div>
 
@@ -1690,7 +1825,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
               <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
                 disabled={!commentText.trim() || submittingComment}
                 style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '100px', opacity: submittingComment ? 0.75 : 1 }}>
-                {submittingComment ? 'Odosielam...' : 'Odoslať'}
+                {submittingComment ? `Odosielam...${uploadProgress != null ? ` ${uploadProgress} %` : ''}` : 'Odoslať'}
               </button>
             </div>
           </div>

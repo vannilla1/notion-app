@@ -26,12 +26,67 @@ const BLOCKED_EXTENSIONS = new Set([
   'iso', 'img', 'vhd'
 ]);
 
+/**
+ * Názov súboru z multipart hlavičky → správny Unicode.
+ *
+ * multer 1.4.5-lts.2 vytvára busboy bez defParamCharset, takže busboy dekóduje
+ * `filename="…"` ako latin1. Prehliadače (desktop, iOS, Android) ale posielajú
+ * surové UTF-8 bajty → „faktúra č. 5.pdf" sa uložilo ako „faktÃºra Ä. 5.pdf".
+ * Prílohy kontaktov/úloh to doteraz obchádzali len vďaka poľu customName;
+ * správy (messages.js) ho nemajú.
+ *
+ * Bezpečné voči dvojitému dekódovaniu: ak názov obsahuje znak mimo latin1
+ * (busboy ho už dekódoval správne, napr. z `filename*=UTF-8''…`), alebo
+ * latin1 bajty nie sú platné UTF-8 (naozaj to bol latin1), nechá ho tak.
+ */
+const normalizeUploadName = (name) => {
+  if (typeof name !== 'string' || !name) return name;
+  if (!/^[\x00-\xff]*$/.test(name)) return name;
+  if (!/[\x80-\xff]/.test(name)) return name; // čisté ASCII — nie je čo opravovať
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  return decoded.includes('\uFFFD') ? name : decoded;
+};
+
+/**
+ * Zobrazovaný názov prílohy (customName / originalName) bez znakov, ktoré
+ * rozbíjajú ukladanie na zariadení: „/" a „\" (iOS bridge fileDownload píše do
+ * tmp/<názov> → „Faktúra 3/2026" = neexistujúci podpriečinok, Stiahnuť ticho
+ * zlyhá), riadiace znaky, bodky/medzery na krajoch. Prázdny výsledok → null.
+ */
+const sanitizeDisplayName = (name) => {
+  if (typeof name !== 'string') return null;
+  const cleaned = name
+    .replace(/[\/\\]/g, '-')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .slice(0, 255);
+  return cleaned || null;
+};
+
+/**
+ * Prípona tak, ako bude uložená a ponúknutá na stiahnutie. Zobrazovaný názov
+ * prechádza sanitizeDisplayName (orezá koncové bodky, medzery, riadiace
+ * znaky) — „faktura.exe." by inak prešla blocklistom (prípona „") a uložila
+ * sa ako „faktura.exe".
+ */
+const effectiveExtension = (name) => {
+  const cleaned = sanitizeDisplayName(typeof name === 'string' ? name : '') || '';
+  const dot = cleaned.lastIndexOf('.');
+  return dot === -1 ? '' : cleaned.slice(dot + 1).toLowerCase();
+};
+
+const hasBlockedExtension = (name) => BLOCKED_EXTENSIONS.has(effectiveExtension(name));
+
 const attachmentFileFilter = (req, file, cb) => {
-  const ext = file.originalname.toLowerCase().split('.').pop();
-  if (BLOCKED_EXTENSIONS.has(ext)) {
-    return cb(new Error('Tento typ súboru nie je z bezpečnostných dôvodov povolený (spustiteľný súbor).'));
+  // Musí byť prvé: multer odovzdáva ten istý objekt ďalej ako req.file,
+  // takže oprava názvu sa prenesie do route handlera.
+  file.originalname = normalizeUploadName(file.originalname);
+  if (hasBlockedExtension(file.originalname)) {
+    const err = new Error('Tento typ súboru nie je z bezpečnostných dôvodov povolený (spustiteľný súbor).');
+    err.code = 'BLOCKED_EXTENSION';
+    return cb(err);
   }
   cb(null, true);
 };
 
-module.exports = { attachmentFileFilter, BLOCKED_EXTENSIONS };
+module.exports = { attachmentFileFilter, BLOCKED_EXTENSIONS, normalizeUploadName, sanitizeDisplayName, effectiveExtension, hasBlockedExtension };
