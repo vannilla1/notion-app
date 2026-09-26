@@ -64,6 +64,18 @@ class LoadErrorOverlay(
         view.visibility = View.GONE
     }
 
+    /**
+     * Načítanie hlavného rámca skončilo bez úspechu, ale aj bez chybového
+     * callbacku (prerušená navigácia, zriedkavé poradie callbackov). Ak prekrytie
+     * svieti a žiadny pokus nie je naplánovaný, naplánuj ďalší — inak by ostalo
+     * visieť s retryInFlight = true (návrat siete ani onResume ho nespustia).
+     */
+    fun attemptEnded() {
+        if (!isShowing || tick != null) return
+        retryInFlight = false
+        scheduleRetry()
+    }
+
     /** Activity končí — zastav odpočet, aby Handler nedržal referenciu na Activity. */
     fun destroy() {
         cancelTimer()

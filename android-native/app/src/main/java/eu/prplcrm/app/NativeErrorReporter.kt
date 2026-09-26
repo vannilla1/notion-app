@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -49,11 +50,18 @@ object NativeErrorReporter {
         return true
     }
 
+    /**
+     * @param details doplňujúce riadky (napr. trvanie výpadku, počet pokusov) —
+     *   idú ako breadcrumbs do kontextu záznamu, NIE do message: message je
+     *   súčasť fingerprintu v Diagnostike a premenlivé čísla by každý výskyt
+     *   rozbili do samostatnej skupiny.
+     */
     fun report(
         context: Context,
         name: String,
         message: String,
-        url: String = "https://prplcrm.eu/native-android"
+        url: String = "https://prplcrm.eu/native-android",
+        details: List<String> = emptyList()
     ) {
         try {
             if (!shouldSend(name)) return
@@ -66,6 +74,19 @@ object NativeErrorReporter {
                 put("url", url)
                 put("userAgent", "PrplCRM-Android/native")
                 put("release", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                if (details.isNotEmpty()) {
+                    val now = System.currentTimeMillis()
+                    put("breadcrumbs", JSONArray().apply {
+                        details.take(10).forEach { line ->
+                            put(JSONObject().apply {
+                                put("ts", now)
+                                put("category", "native")
+                                put("level", "info")
+                                put("message", line.take(300))
+                            })
+                        }
+                    })
+                }
             }.toString().toRequestBody("application/json".toMediaType())
 
             val request = Request.Builder()

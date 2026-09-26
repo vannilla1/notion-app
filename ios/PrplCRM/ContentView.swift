@@ -51,7 +51,14 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: isLocked)
         .onChange(of: loadError) { failed in
             retryTask?.cancel()
-            guard failed else { retryAttempt = 0; return }
+            // Pokus sám nastaví loadError = false a zároveň isLoading = true — vtedy
+            // sa počítadlo NEnuluje, inak by odstup nikdy nerástol (vždy 3 s).
+            // loadError = false bez načítavania = úspech inou cestou (didFinish
+            // po deep linku, kým svietil ErrorView) → vynulovať.
+            guard failed else {
+                if !isLoading { retryAttempt = 0 }
+                return
+            }
             let delays: [UInt64] = [3, 5, 10, 20, 30]
             let delay = delays[min(retryAttempt, delays.count - 1)]
             retryAttempt += 1
@@ -61,6 +68,10 @@ struct ContentView: View {
                 loadError = false
                 isLoading = true
             }
+        }
+        .onChange(of: isLoading) { loading in
+            // Stránka sa načítala (didFinish → isLoading = false bez chyby).
+            if !loading && !loadError { retryAttempt = 0 }
         }
         .onAppear {
             // If we have a saved token, require biometric auth
@@ -515,7 +526,7 @@ struct WebView: UIViewRepresentable {
         if loadError == false && isLoading == true
             && (webView.url == nil || context.coordinator.needsRetryLoad) {
             context.coordinator.needsRetryLoad = false
-            webView.load(URLRequest(url: url))
+            webView.load(URLRequest(url: context.coordinator.recoveryURL ?? url))
         }
 
         // Handle deep link from push notification tap.
@@ -598,6 +609,13 @@ struct WebView: UIViewRepresentable {
         // webView.url už nie je nil (napr. stránka sa stihla commitnúť a až
         // následná navigácia zlyhala). Nuluje updateUIView pri opakovaní.
         var needsRetryLoad = false
+        // Obnova po páde WebContent procesu: nový proces ešte nemá žiadnu stránku
+        // (biela plocha), takže zlyhanie obnovy treba riešiť ako prvé načítanie —
+        // ErrorView s opakovaním na TÚTO URL — nie tichým pokusom „pôvodná
+        // stránka ostáva". Nuluje didFinish.
+        var recoveryURL: URL?
+        // Zlyhanie načítania má ukázať ErrorView (nie je čo nechať na obrazovke).
+        var failureNeedsErrorView: Bool { !hasFinishedInitialLoad || recoveryURL != nil }
         private var didOpenExternalAuth = false
         // Nastavuje sa keď updateUIView stihne obslúžiť pendingDeepLink v tomto
         // foreground cykle — napr. Universal Link z OAuth redirectu. appWillEnter-
@@ -1069,6 +1087,15 @@ struct WebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             httpRetryAttempt = 0
+            endHttpOutage()
+            // Stránka je načítaná → čakajúce opakovanie z ErrorView už nesmie nič
+            // načítať (zahodilo by napr. práve otvorený deep link a po prvom
+            // načítaní by nikto nevypol splash). Úspech mohol prísť aj inou cestou
+            // než cez ErrorView (deep link / push tap / obnova po páde procesu).
+            needsRetryLoad = false
+            recoveryURL = nil
+            if parent.loadError { parent.loadError = false } // onChange zruší retryTask
+            if hasFinishedInitialLoad && parent.isLoading { parent.isLoading = false }
             // Inject actual safe area inset values from native
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let window = webView.window {
@@ -1111,7 +1138,7 @@ struct WebView: UIViewRepresentable {
             // v decidePolicyFor. NESMIE zobraziť "Nepodarilo sa pripojiť" ErrorView.
             if (error as NSError).code == NSURLErrorCancelled { return }
             if Self.isPolicyCancel(error) { return } // 5xx zrušené nami — rieši handleMainFrameHttpError
-            if !hasFinishedInitialLoad {
+            if failureNeedsErrorView {
                 needsRetryLoad = true
                 parent.loadError = true
                 parent.isLoading = false
@@ -1188,6 +1215,7 @@ struct WebView: UIViewRepresentable {
                     message: "WKWebView WebContent process terminated (memory jetsam, AKTÍVNA appka) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \(fullURL.absoluteString)"
                 )
             }
+            recoveryURL = restoreURL
             webView.load(URLRequest(url: restoreURL))
         }
 
@@ -1212,10 +1240,17 @@ struct WebView: UIViewRepresentable {
             // vo workspace). -999 preto NESMIE nastaviť loadError ani sa logovať.
             if nsErr.code == NSURLErrorCancelled { return }
             if Self.isPolicyCancel(error) { return } // 5xx zrušené nami — rieši handleMainFrameHttpError
-            if !hasFinishedInitialLoad {
+            if failureNeedsErrorView {
                 needsRetryLoad = true
                 parent.loadError = true
                 parent.isLoading = false
+            } else if httpOutageStart != nil {
+                // Tiché opakovanie po 5xx zlyhalo na sieti (zmena siete, appka
+                // išla na pozadie) — ďalší pokus nepríde. Výpadok servera uzavri,
+                // nech ho 60 s kontrola nenahlási a neskorší výpadok má vlastný
+                // záznam; samotná sieťová chyba sa hlási nižšie.
+                endHttpOutage()
+                httpRetryAttempt = 0
             }
             reportNativeError(
                 name: "iOSProvisionalNavigationFailed",
@@ -1227,10 +1262,10 @@ struct WebView: UIViewRepresentable {
         // Volá sa pri WebContent jetsam + failed navigation. Best-effort,
         // fire-and-forget. Endpoint je rovnaký ako pre web errory, iba
         // s platform='ios' markerom v userAgent a v kontexte.
-        private func reportNativeError(name: String, message: String) {
+        private func reportNativeError(name: String, message: String, url: URL? = nil, details: [String] = []) {
             // Deleguje na zdieľaný NativeErrorReporter (OAuthController.swift) —
             // jedna implementácia POST /api/errors/client pre celý target.
-            NativeErrorReporter.report(name: name, message: message, url: (lastURL ?? parent.url).absoluteString)
+            NativeErrorReporter.report(name: name, message: message, url: (url ?? lastURL ?? parent.url).absoluteString, details: details)
         }
 
         // Handle JavaScript alert()
@@ -1378,12 +1413,84 @@ struct WebView: UIViewRepresentable {
 
         private var httpRetryAttempt = 0
 
+        // Výpadok hlavnej stránky (5xx z CDN) — od prvého zlyhania po didFinish.
+        // Krátke 502/503/504 appka vyrieši sama (ErrorView / tiché opakovanie),
+        // preto sa do Diagnostiky hlási len výpadok, ktorý trvá dlhšie ako
+        // httpOutageReportAfter, alebo pri ktorom sa tiché opakovania vzdali.
+        // (Android 1.0.10 hlásil každé zlyhanie hneď → krátky výpadok z 25. 9.
+        // 2026, ktorý sa o pár sekúnd sám vyriešil, znovu otvoril chybu.)
+        private var httpOutageStart: Date?
+        private var httpOutageFirst: String?
+        private var httpOutageURL: URL?
+        private var httpOutageAttempts = 0
+        private var httpOutageReported = false
+        private var httpOutageLoadedBefore = false
+        private static let httpOutageReportAfter: TimeInterval = 60
+
+        private func noteHttpOutage(_ message: String, url: URL) {
+            if httpOutageStart == nil {
+                let start = Date()
+                httpOutageStart = start
+                httpOutageFirst = message
+                httpOutageURL = url
+                httpOutageAttempts = 0
+                httpOutageReported = false
+                httpOutageLoadedBefore = hasFinishedInitialLoad
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.httpOutageReportAfter) { [weak self] in
+                    self?.checkHttpOutage(start: start)
+                }
+            }
+            httpOutageAttempts += 1
+        }
+
+        private func checkHttpOutage(start: Date) {
+            guard httpOutageStart == start, !httpOutageReported else { return }
+            // Appka bola na pozadí (iOS pozastaví časovač aj opakovanie) → výpadok
+            // sa medzitým mohol vyriešiť. Daj opakovaniu šancu a over neskôr.
+            let sinceForeground = lastForegroundAt.map { Date().timeIntervalSince($0) } ?? .infinity
+            if UIApplication.shared.applicationState != .active || sinceForeground < 15 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                    self?.checkHttpOutage(start: start)
+                }
+                return
+            }
+            reportHttpOutage(gaveUp: false)
+        }
+
+        private func reportHttpOutage(gaveUp: Bool) {
+            guard let start = httpOutageStart, let message = httpOutageFirst, !httpOutageReported else { return }
+            httpOutageReported = true
+            let seconds = Int(Date().timeIntervalSince(start))
+            reportNativeError(
+                name: "iOSMainFrameUnavailable",
+                message: message,
+                url: httpOutageURL,
+                details: [
+                    gaveUp
+                        ? "Tiché opakovania sa vzdali po \(seconds) s, pokusov: \(httpOutageAttempts)"
+                        : "Stránka sa nenačítala ani po \(seconds) s, pokusov: \(httpOutageAttempts)",
+                    httpOutageLoadedBefore
+                        ? "Výpadok počas používania (stránka sa v tomto spustení už načítala)"
+                        : "Výpadok pri spustení appky (stránka sa ešte nenačítala)"
+                ]
+            )
+        }
+
+        private func endHttpOutage() {
+            guard let start = httpOutageStart else { return }
+            debugLog("[Load] výpadok hlavnej stránky vyriešený po \(Int(Date().timeIntervalSince(start))) s")
+            httpOutageStart = nil
+            httpOutageFirst = nil
+            httpOutageURL = nil
+        }
+
         private func handleMainFrameHttpError(_ webView: WKWebView, response: HTTPURLResponse) {
             let url = response.url ?? parent.url
             let safe = Self.strippedOfQuery(url) ?? url
-            reportNativeError(name: "iOSMainFrameHttpError", message: "status=\(response.statusCode) url=\(safe.absoluteString)")
-            if !hasFinishedInitialLoad {
-                // Prvé načítanie: celoobrazovkový ErrorView s automatickým opakovaním
+            noteHttpOutage("status=\(response.statusCode) url=\(safe.absoluteString)", url: safe)
+            if failureNeedsErrorView {
+                // Prvé načítanie alebo obnova po páde procesu (nie je čo nechať na
+                // obrazovke): celoobrazovkový ErrorView s automatickým opakovaním
                 // (ContentView.onChange(loadError)); needsRetryLoad zaručí, že
                 // updateUIView pri ďalšom pokuse načíta URL znova.
                 needsRetryLoad = true
@@ -1394,7 +1501,16 @@ struct WebView: UIViewRepresentable {
             // Po prvom načítaní (deep link, reload po 15 min na pozadí): pôvodná
             // stránka ostáva zobrazená a použiteľná, len to skúsime ešte 3× znova
             // s odstupom 4 s. Počítadlo sa nuluje pri úspešnom didFinish.
-            guard httpRetryAttempt < 3 else { return }
+            guard httpRetryAttempt < 3 else {
+                // Aj posledné tiché opakovanie zlyhalo — cieľ (deep link, reload)
+                // sa nenačítal a ďalší pokus už nepríde → nevyriešený výpadok.
+                // Potom stav vynulujeme: ďalšia navigácia neskôr (iný deep link)
+                // je nový pokus s vlastnými opakovaniami a vlastným hlásením.
+                reportHttpOutage(gaveUp: true)
+                endHttpOutage()
+                httpRetryAttempt = 0
+                return
+            }
             httpRetryAttempt += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self, weak webView] in
                 guard let self = self, let webView = webView else { return }

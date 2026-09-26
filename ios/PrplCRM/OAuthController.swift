@@ -516,14 +516,23 @@ enum OAuthController {
 /// súbor by vyžadoval úpravu project.pbxproj. enum (internal) je dostupné zo
 /// všetkých súborov rovnakého modulu.
 enum NativeErrorReporter {
-    static func report(name: String, message: String, url: String = "https://prplcrm.eu/native") {
-        let body: [String: Any] = [
+    /// `details` — doplňujúce riadky (trvanie výpadku, počet pokusov…) idú ako
+    /// breadcrumbs do kontextu záznamu, NIE do message: message je súčasť
+    /// fingerprintu v Diagnostike a premenlivé čísla by rozbili skupinu.
+    static func report(name: String, message: String, url: String = "https://prplcrm.eu/native", details: [String] = []) {
+        var body: [String: Any] = [
             "name": name,
             "message": message,
             "url": url,
             "userAgent": "PrplCRM-iOS/native",
             "release": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         ]
+        if !details.isEmpty {
+            let ts = Int(Date().timeIntervalSince1970 * 1000)
+            body["breadcrumbs"] = details.prefix(10).map { line -> [String: Any] in
+                ["ts": ts, "category": "native", "level": "info", "message": String(line.prefix(300))]
+            }
+        }
         // ⚠️ MUSÍ ísť na API doménu (perun-crm-api.onrender.com), NIE prplcrm.eu —
         // to je len static frontend, ktorý by na /api/errors/client vrátil
         // index.html (HTTP 200) a report by nikdy nedorazil na backend. Predošlá

@@ -14,6 +14,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.KeyEvent
 import android.view.View
@@ -67,10 +70,17 @@ class MainActivity : AppCompatActivity() {
     // Koreňový kontajner: WebView + natívne prekrytie pri zlyhaní načítania.
     private lateinit var rootLayout: FrameLayout
     private lateinit var loadErrorOverlay: LoadErrorOverlay
-    // true = aktuálna navigácia hlavného rámca zlyhala (sieť / HTTP 5xx). WebView
-    // po chybe aj tak zavolá onPageFinished (pre svoju chybovú stránku), takže
-    // prekrytie sa smie skryť len keď táto navigácia NEzlyhala.
-    private var mainFrameFailed = false
+    // Či navigácia hlavného rámca naozaj prešla (sieť / HTTP 5xx). WebView po
+    // chybe aj tak zavolá onPageFinished (pre svoju chybovú stránku), takže
+    // prekrytie sa smie skryť len keď táto navigácia NEzlyhala. Pozor na poradie
+    // callbackov pri 5xx — viď MainFrameLoadState.
+    private val loadState = MainFrameLoadState()
+    // Výpadok hlavnej stránky (od prvého zlyhania po úspešné načítanie). Do
+    // Diagnostiky ide len ten, ktorý appka nevyriešila sama do minúty — krátke
+    // 502/503/504 z CDN rieši prekrytie s opakovaním (viď LoadIncidentTracker).
+    private val loadIncident = LoadIncidentTracker(now = { SystemClock.uptimeMillis() })
+    private val incidentHandler = Handler(Looper.getMainLooper())
+    private val incidentCheck = Runnable { reportLoadIncidentIfDue() }
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     // Prediktívny back (targetSdk 36): enabled sa synchronizuje s
     // webView.canGoBack() v doUpdateVisitedHistory + po crash-recovery.
@@ -423,6 +433,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             rootLayout.addView(webView, 0) // index 0 = pod prekrytím chyby
+            loadState.reset()
             configureWebView()
             setupWebViewClients()
             // Nový WebView = prázdna história — resync prediktívneho backu
@@ -476,7 +487,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                mainFrameFailed = false // nová navigácia hlavného rámca
+                loadState.onPageStarted()
 
                 // Defence-in-depth hostname guard na NativeBridge:
                 // Ak sa WebView akýmkoľvek spôsobom dostal na cudziu doménu (napr. OAuth
@@ -524,20 +535,19 @@ class MainActivity : AppCompatActivity() {
                 // zvyšok nie je chyba našej stránky — nereportovať (šum v paneli).
                 if (error?.errorCode == ERROR_UNSUPPORTED_SCHEME) return
                 val safeUrl = sanitizeUrlForReport(request.url)
-                NativeErrorReporter.report(
-                    this@MainActivity,
-                    "AndroidWebViewError",
-                    "code=${error?.errorCode} desc=${error?.description} url=$safeUrl",
-                    safeUrl
-                )
+                val detail = "code=${error?.errorCode} desc=${error?.description} url=$safeUrl"
                 // Bez siete / DNS / timeout → namiesto Chrome „Webpage not available"
                 // ukáž natívne prekrytie s automatickým opakovaním. LEN pre chyby,
                 // ktoré má zmysel opakovať: prerušená navigácia (ERR_ABORTED —
                 // presmerovanie, window.location počas načítania, OAuth návrat) alebo
                 // zlá/zablokovaná URL nie sú výpadok a prekrytie by len preblikávalo.
                 if (isRetryableLoadError(error)) {
-                    mainFrameFailed = true
-                    loadErrorOverlay.show(offline = !isOnline())
+                    loadState.onNetworkFailure()
+                    val online = isOnline()
+                    loadErrorOverlay.show(offline = !online)
+                    recordLoadFailure(detail, safeUrl, online)
+                } else {
+                    NativeErrorReporter.report(this@MainActivity, "AndroidWebViewError", detail, safeUrl)
                 }
             }
 
@@ -546,19 +556,18 @@ class MainActivity : AppCompatActivity() {
                 if (request?.isForMainFrame != true) return
                 val safeUrl = sanitizeUrlForReport(request.url)
                 val status = errorResponse?.statusCode ?: 0
-                NativeErrorReporter.report(
-                    this@MainActivity,
-                    "AndroidWebViewHttpError",
-                    "status=$status url=$safeUrl",
-                    safeUrl
-                )
+                val detail = "status=$status url=$safeUrl"
                 // 5xx (Render/Cloudflare 502/503/504, výpadok, deploy) → WebView by
                 // inak zobrazil surovú chybovú stránku Cloudflare bez cesty von.
+                // Odpoveď prišla, takže telefón sieť má (online = true).
                 // 4xx nechávame (statický web servíruje index.html pre všetky cesty,
-                // takže na hlavnom rámci reálne nenastáva).
+                // takže na hlavnom rámci reálne nenastáva) — tá sa hlási hneď.
                 if (status >= 500) {
-                    mainFrameFailed = true
+                    loadState.onHttpFailure()
                     loadErrorOverlay.show(offline = false)
+                    recordLoadFailure(detail, safeUrl, online = true)
+                } else {
+                    NativeErrorReporter.report(this@MainActivity, "AndroidWebViewHttpError", detail, safeUrl)
                 }
             }
 
@@ -566,7 +575,12 @@ class MainActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 // Volá sa aj pre chybovú stránku po zlyhaní — skry prekrytie LEN
                 // keď táto navigácia prešla.
-                if (!mainFrameFailed) loadErrorOverlay.hide()
+                if (loadState.onPageFinished()) {
+                    loadErrorOverlay.hide()
+                    endLoadIncident()
+                } else {
+                    loadErrorOverlay.attemptEnded()
+                }
             }
 
             // História sa zmenila (aj SPA pushState) → synchronizuj prediktívny
@@ -970,6 +984,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Zlyhanie hlavnej stránky, ktoré appka rieši opakovaním. Nehlási sa hneď:
+     * prvé zlyhanie so sieťou naplánuje kontrolu o minútu a každé ďalšie ju overí.
+     * Zlyhania bez internetu v telefóne sa nehlásia (viď LoadIncidentTracker).
+     */
+    private fun recordLoadFailure(detail: String, url: String, online: Boolean) {
+        // true = prvé zlyhanie so sieťou → odtiaľ sa meria minúta do hlásenia.
+        if (loadIncident.onFailure(LoadIncidentTracker.Failure(detail, url), online)) {
+            incidentHandler.removeCallbacks(incidentCheck)
+            loadIncident.msUntilDue()?.let { incidentHandler.postDelayed(incidentCheck, it) }
+        }
+        reportLoadIncidentIfDue()
+    }
+
+    private fun reportLoadIncidentIfDue() {
+        val report = loadIncident.takeDueReport() ?: return
+        val offlineNote = if (report.offlineAttempts > 0) " (z toho bez siete: ${report.offlineAttempts})" else ""
+        NativeErrorReporter.report(
+            this,
+            "AndroidMainFrameUnavailable",
+            report.failure.message,
+            report.failure.url,
+            details = listOf(
+                "Stránka sa nenačítala ani po ${report.durationMs / 1000} s, pokusov: ${report.attempts}$offlineNote",
+                if (report.loadedBefore) "Výpadok počas používania (stránka sa v tomto spustení už načítala)"
+                else "Výpadok pri spustení appky (stránka sa ešte nenačítala)"
+            )
+        )
+    }
+
+    /** Hlavná stránka sa načítala — prípadný výpadok skončil (krátky sa nehlási). */
+    private fun endLoadIncident() {
+        val durationMs = loadIncident.onSuccess() ?: return
+        incidentHandler.removeCallbacks(incidentCheck)
+        android.util.Log.i("MainActivity", "Výpadok hlavnej stránky vyriešený po ${durationMs / 1000} s")
+    }
+
     override fun onResume() {
         super.onResume()
         webView.onResume()
@@ -1003,6 +1054,7 @@ class MainActivity : AppCompatActivity() {
         fileSourceDialog?.dismiss()
         fileSourceDialog = null
         loadErrorOverlay.destroy()
+        incidentHandler.removeCallbacks(incidentCheck)
         webView.destroy()
         // Kill swiped alebo destroy → určite nie na popredí. Ak by onPause
         // nestihlo bežat (rare race), tento fallback zabezpečí že ďalšia push
