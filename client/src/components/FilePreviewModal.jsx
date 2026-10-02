@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/api';
 import { downloadBlob } from '../utils/fileDownload';
 
@@ -49,6 +49,9 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
   const [error, setError] = useState(null);
   const [textContent, setTextContent] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  // Blob náhľadu držíme pre „Stiahnuť" — inak by sa ten istý súbor (až 50 MB)
+  // sťahoval druhýkrát, hoci už je v pamäti.
+  const blobRef = useRef(null);
 
   const fetchBlob = useCallback(async () => {
     const response = await api.get(downloadUrl, {
@@ -87,6 +90,7 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
         }
 
         if (cancelled) return;
+        blobRef.current = blob;
 
         // Text file content
         if (isTextFile(file.mimetype, file.originalName)) {
@@ -125,6 +129,7 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
 
     return () => {
       cancelled = true;
+      blobRef.current = null;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [file, fetchBlob]);
@@ -137,6 +142,11 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
   }, [onClose]);
 
   const handleDownload = async () => {
+    // Náhľad už blob stiahol — použijeme ho, bez druhého prenosu.
+    if (blobRef.current) {
+      downloadBlob(blobRef.current, file.originalName);
+      return;
+    }
     setDownloading(true);
     try {
       const response = await api.get(downloadUrl, {
@@ -145,13 +155,10 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
       });
       downloadBlob(response.data, file.originalName);
     } catch {
-      // Fallback — open in new tab
-      if (previewUrl) {
-        const a = document.createElement('a');
-        a.href = previewUrl;
-        a.download = file.originalName;
-        a.click();
-      }
+      // Pôvodný fallback <a download href=previewUrl> je v Android WebView aj
+      // iOS WKWebView tichý no-op (viď utils/fileDownload.js) — používateľ
+      // sa o zlyhaní nedozvedel. Hláška je jediná spoľahlivá cesta.
+      alert('Súbor sa nepodarilo stiahnuť.');
     } finally {
       setDownloading(false);
     }

@@ -256,6 +256,9 @@ function CRM() {
   // odpoveď nesmie prepísať aktuálny stav (FilePreviewModal to rieši
   // premennou `cancelled`, táto inline implementácia ju nemala).
   const previewReqRef = useRef(0);
+  // Blob otvoreného náhľadu — „Stiahnuť" z modalu ho použije namiesto
+  // druhého prenosu toho istého súboru (až 50 MB na mobilnej sieti).
+  const previewBlobRef = useRef(null);
 
   // Uvoľni blob URL náhľadu pri KAŽDEJ zmene (prepnutie na iný súbor) aj pri
   // opustení stránky. closePreview revoke-uje len pri explicitnom zatvorení —
@@ -699,6 +702,11 @@ function CRM() {
   };
 
   const downloadFile = async (contactId, fileId, fileName) => {
+    // Súbor otvorený v náhľade je už stiahnutý — nesťahuj ho znova.
+    if (previewFile?.id === fileId && previewBlobRef.current) {
+      downloadBlob(previewBlobRef.current, fileName);
+      return;
+    }
     setDownloadingFileId(fileId);
     try {
       const response = await api.get(`/api/contacts/${contactId}/files/${fileId}/download`, {
@@ -769,6 +777,7 @@ function CRM() {
   const openPreview = async (file, contactId) => {
     const reqId = ++previewReqRef.current;
     const isStale = () => reqId !== previewReqRef.current;
+    previewBlobRef.current = null; // blob predošlého súboru nesmie ísť na „Stiahnuť" nového
     setPreviewFile(file);
     setPreviewContact(contactId);
     setPreviewLoading(true);
@@ -802,6 +811,7 @@ function CRM() {
         }
       }
       if (isStale()) return;
+      previewBlobRef.current = blob;
 
       // Pre textové súbory načítaj obsah ako text
       const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml', '.txt'];
@@ -845,6 +855,7 @@ function CRM() {
 
   const closePreview = () => {
     previewReqRef.current++; // zneplatni prebiehajúce načítanie náhľadu
+    previewBlobRef.current = null;
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
