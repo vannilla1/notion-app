@@ -131,6 +131,9 @@ function CRM() {
   const [contacts, setContacts] = useState([]);
   const [globalTasks, setGlobalTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Zlyhanie načítania kontaktov (sieť / 5xx / studený štart) — bez tohto sa
+  // ukázal prázdny stav „Začnite pridaním prvého kontaktu", akoby kontakty zmizli.
+  const [loadError, setLoadError] = useState(false);
   const [filter, setFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -287,11 +290,14 @@ function CRM() {
 
   // Define fetch functions early so they can be used in useEffects
   const fetchContacts = useCallback(async () => {
+    setLoadError(false);
     try {
       const res = await api.get('/api/contacts');
       setContacts(res.data);
     } catch {
-      // Silently fail — contact list shows empty/loading state
+      // Chybový stav sa zobrazí len keď nemáme žiadne kontakty (prázdny
+      // zoznam) — pri refetchi nad existujúcimi dátami ostane starý zoznam.
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -1716,11 +1722,23 @@ function CRM() {
 
               {loading ? (
                 <div className="loading">Načítavam...</div>
+              ) : loadError && contacts.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">⚠️</div>
+                  <h2>Kontakty sa nepodarilo načítať</h2>
+                  <p>Skontrolujte pripojenie a skúste to znova</p>
+                  <button
+                    className="btn btn-primary empty-state-btn"
+                    onClick={() => { setLoading(true); fetchContacts(); }}
+                  >
+                    Skúsiť znova
+                  </button>
+                </div>
               ) : filteredContacts.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">👥</div>
                   <h2>Žiadne kontakty</h2>
-                  <p>Začnite pridaním vášho prvého kontaktu</p>
+                  <p>{contacts.length > 0 ? 'Žiadny kontakt nezodpovedá filtru alebo hľadaniu' : 'Začnite pridaním vášho prvého kontaktu'}</p>
                   <button
                     className="btn btn-primary empty-state-btn"
                     onClick={() => {
