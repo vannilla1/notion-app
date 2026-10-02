@@ -34,6 +34,19 @@ function truncate(s) {
   return s.slice(0, MAX_STRING_LEN) + '…';
 }
 
+// Argument console.error/warn → text. Musí byť v try: `String(a)` hodí
+// TypeError pre Object.create(null) alebo objekt s hádžucim toString /
+// Symbol.toPrimitive — a `args.map(...)` sa vyhodnocuje ako argument push()
+// ešte PRED jeho try blokom, takže výnimka by sa šírila z console.error do
+// kódu, ktorý chcel len zalogovať chybu (vrátane volaní z knižníc).
+function safeStr(a) {
+  try {
+    return typeof a === 'string' ? a : (a?.message || String(a));
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 /**
  * Vráť kópiu bufferu (array). Volá sa pri error reporte.
  */
@@ -124,7 +137,7 @@ export function installBreadcrumbInstrumentation() {
       push({
         category: 'console',
         level: 'error',
-        message: truncate(args.map(a => typeof a === 'string' ? a : (a?.message || String(a))).join(' '))
+        message: truncate(args.map(safeStr).join(' '))
       });
       return origError.apply(this, args);
     };
@@ -132,7 +145,7 @@ export function installBreadcrumbInstrumentation() {
       push({
         category: 'console',
         level: 'warning',
-        message: truncate(args.map(a => typeof a === 'string' ? a : (a?.message || String(a))).join(' '))
+        message: truncate(args.map(safeStr).join(' '))
       });
       return origWarn.apply(this, args);
     };
