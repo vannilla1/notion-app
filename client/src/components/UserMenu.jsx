@@ -1125,45 +1125,39 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const formData = new FormData();
     formData.append('avatar', file);
 
-    const token = getStoredToken();
-    const uploadUrl = `${API_URL}/auth/avatar`;
-
-    const xhr = new XMLHttpRequest();
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          const newAvatar = response.avatar;
-          const newTimestamp = Date.now();
-          setProfile(prev => ({ ...prev, avatar: newAvatar }));
-          setAvatarTimestamp(newTimestamp);
-          setMessage('Avatar bol úspešne nahraný');
-          if (onUserUpdate) {
-            onUserUpdate({ avatar: newAvatar, avatarTimestamp: newTimestamp });
-          }
-        } catch {
-          setErrors({ general: 'Chyba pri spracovaní odpovede' });
-        }
-      } else {
-        try {
-          const errorResponse = JSON.parse(xhr.responseText);
-          setErrors({ general: errorResponse.message || 'Chyba pri nahrávaní avatara' });
-        } catch {
-          setErrors({ general: `Chyba pri nahrávaní avatara (${xhr.status})` });
+    // Surový axios (nie `api`) ako zvyšok tohto súboru — nemení 401 semantiku.
+    // Pôvodný XMLHttpRequest nemal timeout ani abort/timeout handler (pri
+    // prerušení prenosu sa nenastavila žiadna chyba) a skladal hlavičku
+    // ručne aj pri chýbajúcom tokene (`Bearer null`). authHeaders() pridá
+    // Authorization len ak token existuje; axios doplní multipart boundary.
+    try {
+      const { data } = await axios.post(`${API_URL}/auth/avatar`, formData, {
+        headers: { ...authHeaders(), 'Content-Type': 'multipart/form-data' },
+        timeout: 60000
+      });
+      const newAvatar = data.avatar;
+      const newTimestamp = Date.now();
+      setProfile(prev => ({ ...prev, avatar: newAvatar }));
+      setAvatarTimestamp(newTimestamp);
+      setMessage('Avatar bol úspešne nahraný');
+      if (onUserUpdate) {
+        onUserUpdate({ avatar: newAvatar, avatarTimestamp: newTimestamp });
+      }
+    } catch (err) {
+      let msg = err.response?.data?.message;
+      if (!msg) {
+        if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+          msg = 'Nahrávanie trvalo príliš dlho';
+        } else if (err.response) {
+          msg = `Chyba pri nahrávaní avatara (${err.response.status})`;
+        } else {
+          msg = 'Chyba siete pri nahrávaní avatara';
         }
       }
-    });
-
-    xhr.addEventListener('error', () => {
-      setErrors({ general: 'Chyba siete pri nahrávaní avatara' });
-    });
-
-    xhr.open('POST', uploadUrl);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.send(formData);
-
-    e.target.value = '';
+      setErrors({ general: msg });
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleDeleteAvatar = async () => {
