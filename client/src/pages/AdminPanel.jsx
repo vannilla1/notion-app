@@ -7169,7 +7169,9 @@ function DiagActiveSection() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000); // auto-refresh každých 15s
+    // Page Visibility pauza ako v ostatných taboch — každý tick sú 2 requesty
+    // (online-users + auth-events s agregáciou audit logu), na pozadí zbytočné.
+    const t = setInterval(() => { if (!document.hidden) load(); }, 15000); // auto-refresh každých 15s
     return () => clearInterval(t);
   }, [load]);
 
