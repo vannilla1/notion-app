@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import adminApi, { API_BASE_URL } from '@/api/adminApi';
+import adminApi, { API_BASE_URL, getAdminToken, clearAdminToken } from '@/api/adminApi';
 import { downloadBlob } from '@/utils/fileDownload';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
@@ -94,19 +94,21 @@ function AdminPanel() {
   }, []);
 
   useEffect(() => {
-    // Admin token v sessionStorage (XSS hardening) — viď adminApi.js
-    const token = sessionStorage.getItem('adminToken');
+    // Admin token v sessionStorage (XSS hardening) — viď adminApi.js.
+    // getAdminToken() má try/catch — blokovaný storage (Safari private mode)
+    // nesmie zhodiť celý AdminPanel na SecurityError.
+    const token = getAdminToken();
     if (!token) {
       navigate('/admin');
     }
   }, [navigate]);
 
   const handleLogout = () => {
-    sessionStorage.removeItem('adminToken');
+    clearAdminToken();
     navigate('/admin');
   };
 
-  if (!sessionStorage.getItem('adminToken')) {
+  if (!getAdminToken()) {
     return null;
   }
 
