@@ -629,8 +629,13 @@ function CRM() {
       // po vyčerpaní reconnectionAttempts (useSocket) už nepríde a UI by
       // ostalo staré, hoci kontakt na serveri vznikol (používateľ by akciu
       // zopakoval → duplikát). Dedupe cez prev.some robí duplicitnú socket
-      // udalosť no-op.
-      if (res?.data?.id) {
+      // udalosť no-op. Rovnaký workspace guard ako v socket handleroch: ak
+      // používateľ prepol prostredie počas požiadavky, kontakt patrí do
+      // pôvodného a do aktuálneho zoznamu nepatrí.
+      const resWs = res?.data?.workspaceId;
+      const curWs = currentWorkspaceIdRef.current;
+      const sameWs = !resWs || !curWs || String(resWs) === String(curWs);
+      if (res?.data?.id && sameWs) {
         setContacts(prev => (prev.some(c => c.id === res.data.id) ? prev : [...prev, res.data]));
       }
       setNewContactForm({
