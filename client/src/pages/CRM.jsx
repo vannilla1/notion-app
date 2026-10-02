@@ -251,6 +251,11 @@ function CRM() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTextContent, setPreviewTextContent] = useState(null);
+  // Počítadlo požiadaviek náhľadu — openPreview je async bez abortu; keď
+  // používateľ pred dobehnutím otvorí iný súbor alebo modal zavrie, neskorá
+  // odpoveď nesmie prepísať aktuálny stav (FilePreviewModal to rieši
+  // premennou `cancelled`, táto inline implementácia ju nemala).
+  const previewReqRef = useRef(0);
 
   // Uvoľni blob URL náhľadu pri KAŽDEJ zmene (prepnutie na iný súbor) aj pri
   // opustení stránky. closePreview revoke-uje len pri explicitnom zatvorení —
@@ -762,6 +767,8 @@ function CRM() {
   };
 
   const openPreview = async (file, contactId) => {
+    const reqId = ++previewReqRef.current;
+    const isStale = () => reqId !== previewReqRef.current;
     setPreviewFile(file);
     setPreviewContact(contactId);
     setPreviewLoading(true);
@@ -794,6 +801,7 @@ function CRM() {
           throw firstError;
         }
       }
+      if (isStale()) return;
 
       // Pre textové súbory načítaj obsah ako text
       const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml', '.txt'];
@@ -801,12 +809,16 @@ function CRM() {
 
       if (isText) {
         const text = await blob.text();
+        if (isStale()) return;
         setPreviewTextContent(text);
       }
 
+      // Blob URL vytvárame až po kontrole — pre neaktuálnu odpoveď by ho
+      // nemal kto revoke-núť (cleanup effect sleduje len previewUrl).
       const blobUrl = URL.createObjectURL(blob);
       setPreviewUrl(blobUrl);
     } catch (error) {
+      if (isStale()) return;
       let msg = 'Neznáma chyba';
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         msg = 'Časový limit vypršal — skúste to znova';
@@ -824,13 +836,15 @@ function CRM() {
       } else {
         msg = error.message || 'Neznáma chyba';
       }
+      if (isStale()) return;
       setPreviewError('Nepodarilo sa načítať náhľad: ' + msg);
     } finally {
-      setPreviewLoading(false);
+      if (!isStale()) setPreviewLoading(false);
     }
   };
 
   const closePreview = () => {
+    previewReqRef.current++; // zneplatni prebiehajúce načítanie náhľadu
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
