@@ -537,6 +537,9 @@ function UsersTab() {
   const [deleteCandidate, setDeleteCandidate] = useState(null); // typed-confirmation delete
 
   // Filter + sort state
+  // `searchInput` je hodnota v inpute, `search` je debounced hodnota, ktorá
+  // reálne spúšťa request — inak by každý stlačený kláves = GET /api/admin/users.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [filterPlan, setFilterPlan] = useState('');
   const [filterRole, setFilterRole] = useState('');
@@ -545,8 +548,17 @@ function UsersTab() {
   const [filterDiscount, setFilterDiscount] = useState('');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
+  // Poradové číslo posledného requestu — neskoršia odpoveď staršieho requestu
+  // (napr. page=N vs. page=1 pri zmene filtra) nesmie prepísať novší výsledok.
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const fetchUsers = useCallback(async (silent = false) => {
+    const reqId = ++reqIdRef.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = { page, limit, sort: sortBy, order: sortOrder };
@@ -557,13 +569,16 @@ function UsersTab() {
       if (filterStripe) params.hasStripe = filterStripe;
       if (filterDiscount) params.hasDiscount = filterDiscount;
       const res = await adminApi.get('/api/admin/users', { params });
+      if (reqId !== reqIdRef.current) return; // stale odpoveď — medzitým odišiel novší request
       setUsers(res.data.users || []);
       setTotal(res.data.total || 0);
       setBreakdown(res.data.breakdown || {});
     } catch { /* ignore */ }
     finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [page, limit, sortBy, sortOrder, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount]);
 
@@ -734,8 +749,8 @@ function UsersTab() {
         <input
           type="text"
           placeholder="🔍 Hľadať username / email..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
           className="form-input sa-search"
           style={{ flex: '1 1 200px', minWidth: 180 }}
         />
@@ -765,12 +780,12 @@ function UsersTab() {
           <option value="">Zľava ?</option>
           <option value="true">🏷️ Má zľavu</option>
         </select>
-        {(search || filterPlan || filterRole || filterActive || filterStripe || filterDiscount) && (
+        {(searchInput || search || filterPlan || filterRole || filterActive || filterStripe || filterDiscount) && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: 12, padding: '4px 10px' }}
             onClick={() => {
-              setSearch(''); setFilterPlan(''); setFilterRole('');
+              setSearchInput(''); setSearch(''); setFilterPlan(''); setFilterRole('');
               setFilterActive(''); setFilterStripe(''); setFilterDiscount('');
             }}
           >
@@ -1401,15 +1416,24 @@ function WorkspacesTab() {
   const [wsDetailLoading, setWsDetailLoading] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
 
-  // Filter + sort
+  // Filter + sort (searchInput = hodnota v inpute, search = debounced → request;
+  // rovnaký vzor ako UsersTab)
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterOwnerPlan, setFilterOwnerPlan] = useState('');
   const [filterStripe, setFilterStripe] = useState('');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
+  const reqIdRef = useRef(0); // ochrana pred stale odpoveďou (viď UsersTab)
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const fetchWorkspaces = useCallback(async (silent = false) => {
+    const reqId = ++reqIdRef.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = { page, limit, sort: sortBy, order: sortOrder };
@@ -1418,13 +1442,16 @@ function WorkspacesTab() {
       if (filterOwnerPlan) params.ownerPlan = filterOwnerPlan;
       if (filterStripe) params.hasStripe = filterStripe;
       const res = await adminApi.get('/api/admin/workspaces', { params });
+      if (reqId !== reqIdRef.current) return; // stale odpoveď
       setWorkspaces(res.data.workspaces || []);
       setTotal(res.data.total || 0);
       setBreakdown(res.data.breakdown || {});
     } catch { /* ignore */ }
     finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [page, limit, sortBy, sortOrder, search, filterStatus, filterOwnerPlan, filterStripe]);
 
@@ -1508,8 +1535,8 @@ function WorkspacesTab() {
         <input
           type="text"
           placeholder="🔍 Hľadať workspace podľa názvu..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="form-input sa-search"
           style={{ flex: '1 1 220px', minWidth: 200 }}
         />
@@ -1530,11 +1557,11 @@ function WorkspacesTab() {
           <option value="true">💳 Má Stripe</option>
           <option value="false">Bez Stripe</option>
         </select>
-        {(search || filterStatus || filterOwnerPlan || filterStripe) && (
+        {(searchInput || search || filterStatus || filterOwnerPlan || filterStripe) && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: 12, padding: '4px 10px' }}
-            onClick={() => { setSearch(''); setFilterStatus(''); setFilterOwnerPlan(''); setFilterStripe(''); }}
+            onClick={() => { setSearchInput(''); setSearch(''); setFilterStatus(''); setFilterOwnerPlan(''); setFilterStripe(''); }}
           >
             ✕ Vymazať filtre
           </button>
