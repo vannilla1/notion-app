@@ -68,7 +68,14 @@ export default function NotificationPreferences({ onClose }) {
     setPrefs(prev => ({ ...prev, [key]: next }));
     try {
       const res = await api.put('/api/auth/notification-preferences', { [key]: next });
-      setPrefs({ ...DEFAULT_PREFS, ...res.data });
+      // Mergujeme len prepínaný kľúč (server ostáva autoritou preň). Celý
+      // objekt zo servera by prepísal optimistický stav iného toggle-u, ktorý
+      // používateľ stihol prepnúť počas letu tohto requestu — `disabled`
+      // blokuje iba práve ukladaný kľúč.
+      setPrefs(prev => ({
+        ...prev,
+        [key]: typeof res.data?.[key] === 'boolean' ? res.data[key] : next
+      }));
     } catch {
       // rollback
       setPrefs(prev => ({ ...prev, [key]: !next }));
