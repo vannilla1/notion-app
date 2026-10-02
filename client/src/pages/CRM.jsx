@@ -737,12 +737,6 @@ function CRM() {
       .catch(() => alert('Chyba pri exporte'));
   };
 
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
   const getFileIcon = (mimetype) => {
     if (mimetype?.startsWith('image/')) return '🖼️';
     if (mimetype === 'application/pdf') return '📄';
@@ -768,9 +762,13 @@ function CRM() {
     return officeTypes.includes(mimetype);
   };
 
+  // Jediný zoznam textových prípon — používa ho openPreview (načítanie
+  // obsahu) aj render (vetva <pre>). Dva rôzne zoznamy spôsobovali, že .txt
+  // s ne-text/* mimetype (napr. application/octet-stream z Android pickera)
+  // sa stiahol, ale v náhľade sa neukázal.
   const isTextFile = (mimetype, filename) => {
     if (mimetype?.startsWith('text/')) return true;
-    const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml'];
+    const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml', '.txt'];
     return textExtensions.some(ext => filename?.toLowerCase().endsWith(ext));
   };
 
@@ -814,10 +812,7 @@ function CRM() {
       previewBlobRef.current = blob;
 
       // Pre textové súbory načítaj obsah ako text
-      const textExtensions = ['.json', '.xml', '.csv', '.md', '.js', '.ts', '.css', '.html', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.sql', '.sh', '.yml', '.yaml', '.txt'];
-      const isText = file.mimetype?.startsWith('text/') || textExtensions.some(ext => file.originalName?.toLowerCase().endsWith(ext));
-
-      if (isText) {
+      if (isTextFile(file.mimetype, file.originalName)) {
         const text = await blob.text();
         if (isStale()) return;
         setPreviewTextContent(text);
