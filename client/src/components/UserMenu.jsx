@@ -1255,6 +1255,27 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
+  // Jediná cesta na vytvorenie prostredia z mobilného formulára — volá ju
+  // Enter v inpute aj tlačidlo „Vytvoriť“. Guard creatingWorkspaceSubmitting
+  // bránil dvojitému odoslaniu len pri tlačidle; Enter ho obchádzal, takže
+  // dvojité stlačenie (alebo Enter + klik) počas čakania na server vytvorilo
+  // dve prostredia.
+  const submitCreateWorkspace = async () => {
+    const trimmed = newWorkspaceName.trim();
+    if (!trimmed || creatingWorkspaceSubmitting) return;
+    setCreatingWorkspaceSubmitting(true);
+    try {
+      // Backend očakáva { name: '...' }, nie čistý string.
+      await createWorkspace({ name: trimmed });
+      setNewWorkspaceName('');
+      setCreatingWorkspace(false);
+      window.location.href = '/app';
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Nepodarilo sa vytvoriť prostredie');
+      setCreatingWorkspaceSubmitting(false);
+    }
+  };
+
   return (
     <div className="user-menu" ref={menuRef}>
       <button
@@ -1418,17 +1439,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         placeholder="Názov prostredia..."
                         className="mobile-workspace-input"
                         autoFocus
-                        onKeyDown={async (e) => {
-                          if (e.key === 'Enter' && newWorkspaceName.trim()) {
-                            try {
-                              // Backend očakáva { name: '...' }, nie čistý string.
-                              await createWorkspace({ name: newWorkspaceName.trim() });
-                              setNewWorkspaceName('');
-                              setCreatingWorkspace(false);
-                              window.location.href = '/app';
-                            } catch (err) {
-                              alert(err?.response?.data?.message || 'Nepodarilo sa vytvoriť prostredie');
-                            }
+                        disabled={creatingWorkspaceSubmitting}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitCreateWorkspace();
                           }
                           if (e.key === 'Escape') {
                             setCreatingWorkspace(false);
@@ -1451,20 +1466,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                           type="button"
                           className="mobile-workspace-btn mobile-workspace-btn-confirm"
                           disabled={!newWorkspaceName.trim() || creatingWorkspaceSubmitting}
-                          onClick={async () => {
-                            const trimmed = newWorkspaceName.trim();
-                            if (!trimmed || creatingWorkspaceSubmitting) return;
-                            setCreatingWorkspaceSubmitting(true);
-                            try {
-                              await createWorkspace({ name: trimmed });
-                              setNewWorkspaceName('');
-                              setCreatingWorkspace(false);
-                              window.location.href = '/app';
-                            } catch (err) {
-                              alert(err?.response?.data?.message || 'Nepodarilo sa vytvoriť prostredie');
-                              setCreatingWorkspaceSubmitting(false);
-                            }
-                          }}
+                          onClick={submitCreateWorkspace}
                         >
                           {creatingWorkspaceSubmitting ? 'Vytváram…' : 'Vytvoriť'}
                         </button>
