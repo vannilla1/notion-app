@@ -408,7 +408,12 @@ function AppContent() {
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
           (location.pathname === '/tasks' && params.get('highlightTask')) ||
           (location.pathname === '/messages' && params.get('highlight'))) {
-        sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
+        // Safari „Blokovať všetky cookies" / embedded prehliadače: už prístup
+        // k sessionStorage hádže SecurityError — výnimka z effectu by zhodila
+        // celý React strom (AppErrorBoundary). Deep link je nice-to-have.
+        try {
+          sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
+        } catch { /* storage blokovaný */ }
       }
     }
   }, [location.pathname, location.search, isAuthenticated]);
@@ -418,9 +423,14 @@ function AppContent() {
 
     // Check immediately
     const checkAndNavigate = () => {
-      const pendingLink = sessionStorage.getItem('pendingDeepLink');
+      let pendingLink = null;
+      try {
+        pendingLink = sessionStorage.getItem('pendingDeepLink');
+        if (pendingLink) sessionStorage.removeItem('pendingDeepLink');
+      } catch {
+        return false; // storage blokovaný — viď komentár pri setItem vyššie
+      }
       if (pendingLink) {
-        sessionStorage.removeItem('pendingDeepLink');
         const sep = pendingLink.includes('?') ? '&' : '?';
         // navigateWithWorkspace handles workspace switch if link has ws=
         navigateWithWorkspace(pendingLink + sep + '_t=' + Date.now());
