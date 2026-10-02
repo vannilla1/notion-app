@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,6 +19,17 @@ function NotificationToast() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(areNotificationsEnabled());
   const { socket, isConnected } = useSocket();
   const navigate = useNavigate();
+  // Bežiace auto-dismiss timery — pri unmounte (logout, prechod na /admin)
+  // by inak po 5 s volali setToasts na odmontovanom komponente.
+  const timersRef = useRef(new Set());
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -46,9 +57,11 @@ function NotificationToast() {
       return newToasts.slice(-5);
     });
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timersRef.current.delete(timer);
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
+    timersRef.current.add(timer);
   }, []);
 
   const removeToast = useCallback((id) => {
