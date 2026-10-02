@@ -113,8 +113,21 @@ function AnnouncementModal({ announcement, onClose, onDismiss }) {
   const showGooglePlay = !inIosShell;
   const showAppStore = true;
 
+  // Escape zatvorí modal — rovnaký vzor ako ConfirmModal.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Trieda modal-overlay aktivuje globálny iOS zámok scrollu tela
+  // (MutationObserver v App.jsx hľadá výlučne '.modal-overlay') — rovnako
+  // ako HelpGuide a WhatsNewModal. Vizuál (z-index, pozadie) preberá
+  // .announcement-modal-overlay, ktorá je v CSS definovaná neskôr.
   return (
-    <div className="announcement-modal-overlay" onClick={onClose}>
+    <div className="announcement-modal-overlay modal-overlay" onClick={onClose}>
       <div className="announcement-modal" onClick={(e) => e.stopPropagation()}>
         <button className="announcement-modal-close" onClick={onClose} aria-label="Zatvoriť">×</button>
 
