@@ -178,11 +178,15 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   }, []);
 
+  // Poll beží len kým je dropdown otvorený — `unreadByWs` sa zobrazuje iba
+  // v ňom (mobilný zoznam prostredí). Na desktope aj pri zavretom menu by
+  // to bol zbytočný 5. nezávislý 30 s poller na jednej stránke.
   useEffect(() => {
+    if (!isOpen) return undefined;
     fetchUnreadByWs();
     const interval = setInterval(fetchUnreadByWs, 30000);
     return () => clearInterval(interval);
-  }, [fetchUnreadByWs]);
+  }, [isOpen, fetchUnreadByWs]);
 
   // Po OAuth návrate z Google (query ?google_calendar=connected | ?google_tasks=connected)
   // automaticky otvoríme "Synchronizácia kalendára" modal a scrollneme k relevantnej
