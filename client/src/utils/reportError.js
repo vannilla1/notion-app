@@ -178,6 +178,30 @@ function shouldSend(payload) {
 }
 
 /**
+ * URL pre report BEZ citlivých tokenov. Plné location.href by do DB chýb
+ * (ServerError, admin Diagnostika, zálohy) ukladalo ako plaintext:
+ *   - session JWT z OAuth callbacku (/auth/callback#token=JWT),
+ *   - jednorazový token resetu hesla (/reset-password?token=),
+ *   - token pozvánky (/invite/:token, /login?invite=).
+ * Hash sa zahodí celý, známe query kľúče sa prepíšu, token v ceste /invite/
+ * sa nahradí. hashKey() aj server (serverErrorService) používajú len pathname,
+ * takže dedup/fingerprint ďalej fungujú (všetky pozvánky sa zlúčia — žiaduce).
+ */
+function safeUrl() {
+  try {
+    const u = new URL(location.href);
+    u.hash = '';
+    for (const k of ['token', 'invite', 'code']) {
+      if (u.searchParams.has(k)) u.searchParams.set(k, '[redacted]');
+    }
+    u.pathname = u.pathname.replace(/^\/invite\/[^/]+/, '/invite/[redacted]');
+    return u.toString();
+  } catch {
+    try { return location.pathname; } catch { return ''; }
+  }
+}
+
+/**
  * @param {object} payload
  * @param {string} payload.message
  * @param {string} [payload.name]
@@ -198,7 +222,7 @@ export function reportError(payload) {
       componentStack: payload.componentStack ? String(payload.componentStack).slice(0, 5000) : undefined,
       line: payload.line,
       column: payload.column,
-      url: location.href,
+      url: safeUrl(),
       userAgent: navigator.userAgent,
       release: resolveRelease(),
       // Snímka posledných ~30 breadcrumbs (navigation, fetch, clicks, console).
