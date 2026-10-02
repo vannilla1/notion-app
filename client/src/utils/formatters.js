@@ -56,8 +56,10 @@ export const formatRelativeTime = (dateString) => {
   const now = new Date();
   const diffMs = now - date;
   // Budúci dátum (termíny úloh) má záporný diff → všetky vetvy nižšie by
-  // vrátili 'práve teraz'. Zobrazíme ho ako bežný dátum.
-  if (diffMs < 0) return formatDate(dateString);
+  // vrátili 'práve teraz'. Zobrazíme ho ako bežný dátum. Tolerancia 60 s:
+  // práve vytvorený záznam má serverový čas, ktorý môže byť o pár sekúnd
+  // pred hodinami klienta — ten má ostať 'práve teraz', nie dátum.
+  if (diffMs < -60000) return formatDate(dateString);
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
