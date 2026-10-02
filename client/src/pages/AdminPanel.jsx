@@ -605,6 +605,13 @@ function UsersTab() {
     setPage(1);
   }, [search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
 
+  // Výber (checkedIds) sa viaže len na aktuálne zobrazenú stranu — pri zmene
+  // strany / filtra / sortu ho nulujeme, inak by hromadná akcia zasiahla aj
+  // userov, ktorí už nie sú v tabuľke a counter „N vybraných“ by klamal.
+  useEffect(() => {
+    setCheckedIds(new Set());
+  }, [page, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
+
   const openUserDetail = (userId) => {
     setSelectedUser(userId);
     setUserDetailLoading(true);
