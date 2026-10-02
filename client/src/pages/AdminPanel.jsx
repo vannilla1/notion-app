@@ -5812,6 +5812,9 @@ function PromoCodesTab() {
 
   const copyQRUrl = () => {
     if (!qrModal) return;
+    // Bez guardu by `navigator.clipboard` undefined (HTTP, starý prehliadač,
+    // iframe bez povolenia) hodil synchronný TypeError, ktorý .catch nechytí.
+    if (!navigator.clipboard?.writeText) { alert('Schránka nie je dostupná v tomto prehliadači.'); return; }
     navigator.clipboard.writeText(qrModal.url).then(
       () => alert('URL skopírovaná do schránky'),
       () => alert('Nepodarilo sa skopírovať')
@@ -6695,6 +6698,9 @@ Workspace: ${err.workspaceId || 'N/A'}
 URL: ${err.url || '—'}
 User agent: ${err.userAgent || '—'}
 `;
+    // Feature guard — mimo secure contextu je navigator.clipboard undefined
+    // a volanie by spadlo na synchronnom TypeError bez hlášky.
+    if (!navigator.clipboard?.writeText) { alert('Schránka nie je dostupná v tomto prehliadači.'); return; }
     navigator.clipboard.writeText(prompt).then(() => {
       alert('Skopírované do schránky. Vlož do Claude Code.');
     }).catch(() => alert('Kopírovanie zlyhalo'));
