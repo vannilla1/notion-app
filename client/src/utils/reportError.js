@@ -60,7 +60,10 @@ function isChunkLoadError(message) {
   return CHUNK_LOAD_PATTERNS.some(p => p.test(String(message || '')));
 }
 
-function maybeAutoReload(message) {
+// Exportované aj pre RouteErrorBoundary (App.jsx) — React v produkcii chyby
+// zachytené boundary NEposiela na window 'error', takže zlyhanie lazy chunku
+// po deployi by inak skončilo v červenom okne namiesto auto-reloadu.
+export function maybeAutoReload(message) {
   if (!isChunkLoadError(message)) return false;
   try {
     // Reload-loop guard: nereload-uj ak už sme práve teraz reload-li.

@@ -14,6 +14,7 @@ import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
 import { removeStoredToken } from './utils/authStorage';
+import { reportError, maybeAutoReload } from './utils/reportError';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -68,6 +69,18 @@ class RouteErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // Lazy chunk failures (Failed to fetch dynamically imported module).
     // Bez ErrorBoundary by React tichom unmount-oval celý strom → biela.
+    //
+    // Stale chunk po deployi (starý index.html → neexistujúci hash) → reload
+    // s 60 s cooldownom (sessionStorage), rovnako ako globálny 'error' handler.
+    // React v produkcii chyby zachytené boundary na window 'error' neposiela,
+    // takže bez tohto by sa auto-reload ani hlásenie do Diagnostiky nespustili.
+    if (maybeAutoReload(error?.message)) return;
+    reportError({
+      name: error?.name,
+      message: error?.message || 'Route render error',
+      stack: error?.stack,
+      componentStack: info?.componentStack
+    });
     console.error('[RouteErrorBoundary] caught:', error?.message);
   }
   render() {
