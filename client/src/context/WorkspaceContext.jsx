@@ -215,6 +215,10 @@ export const WorkspaceProvider = ({ children }) => {
     // — to bola "cross-workspace push notification" regresia, commit c18a9b2.)
     setCurrentWorkspaceId(workspaceId);
     setStoredWorkspaceId(workspaceId);
+    // Úspešný POST /switch = server potvrdil členstvo → používateľ prostredie má.
+    // Bez tohto by po prijatí pozvánky (AcceptInvite → switchWorkspace) používateľ
+    // bez predošlého prostredia skončil na /app znova vo WorkspaceSetup.
+    setNeedsWorkspace(false);
     if (result?.workspace) {
       setCurrentWorkspace(result.workspace);
     } else {

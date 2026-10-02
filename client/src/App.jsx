@@ -533,7 +533,11 @@ function AppContent() {
     return <LoadingGate />;
   }
 
-  if (isAuthenticated && needsWorkspace) {
+  // Verejné stránky (/invite/:token, /vop, /ochrana-udajov, /auth/callback, ...)
+  // nesmie WorkspaceSetup prekryť — prihlásený používateľ bez prostredia
+  // (nový účet, opustené/zmazané prostredia) by inak z e-mailového odkazu
+  // nikdy neuvidel AcceptInvite (WorkspaceSetup pozná len ručný kód, nie token).
+  if (isAuthenticated && needsWorkspace && !isPublicPage) {
     return <WorkspaceSetup />;
   }
 
