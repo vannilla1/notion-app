@@ -226,7 +226,7 @@ function WorkspaceMembers() {
             Správy
           </button>
           <NotificationBell />
-          <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
+          <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>
 
