@@ -80,18 +80,31 @@ function AcceptInvite() {
     return () => { cancelled = true; };
   }, [token, isAuthenticated, authLoading, authWaitExpired]);
 
+  // Timer presmerovania po prijatí — pri unmounte (používateľ odišiel zo
+  // stránky skôr) sa zruší, inak by navigate('/app') dobehol mimo stránky.
+  const redirectRef = useRef(null);
+  useEffect(() => () => clearTimeout(redirectRef.current), []);
+
   const handleAccept = async () => {
     setAccepting(true);
     setError('');
     try {
       const result = await acceptInvitation(token);
       setSuccess(result.message);
-      if (result.workspaceId) {
-        await switchWorkspace(result.workspaceId);
-      } else {
-        await fetchWorkspaces();
+      // Pozvánka je na serveri už prijatá — switch/fetch je best-effort.
+      // V spoločnom try by prechodná chyba switchu ukázala „Chyba pri
+      // prijímaní pozvánky“ a presmerovanie by nenastalo; /app si workspace
+      // načíta sám.
+      try {
+        if (result.workspaceId) {
+          await switchWorkspace(result.workspaceId);
+        } else {
+          await fetchWorkspaces();
+        }
+      } catch {
+        /* best-effort */
       }
-      setTimeout(() => navigate('/app'), 2000);
+      redirectRef.current = setTimeout(() => navigate('/app'), 2000);
     } catch (err) {
       setError(err.response?.data?.message || 'Chyba pri prijímaní pozvánky');
     } finally {
