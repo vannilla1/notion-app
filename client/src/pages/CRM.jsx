@@ -181,9 +181,6 @@ function CRM() {
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
   const [showNotesFor, setShowNotesFor] = useState(null);
 
-  // File states
-  const [uploadingFile, setUploadingFile] = useState(null);
-
   // Fronta nahrávaní beží mimo tejto stránky (aj po jej opustení), takže
   // zoznam kontaktov obnovíme až keď príloha reálne dorazí na server.
   // Zlyhania (aj plánové limity) ukazuje globálne UploadQueueIndicator na
@@ -762,11 +759,6 @@ function CRM() {
     if (mimetype?.includes('word')) return '📝';
     if (mimetype?.includes('excel') || mimetype?.includes('spreadsheet')) return '📊';
     return '📎';
-  };
-
-  const canPreview = () => {
-    // Všetky súbory môžu mať náhľad
-    return true;
   };
 
   const isOfficeDocument = (mimetype) => {
@@ -1940,7 +1932,7 @@ function CRM() {
                             <div className="files-section-header">
                               <span>Súbory</span>
                               <label className="btn btn-secondary btn-sm file-upload-btn">
-                                {uploadingFile === contact.id ? 'Nahrávam...' : '+ Pridať súbor'}
+                                + Pridať súbor
                                 <input
                                   type="file"
                                   hidden
@@ -1953,7 +1945,6 @@ function CRM() {
                                     if (f) { primeMobileKeyboard(); setPendingUpload({ file: f, contactId: contact.id }); }
                                     e.target.value = '';
                                   }}
-                                  disabled={uploadingFile === contact.id}
                                 />
                               </label>
                             </div>
@@ -1963,31 +1954,29 @@ function CRM() {
                                 {contact.files.map(file => (
                                   <div key={file.id} className="file-item">
                                     <span
-                                      className={`file-icon ${canPreview(file.mimetype) ? 'clickable' : ''}`}
-                                      onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
-                                      title={canPreview(file.mimetype) ? 'Zobraziť náhľad' : ''}
+                                      className="file-icon clickable"
+                                      onClick={() => openPreview(file, contact.id)}
+                                      title="Zobraziť náhľad"
                                     >
                                       {getFileIcon(file.mimetype)}
                                     </span>
                                     <div className="file-info">
                                       <span
-                                        className={`file-name ${canPreview(file.mimetype) ? 'clickable' : ''}`}
-                                        onClick={() => canPreview(file.mimetype) && openPreview(file, contact.id)}
+                                        className="file-name clickable"
+                                        onClick={() => openPreview(file, contact.id)}
                                       >
                                         {file.originalName}
                                       </span>
                                       <span className="file-size">{formatFileSize(file.size)}</span>
                                     </div>
                                     <div className="file-actions">
-                                      {canPreview(file.mimetype) && (
-                                        <button
-                                          onClick={() => openPreview(file, contact.id)}
-                                          className="btn-icon-sm"
-                                          title="Náhľad"
-                                        >
-                                          👁️
-                                        </button>
-                                      )}
+                                      <button
+                                        onClick={() => openPreview(file, contact.id)}
+                                        className="btn-icon-sm"
+                                        title="Náhľad"
+                                      >
+                                        👁️
+                                      </button>
                                       <button
                                         onClick={() => downloadFile(contact.id, file.id, file.originalName)}
                                         className="btn-icon-sm"
