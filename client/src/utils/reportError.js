@@ -259,6 +259,19 @@ export function reportError(payload) {
   }
 }
 
+// Popis ne-Error dôvodu rejectu. JSON.stringify hádže pre cyklický objekt
+// (axios config, DOM uzol, React fiber) alebo BigInt — a bežal priamo
+// v 'unhandledrejection' listeneri, mimo try bloku reportError. Vznikla tak
+// druhá window 'error' udalosť ("Converting circular structure to JSON")
+// a pôvodná príčina sa do Diagnostiky nedostala.
+function describeReason(r) {
+  try {
+    return JSON.stringify(r).slice(0, 500);
+  } catch {
+    try { return String(r).slice(0, 500); } catch { return 'Unserializable rejection reason'; }
+  }
+}
+
 /**
  * Napojí globálne browser listenery. Volá sa raz z main.jsx.
  */
@@ -287,7 +300,7 @@ export function installGlobalErrorHandlers() {
     if (!reason) return;
     const message = reason instanceof Error
       ? (reason.message || 'Unhandled promise rejection')
-      : (typeof reason === 'string' ? reason : JSON.stringify(reason).slice(0, 500));
+      : (typeof reason === 'string' ? reason : describeReason(reason));
     if (maybeAutoReload(message)) return;
     if (reason instanceof Error) {
       reportError({
