@@ -6611,6 +6611,7 @@ function DiagErrorsSection() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [filter, setFilter] = useState({ resolved: 'false', search: '', source: 'all' });
+  const [searchInput, setSearchInput] = useState(''); // hodnota v inpute, do filter.search ide až po potvrdení
   const [selected, setSelected] = useState(null);
 
   // `silent` = true pri polling refresh — neukazuje full-page loading overlay,
@@ -6639,6 +6640,16 @@ function DiagErrorsSection() {
   }, [page, filter.resolved, filter.source, filter.search]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Hľadanie sa potvrdzuje Enterom / tlačidlom „Hľadať“ (searchInput →
+  // filter.search), nie pri každom znaku — inak išli 2 requesty (errors +
+  // stats) na každý kláves a Enter spúšťal ďalší duplicitný load() k tomu,
+  // čo už odpálil efekt vyššie. Ak sa nič nezmenilo, Enter = explicitný refresh.
+  const applySearch = () => {
+    if (searchInput === filter.search && page === 1) { load(); return; }
+    setFilter((f) => ({ ...f, search: searchInput }));
+    setPage(1);
+  };
 
   // Auto-refresh — pozastaví sa keď:
   //  a) používateľ má otvorený detail modal (selected !== null) — nechceme
@@ -6737,12 +6748,12 @@ User agent: ${err.userAgent || '—'}
         <input
           type="text"
           placeholder="Hľadať v message / path..."
-          value={filter.search}
-          onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') applySearch(); }}
           style={{ flex: 1, minWidth: '200px', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
         />
-        <button onClick={() => { setPage(1); load(); }} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
+        <button onClick={applySearch} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
         <button
           onClick={() => load(true)}
           className="btn btn-secondary"
