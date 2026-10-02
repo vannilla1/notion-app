@@ -1317,8 +1317,18 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
     removeAttachment: false
   });
 
-  // Reset edit form when message changes
+  // Reset edit form when message changes.
+  // fetchMessages (socket event, návrat z pozadia, prepnutie workspacu) nahradí
+  // selectedMessage NOVÝM objektom aj pri nezmenenom obsahu — počas úpravy tej
+  // istej správy formulár nereseteujeme, inak by sa rozpísaný text stratil.
+  // Po uložení/zrušení (editing=false) alebo pri otvorení INEJ správy (iné id,
+  // napr. deep-link z notifikácie) sa formulár naplní aktuálnymi hodnotami.
+  const editMsgId = msg.id || msg._id;
+  const editMsgIdRef = useRef(editMsgId);
   useEffect(() => {
+    const sameMessage = editMsgIdRef.current === editMsgId;
+    editMsgIdRef.current = editMsgId;
+    if (editing && sameMessage) return;
     setEditForm({
       subject: msg.subject || '',
       description: msg.description || '',
@@ -1330,7 +1340,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
       newAttachment: null,
       removeAttachment: false
     });
-  }, [msg]);
+  }, [msg, editing]);
 
   const handleLinkedChangeEdit = (lType, lId) => {
     let name = '';
