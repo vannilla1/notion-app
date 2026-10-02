@@ -283,6 +283,13 @@ function CRM() {
   const [highlightedContactId, setHighlightedContactId] = useState(null);
   const [highlightedContactIds, setHighlightedContactIds] = useState(new Set());
   const pendingHighlightRef = useRef(null);
+  // Časovače scroll/highlight deep-linku — zrušia sa pri unmounte, aby po
+  // rýchlom odchode zo stránky nebežali nad odpojeným komponentom.
+  const timersRef = useRef([]);
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+  }, []);
 
   // Auto-highlight kontaktov vytvorených/zmenených v poslednych 24h.
   // Konzistentne s Tasks.isNewOrModified — jednotný indikátor naprieč
@@ -447,11 +454,11 @@ function CRM() {
           setHighlightedContactIds(ids);
           const firstId = [...ids][0];
           setExpandedContact(firstId);
-          setTimeout(() => {
+          timersRef.current.push(setTimeout(() => {
             const el = document.querySelector(`[data-contact-id="${firstId}"]`);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 200);
-          setTimeout(() => setHighlightedContactIds(new Set()), 4000);
+          }, 200));
+          timersRef.current.push(setTimeout(() => setHighlightedContactIds(new Set()), 4000));
         }
       }).catch(() => {});
     }
@@ -470,17 +477,17 @@ function CRM() {
       setHighlightedContactId(contactId);
 
       // Scroll to contact after DOM renders with expanded contact
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
         if (contactElement) {
           contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-      }, 300);
+      }, 300));
 
       // Remove highlight after 3 seconds
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         setHighlightedContactId(null);
-      }, 3000);
+      }, 3000));
     }
   }, [contacts]);
 
