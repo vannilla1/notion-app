@@ -3316,7 +3316,6 @@ function ActivityFeedTab() {
   const [userDetailId, setUserDetailId] = useState(null);
   const [userDetail, setUserDetail] = useState(null);
   const timerRef = useRef(null);
-  const scrollRef = useRef(null);
 
   const fetchEvents = useCallback((opts = {}) => {
     const params = new URLSearchParams();
@@ -3365,13 +3364,10 @@ function ActivityFeedTab() {
 
   // Detect manual scroll — keď je užívateľ ďaleko od top, pauznime auto-refresh
   // aby mu nový event neskočil pod prst pri čítaní starších záznamov.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => setPaused(el.scrollTop > 100);
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+  // Riešené cez React onScroll na scroll containeri (nie useEffect s []):
+  // pri prvom renderi je loading=true a container ešte neexistuje, takže
+  // addEventListener na ref by sa nikdy nepripojil.
+  const handleFeedScroll = (e) => setPaused(e.currentTarget.scrollTop > 100);
 
   const handleLoadMore = async () => {
     if (loadingMore || !hasMore || events.length === 0) return;
@@ -3521,7 +3517,7 @@ function ActivityFeedTab() {
         )}
       </div>
 
-      <div ref={scrollRef} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '65vh', overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 8, background: 'var(--bg-primary)' }}>
+      <div onScroll={handleFeedScroll} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '65vh', overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 8, background: 'var(--bg-primary)' }}>
         {events.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
             {filtersActive ? 'Žiadne výsledky pre tento filter' : 'Žiadna aktivita'}
