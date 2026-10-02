@@ -588,7 +588,15 @@ function CRM() {
 
     setSubmitting(true);
     try {
-      await api.post('/api/contacts', newContactForm);
+      const res = await api.post('/api/contacts', newContactForm);
+      // Zoznam obnovíme priamo z odpovede servera — socket 'contact-created'
+      // po vyčerpaní reconnectionAttempts (useSocket) už nepríde a UI by
+      // ostalo staré, hoci kontakt na serveri vznikol (používateľ by akciu
+      // zopakoval → duplikát). Dedupe cez prev.some robí duplicitnú socket
+      // udalosť no-op.
+      if (res?.data?.id) {
+        setContacts(prev => (prev.some(c => c.id === res.data.id) ? prev : [...prev, res.data]));
+      }
       setNewContactForm({
         name: '',
         email: '',
@@ -610,6 +618,11 @@ function CRM() {
     if (!window.confirm('Vymazať tento kontakt?')) return;
     try {
       await api.delete(`/api/contacts/${contact.id}`);
+      // Lokálne odstránenie hneď — nečakáme na socket 'contact-deleted'
+      // (po výpadku socketu by kontakt v zozname ostal). Handler socketu je
+      // idempotentný (filter), duplicitná udalosť nič nerozbije.
+      setContacts(prev => prev.filter(c => c.id !== contact.id));
+      setExpandedContact(prev => (prev === contact.id ? null : prev));
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri mazaní kontaktu');
     }
@@ -644,6 +657,10 @@ function CRM() {
     if (!window.confirm('Vymazať tento súbor?')) return;
     try {
       await api.delete(`/api/contacts/${contactId}/files/${fileId}`);
+      // Server vracia len { message } — zoznam obnovíme refetchom (cache sa
+      // na serveri invaliduje pred odoslaním odpovede), nespoliehame sa iba
+      // na socket 'contact-updated'.
+      fetchContacts();
     } catch (error) {
       // 404 = súbor už na serveri nie je (zmazal ho kolega / iné zariadenie)
       // — cieľ je splnený, len obnovíme kontakty namiesto chybovej hlášky.
@@ -656,13 +673,15 @@ function CRM() {
   };
 
   // Premenovanie už nahratého súboru cez FileRenameModal (renamingFile state).
-  // Refresh kontaktov rieši socket 'contact-updated' z backendu.
+  // Po úspechu refetch — socket 'contact-updated' z backendu je len doplnok
+  // (po výpadku socketu by nový názov v zozname neukázal).
   const handleFileRename = async (finalName) => {
     if (!renamingFile) return;
     const { contactId, fileId } = renamingFile;
     setRenamingFile(null);
     try {
       await api.patch(`/api/contacts/${contactId}/files/${fileId}`, { originalName: finalName });
+      fetchContacts();
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri premenovaní súboru');
     }
@@ -859,7 +878,12 @@ function CRM() {
 
   const saveContact = async (contactId) => {
     try {
-      await api.put(`/api/contacts/${contactId}`, editForm);
+      const res = await api.put(`/api/contacts/${contactId}`, editForm);
+      // Server vracia hotový kontakt (contactToPlainObject) — aplikujeme ho
+      // hneď, bez čakania na socket 'contact-updated'.
+      if (res?.data?.id) {
+        setContacts(prev => prev.map(c => (c.id === contactId ? res.data : c)));
+      }
       setEditingContact(null);
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri ukladaní kontaktu');
