@@ -3411,7 +3411,14 @@ function ActivityFeedTab() {
       return;
     }
     timerRef.current = setInterval(async () => {
-      if (events.length === 0) return;
+      if (events.length === 0) {
+        // Prázdny feed (čerstvý deploy, žiadna aktivita) — bez „after“ kurzora
+        // by polling nikdy nič nenačítal, hoci zelená „live“ bodka svieti.
+        // fetchEvents má vlastný .catch(() => []), await nikdy nevyhodí.
+        const initial = await fetchEvents({ limit: 50 });
+        if (initial.length) { setEvents(initial); setHasMore(initial.length === 50); }
+        return;
+      }
       const latest = events[0]?.createdAt;
       if (!latest) return;
       const newEvents = await fetchEvents({ after: latest, limit: 20 });
