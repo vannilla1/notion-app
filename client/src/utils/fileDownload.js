@@ -114,5 +114,11 @@ export function downloadBlob(blob, rawFileName) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  // Revoke odložene: Safari (desktop aj iOS PWA/Safari mimo shellu) spúšťa
+  // sťahovanie asynchrónne a pri okamžitom revoke-u vie skončiť chybou
+  // „WebKitBlobResource error 1" / prázdnym súborom (preto aj FileSaver.js
+  // revoke odkladá). Minúta navyše v pamäti nikomu neprekáža.
+  setTimeout(() => {
+    try { window.URL.revokeObjectURL(url); } catch { /* už uvoľnené */ }
+  }, 60000);
 }
