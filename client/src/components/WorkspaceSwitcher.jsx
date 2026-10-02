@@ -123,8 +123,11 @@ const WorkspaceSwitcher = () => {
       //    stihol re-injectnuť stale wsId z TokenStore do localStorage pred
       //    React bootom, URL param vyhrá. Bulletproof pre Android race.
       window.location.href = `/app?ws=${encodeURIComponent(workspaceId)}`;
-    } catch {
-      // Switch failed — stay on current workspace
+    } catch (err) {
+      // Switch failed — stay on current workspace. Bez spätnej väzby ostal
+      // dropdown otvorený bez vysvetlenia (403 = člen medzitým odstránený,
+      // 5xx, výpadok siete); create/rename v tomto komponente hlásia alertom.
+      alert(err?.response?.data?.message || 'Nepodarilo sa prepnúť prostredie');
     }
   };
 
