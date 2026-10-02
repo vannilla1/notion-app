@@ -1366,13 +1366,20 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                         key={wsId}
                         className="mobile-workspace-item"
                         onClick={async () => {
-                          await switchWorkspaceApi(wsId);
-                          // Per-device storage + native Android bridge write-through.
-                          setStoredWorkspaceId(wsId);
-                          // ws= URL param má v WorkspaceContext najvyššiu prioritu
-                          // (nad localStorage aj DB default) → bulletproof pre
-                          // Android race medzi MainActivity inject a React boot.
-                          window.location.href = `/app?ws=${encodeURIComponent(wsId)}`;
+                          try {
+                            await switchWorkspaceApi(wsId);
+                            // Per-device storage + native Android bridge write-through.
+                            setStoredWorkspaceId(wsId);
+                            // ws= URL param má v WorkspaceContext najvyššiu prioritu
+                            // (nad localStorage aj DB default) → bulletproof pre
+                            // Android race medzi MainActivity inject a React boot.
+                            window.location.href = `/app?ws=${encodeURIComponent(wsId)}`;
+                          } catch (err) {
+                            // 403 (medzitým odstránený člen), 5xx, výpadok siete —
+                            // bez catch ostal tichý unhandled rejection a nič sa
+                            // nestalo. Rovnaký alert vzor ako pri createWorkspace.
+                            alert(err?.response?.data?.message || 'Nepodarilo sa prepnúť prostredie');
+                          }
                         }}
                       >
                         <span
