@@ -53,7 +53,15 @@ class AppErrorBoundary extends React.Component {
       componentStack: errorInfo?.componentStack
     });
   }
-  reset = () => this.setState({ hasError: false });
+  // Tlačidlo sľubuje „Obnoviť stránku" — skutočný reload. Samotné
+  // setState({ hasError: false }) len znova vyrenderovalo ten istý podstrom
+  // s rovnakým stavom (AuthProvider, Router, cache modulov), takže pri
+  // deterministickej chybe (TDZ, chýbajúce pole, stale chunk) spadol hneď
+  // znova a používateľ klikal bez efektu — ide o najvyšší boundary, pod ním
+  // už žiadna cesta von nie je. Manuálna akcia, nie 401 slučka z api.js.
+  reset = () => {
+    try { window.location.reload(); } catch { this.setState({ hasError: false }); }
+  };
   render() {
     if (!this.state.hasError) return this.props.children;
     return (
