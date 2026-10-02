@@ -54,6 +54,12 @@ function NotificationToast() {
     const type = toast.type || '';
     const related = toast.relatedType || '';
     const data = toast.data || {};
+    // Notifikácia môže patriť inému prostrediu než je aktívne. `ws=` v URL
+    // spracuje App.jsx (useLayoutEffect → navigateWithWorkspace): prepne
+    // workspace iba ak sa líši, LoadingGate drží render a `ws=` z URL
+    // strippne. Bez neho by sa highlight otvoril v nesprávnom prostredí.
+    // Rovnaký transport používa web push klik aj iOS deep-link.
+    const wsSuffix = toast.workspaceId ? `&ws=${encodeURIComponent(toast.workspaceId)}` : '';
 
     // Route priority: message > task/subtask > contact.
     // Task ide PRED contact lebo due-date notifikácie pre contact-embedded
@@ -63,14 +69,14 @@ function NotificationToast() {
     // zdroje), takže highlight + scroll funguje bez ohľadu na zdroj úlohy.
     // Viď identickú logiku v NotificationBell.jsx.
     if ((related === 'message' || type.startsWith('message')) && data.messageId) {
-      navigate(`/messages?highlight=${data.messageId}&_t=${ts}`);
+      navigate(`/messages?highlight=${data.messageId}&_t=${ts}${wsSuffix}`);
     } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
       let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       if (data.contactId) url += `&contactId=${data.contactId}`;
-      navigate(url);
+      navigate(url + wsSuffix);
     } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
-      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}`);
+      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}${wsSuffix}`);
     }
   }, [navigate, removeToast]);
 
