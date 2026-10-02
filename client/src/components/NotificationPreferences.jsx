@@ -53,10 +53,16 @@ export default function NotificationPreferences({ onClose }) {
 
   useEffect(() => {
     let alive = true;
-    api.get('/api/auth/notification-preferences')
-      .then(res => { if (alive) setPrefs({ ...DEFAULT_PREFS, ...res.data }); })
-      .catch(() => { if (alive) setError('Nepodarilo sa načítať nastavenia'); })
-      .finally(() => { if (alive) setLoading(false); });
+    (async () => {
+      try {
+        const res = await api.get('/api/auth/notification-preferences');
+        if (alive) setPrefs({ ...DEFAULT_PREFS, ...res.data });
+      } catch {
+        if (alive) setError('Nepodarilo sa načítať nastavenia');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
     return () => { alive = false; };
   }, []);
 
