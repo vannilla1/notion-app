@@ -153,28 +153,36 @@ export const sendTestPush = async () => {
   return response.data;
 };
 
+// initializePush volá App.jsx pri každom prihlásení a každom prechode medzi
+// /admin* a bežnou appkou — bez guardu by sa 'message' listener na SW
+// pridával znova a znova (hromadenie, viacnásobný re-subscribe na jeden event).
+let swMessageListenerAttached = false;
+
 export const initializePush = async () => {
   if (!isPushSupported()) {
     return false;
   }
 
-  navigator.serviceWorker.addEventListener('message', async (event) => {
-    if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
-      if (event.data.newSubscription) {
-        try {
-          await api.post('/api/push/subscribe', event.data.newSubscription);
-        } catch {
-          // Failed to persist renewed subscription
-        }
-      } else {
-        try {
-          await subscribeToPush();
-        } catch {
-          // Failed to re-subscribe after subscription change
+  if (!swMessageListenerAttached) {
+    swMessageListenerAttached = true;
+    navigator.serviceWorker.addEventListener('message', async (event) => {
+      if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
+        if (event.data.newSubscription) {
+          try {
+            await api.post('/api/push/subscribe', event.data.newSubscription);
+          } catch {
+            // Failed to persist renewed subscription
+          }
+        } else {
+          try {
+            await subscribeToPush();
+          } catch {
+            // Failed to re-subscribe after subscription change
+          }
         }
       }
-    }
-  });
+    });
+  }
 
   try {
     const cache = await caches.open('push-subscription-cache');
