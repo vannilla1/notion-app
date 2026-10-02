@@ -893,7 +893,7 @@ function UsersTab() {
                   </div>
                 </td>
                 <td className="sa-email-cell">{u.email}</td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   <select
                     value={u.plan}
                     onChange={e => handlePlanChange(u.id, e.target.value)}
