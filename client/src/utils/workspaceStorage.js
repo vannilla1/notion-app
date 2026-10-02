@@ -56,6 +56,16 @@ const safeSet = (store, value) => {
   } catch { /* Private Browsing / quota */ }
 };
 
+// Už samotný getter `window.sessionStorage` / `window.localStorage` hodí
+// SecurityError v Safari s „Blokovať všetky cookies" a v niektorých embedded
+// prehliadačoch — safeGet/safeSet chránia len getItem/setItem, prístup
+// k storage preto musí byť tiež v try. getStoredWorkspaceId() beží v axios
+// request interceptore pre KAŽDÝ request (api.js) a v useState inicializátore
+// WorkspaceContextu — nechránená výnimka by zhodila všetky requesty aj render.
+const store = (name) => {
+  try { return window[name]; } catch { return null; }
+};
+
 // Jednorázová migrácia: predchádzajúci commit 1a06477 seeduje localStorage
 // z DB defaultu pri prvom fetchu, čo "zacementovalo" stale workspace. Tento
 // commit prestal to robiť, ale users ktorí medzitým loadli appku majú už
@@ -77,7 +87,7 @@ export const getStoredWorkspaceId = () => {
   // 1) sessionStorage má priority — tab-špecifický state.
   // 2) localStorage fallback — device-wide (zachováva voľbu pri novom tabe
   //    alebo keď sessionStorage vyprší).
-  return safeGet(window.sessionStorage) || safeGet(window.localStorage);
+  return safeGet(store('sessionStorage')) || safeGet(store('localStorage'));
 };
 
 export const setStoredWorkspaceId = (workspaceId) => {
@@ -89,8 +99,8 @@ export const setStoredWorkspaceId = (workspaceId) => {
     // z URL). Pre bootstrapping fallback na DB default použi
     // `setSessionOnlyWorkspaceId` — inak by sa stale DB default zapísal do
     // localStorage a "zacementoval" sa naprieč refreshmi.
-    safeSet(window.sessionStorage, workspaceId);
-    safeSet(window.localStorage, workspaceId);
+    safeSet(store('sessionStorage'), workspaceId);
+    safeSet(store('localStorage'), workspaceId);
   }
   // Write-through do natívnej Android/iOS vrstvy — MainActivity pri cold-start
   // injectne tento workspaceId späť do localStorage, takže appka vidí
@@ -104,7 +114,7 @@ export const setStoredWorkspaceId = (workspaceId) => {
 // môže byť stale (iné zariadenie menilo, legacy migrácie...).
 export const setSessionOnlyWorkspaceId = (workspaceId) => {
   if (typeof window !== 'undefined') {
-    safeSet(window.sessionStorage, workspaceId);
+    safeSet(store('sessionStorage'), workspaceId);
   }
   nativeSetWorkspaceId(workspaceId);
 };
