@@ -16,9 +16,11 @@ export const useSocket = () => {
 
     const newSocket = io(API_BASE_URL, {
       auth: { token },
-      // Reconnection settings
+      // Reconnection settings — bez limitu pokusov (predvolené Infinity,
+      // exponenciálny backoff 1 s → 5 s). Pôvodných 5 pokusov sa vyčerpalo
+      // po ~20 s výpadku (mobil v pozadí, slabý signál) a socket.io už nikdy
+      // znova nepripojil → notifikácie, task/message eventy mŕtve do reloadu.
       reconnection: true,
-      reconnectionAttempts: 5,
       reconnectionDelay: 1000
     });
 
