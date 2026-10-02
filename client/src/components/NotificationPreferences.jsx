@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import api from '../api/api';
 import PushNotificationToggle from './PushNotificationToggle';
 import { isMobileDevice, isIosNativeApp } from '../utils/platform';
+import { isPushSupported } from '../services/pushNotifications';
+import { isNativeAndroidApp } from '../utils/nativeBridge';
 
 /**
  * Modal pre nastavenie push notifikácií.
@@ -85,16 +87,23 @@ export default function NotificationPreferences({ onClose }) {
         </div>
 
         <div className="notif-prefs-body">
-          {/* Browser power switch — desktop only. Mobile zariadenia majú
-              vlastné OS-level povolenia (iOS APNs, Android FCM). */}
-          {!isMobileDevice() && !isIosNativeApp() && (
+          {/* Browser power switch. Desktop vždy; na mobile iba tam, kde web
+              push reálne existuje (Android Chrome / TWA / PWA, iOS PWA 16.4+
+              — isPushSupported() kontroluje PushManager), plus natívna
+              Android appka (PushNotificationToggle tam renderuje FCM
+              diagnostiku). iOS natív má APNs → sekcia sa skrýva. Pôvodný
+              guard `!isMobileDevice()` skrýval sekciu aj na TWA/PWA, kde
+              bez nej používateľ nemal ako push zapnúť/vypnúť. */}
+          {!isIosNativeApp() && (!isMobileDevice() || isPushSupported() || isNativeAndroidApp()) && (
             <div className="notif-prefs-section">
-              <h3>🌐 Browser push</h3>
-              <p className="notif-prefs-section-desc">
-                Dostávajte push notifikácie v prehliadači aj keď máte appku
-                zatvorenú. Bez tohto budú notifikácie chodiť len do zvončeka
-                pri otvorenej appke.
-              </p>
+              <h3>{isNativeAndroidApp() ? '🔔 Notifikácie (Android)' : '🌐 Browser push'}</h3>
+              {!isNativeAndroidApp() && (
+                <p className="notif-prefs-section-desc">
+                  Dostávajte push notifikácie v prehliadači aj keď máte appku
+                  zatvorenú. Bez tohto budú notifikácie chodiť len do zvončeka
+                  pri otvorenej appke.
+                </p>
+              )}
               <PushNotificationToggle />
             </div>
           )}
