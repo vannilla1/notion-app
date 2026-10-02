@@ -68,6 +68,15 @@ export const WorkspaceProvider = ({ children }) => {
     return () => clearTimeout(retryTimerRef.current);
   }, [isAuthenticated]);
 
+  // Generácia prepnutia prostredia (rovnaký princíp ako fetchUserRunRef
+  // v AuthContext). switchWorkspace ju po úspešnom POST /switch zvýši;
+  // rozbehnutý fetchWorkspaces si svoju hodnotu zapamätá a po každom await
+  // porovná — zastaranú odpoveď (GET odoslaný ešte pre pôvodné prostredie A)
+  // zahodí. Inak by neskôr doručený GET /workspaces/current prepísal
+  // currentWorkspace nastavený zo switchu na B: hlavička X-Workspace-Id
+  // a dáta stránok z B, ale názov/farba/inviteCode v headeri z A.
+  const switchGenRef = useRef(0);
+
   const fetchWorkspaces = useCallback(async (attemptArg) => {
     // Volá sa aj bez argumentu / ako event handler → berieme len číslo.
     const attempt = typeof attemptArg === 'number' ? attemptArg : 0;
@@ -80,12 +89,21 @@ export const WorkspaceProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
+      const gen = switchGenRef.current;
 
       // KROK 1: Memberships + server-side default current (z User.currentWorkspaceId).
       // `getWorkspaces()` nepoužíva requireWorkspace middleware, takže tu header
       // nerobí nič — dostaneme vždy zoznam membership-ov + DB default.
       const data = await workspaceApi.getWorkspaces();
-      setWorkspaces(data.workspaces || []);
+      setWorkspaces(data.workspaces || []); // zoznam členstiev platí aj po prepnutí
+
+      if (gen !== switchGenRef.current) {
+        // Medzitým prebehol switchWorkspace — id, storage, needsWorkspace aj
+        // detaily už nastavil z odpovede POST /switch. DB default v tejto
+        // odpovedi je zastaraný a mohol by ich prepísať → zvyšok preskoč.
+        setLoading(false);
+        return;
+      }
 
       // KROK 2: Workspace priority — URL `ws=` > localStorage > DB default.
       // - URL `ws=` (deep link) MUSÍ vyhrať — inak by fetchWorkspaces nastavilo
@@ -132,9 +150,13 @@ export const WorkspaceProvider = ({ children }) => {
         // KROK 3: Načítame details pre effectiveWsId (backend honorí header).
         try {
           const current = await workspaceApi.getCurrentWorkspace();
-          setCurrentWorkspace(current);
+          // Zastaraná odpoveď (GET šiel ešte s hlavičkou pôvodného prostredia,
+          // medzitým switchWorkspace prepol inam) — neprepisuj, viď switchGenRef.
+          if (gen === switchGenRef.current) setCurrentWorkspace(current);
         } catch (err) {
-          if (err.response?.data?.code === 'NO_WORKSPACE') {
+          if (gen !== switchGenRef.current) {
+            // zastarané — switchWorkspace už nastavil konzistentný stav
+          } else if (err.response?.data?.code === 'NO_WORKSPACE') {
             setNeedsWorkspace(true);
             setCurrentWorkspace(null);
           } else {
@@ -207,6 +229,8 @@ export const WorkspaceProvider = ({ children }) => {
 
   const switchWorkspace = async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
+    // Zneplatni prípadný rozbehnutý fetchWorkspaces (viď switchGenRef).
+    switchGenRef.current += 1;
     // CRITICAL: id + details meníme ATOMICKY z jedného POST /switch response.
     // React batchne oba setState volania do jedného renderu, takže header /
     // sidebar / children vidia konzistentný workspace v ďalšom paint.
