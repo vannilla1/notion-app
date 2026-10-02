@@ -1780,7 +1780,7 @@ function CRM() {
                           className="contact-avatar"
                           style={{ backgroundColor: getStatusColor(contact.status) }}
                         >
-                          {contact.name.charAt(0).toUpperCase()}
+                          {(contact.name || '?').charAt(0).toUpperCase()}
                         </div>
 
                         {editingContact === contact.id ? (
