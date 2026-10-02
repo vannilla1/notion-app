@@ -1763,7 +1763,9 @@ function CRM() {
                     className="btn btn-primary empty-state-btn"
                     onClick={() => {
                       setShowForm(true);
-                      setSidebarOpen(true);
+                      // Formulár je v <main>, nie v sidebare — na mobile by
+                      // otvorený panel + overlay formulár prekryli.
+                      setSidebarOpen(false);
                     }}
                   >
                     + Nový kontakt
