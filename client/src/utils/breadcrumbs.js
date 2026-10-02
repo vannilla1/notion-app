@@ -158,10 +158,20 @@ export function installBreadcrumbInstrumentation() {
       if (!t || !t.closest) return;
       const clickable = t.closest('button, a, [role="button"]');
       if (!clickable) return;
+      // Súkromie: riadky kontaktov, úloh a správ sú často klikateľné
+      // (role=button) a ich innerText nesie mená, telefóny, e-maily, úryvky
+      // správ — posledných 30 kliknutí ide s KAŽDÝM error reportom na server
+      // a ukladá sa do ServerError mimo workspace-u (GDPR: účel/retencia).
+      // Preferujeme explicitné popisky (aria-label, data-breadcrumb, title),
+      // tel:/mailto: odkazy redigujeme, voľný text skracujeme na 40 znakov.
+      const href = clickable.getAttribute('href');
       const label = (clickable.getAttribute('aria-label')
-        || clickable.innerText
+        || clickable.getAttribute('data-breadcrumb')
         || clickable.getAttribute('title')
-        || clickable.tagName).toString().trim().replace(/\s+/g, ' ');
+        || ((href && /^(tel|mailto):/i.test(href))
+          ? href.split(':')[0] + ':[redacted]'
+          : (clickable.innerText || ''))
+        || clickable.tagName).toString().trim().replace(/\s+/g, ' ').slice(0, 40);
       push({
         category: 'ui.click',
         level: 'info',
