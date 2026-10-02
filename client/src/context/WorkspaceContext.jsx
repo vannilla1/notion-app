@@ -305,13 +305,9 @@ export const WorkspaceProvider = ({ children }) => {
   };
 
   const refreshCurrentWorkspace = async () => {
-    try {
-      const current = await workspaceApi.getCurrentWorkspace();
-      setCurrentWorkspace(current);
-      return current;
-    } catch (err) {
-      throw err;
-    }
+    const current = await workspaceApi.getCurrentWorkspace();
+    setCurrentWorkspace(current);
+    return current;
   };
 
   const value = {
