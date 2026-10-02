@@ -189,7 +189,12 @@ function AcceptInvite() {
                 <div className="invite-ios-steps">
                   <p className="invite-not-logged">Pre prijatie pozvánky postupujte podľa krokov:</p>
                   <ol style={{ margin: '8px 0 0', paddingLeft: '20px', fontSize: '14px', lineHeight: 1.6, color: 'var(--text-muted, #64748b)' }}>
-                    <li>Otvorte vo Safari adresu <a href="https://prplcrm.eu" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-color, #6366f1)', fontWeight: 600 }}>prplcrm.eu</a> a vytvorte si zdarma účet.</li>
+                    {/* Bez <a href>: v iOS WKWebView shelli createWebViewWith
+                        považuje host prplcrm.eu za interný a načíta ho v tom
+                        istom WebView, kde decidePolicyFor cestu „/“ presmeruje
+                        na /app — odkaz by teda neotvoril Safari, ale skočil
+                        späť do appky. Text aj tak inštruuje otvoriť Safari ručne. */}
+                    <li>Otvorte vo Safari adresu <strong style={{ color: 'var(--accent-color, #6366f1)' }}>prplcrm.eu</strong> a vytvorte si zdarma účet.</li>
                     <li>Vráťte sa do tejto aplikácie a prihláste sa.</li>
                     <li>Pozvánka sa potom automaticky prijme — alebo ju otvorte z emailu znova.</li>
                   </ol>
