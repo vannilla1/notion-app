@@ -3781,7 +3781,13 @@ function ApiMetricsTab() {
   if (!metrics) return <div className="sa-error">Nepodarilo sa načítať metriky</div>;
 
   const hourlyData = {
-    labels: metrics.hourlyData.map(h => h.hour.slice(11) + ':00'),
+    // h.hour je UTC kľúč 'YYYY-MM-DDTHH' (server/services/apiMetrics.js) —
+    // prevádzame na lokálnu hodinu prehliadača, inak os X ukazovala UTC
+    // posunuté o 1–2 h voči SK „pracovným hodinám“ z help textu.
+    labels: metrics.hourlyData.map(h => {
+      const d = new Date(`${h.hour}:00:00Z`);
+      return Number.isNaN(d.getTime()) ? h.hour.slice(11) + ':00' : `${String(d.getHours()).padStart(2, '0')}:00`;
+    }),
     datasets: [{
       label: 'Requesty/hod',
       data: metrics.hourlyData.map(h => h.count),
