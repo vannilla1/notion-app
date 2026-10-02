@@ -5617,7 +5617,17 @@ function PromoCodesTab() {
   const generateCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = 'PRPL-';
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    // Kryptografický zdroj — promo kódy majú finančný dopad (zľavy, Stripe
+    // kupóny). chars.length = 32 delí 256, takže `b % 32` nemá modulo bias.
+    // Math.random ostáva len ako fallback pre prostredie bez WebCrypto.
+    const cryptoObj = window.crypto;
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint8Array(6);
+      cryptoObj.getRandomValues(bytes);
+      for (const b of bytes) code += chars[b % chars.length];
+    } else {
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    }
     setForm(f => ({ ...f, code }));
   };
 
