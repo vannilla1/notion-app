@@ -5,7 +5,6 @@ import api, { API_BASE_URL } from '../api/api';
 import { getStoredToken } from '../utils/authStorage';
 import NotificationPreferences from './NotificationPreferences';
 import ConnectedAccounts from './ConnectedAccounts';
-import { isMobileDevice, isIosNativeApp } from '../utils/platform';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId, getStoredWorkspaceId } from '../utils/workspaceStorage';
@@ -69,7 +68,7 @@ const translateErrorMessage = (message) => {
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
-  const { currentWorkspace, workspaces, switchWorkspace, createWorkspace, reorderWorkspaces } = useWorkspace();
+  const { currentWorkspace, workspaces, createWorkspace, reorderWorkspaces } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [reorderingWs, setReorderingWs] = useState(false); // in-flight reorder guard (mobil)
   const [showNotifPrefs, setShowNotifPrefs] = useState(false);
@@ -237,7 +236,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setLoading(true);
       setErrors({});
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/auth/profile`, {
         headers: authHeaders()
       });
@@ -323,7 +321,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchCalendarFeedStatus = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/tasks/calendar/feed/status`, {
         headers: authHeaders()
       });
@@ -340,7 +337,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleEnableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/generate`, {}, {
         headers: authHeaders()
       });
@@ -359,7 +355,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleDisableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       await axios.post(`${API_URL}/tasks/calendar/feed/disable`, {}, {
         headers: authHeaders()
       });
@@ -381,7 +376,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/tasks/calendar/feed/regenerate`, {}, {
         headers: authHeaders()
       });
@@ -425,7 +419,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleCalendarStatus = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/status`, {
         headers: authHeaders()
       });
@@ -448,7 +441,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleCalendar = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
         headers: authHeaders()
       });
@@ -481,7 +473,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       await axios.post(`${API_URL}/google-calendar/disconnect`, {}, {
         headers: authHeaders()
       });
@@ -913,7 +904,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/status`, {
         headers: authHeaders(),
         timeout: 15000
@@ -943,7 +933,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
         headers: authHeaders()
       });
@@ -972,7 +961,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const token = getStoredToken();
       await axios.post(`${API_URL}/google-tasks/disconnect`, {}, {
         headers: authHeaders()
       });
@@ -996,7 +984,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const token = getStoredToken();
 
       await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
         headers: authHeaders(),
@@ -1028,7 +1015,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const token = getStoredToken();
       const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
         headers: authHeaders()
       });
@@ -1064,7 +1050,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setErrors({});
       setMessage('');
-      const token = getStoredToken();
       const response = await axios.put(`${API_URL}/auth/profile`, formData, {
         headers: authHeaders()
       });
@@ -1097,7 +1082,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     if (changingPassword) return;
     setChangingPassword(true);
     try {
-      const token = getStoredToken();
       await axios.put(`${API_URL}/auth/password`, {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
@@ -1174,7 +1158,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
   const handleDeleteAvatar = async () => {
     try {
-      const token = getStoredToken();
       await axios.delete(`${API_URL}/auth/avatar`, {
         headers: authHeaders()
       });
