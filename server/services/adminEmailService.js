@@ -303,6 +303,14 @@ const sendPasswordResetEmail = async ({ toEmail, username, resetLink }) => {
     </p>
   `;
 
+  // Rovnaký vzor ako sendWelcomeEmail: HTML poskladáme RAZ a použijeme ho
+  // pre `html` aj pre textovú alternatívu. Predtým sa volalo `htmlToText(html)`
+  // s nedeklarovanou premennou `html` → ReferenceError ešte pred sendMail,
+  // catch nižšie ho ticho zalogoval a vrátil false — e-mail na obnovenie
+  // hesla sa teda v produkcii NIKDY neodoslal (API pritom vrátilo generickú
+  // odpoveď „ak účet existuje, poslali sme e-mail").
+  const html = wrapEmail({ headerSubtitle: 'Obnovenie hesla', bodyHtml });
+
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || '"PrplCRM" <hello@prplcrm.eu>',
@@ -310,7 +318,7 @@ const sendPasswordResetEmail = async ({ toEmail, username, resetLink }) => {
       text: htmlToText(html),
       to: toEmail,
       subject: 'Obnovenie hesla — PrplCRM',
-      html: wrapEmail({ headerSubtitle: 'Obnovenie hesla', bodyHtml })
+      html
     });
     logger.info('[AdminEmail] Password reset email sent', { toEmail });
     return true;
