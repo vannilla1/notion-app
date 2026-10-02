@@ -610,8 +610,8 @@ function CRM() {
     if (!window.confirm('Vymazať tento kontakt?')) return;
     try {
       await api.delete(`/api/contacts/${contact.id}`);
-    } catch {
-      // Silently fail
+    } catch (error) {
+      alertUnlessPlanGate(error, 'Chyba pri mazaní kontaktu');
     }
   };
 
