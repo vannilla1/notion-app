@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApi, { API_BASE_URL } from '@/api/adminApi';
+import { downloadBlob } from '@/utils/fileDownload';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import AdminHelpToggle from '../components/AdminHelpToggle';
@@ -5276,13 +5277,18 @@ function CommissionsSubTab() {
     }
   };
 
-  const exportCsv = () => {
-    const params = new URLSearchParams();
-    if (statusFilter) params.append('status', statusFilter);
-    if (referrerFilter) params.append('referrerId', referrerFilter);
-    if (from) params.append('from', from);
-    if (to) params.append('to', to);
-    window.open(`${API_BASE_URL}/api/admin/commissions/export.csv?${params.toString()}`, '_blank');
+  // Export ide cez adminApi (Bearer token v hlavičke) — window.open na API
+  // URL token neposiela a server vrátil len 401 JSON namiesto CSV.
+  const exportCsv = async () => {
+    const params = {};
+    if (statusFilter) params.status = statusFilter;
+    if (referrerFilter) params.referrerId = referrerFilter;
+    if (from) params.from = from;
+    if (to) params.to = to;
+    try {
+      const res = await adminApi.get('/api/admin/commissions/export.csv', { params, responseType: 'blob' });
+      downloadBlob(res.data, `commissions-${new Date().toISOString().slice(0, 10)}.csv`);
+    } catch { alert('Export zlyhal'); }
   };
 
   // Eligible per-referrer (na zobrazenie tlačidiel bulk-pay vedľa každého affiliateho)
