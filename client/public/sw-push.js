@@ -8,8 +8,11 @@
 
 const SW_VERSION = '2.7';
 
-// Debug logging - enabled temporarily for troubleshooting
-const DEBUG = true;
+// Debug logging — len na localhost. V produkcii bolo DEBUG=true („dočasne na
+// troubleshooting“) a worker logoval obsah každej notifikácie vrátane
+// JSON.stringify(event.notification.data) (ID správ/úloh/kontaktov, cieľová
+// URL); v Android WebView ide console.* do logcatu.
+const DEBUG = self.location.hostname === 'localhost';
 const log = (...args) => DEBUG && console.log('[SW]', ...args);
 const logError = (...args) => console.error('[SW]', ...args);
 
