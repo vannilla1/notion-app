@@ -753,18 +753,22 @@ const rearmExhausted = async () => {
 };
 
 let started = false;
-export const startUploadQueue = () => {
+export const startUploadQueue = async () => {
+  // Synchrónna časť (registrácia listenerov) beží pred prvým await — druhé
+  // volanie v tom istom ticku už listenery nepridá.
   if (!started) {
     started = true;
-    window.addEventListener('online', () => { rearmExhausted().then(() => processUploadQueue()); });
-    document.addEventListener('visibilitychange', () => {
+    window.addEventListener('online', async () => {
+      await rearmExhausted();
+      await processUploadQueue();
+    });
+    document.addEventListener('visibilitychange', async () => {
       if (document.hidden) return;
-      if (Date.now() - lastRearmAt > REARM_ON_VISIBLE_MS) {
-        rearmExhausted().then(() => processUploadQueue());
-      } else {
-        processUploadQueue();
-      }
+      if (Date.now() - lastRearmAt > REARM_ON_VISIBLE_MS) await rearmExhausted();
+      await processUploadQueue();
     });
   }
-  return rearmExhausted().then(refreshCounts).then(() => processUploadQueue());
+  await rearmExhausted();
+  await refreshCounts();
+  return processUploadQueue();
 };

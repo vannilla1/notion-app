@@ -69,6 +69,36 @@ export function safeDownloadName(fileName) {
   return truncateKeepingExtension(cleaned, MAX_NAME_BYTES);
 }
 
+// Shelly dostanú obsah ako base64 cez natívny most. Async helpery sú MIMO
+// downloadBlob — tá musí ostať synchrónna, aby web vetva spustila klik ešte
+// v rámci používateľského gesta a aby prípadná synchrónna chyba išla
+// volajúcemu (try/catch v downloadFile) rovnako ako doteraz.
+async function postToIosShell(blob, fileName) {
+  try {
+    const base64 = await toBase64(blob);
+    window.webkit.messageHandlers.fileDownload.postMessage({
+      data: base64,
+      fileName,
+      mimetype: blob.type || 'application/octet-stream'
+    });
+  } catch {
+    alert('Súbor sa nepodarilo pripraviť na stiahnutie.');
+  }
+}
+
+async function saveViaAndroidBridge(blob, fileName) {
+  try {
+    const base64 = await toBase64(blob);
+    const res = window.NativeBridge.saveFile(base64, fileName, blob.type || 'application/octet-stream');
+    if (res && String(res).startsWith('error')) {
+      alert('Súbor sa nepodarilo uložiť do priečinka Stiahnuté.');
+    }
+    // Úspech hlási natívny Toast — bez duplicitnej web hlášky
+  } catch {
+    alert('Súbor sa nepodarilo pripraviť na stiahnutie.');
+  }
+}
+
 export function downloadBlob(blob, rawFileName) {
   // Čistíme PRED vetvením — každá platforma dostane ten istý bezpečný názov.
   const fileName = safeDownloadName(rawFileName);
@@ -78,13 +108,7 @@ export function downloadBlob(blob, rawFileName) {
   // s rovnakým menom a náš base64 payload by zmizol bez stiahnutia súboru.
   // Náš shell registruje iosNative aj fileDownload spolu (ContentView.swift).
   if (isIosNativeApp() && window.webkit?.messageHandlers?.fileDownload) {
-    toBase64(blob).then(base64 => {
-      window.webkit.messageHandlers.fileDownload.postMessage({
-        data: base64,
-        fileName,
-        mimetype: blob.type || 'application/octet-stream'
-      });
-    }).catch(() => alert('Súbor sa nepodarilo pripraviť na stiahnutie.'));
+    postToIosShell(blob, fileName);
     return;
   }
 
@@ -96,13 +120,7 @@ export function downloadBlob(blob, rawFileName) {
       alert('Sťahovanie súborov vyžaduje novšiu verziu aplikácie. Aktualizujte ju v Google Play.');
       return;
     }
-    toBase64(blob).then(base64 => {
-      const res = window.NativeBridge.saveFile(base64, fileName, blob.type || 'application/octet-stream');
-      if (res && String(res).startsWith('error')) {
-        alert('Súbor sa nepodarilo uložiť do priečinka Stiahnuté.');
-      }
-      // Úspech hlási natívny Toast — bez duplicitnej web hlášky
-    }).catch(() => alert('Súbor sa nepodarilo pripraviť na stiahnutie.'));
+    saveViaAndroidBridge(blob, fileName);
     return;
   }
 

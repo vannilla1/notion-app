@@ -185,11 +185,12 @@ function CRM() {
   // zoznam kontaktov obnovíme až keď príloha reálne dorazí na server.
   // Zlyhania (aj plánové limity) ukazuje globálne UploadQueueIndicator na
   // každej stránke; alert tu by bol duplicitný.
-  useEffect(() => onUploadSettled(({ ok, item }) => {
-    if (item?.kind !== 'contact') return;
-    if (ok) {
-      api.get('/api/contacts').then(r => setContacts(r.data)).catch(() => {});
-    }
+  useEffect(() => onUploadSettled(async ({ ok, item }) => {
+    if (item?.kind !== 'contact' || !ok) return;
+    try {
+      const r = await api.get('/api/contacts');
+      setContacts(r.data);
+    } catch { /* zoznam ostane starý — obnoví ho ďalší refetch */ }
   }), []);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
@@ -369,12 +370,15 @@ function CRM() {
   // Server endpoint is idempotent.
   useEffect(() => {
     if (!expandedContact) return;
-    api.put('/api/notifications/read-for-related', {
-      relatedType: 'contact',
-      relatedId: expandedContact
-    }).then(() => {
-      window.dispatchEvent(new CustomEvent('notifications-updated'));
-    }).catch(() => {});
+    (async () => {
+      try {
+        await api.put('/api/notifications/read-for-related', {
+          relatedType: 'contact',
+          relatedId: expandedContact
+        });
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      } catch { /* endpoint je idempotentný — skúsi sa pri ďalšom otvorení */ }
+    })();
   }, [expandedContact]);
 
   useEffect(() => {
@@ -442,12 +446,14 @@ function CRM() {
       lastNavTimestampRef.current = urlTimestamp || 'unread';
       navigate(location.pathname, { replace: true, state: {} });
 
-      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
-        const contactNotifs = (res.data.notifications || []).filter(n =>
-          n.type?.startsWith('contact.')
-        );
-        const ids = new Set(contactNotifs.map(n => n.relatedId).filter(Boolean));
-        if (ids.size > 0) {
+      (async () => {
+        try {
+          const res = await api.get('/api/notifications?unreadOnly=true&limit=50');
+          const contactNotifs = (res.data.notifications || []).filter(n =>
+            n.type?.startsWith('contact.')
+          );
+          const ids = new Set(contactNotifs.map(n => n.relatedId).filter(Boolean));
+          if (ids.size === 0) return;
           setHighlightedContactIds(ids);
           const firstId = [...ids][0];
           setExpandedContact(firstId);
@@ -456,8 +462,8 @@ function CRM() {
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }, 200));
           timersRef.current.push(setTimeout(() => setHighlightedContactIds(new Set()), 4000));
-        }
-      }).catch(() => {});
+        } catch { /* ignore */ }
+      })();
     }
   }, [location.search]);
 
@@ -747,10 +753,13 @@ function CRM() {
     }
   };
 
-  const exportContactsCsv = () => {
-    api.get('/api/contacts/export/csv', { responseType: 'blob' })
-      .then(response => downloadBlob(response.data, 'kontakty.csv'))
-      .catch(() => alert('Chyba pri exporte'));
+  const exportContactsCsv = async () => {
+    try {
+      const response = await api.get('/api/contacts/export/csv', { responseType: 'blob' });
+      downloadBlob(response.data, 'kontakty.csv');
+    } catch {
+      alert('Chyba pri exporte');
+    }
   };
 
   const getFileIcon = (mimetype) => {
