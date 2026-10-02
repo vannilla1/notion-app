@@ -805,10 +805,14 @@ function UsersTab() {
           </button>
         )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
-          onClick={() => adminApi.get('/api/admin/export/users', { responseType: 'blob' }).then(res => {
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a'); a.href = url; a.download = 'users-export.csv'; a.click(); URL.revokeObjectURL(url);
-          })}>
+          onClick={async () => {
+            // downloadBlob (anchor v DOM, revoke až po kliknutí, iOS/Android shell)
+            // + catch: bez neho bol fail tichý a skončil ako „klientská chyba“ v Diagnostike.
+            try {
+              const res = await adminApi.get('/api/admin/export/users', { responseType: 'blob' });
+              downloadBlob(res.data, 'users-export.csv');
+            } catch { alert('Export zlyhal'); }
+          }}>
           📥 Export CSV
         </button>
       </div>
@@ -1582,10 +1586,12 @@ function WorkspacesTab() {
           </button>
         )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
-          onClick={() => adminApi.get('/api/admin/export/workspaces', { responseType: 'blob' }).then(res => {
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a'); a.href = url; a.download = 'workspaces-export.csv'; a.click(); URL.revokeObjectURL(url);
-          })}>
+          onClick={async () => {
+            try {
+              const res = await adminApi.get('/api/admin/export/workspaces', { responseType: 'blob' });
+              downloadBlob(res.data, 'workspaces-export.csv');
+            } catch { alert('Export zlyhal'); }
+          }}>
           📥 Export CSV
         </button>
       </div>
@@ -2740,10 +2746,7 @@ function AuditLogTab() {
       const header = ['Date', 'Username', 'Email', 'Action', 'Category', 'TargetType', 'TargetName', 'IP', 'Details'];
       const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
+      downloadBlob(blob, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
   };
 
@@ -4798,10 +4801,7 @@ function WorkspaceComparisonTab() {
     ]);
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click(); URL.revokeObjectURL(url);
+    downloadBlob(blob, `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
   // Chart agreguje "real work units" — kontakty, projekty + úlohy v nich,
@@ -7760,10 +7760,7 @@ function EmailsTab() {
       const header = ['SentAt', 'ToEmail', 'Username', 'Type', 'Subject', 'Status', 'Error', 'TriggeredBy'];
       const csv = [header, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `email-logs-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
+      downloadBlob(blob, `email-logs-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
   };
 
