@@ -9,7 +9,12 @@ export const formatDate = (dateString, options = {}) => {
   };
 
   try {
-    return new Date(dateString).toLocaleDateString('sk-SK', defaultOptions);
+    // toLocaleDateString pri neplatnom dátume NEHÁDŽE — vráti doslovný
+    // reťazec 'Invalid Date' (catch nižšie ho nikdy nezachytí). Safari
+    // navyše neparsuje 'YYYY-MM-DD HH:mm', kde Chrome dátum vráti.
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('sk-SK', defaultOptions);
   } catch {
     return '-';
   }
@@ -19,7 +24,9 @@ export const formatDateTime = (dateString) => {
   if (!dateString) return '-';
 
   try {
-    return new Date(dateString).toLocaleString('sk-SK', {
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '-'; // viď formatDate
+    return d.toLocaleString('sk-SK', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -45,8 +52,12 @@ export const formatRelativeTime = (dateString) => {
   if (!dateString) return '';
 
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return ''; // inak by prepadlo na 'Invalid Date'
   const now = new Date();
   const diffMs = now - date;
+  // Budúci dátum (termíny úloh) má záporný diff → všetky vetvy nižšie by
+  // vrátili 'práve teraz'. Zobrazíme ho ako bežný dátum.
+  if (diffMs < 0) return formatDate(dateString);
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
