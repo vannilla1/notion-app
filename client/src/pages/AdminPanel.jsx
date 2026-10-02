@@ -2631,6 +2631,16 @@ const CATEGORY_LABELS = {
   task: '📋 Úloha', message: '✉️ Správa', auth: '🔐 Auth', billing: '💳 Fakturácia', system: '⚙️ Systém'
 };
 
+// CSV bunka pre klientské exporty: escapovanie úvodzoviek + ochrana proti
+// CSV/formula injection. Bunky začínajúce na = + - @ TAB CR by Excel /
+// LibreOffice interpretovali ako vzorec (DDE, HYPERLINK) — prefixujeme `'`
+// rovnako ako server pri /api/admin/commissions/export.csv.
+const csvCell = (c) => {
+  let s = String(c ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
 function AuditLogTab() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
@@ -2744,7 +2754,7 @@ function AuditLogTab() {
         JSON.stringify(l.details || {})
       ]);
       const header = ['Date', 'Username', 'Email', 'Action', 'Category', 'TargetType', 'TargetName', 'IP', 'Details'];
-      const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       downloadBlob(blob, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
@@ -4799,7 +4809,7 @@ function WorkspaceComparisonTab() {
       w.lastActivity ? new Date(w.lastActivity).toISOString() : '',
       w.activityScore
     ]);
-    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     downloadBlob(blob, `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`);
   };
@@ -7758,7 +7768,7 @@ function EmailsTab() {
         l.triggeredBy || ''
       ]);
       const header = ['SentAt', 'ToEmail', 'Username', 'Type', 'Subject', 'Status', 'Error', 'TriggeredBy'];
-      const csv = [header, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       downloadBlob(blob, `email-logs-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
