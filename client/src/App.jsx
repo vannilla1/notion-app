@@ -46,10 +46,25 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 
+// Výška celoobrazovkových loaderov (RouteFallback, LoadingGate). Inline štýl
+// nevie mať CSS fallback (`height: 100vh; height: 100dvh;` ako .login-container
+// v index.css), preto voľba cez CSS.supports. V mobilnom Safari/WKWebView je
+// 100vh výška s ROZBALENÝM adresným riadkom — kontajner vyšší než viditeľná
+// plocha, spinner mimo stredu a stránka sa dá pri načítaní posúvať. 100dvh
+// (iOS ≥ 15.4) sleduje skutočný viewport; staršie WebView ostanú na 100vh.
+// min-height (nie height), aby LoadingGate s únikovými tlačidlami na malom
+// displeji neorezal obsah.
+let FULL_VIEWPORT_HEIGHT = '100vh';
+try {
+  if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('height', '100dvh')) {
+    FULL_VIEWPORT_HEIGHT = '100dvh';
+  }
+} catch { /* ponechaj 100vh */ }
+
 const RouteFallback = () => (
   <div style={{
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+    minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
     color: 'var(--text-secondary, #64748b)'
   }}>
     Načítavam…
@@ -135,7 +150,7 @@ function LoadingGate() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+      minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
       color: 'var(--text-secondary, #64748b)', padding: '24px'
     }}>
       <div style={{ textAlign: 'center', maxWidth: 360 }}>
