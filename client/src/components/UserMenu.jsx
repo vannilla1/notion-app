@@ -393,10 +393,28 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
   };
 
-  const handleCopyFeedUrl = () => {
-    if (calendarFeed.feedUrl) {
-      navigator.clipboard.writeText(calendarFeed.feedUrl);
+  const handleCopyFeedUrl = async () => {
+    const url = calendarFeed.feedUrl;
+    if (!url) return;
+    // navigator.clipboard nemusí existovať (staršie WebView, non-secure
+    // kontext) alebo writeText odmietne (povolenie) — pôvodný kód hlásil
+    // „skopírované“ ešte pred výsledkom. Fallback cez execCommand('copy')
+    // zhodne s WorkspaceMembers.handleCopyLink.
+    try {
+      await navigator.clipboard.writeText(url);
       setMessage('Odkaz bol skopírovaný do schránky');
+    } catch {
+      try {
+        const input = document.createElement('input');
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        setMessage('Odkaz bol skopírovaný do schránky');
+      } catch {
+        setErrors({ general: 'Nepodarilo sa skopírovať odkaz — skopírujte ho ručne' });
+      }
     }
   };
 
