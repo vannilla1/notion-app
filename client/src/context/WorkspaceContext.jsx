@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import * as workspaceApi from '../api/workspaces';
 import { APP_EVENTS } from '../utils/constants';
@@ -215,19 +215,26 @@ export const WorkspaceProvider = ({ children }) => {
     }
   }, [isAuthenticated, fetchWorkspaces]);
 
-  const createWorkspace = async (data) => {
+  // Akcie sú memoizované (useCallback) a `value` cez useMemo: App.jsx má
+  // navigateWithWorkspace = useCallback(..., [switchWorkspace, ...]) a na ňom
+  // visia effecty (500 ms polling pendingDeepLink, service-worker 'message'
+  // listener, useLayoutEffect deep linku). Nová identita pri každom renderi
+  // providera (setLoading, setWorkspaces, re-render z AuthProvideru) ich
+  // zbytočne rušila a štartovala odznova (polling bežal dlhšie než 3 s);
+  // všetci konzumenti useWorkspace() sa re-renderovali aj bez zmeny dát.
+  const createWorkspace = useCallback(async (data) => {
     const result = await workspaceApi.createWorkspace(data);
     await fetchWorkspaces();
     return result;
-  };
+  }, [fetchWorkspaces]);
 
-  const joinWorkspace = async (inviteCode) => {
+  const joinWorkspace = useCallback(async (inviteCode) => {
     const result = await workspaceApi.joinWorkspace(inviteCode);
     await fetchWorkspaces();
     return result;
-  };
+  }, [fetchWorkspaces]);
 
-  const switchWorkspace = async (workspaceId) => {
+  const switchWorkspace = useCallback(async (workspaceId) => {
     const result = await workspaceApi.switchWorkspace(workspaceId);
     // Zneplatni prípadný rozbehnutý fetchWorkspaces (viď switchGenRef).
     switchGenRef.current += 1;
@@ -259,25 +266,25 @@ export const WorkspaceProvider = ({ children }) => {
     // URL pri `ws=` zmene, preto im eventom povieme: refetch + reset modalov.
     window.dispatchEvent(new CustomEvent(APP_EVENTS.WORKSPACE_SWITCHED, { detail: { workspaceId } }));
     return result;
-  };
+  }, []); // iba settery, ref, storage a modulové importy — všetko stabilné
 
-  const updateWorkspace = async (data) => {
+  const updateWorkspace = useCallback(async (data) => {
     const result = await workspaceApi.updateWorkspace(data);
     setCurrentWorkspace(prev => ({ ...prev, ...result }));
     return result;
-  };
+  }, []);
 
-  const regenerateInviteCode = async () => {
+  const regenerateInviteCode = useCallback(async () => {
     const result = await workspaceApi.regenerateInviteCode();
     setCurrentWorkspace(prev => ({ ...prev, inviteCode: result.inviteCode }));
     return result;
-  };
+  }, []);
 
-  const leaveWorkspace = async () => {
+  const leaveWorkspace = useCallback(async () => {
     const result = await workspaceApi.leaveWorkspace();
     await fetchWorkspaces();
     return result;
-  };
+  }, [fetchWorkspaces]);
 
   /**
    * Delete current workspace (owner only — server enforces).
@@ -286,7 +293,7 @@ export const WorkspaceProvider = ({ children }) => {
    * Caller is responsible for the actual redirect (typically a hard navigation
    * to /app?ws=<id> to ensure all in-memory state is rebuilt with the new ws).
    */
-  const deleteWorkspace = async () => {
+  const deleteWorkspace = useCallback(async () => {
     const deletedId = currentWorkspace?.id || currentWorkspaceId;
     await workspaceApi.deleteWorkspace();
     // Refetch workspaces — server-side deleteWorkspace clears
@@ -307,11 +314,11 @@ export const WorkspaceProvider = ({ children }) => {
     // switch + redirect (window.location.href = `/app?ws=${id}`).
     const next = remaining[0];
     return { nextWorkspaceId: next.id || next._id };
-  };
+  }, [currentWorkspace, currentWorkspaceId]);
 
   // Per-user zmena poradia prostredí. Optimisticky preusporiada lokálny zoznam
   // (okamžitá odozva UI), potom persistne na server. Pri chybe vráti pôvodné.
-  const reorderWorkspaces = async (orderedIds) => {
+  const reorderWorkspaces = useCallback(async (orderedIds) => {
     const prev = workspaces;
     const byId = new Map(prev.map(w => [String(w.id || w._id), w]));
     const reordered = orderedIds.map(id => byId.get(String(id))).filter(Boolean);
@@ -326,15 +333,15 @@ export const WorkspaceProvider = ({ children }) => {
       setWorkspaces(prev); // rollback
       throw err;
     }
-  };
+  }, [workspaces]);
 
-  const refreshCurrentWorkspace = async () => {
+  const refreshCurrentWorkspace = useCallback(async () => {
     const current = await workspaceApi.getCurrentWorkspace();
     setCurrentWorkspace(current);
     return current;
-  };
+  }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     workspaces,
     currentWorkspace,
     currentWorkspaceId,
@@ -351,7 +358,24 @@ export const WorkspaceProvider = ({ children }) => {
     deleteWorkspace,
     reorderWorkspaces,
     refreshCurrentWorkspace
-  };
+  }), [
+    workspaces,
+    currentWorkspace,
+    currentWorkspaceId,
+    loading,
+    error,
+    needsWorkspace,
+    fetchWorkspaces,
+    createWorkspace,
+    joinWorkspace,
+    switchWorkspace,
+    updateWorkspace,
+    regenerateInviteCode,
+    leaveWorkspace,
+    deleteWorkspace,
+    reorderWorkspaces,
+    refreshCurrentWorkspace
+  ]);
 
   return (
     <WorkspaceContext.Provider value={value}>
