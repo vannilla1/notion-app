@@ -506,8 +506,16 @@ function Messages() {
 
       setShowForm(false);
       resetForm();
-      // setTab triggers useEffect which fetches messages — no manual fetch needed
-      setTab('sent');
+      // setTab spustí useEffect([tab]), ktorý správy stiahne. Ak už sme na
+      // záložke Odoslané, React stav nezmení a efekt nebeží — a server emituje
+      // 'message-created' len príjemcovi, takže odosielateľ by novú správu
+      // nevidel až do manuálneho prepnutia. Preto tu refetch voláme priamo.
+      if (tab === 'sent') {
+        fetchMessages();
+        fetchPendingCount();
+      } else {
+        setTab('sent');
+      }
     } catch (err) {
       alert(attachment && isUploadTimeout(err)
         ? uploadFailureText(err)
