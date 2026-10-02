@@ -612,13 +612,18 @@ function UsersTab() {
     setCheckedIds(new Set());
   }, [page, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
 
+  // Poradové číslo detail requestu — pri rýchlom kliknutí na dva riadky
+  // nesmie neskoršia odpoveď pre usera A prepísať modal usera B.
+  const detailReqRef = useRef(0);
   const openUserDetail = (userId) => {
+    const reqId = ++detailReqRef.current;
     setSelectedUser(userId);
+    setUserDetail(null);
     setUserDetailLoading(true);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then(res => setUserDetail(res.data))
+      .then(res => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
       .catch(() => {})
-      .finally(() => setUserDetailLoading(false));
+      .finally(() => { if (reqId === detailReqRef.current) setUserDetailLoading(false); });
   };
 
   const handleSort = (column) => {
@@ -1485,13 +1490,16 @@ function WorkspacesTab() {
     else { setSortBy(column); setSortOrder('desc'); }
   };
 
+  const wsDetailReqRef = useRef(0); // stale guard — viď openUserDetail v UsersTab
   const openWsDetail = (wsId) => {
+    const reqId = ++wsDetailReqRef.current;
     setSelectedWs(wsId);
+    setWsDetail(null);
     setWsDetailLoading(true);
     adminApi.get(`/api/admin/workspaces/${wsId}`)
-      .then(res => setWsDetail(res.data))
+      .then(res => { if (reqId === wsDetailReqRef.current) setWsDetail(res.data); })
       .catch(() => {})
-      .finally(() => setWsDetailLoading(false));
+      .finally(() => { if (reqId === wsDetailReqRef.current) setWsDetailLoading(false); });
   };
 
   const handleDeleteWorkspace = () => {
@@ -2739,12 +2747,15 @@ function AuditLogTab() {
     } catch { alert('Export zlyhal'); }
   };
 
+  const detailReqRef = useRef(0); // stale guard pre mini modal (rýchle kliknutie na dvoch userov)
   const openUserDetail = (userId) => {
     if (!userId) return;
+    const reqId = ++detailReqRef.current;
     setUserDetailId(userId);
+    setUserDetail(null);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then((res) => setUserDetail(res.data))
-      .catch(() => setUserDetail(null));
+      .then((res) => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
+      .catch(() => { if (reqId === detailReqRef.current) setUserDetail(null); });
   };
 
   return (
@@ -3422,13 +3433,16 @@ function ActivityFeedTab() {
     }
   };
 
+  const detailReqRef = useRef(0); // stale guard pre mini modal (rýchle kliknutie na dvoch userov)
   const handleUsernameClick = (e, userId) => {
     e.stopPropagation();
     if (!userId) return;
+    const reqId = ++detailReqRef.current;
     setUserDetailId(userId);
+    setUserDetail(null);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then((res) => setUserDetail(res.data))
-      .catch(() => setUserDetail(null));
+      .then((res) => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
+      .catch(() => { if (reqId === detailReqRef.current) setUserDetail(null); });
   };
 
   const formatTime = (d) => {
@@ -7279,11 +7293,15 @@ function DiagUsageSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Rýchle prepnutie 24h/7d/30d — odpoveď staršieho obdobia nesmie
+    // prepísať novšiu, preto cleanup efektu označí request ako zrušený.
+    let cancelled = false;
     setLoading(true);
     adminApi.get('/api/admin/usage', { params: { period } })
-      .then(res => setData(res.data))
+      .then(res => { if (!cancelled) setData(res.data); })
       .catch(err => console.error('Usage load', err))
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [period]);
 
   if (loading) return <div className="sa-loading">Načítavam...</div>;
