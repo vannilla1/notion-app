@@ -3,8 +3,15 @@ import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 
 const areNotificationsEnabled = () => {
-  const setting = localStorage.getItem('notificationsEnabled');
-  return setting === null ? true : setting === 'true';
+  // Volá sa priamo v renderi (useState init) — pri zablokovanom storage
+  // (Chrome „blokovať cookies“, embed/iframe, SecurityError) by výnimka
+  // zhodila celý authenticated strom. Default = zapnuté.
+  try {
+    const setting = localStorage.getItem('notificationsEnabled');
+    return setting === null ? true : setting === 'true';
+  } catch {
+    return true;
+  }
 };
 
 function NotificationToast() {

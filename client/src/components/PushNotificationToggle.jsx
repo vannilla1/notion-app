@@ -10,13 +10,24 @@ import {
 import api from '../api/api';
 import { isNativeAndroidApp } from '../utils/nativeBridge';
 
+// localStorage môže byť zablokovaný (Chrome „blokovať cookies“, embed,
+// SecurityError) — getItem beží v renderi (useState init), výnimka by zhodila
+// komponent. Rovnaký try/catch vzor ako PushPermissionBanner.
 const areNotificationsEnabled = () => {
-  const setting = localStorage.getItem('notificationsEnabled');
-  return setting === null ? true : setting === 'true';
+  try {
+    const setting = localStorage.getItem('notificationsEnabled');
+    return setting === null ? true : setting === 'true';
+  } catch {
+    return true;
+  }
 };
 
 const setNotificationsEnabled = (enabled) => {
-  localStorage.setItem('notificationsEnabled', enabled.toString());
+  try {
+    localStorage.setItem('notificationsEnabled', enabled.toString());
+  } catch {
+    /* storage zablokovaný — nastavenie sa nedá uložiť, ale UI nepadne */
+  }
   window.dispatchEvent(new Event('notificationSettingChanged'));
 };
 
