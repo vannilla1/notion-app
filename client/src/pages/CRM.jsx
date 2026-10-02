@@ -322,6 +322,22 @@ function CRM() {
     }
   }, []);
 
+  // Index globálnych projektov podľa kontaktu — getContactTasks aj hľadanie
+  // inak prechádzali všetky globalTasks pre KAŽDÝ kontakt pri každom renderi
+  // (O(kontakty × projekty × contactIds) a tisíce String() alokácií na každé
+  // písmeno v hľadaní / socket udalosť). Prepočíta sa len pri zmene globalTasks.
+  const globalTasksByContact = useMemo(() => {
+    const m = new Map();
+    for (const t of globalTasks || []) {
+      for (const id of (t.contactIds || [])) {
+        const k = String(id);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(t);
+      }
+    }
+    return m;
+  }, [globalTasks]);
+
   const fetchLinkedMessages = useCallback(async (contactId) => {
     try {
       const res = await api.get('/api/messages/by-linked', { params: { linkedType: 'contact', linkedId: contactId } });
@@ -502,11 +518,7 @@ function CRM() {
       contactId: contact.id
     }));
 
-    const contactIdStr = String(contact.id);
-    const globalForContact = (globalTasks || []).filter(t => {
-      const ids = (t.contactIds || []).map(id => String(id));
-      return ids.includes(contactIdStr);
-    }).map(t => ({
+    const globalForContact = (globalTasksByContact.get(String(contact.id)) || []).map(t => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -1489,9 +1501,8 @@ function CRM() {
         // jeho názvu vôbec nezobrazil.
         const cidStr = String(c.id);
         const embeddedMatch = c.tasks?.some(t => t.title?.toLowerCase().includes(query));
-        const globalMatch = globalTasks.some(t =>
-          (t.contactIds || []).map(id => String(id)).includes(cidStr)
-          && t.title?.toLowerCase().includes(query)
+        const globalMatch = (globalTasksByContact.get(cidStr) || []).some(t =>
+          t.title?.toLowerCase().includes(query)
         );
         return nameMatch || emailMatch || phoneMatch || companyMatch || notesMatch || embeddedMatch || globalMatch;
       }
@@ -1503,7 +1514,7 @@ function CRM() {
       if (orderA !== orderB) return orderA - orderB;
       return (a.name || '').localeCompare(b.name || '', 'sk');
     });
-  }, [contacts, filter, searchQuery, globalTasks]);
+  }, [contacts, filter, searchQuery, globalTasksByContact]);
 
   // Memoize status counts to prevent unnecessary recalculations
   const statusCounts = useMemo(() => ({
