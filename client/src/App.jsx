@@ -586,11 +586,11 @@ function AppContent() {
         />
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate to="/app" /> : <Login />}
+          element={isAuthenticated ? <Navigate to="/app" replace /> : <Login />}
         />
         <Route
           path="/forgot-password"
-          element={isAuthenticated ? <Navigate to="/app" /> : <ForgotPassword />}
+          element={isAuthenticated ? <Navigate to="/app" replace /> : <ForgotPassword />}
         />
         <Route
           path="/reset-password"
@@ -598,34 +598,34 @@ function AppContent() {
         />
         <Route
           path="/app"
-          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/crm"
-          element={isAuthenticated ? <CRM /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <CRM /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/tasks"
-          element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Tasks /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/prilohy"
-          element={isAuthenticated ? <Attachments /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Attachments /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/workspace/members"
-          element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/messages"
-          element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Messages /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/app/billing"
           element={
             isAuthenticated
               ? (isIosNativeApp() ? <IapBilling /> : <BillingPage />)
-              : <Navigate to="/login" />
+              : <Navigate to="/login" replace />
           }
         />
         {/* Affiliate dashboard — visible iba pre prihlásených CRM userov.
@@ -633,7 +633,7 @@ function AppContent() {
             inak ukáže CTA na kontakt support@. */}
         <Route
           path="/app/affiliate"
-          element={isAuthenticated ? <UserAffiliate /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <UserAffiliate /> : <Navigate to="/login" replace />}
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />
