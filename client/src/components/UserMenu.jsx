@@ -98,6 +98,10 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const [showCalendarSettings, setShowCalendarSettings] = useState(false);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
+  // In-flight guardy — dvojklik na „Uložiť zmeny“ / „Zmeniť heslo“ posielal
+  // dva PUT requesty.
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -1055,6 +1059,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   };
 
   const handleSaveProfile = async () => {
+    if (savingProfile) return;
+    setSavingProfile(true);
     try {
       setErrors({});
       setMessage('');
@@ -1069,6 +1075,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
           setShowProfile(false);
     } catch (error) {
       setErrors({ general: error.response?.data?.message || 'Chyba pri ukladaní profilu' });
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -1086,6 +1094,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       return;
     }
 
+    if (changingPassword) return;
+    setChangingPassword(true);
     try {
       const token = getStoredToken();
       await axios.put(`${API_URL}/auth/password`, {
@@ -1102,6 +1112,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       });
     } catch (error) {
       setErrors({ general: error.response?.data?.message || 'Chyba pri zmene hesla' });
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -1665,8 +1677,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
                 {errors.general && <div className="form-error">{errors.general}</div>}
 
                 <div className="modal-actions">
-                  <button className="btn btn-primary" onClick={handleSaveProfile}>
-                    Uložiť zmeny
+                  <button className="btn btn-primary" onClick={handleSaveProfile} disabled={savingProfile}>
+                    {savingProfile ? 'Ukladám…' : 'Uložiť zmeny'}
                   </button>
                   <button className="btn btn-secondary" onClick={handleCloseProfile}>
                     Zavrieť
@@ -1759,8 +1771,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
               {errors.general && <div className="form-error">{errors.general}</div>}
 
               <div className="modal-actions">
-                <button className="btn btn-primary" onClick={handleChangePassword}>
-                  Zmeniť heslo
+                <button className="btn btn-primary" onClick={handleChangePassword} disabled={changingPassword}>
+                  {changingPassword ? 'Mením…' : 'Zmeniť heslo'}
                 </button>
                 <button className="btn btn-secondary" onClick={handleClosePasswordChange}>
                   Zavrieť
