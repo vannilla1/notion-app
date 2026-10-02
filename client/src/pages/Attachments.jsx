@@ -7,6 +7,7 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import NotificationBell from '../components/NotificationBell';
 import UserMenu from '../components/UserMenu';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useWorkspaceSwitched } from '../hooks';
 import { formatFileSize } from '../utils/constants';
 import { alertUnlessPlanGate } from '../utils/planGate';
 
@@ -47,6 +48,18 @@ export default function Attachments() {
   }, []);
 
   useEffect(() => { fetchItems(); }, [fetchItems, currentWorkspace?.id]);
+
+  // Prepnutie prostredia stránku neremountuje (WorkspaceContext len mení stav),
+  // takže výber a filtre z predošlého prostredia by ostali: „Zrušiť výber"
+  // sa ukazovalo pri nula viditeľných vybraných a staré ID sa po návrate
+  // „oživili" ako vybrané. Reset cez event, NIE cez zmenu currentWorkspace?.id
+  // — tá nastáva aj pri prvom načítaní (null → workspace) a zmazala by
+  // contactFilter z URL (?contactId=).
+  useWorkspaceSwitched(() => {
+    setSelected(new Set());
+    setContactFilter('');
+    setTaskFilter('');
+  });
 
   // Zoznamy pre filtre — z reálnych dát, nie zo samostatných dotazov
   const contacts = useMemo(() => {
