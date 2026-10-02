@@ -50,6 +50,10 @@ const PushPermissionBanner = () => {
 
   useEffect(() => {
     let cancelled = false;
+    // Timer musí žiť v scope effectu — `return () => clearTimeout(timer)`
+    // vnútri async IIFE bola návratová hodnota promisu, nie cleanup, takže
+    // sa 2 s timer nikdy nerušil (chránil ho len flag `cancelled`).
+    let timer;
 
     (async () => {
       // Android-only — desktop users majú browser notification UI (icon v URL
@@ -72,13 +76,16 @@ const PushPermissionBanner = () => {
 
       // Delay 2s po mount — nechceme ruptnúť user UX okamžite po otvorení
       // appky. Dá to čas loaderom a shimmers dobehnúť.
-      const timer = setTimeout(() => {
+      if (cancelled) return;
+      timer = setTimeout(() => {
         if (!cancelled) setVisible(true);
       }, 2000);
-      return () => clearTimeout(timer);
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   const handleEnable = async () => {
