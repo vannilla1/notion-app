@@ -50,16 +50,21 @@ function WorkspaceMembers() {
   const isOwner = currentWorkspace?.role === 'owner';
   const canManage = currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager';
 
+  // Chyba načítania členov — bez nej stránka pri 403/5xx/výpadku siete
+  // ukazovala „Aktívni členovia (0)“, akoby prostredie nemalo členov.
+  const [loadError, setLoadError] = useState('');
+
   const fetchData = useCallback(async () => {
     try {
+      setLoadError('');
       const [membersData, invitationsData] = await Promise.all([
         getWorkspaceMembers(),
         canManage ? getInvitations().catch(() => []) : Promise.resolve([])
       ]);
       setMembers(membersData);
       setInvitations(invitationsData);
-    } catch {
-      // Silently fail — members list shows empty state
+    } catch (err) {
+      setLoadError(err?.response?.data?.message || 'Nepodarilo sa načítať členov');
     } finally {
       setLoading(false);
     }
@@ -405,6 +410,17 @@ function WorkspaceMembers() {
           <h3 className="wm-section-title">Aktívni členovia ({members.length})</h3>
           {loading ? (
             <div className="loading">Načítavam...</div>
+          ) : loadError ? (
+            <div className="wm-invite-result error">
+              {loadError}{' '}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setLoading(true); fetchData(); }}
+              >
+                Skúsiť znova
+              </button>
+            </div>
           ) : (
             <div className="wm-list">
               {members.map(member => {
