@@ -2117,6 +2117,18 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
     releaseIdem();
     return res.status(status).json(body);
   };
+  // Cleanup osirelého blobu: po úspešnom uploade do R2 / vytvorení ContactFile
+  // môže ešte padnúť save() metadát (ValidationError, výpadok DB, kontakt
+  // medzitým zmazaný) — bez cleanupu by R2 objekt a ContactFile riadok ostali
+  // natrvalo. Kopírovacie cesty (copyOneFile, transfer) to už robia. Best-effort.
+  let uploadedKey = null;
+  let createdFileId = null;
+  const cleanupOrphan = () => {
+    if (uploadedKey) fileStorage.deleteFile(uploadedKey).catch(() => {});
+    if (createdFileId) ContactFile.deleteOne({ fileId: createdFileId }).catch(() => {});
+    uploadedKey = null;
+    createdFileId = null;
+  };
   upload.single('file')(req, res, async (err) => {
     try {
       // multer/busboy chyby → 400 so slovenskou správou + `code` (predtým
@@ -2214,12 +2226,14 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       if (fileStorage.isR2Available()) {
         const r2Key = fileStorage.contactFileKey(fileId);
         await fileStorage.uploadFile(r2Key, req.file.buffer, req.file.mimetype);
+        uploadedKey = r2Key;
         await ContactFile.create({
           contactId: contact._id,
           fileId: fileId,
           r2Key: r2Key,
           data: null
         });
+        createdFileId = fileId;
         logger.debug('[Contact upload] Stored in R2', { fileId, r2Key, size: req.file.size });
       } else {
         // base64 sa počíta AŽ tu vo fallbacku — nepodmienená konverzia
@@ -2229,6 +2243,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           fileId: fileId,
           data: req.file.buffer.toString('base64')
         });
+        createdFileId = fileId;
         logger.warn('[Contact upload] R2 unavailable, stored as base64 in MongoDB', { fileId });
       }
 
@@ -2250,10 +2265,14 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           docToSave = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
           if (!docToSave) {
             releaseIdem();
+            cleanupOrphan();
             return res.status(404).json({ message: 'Kontakt už neexistuje.' });
           }
         }
       }
+      // Metadáta uložené — blob už nie je sirota, catch ho nesmie zmazať
+      uploadedKey = null;
+      createdFileId = null;
 
       const io = req.app.get('io');
       if (io) {
@@ -2273,6 +2292,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       res.status(201).json(responseData);
     } catch (error) {
       releaseIdem();
+      cleanupOrphan();
       logger.error('File upload error', { error: error.message });
       // SKUTOČNÝ error (stack) do Diagnostiky — finish-hook by inak zapísal
       // len generické „HTTP 500" bez príčiny (rovnako ako tasks.js upload).
