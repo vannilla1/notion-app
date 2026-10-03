@@ -2296,9 +2296,14 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
+    // RFC 6266: res.attachment() pošle `filename*=UTF-8''…` (+ latin1
+    // fallback vo filename="…"). Ručná hlavička dávala percent-encoded názov
+    // priamo do filename="…" — WKWebView / Android WebView by ponúkli
+    // „Zmluva%20%C4%8D.pdf". Rovnako ako messages.js; + nosniff.
+    res.attachment(sanitizeDisplayName(fileMeta.originalName) || 'priloha');
     res.set({
-      'Content-Type': fileMeta.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
+      'Content-Type': fileMeta.mimetype || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
       'Content-Length': fileBuffer.length
     });
 
