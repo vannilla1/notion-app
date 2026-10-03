@@ -2121,6 +2121,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
           // Auto-delete from Google (cascades to every nested subtask too).
           autoDeleteTaskTreeFromGoogle(deletedTask);
+          deleteNodeFileBlobs(deletedTask, contact._id);
 
           // Send notification about deleted task
           await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -2160,6 +2161,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
       // Auto-delete from Google (cascades through subtasks so nothing orphans).
       autoDeleteTaskTreeFromGoogle(task);
+      deleteNodeFileBlobs(task, null);
 
       // Send notification about deleted task
       await notificationService.notifyTaskChange('task.deleted', task, req.user, [], req.workspaceId);
@@ -2199,6 +2201,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
         // Auto-delete from Google (cascades through subtasks so nothing orphans).
         autoDeleteTaskTreeFromGoogle(deletedTask);
+        deleteNodeFileBlobs(deletedTask, contact._id);
 
         // Send notification about deleted task
         await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -2972,6 +2975,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
             // Auto-delete subtask from Google
             // Cascades through any nested sub-subtasks so they vanish from Google too.
             autoDeleteTaskTreeFromGoogle(deletedSubtask);
+            deleteNodeFileBlobs(deletedSubtask, contact._id);
 
             return res.json({ message: 'Subtask deleted' });
           }
@@ -2999,6 +3003,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
         // Cascades through any nested sub-subtasks so they vanish from Google too.
         autoDeleteTaskTreeFromGoogle(deletedSubtask);
+        deleteNodeFileBlobs(deletedSubtask, null);
 
         return res.json({ message: 'Subtask deleted' });
       }
@@ -3036,6 +3041,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
           // Cascades through any nested sub-subtasks so they vanish from Google too.
           autoDeleteTaskTreeFromGoogle(deletedSubtask);
+          deleteNodeFileBlobs(deletedSubtask, contact._id);
 
           return res.json({ message: 'Subtask deleted' });
         }
@@ -3166,6 +3172,22 @@ const deleteTaskFileBlob = async (fileId, ownerContactId) => {
   } catch (e) {
     logger.warn('[Task file delete] Mazanie blobu zlyhalo (metadáta už zmazané)', { fileId, error: e.message });
   }
+};
+
+// Zmazanie projektu/podúlohy: bloby VŠETKÝCH príloh v jeho strome (R2 +
+// ContactFile). Predtým sa mazali len metadáta a bloby ostávali ako siroty
+// (platený storage, ContactFile s legacy base64 aj Atlas kvóta). Mazanie je
+// viazané na vlastníka (contactId), takže presunuté/kopírované prílohy
+// iného kontaktu (iné fileId alebo prepísaný contactId) sa nedotkne.
+const collectNodeFileIds = (node, out = []) => {
+  for (const f of (node?.files || [])) if (f?.id) out.push(f.id);
+  for (const sub of (node?.subtasks || [])) collectNodeFileIds(sub, out);
+  return out;
+};
+const deleteNodeFileBlobs = (node, ownerContactId) => {
+  const ids = collectNodeFileIds(node);
+  if (ids.length === 0) return;
+  Promise.all(ids.map((id) => deleteTaskFileBlob(id, ownerContactId))).catch(() => {});
 };
 
 // Upload file to task
