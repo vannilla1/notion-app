@@ -1180,7 +1180,25 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
-    await processCalendarChanges(user);
+    // Per-user zámok: Google posiela viac notifikácií rýchlo po sebe a bez
+    // zámku každá paralelne volala events.list s tým istým syncToken a
+    // aplikovala tie isté zmeny (duplicitné socket eventy, prepisovanie
+    // syncToken). Notifikácia, ktorá príde počas behu, sa nezahodí — označí
+    // sa ako „pending" a po dobehnutí sa spracovanie raz zopakuje
+    // (processCalendarChanges si drží aktualizovaný syncToken v `user`).
+    const webhookLockKey = `webhook-${user._id}`;
+    if (!acquireCalendarLock(webhookLockKey, WEBHOOK_LOCK_TIMEOUT)) {
+      calendarWebhookPending.add(webhookLockKey);
+      return;
+    }
+    try {
+      do {
+        calendarWebhookPending.delete(webhookLockKey);
+        await processCalendarChanges(user);
+      } while (calendarWebhookPending.has(webhookLockKey));
+    } finally {
+      releaseCalendarLock(webhookLockKey);
+    }
   } catch (err) {
     logger.error('[Calendar Webhook] Error', { error: err.message, channelId });
   }
@@ -2741,6 +2759,10 @@ const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — single-task / auto-sync operáci
 // inak by ho druhý request po 30 s považoval za zastaraný a spustil paralelný
 // sync, ktorý vloží duplicitné udalosti (Google events.insert nie je idempotentný).
 const FULL_SYNC_LOCK_TIMEOUT = 10 * 60 * 1000;
+// Spracovanie webhook notifikácie (events.list + zápisy do úloh) — 5 min strop
+// pre prípad pádu bez finally; bežne sa zámok uvoľní hneď po spracovaní.
+const WEBHOOK_LOCK_TIMEOUT = 5 * 60 * 1000;
+const calendarWebhookPending = new Set();
 
 const acquireCalendarLock = (key, timeoutMs = CALENDAR_LOCK_TIMEOUT) => {
   const now = Date.now();
