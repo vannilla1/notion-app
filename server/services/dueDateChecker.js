@@ -3,6 +3,13 @@ const Contact = require('../models/Contact');
 const User = require('../models/User');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
+const {
+  mapNodeChains,
+  treeMissingIds,
+  ensureNodeIds,
+  createNestedUpdate,
+  reminderProjection
+} = require('../utils/nestedTaskUpdate');
 
 // ─── Recipient resolution ────────────────────────────────────────────────
 //
@@ -367,25 +374,6 @@ const processSubtaskReminders = (subtasks, taskId, reminders = []) => {
 };
 
 /**
- * Mark subtask reminders as sent recursively
- */
-const markSubtaskRemindersSent = (subtasks) => {
-  if (!subtasks || subtasks.length === 0) return subtasks;
-
-  return subtasks.map(subtask => {
-    const reminderInfo = checkReminder(subtask);
-    const updated = subtask.toObject ? subtask.toObject() : { ...subtask };
-    if (reminderInfo) {
-      updated.reminderSent = true;
-    }
-    if (updated.subtasks && updated.subtasks.length > 0) {
-      updated.subtasks = markSubtaskRemindersSent(updated.subtasks);
-    }
-    return updated;
-  });
-};
-
-/**
  * Process subtasks recursively and collect urgency changes
  */
 const processSubtasks = (subtasks, taskId, changes = []) => {
@@ -424,22 +412,6 @@ const processSubtasks = (subtasks, taskId, changes = []) => {
 };
 
 /**
- * Update urgency levels in subtasks recursively
- */
-const updateSubtaskUrgencyLevels = (subtasks) => {
-  if (!subtasks || subtasks.length === 0) return subtasks;
-
-  return subtasks.map(subtask => {
-    const currentLevel = getUrgencyLevel(subtask.dueDate);
-    return {
-      ...subtask.toObject ? subtask.toObject() : subtask,
-      lastUrgencyLevel: currentLevel,
-      subtasks: updateSubtaskUrgencyLevels(subtask.subtasks)
-    };
-  });
-};
-
-/**
  * Check all tasks for due date urgency changes and send notifications
  */
 // Ochrana proti prekrývaniu behov: interval je 5 min, ale beh prechádza
@@ -462,6 +434,44 @@ const checkDueDates = async () => {
   }
 };
 
+// Polia, ktoré plánovač z Task číta (bez description/files — predtým sa
+// načítali celé dokumenty vrátane legacy base64 súborov).
+const TASK_PROJECTION = {
+  ...reminderProjection(''),
+  createdBy: 1,
+  workspaceId: 1,
+  contactId: 1
+};
+const CONTACT_PROJECTION = {
+  name: 1,
+  workspaceId: 1,
+  userId: 1,
+  ...reminderProjection('tasks.')
+};
+
+/**
+ * Do `marks` pridá nový lastUrgencyLevel pre koreň a všetky podúlohy, ktorých
+ * uložená úroveň sa líši od aktuálnej (predtým sa prepisovalo celé pole
+ * podúloh).
+ */
+const addUrgencyLevelMarks = (marks, root, rootChain, chains) => {
+  const visit = (node, chain) => {
+    if (!chain) return;
+    const level = getUrgencyLevel(node.dueDate);
+    if ((node.lastUrgencyLevel || null) !== level) marks.set(chain, 'lastUrgencyLevel', level);
+  };
+  visit(root, rootChain);
+  const walk = (nodes) => {
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object') continue;
+      visit(node, chains.get(node));
+      walk(node.subtasks);
+    }
+  };
+  walk(root.subtasks);
+};
+
 const runDueDateCheck = async () => {
   try {
     logger.info('[DueDateChecker] Starting due date check...');
@@ -472,8 +482,10 @@ const runDueDateCheck = async () => {
     // a bez update stavu).
     const morningWindow = isMorningSendWindow();
 
-    // Get all incomplete tasks with due dates or reminders
-    const tasks = await Task.find({
+    // Get all incomplete tasks with due dates or reminders.
+    // Kurzor (nie jedno veľké pole): každá úloha sa spracuje krátko po
+    // načítaní a v pamäti je naraz len jedna dávka.
+    const cursor = Task.find({
       completed: false,
       $or: [
         { dueDate: { $exists: true, $ne: null } },
@@ -481,19 +493,33 @@ const runDueDateCheck = async () => {
         { reminder: { $exists: true, $ne: null } },
         { 'subtasks.reminder': { $exists: true, $ne: null } }
       ]
-    }).maxTimeMS(20000);
+    }, TASK_PROJECTION).lean().batchSize(50).maxTimeMS(20000).cursor();
 
-    logger.info(`[DueDateChecker] Found ${tasks.length} tasks to check`);
-
+    let tasksChecked = 0;
     let notificationsSent = 0;
     let tasksUpdated = 0;
 
-    for (const task of tasks) {
-      // Chyba jednej úlohy (validácia pri save(), legacy dáta, výpadok pri
+    for await (let task of cursor) {
+      tasksChecked++;
+      // Chyba jednej úlohy (validácia, legacy dáta, výpadok pri
       // notifikácii) nesmie zastaviť kontrolu všetkých ostatných úloh ani
       // kontaktov — predtým výnimka vyletela z cyklu a checkContactDueDates
       // sa v tom behu vôbec nespustil.
       try {
+        // Cielený zápis potrebuje id na každej podúlohe (legacy dáta ich
+        // nemusia mať) — doplníme ich a pracujeme s čerstvou kópiou.
+        if (treeMissingIds(task.subtasks)) {
+          const ready = await ensureNodeIds(Task.collection, task._id, 'subtasks');
+          if (!ready) {
+            logger.warn('[DueDateChecker] Task changed while assigning subtask ids — skipped this run', { taskId: task._id?.toString() });
+            continue;
+          }
+          task = await Task.findById(task._id, TASK_PROJECTION).lean();
+          if (!task) continue;
+        }
+        const chains = mapNodeChains(task.subtasks, 'subtasks');
+        const chainOf = (node) => (node === task ? [] : chains.get(node));
+
         const changes = [];
 
         // Check main task due date — len v rannom okne (date-only notifikácia)
@@ -519,6 +545,75 @@ const runDueDateCheck = async () => {
 
         // Check subtasks — len v rannom okne
         if (morningWindow) processSubtasks(task.subtasks, task._id, changes);
+
+        // --- Custom reminders --- (date-only → len v rannom okne)
+        const reminders = [];
+        if (morningWindow) {
+          // Check main task reminder
+          const taskReminder = checkReminder(task);
+          if (taskReminder) {
+            reminders.push({ type: 'task', task, ...taskReminder });
+          }
+          // Check subtask reminders
+          processSubtaskReminders(task.subtasks, task._id, reminders);
+        }
+
+        // --- Time-of-day reminders (pole minút pred dueDateTime) ---
+        // User si explicitne nastavil → category: 'direct' (vždy push).
+        const timeFires = [];
+        const nowMs = Date.now();
+
+        // Main task time reminders
+        const taskTimeFires = checkTimeReminders(task, nowMs);
+        for (const f of taskTimeFires) {
+          timeFires.push({ kind: 'task', taskRef: task, ...f });
+        }
+
+        // Subtask time reminders (recursive walk)
+        const walkSubtasksForTime = (subs) => {
+          if (!subs || subs.length === 0) return;
+          for (const sub of subs) {
+            if (sub.completed) continue;
+            const fires = checkTimeReminders(sub, nowMs);
+            for (const f of fires) {
+              timeFires.push({ kind: 'subtask', taskRef: task, subtask: sub, ...f });
+            }
+            if (sub.subtasks && sub.subtasks.length > 0) walkSubtasksForTime(sub.subtasks);
+          }
+        };
+        walkSubtasksForTime(task.subtasks);
+
+        if (changes.length === 0 && reminders.length === 0 && timeFires.length === 0) continue;
+
+        // Stav (odoslané pripomienky + nové úrovne urgentnosti) zapíšeme
+        // PRED odoslaním a cielene len do dotknutých uzlov — prekrývajúci sa
+        // beh nepošle duplikáty a zmeny používateľa v úlohe sa neprepíšu.
+        // Ak zápis zlyhá, notifikácie sa neodošlú: inak by časová
+        // pripomienka chodila každých 5 min až do termínu.
+        const marks = createNestedUpdate();
+        for (const rem of reminders) {
+          const chain = chainOf(rem.type === 'task' ? task : rem.subtask);
+          if (chain) marks.set(chain, 'reminderSent', true);
+        }
+        for (const f of timeFires) {
+          const node = f.kind === 'task' ? task : f.subtask;
+          const chain = chainOf(node);
+          if (chain) marks.addToSet(chain, 'timeRemindersSent', [f.mins], node.timeRemindersSent);
+        }
+        if (changes.length > 0) addUrgencyLevelMarks(marks, task, [], chains);
+
+        if (!marks.isEmpty()) {
+          try {
+            const { update, options } = marks.build();
+            await Task.collection.updateOne({ _id: task._id }, update, options);
+          } catch (err) {
+            logger.error('[DueDateChecker] Failed to persist reminder state — notifications skipped', {
+              error: err.message, taskId: task._id?.toString()
+            });
+            continue;
+          }
+        }
+        if (changes.length > 0) tasksUpdated++;
 
         // Send notifications for changes
         for (const change of changes) {
@@ -579,30 +674,6 @@ const runDueDateCheck = async () => {
           }
         }
 
-        // --- Custom reminders --- (date-only → len v rannom okne)
-        const reminders = [];
-        let taskReminder = null;
-        if (morningWindow) {
-          // Check main task reminder
-          taskReminder = checkReminder(task);
-          if (taskReminder) {
-            reminders.push({ type: 'task', task, ...taskReminder });
-          }
-          // Check subtask reminders
-          processSubtaskReminders(task.subtasks, task._id, reminders);
-        }
-
-        // Mark reminders as sent BEFORE sending notifications (prevents duplicates on overlapping runs)
-        if (reminders.length > 0) {
-          if (taskReminder) {
-            task.reminderSent = true;
-          }
-          if (reminders.some(r => r.type === 'subtask')) {
-            task.subtasks = markSubtaskRemindersSent(task.subtasks);
-          }
-          await task.save();
-        }
-
         // Send reminder notifications
         for (const rem of reminders) {
           const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
@@ -648,100 +719,45 @@ const runDueDateCheck = async () => {
           }
         }
 
-        // --- Time-of-day reminders (pole minút pred dueDateTime) ---
-        // User si explicitne nastavil → category: 'direct' (vždy push).
-        const timeFires = [];
-        const nowMs = Date.now();
+        // Send time-of-day reminders
+        for (const f of timeFires) {
+          const title = f.kind === 'task' ? task.title : f.subtask.title;
+          const msg = formatTimeReminderMessage(title, f.dueMs, f.mins);
 
-        // Main task time reminders
-        const taskTimeFires = checkTimeReminders(task, nowMs);
-        for (const f of taskTimeFires) {
-          timeFires.push({ kind: 'task', taskRef: task, ...f });
-        }
-
-        // Subtask time reminders (recursive walk)
-        const walkSubtasksForTime = (subs) => {
-          if (!subs || subs.length === 0) return;
-          for (const sub of subs) {
-            if (sub.completed) continue;
-            const fires = checkTimeReminders(sub, nowMs);
-            for (const f of fires) {
-              timeFires.push({ kind: 'subtask', taskRef: task, subtask: sub, ...f });
-            }
-            if (sub.subtasks && sub.subtasks.length > 0) walkSubtasksForTime(sub.subtasks);
+          const usersToNotify = new Set();
+          if (task.assignedTo && task.assignedTo.length > 0) {
+            task.assignedTo.forEach(uid => usersToNotify.add(uid.toString()));
           }
-        };
-        walkSubtasksForTime(task.subtasks);
+          if (task.createdBy) usersToNotify.add(task.createdBy.toString());
+          addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
 
-        // Mark sent + persist BEFORE sending so concurrent runs neduplikujú.
-        if (timeFires.length > 0) {
-          for (const f of timeFires) {
-            if (f.kind === 'task') {
-              const sentSet = new Set(task.timeRemindersSent || []);
-              sentSet.add(f.mins);
-              task.timeRemindersSent = Array.from(sentSet);
-            } else if (f.kind === 'subtask' && f.subtask) {
-              const sentSet = new Set(f.subtask.timeRemindersSent || []);
-              sentSet.add(f.mins);
-              f.subtask.timeRemindersSent = Array.from(sentSet);
-            }
-          }
-          try {
-            task.markModified('subtasks');
-            await task.save();
-          } catch (err) {
-            logger.warn('[DueDateChecker] Failed to persist timeRemindersSent', { error: err.message, taskId: task._id });
-          }
-
-          for (const f of timeFires) {
-            const title = f.kind === 'task' ? task.title : f.subtask.title;
-            const msg = formatTimeReminderMessage(title, f.dueMs, f.mins);
-
-            const usersToNotify = new Set();
-            if (task.assignedTo && task.assignedTo.length > 0) {
-              task.assignedTo.forEach(uid => usersToNotify.add(uid.toString()));
-            }
-            if (task.createdBy) usersToNotify.add(task.createdBy.toString());
-            addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
-
-            const recipientIds = await resolveRecipientIds(usersToNotify);
-            for (const userId of recipientIds) {
-              try {
-                await notificationService.createNotification({
-                  userId,
-                  workspaceId: task.workspaceId,
-                  type: f.kind === 'task' ? 'task.dueDate' : 'subtask.dueDate',
-                  category: 'direct', // explicit reminder → vždy push, bez ohľadu na pushDeadlines
-                  title: msg.title,
-                  message: msg.body,
-                  actorName: 'Systém',
-                  relatedType: f.kind,
-                  relatedId: f.kind === 'task' ? task._id.toString() : f.subtask.id,
-                  relatedName: title,
-                  data: {
-                    taskId: task._id.toString(),
-                    subtaskId: f.kind === 'subtask' ? f.subtask.id : null,
-                    contactId: task.contactId || null
-                  }
-                });
-                notificationsSent++;
-              } catch (err) {
-                logger.error('[DueDateChecker] Failed to send time reminder', {
-                  error: err.message, userId, taskId: task._id, mins: f.mins
-                });
-              }
+          const recipientIds = await resolveRecipientIds(usersToNotify);
+          for (const userId of recipientIds) {
+            try {
+              await notificationService.createNotification({
+                userId,
+                workspaceId: task.workspaceId,
+                type: f.kind === 'task' ? 'task.dueDate' : 'subtask.dueDate',
+                category: 'direct', // explicit reminder → vždy push, bez ohľadu na pushDeadlines
+                title: msg.title,
+                message: msg.body,
+                actorName: 'Systém',
+                relatedType: f.kind,
+                relatedId: f.kind === 'task' ? task._id.toString() : f.subtask.id,
+                relatedName: title,
+                data: {
+                  taskId: task._id.toString(),
+                  subtaskId: f.kind === 'subtask' ? f.subtask.id : null,
+                  contactId: task.contactId || null
+                }
+              });
+              notificationsSent++;
+            } catch (err) {
+              logger.error('[DueDateChecker] Failed to send time reminder', {
+                error: err.message, userId, taskId: task._id, mins: f.mins
+              });
             }
           }
-        }
-
-        // Update stored urgency levels (reminders already marked as sent above)
-        if (changes.length > 0) {
-          const currentTaskLevel = getUrgencyLevel(task.dueDate);
-          task.lastUrgencyLevel = currentTaskLevel;
-          task.subtasks = updateSubtaskUrgencyLevels(task.subtasks);
-
-          await task.save();
-          tasksUpdated++;
         }
       } catch (taskErr) {
         logger.error('[DueDateChecker] Task processing failed', { taskId: task._id?.toString(), error: taskErr.message });
@@ -752,7 +768,7 @@ const runDueDateCheck = async () => {
     const contactResult = await checkContactDueDates(morningWindow);
     notificationsSent += contactResult.notificationsSent;
 
-    logger.info(`[DueDateChecker] Completed. Notifications sent: ${notificationsSent}, Tasks updated: ${tasksUpdated}, Contacts updated: ${contactResult.contactsUpdated}`);
+    logger.info(`[DueDateChecker] Completed. Tasks checked: ${tasksChecked}, Notifications sent: ${notificationsSent}, Tasks updated: ${tasksUpdated}, Contacts updated: ${contactResult.contactsUpdated}`);
 
     return { notificationsSent, tasksUpdated };
   } catch (error) {
@@ -769,8 +785,9 @@ const runDueDateCheck = async () => {
  */
 const checkContactDueDates = async (morningWindow = true) => {
   try {
-    // files.data is now in ContactFile collection, Contact docs are small
-    const contacts = await Contact.find(
+    // files.data is now in ContactFile collection. Projekcia len polí, ktoré
+    // plánovač číta; kurzor namiesto jedného poľa všetkých kontaktov.
+    const cursor = Contact.find(
       {
         'tasks.0': { $exists: true },
         'tasks': { $elemMatch: { completed: { $ne: true }, $or: [
@@ -778,19 +795,33 @@ const checkContactDueDates = async (morningWindow = true) => {
           { reminder: { $exists: true, $ne: null } }
         ]}}
       },
-      { name: 1, tasks: 1, workspaceId: 1, userId: 1 }
-    ).lean();
+      CONTACT_PROJECTION
+    ).lean().batchSize(50).maxTimeMS(20000).cursor();
 
     let notificationsSent = 0;
     let contactsUpdated = 0;
 
-    for (const contact of contacts) {
+    for await (let contact of cursor) {
       // Rovnako ako pri Task cykle — chyba jedného kontaktu nezastaví ostatné.
       try {
-        let contactModified = false;
+        if (treeMissingIds(contact.tasks)) {
+          const ready = await ensureNodeIds(Contact.collection, contact._id, 'tasks');
+          if (!ready) {
+            logger.warn('[DueDateChecker] Contact changed while assigning task ids — skipped this run', { contactId: contact._id?.toString() });
+            continue;
+          }
+          contact = await Contact.findById(contact._id, CONTACT_PROJECTION).lean();
+          if (!contact) continue;
+        }
+        const chains = mapNodeChains(contact.tasks, 'tasks');
+        const marks = createNestedUpdate();
+        const pending = [];
+        const nowMs = Date.now();
 
-        for (const task of contact.tasks) {
-          if (task.completed) continue;
+        for (const task of contact.tasks || []) {
+          if (!task || task.completed) continue;
+          const taskChain = chains.get(task);
+          if (!taskChain) continue;
 
           const changes = [];
 
@@ -810,6 +841,66 @@ const checkContactDueDates = async (morningWindow = true) => {
           // Check subtasks — len v rannom okne
           if (morningWindow) processSubtasks(task.subtasks, contact._id, changes);
 
+          // Custom reminders — date-only → len v rannom okne
+          const reminders = [];
+          if (morningWindow) {
+            const taskReminder = checkReminder(task);
+            if (taskReminder) reminders.push({ type: 'task', task, ...taskReminder });
+            processSubtaskReminders(task.subtasks, contact._id, reminders);
+          }
+
+          // --- Time-of-day reminders for contact tasks/subtasks ---
+          const fires = [];
+          const taskTimeFires = checkTimeReminders(task, nowMs);
+          for (const f of taskTimeFires) fires.push({ kind: 'task', taskRef: task, ...f });
+
+          const walkSubsForTime = (subs) => {
+            if (!subs || subs.length === 0) return;
+            for (const sub of subs) {
+              if (sub.completed) continue;
+              const subFires = checkTimeReminders(sub, nowMs);
+              for (const f of subFires) fires.push({ kind: 'subtask', taskRef: task, subtask: sub, ...f });
+              if (sub.subtasks?.length > 0) walkSubsForTime(sub.subtasks);
+            }
+          };
+          walkSubsForTime(task.subtasks);
+
+          if (changes.length === 0 && reminders.length === 0 && fires.length === 0) continue;
+
+          for (const rem of reminders) {
+            const chain = rem.type === 'task' ? taskChain : chains.get(rem.subtask);
+            if (chain) marks.set(chain, 'reminderSent', true);
+          }
+          for (const f of fires) {
+            const node = f.kind === 'task' ? task : f.subtask;
+            const chain = f.kind === 'task' ? taskChain : chains.get(node);
+            if (chain) marks.addToSet(chain, 'timeRemindersSent', [f.mins], node.timeRemindersSent);
+          }
+          if (changes.length > 0) addUrgencyLevelMarks(marks, task, taskChain, chains);
+
+          pending.push({ task, changes, reminders, fires });
+        }
+
+        if (pending.length === 0) continue;
+
+        // Stav zapíšeme PRED odoslaním, cielene do dotknutých úloh/podúloh.
+        // Predtým sa po odoslaní všetkých notifikácií prepísalo celé pole
+        // `tasks` snapshotom zo začiatku behu (strata zmien používateľa) a pri
+        // zlyhaní zápisu sa pripomienky posielali znova každých 5 minút.
+        if (!marks.isEmpty()) {
+          try {
+            const { update, options } = marks.build();
+            await Contact.collection.updateOne({ _id: contact._id }, update, options);
+            contactsUpdated++;
+          } catch (err) {
+            logger.error('[DueDateChecker] Failed to persist contact reminder state — notifications skipped', {
+              error: err.message, contactId: contact._id?.toString()
+            });
+            continue;
+          }
+        }
+
+        for (const { task, changes, reminders, fires } of pending) {
           // Send urgency notifications
           for (const change of changes) {
             const message = getUrgencyMessage(
@@ -852,139 +943,78 @@ const checkContactDueDates = async (morningWindow = true) => {
             }
           }
 
-          // Custom reminders — date-only → len v rannom okne
-          const reminders = [];
-          let taskReminder = null;
-          if (morningWindow) {
-            taskReminder = checkReminder(task);
-            if (taskReminder) reminders.push({ type: 'task', task, ...taskReminder });
-            processSubtaskReminders(task.subtasks, contact._id, reminders);
-          }
+          // Send reminder notifications
+          for (const rem of reminders) {
+            const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
+            const msg = getReminderMessage(title, rem.dueDate, rem.daysRemaining);
 
-          if (reminders.length > 0) {
-            if (taskReminder) task.reminderSent = true;
-            if (reminders.some(r => r.type === 'subtask')) {
-              task.subtasks = markSubtaskRemindersSent(task.subtasks);
-            }
-            contactModified = true;
+            const usersToNotify = new Set();
+            if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
+            usersToNotify.add(contact.userId.toString());
+            addSubtaskAssignees(usersToNotify, rem.type === 'subtask' ? rem.subtask : null);
 
-            for (const rem of reminders) {
-              const title = rem.type === 'task' ? rem.task.title : rem.subtask.title;
-              const msg = getReminderMessage(title, rem.dueDate, rem.daysRemaining);
-
-              const usersToNotify = new Set();
-              if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
-              usersToNotify.add(contact.userId.toString());
-              addSubtaskAssignees(usersToNotify, rem.type === 'subtask' ? rem.subtask : null);
-
-              const recipientIds = await resolveRecipientIds(usersToNotify);
-              for (const userId of recipientIds) {
-                try {
-                  await notificationService.createNotification({
-                    userId,
-                    workspaceId: contact.workspaceId,
-                    type: rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
-                    title: msg.title,
-                    message: msg.body,
-                    actorName: 'Systém',
-                    relatedType: 'contact',
-                    relatedId: contact._id.toString(),
-                    relatedName: contact.name || 'Kontakt',
-                    data: {
-                      contactId: contact._id.toString(),
-                      taskId: task.id,
-                      subtaskId: rem.type === 'subtask' ? rem.subtask.id : null
-                    }
-                  });
-                  notificationsSent++;
-                } catch (err) {
-                  logger.error('[DueDateChecker] Contact task reminder failed', { error: err.message });
-                }
+            const recipientIds = await resolveRecipientIds(usersToNotify);
+            for (const userId of recipientIds) {
+              try {
+                await notificationService.createNotification({
+                  userId,
+                  workspaceId: contact.workspaceId,
+                  type: rem.type === 'task' ? 'task.dueDate' : 'subtask.dueDate',
+                  title: msg.title,
+                  message: msg.body,
+                  actorName: 'Systém',
+                  relatedType: 'contact',
+                  relatedId: contact._id.toString(),
+                  relatedName: contact.name || 'Kontakt',
+                  data: {
+                    contactId: contact._id.toString(),
+                    taskId: task.id,
+                    subtaskId: rem.type === 'subtask' ? rem.subtask.id : null
+                  }
+                });
+                notificationsSent++;
+              } catch (err) {
+                logger.error('[DueDateChecker] Contact task reminder failed', { error: err.message });
               }
             }
           }
 
-          // --- Time-of-day reminders for contact tasks/subtasks ---
-          const nowMs = Date.now();
-          const fires = [];
+          // Send time-of-day reminders
+          for (const f of fires) {
+            const title = f.kind === 'task' ? task.title : f.subtask.title;
+            const msg = formatTimeReminderMessage(title, f.dueMs, f.mins);
 
-          const taskTimeFires = checkTimeReminders(task, nowMs);
-          for (const f of taskTimeFires) fires.push({ kind: 'task', taskRef: task, ...f });
+            const usersToNotify = new Set();
+            if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
+            usersToNotify.add(contact.userId.toString());
+            addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
 
-          const walkSubsForTime = (subs) => {
-            if (!subs || subs.length === 0) return;
-            for (const sub of subs) {
-              if (sub.completed) continue;
-              const subFires = checkTimeReminders(sub, nowMs);
-              for (const f of subFires) fires.push({ kind: 'subtask', taskRef: task, subtask: sub, ...f });
-              if (sub.subtasks?.length > 0) walkSubsForTime(sub.subtasks);
-            }
-          };
-          walkSubsForTime(task.subtasks);
-
-          if (fires.length > 0) {
-            for (const f of fires) {
-              if (f.kind === 'task') {
-                const sentSet = new Set(task.timeRemindersSent || []);
-                sentSet.add(f.mins);
-                task.timeRemindersSent = Array.from(sentSet);
-              } else if (f.subtask) {
-                const sentSet = new Set(f.subtask.timeRemindersSent || []);
-                sentSet.add(f.mins);
-                f.subtask.timeRemindersSent = Array.from(sentSet);
-              }
-            }
-            contactModified = true;
-
-            for (const f of fires) {
-              const title = f.kind === 'task' ? task.title : f.subtask.title;
-              const msg = formatTimeReminderMessage(title, f.dueMs, f.mins);
-
-              const usersToNotify = new Set();
-              if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
-              usersToNotify.add(contact.userId.toString());
-              addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
-
-              const recipientIds = await resolveRecipientIds(usersToNotify);
-              for (const userId of recipientIds) {
-                try {
-                  await notificationService.createNotification({
-                    userId,
-                    workspaceId: contact.workspaceId,
-                    type: f.kind === 'task' ? 'task.dueDate' : 'subtask.dueDate',
-                    category: 'direct', // explicit time reminder → vždy push
-                    title: msg.title,
-                    message: msg.body,
-                    actorName: 'Systém',
-                    relatedType: 'contact',
-                    relatedId: contact._id.toString(),
-                    relatedName: contact.name || 'Kontakt',
-                    data: {
-                      contactId: contact._id.toString(),
-                      taskId: task.id,
-                      subtaskId: f.kind === 'subtask' ? f.subtask.id : null
-                    }
-                  });
-                  notificationsSent++;
-                } catch (err) {
-                  logger.error('[DueDateChecker] Contact time-reminder failed', { error: err.message });
-                }
+            const recipientIds = await resolveRecipientIds(usersToNotify);
+            for (const userId of recipientIds) {
+              try {
+                await notificationService.createNotification({
+                  userId,
+                  workspaceId: contact.workspaceId,
+                  type: f.kind === 'task' ? 'task.dueDate' : 'subtask.dueDate',
+                  category: 'direct', // explicit time reminder → vždy push
+                  title: msg.title,
+                  message: msg.body,
+                  actorName: 'Systém',
+                  relatedType: 'contact',
+                  relatedId: contact._id.toString(),
+                  relatedName: contact.name || 'Kontakt',
+                  data: {
+                    contactId: contact._id.toString(),
+                    taskId: task.id,
+                    subtaskId: f.kind === 'subtask' ? f.subtask.id : null
+                  }
+                });
+                notificationsSent++;
+              } catch (err) {
+                logger.error('[DueDateChecker] Contact time-reminder failed', { error: err.message });
               }
             }
           }
-
-          // Update urgency levels
-          if (changes.length > 0) {
-            const currentTaskLevel = getUrgencyLevel(task.dueDate);
-            task.lastUrgencyLevel = currentTaskLevel;
-            task.subtasks = updateSubtaskUrgencyLevels(task.subtasks);
-            contactModified = true;
-          }
-        }
-
-        if (contactModified) {
-          await Contact.updateOne({ _id: contact._id }, { tasks: contact.tasks });
-          contactsUpdated++;
         }
       } catch (contactErr) {
         logger.error('[DueDateChecker] Contact processing failed', { contactId: contact._id?.toString(), error: contactErr.message });
