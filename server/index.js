@@ -57,8 +57,19 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // CORS configuration - restrict to frontend origin
+//
+// CORS_ORIGIN môže byť čiarkou oddelený zoznam (viď .env.example). Knižnica
+// `cors` string origin NEporovnáva s Origin requestu, ale vráti ho doslovne
+// v hlavičke — "a,b" by prehliadač odmietol a padol by každý request aj
+// Socket.IO handshake. Pole origin-ov sa porovnáva s Origin requestu; pri
+// jednej hodnote nechávame string, aby produkčné správanie ostalo identické.
+const corsOrigins = (process.env.CORS_ORIGIN || 'https://prplcrm.eu')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (corsOrigins.length === 0) corsOrigins.push('https://prplcrm.eu');
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'https://prplcrm.eu',
+  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   // PATCH je nutné explicitne uviesť — používa ho premenovanie príloh
   // (jediné PATCH endpointy: PATCH /api/tasks|contacts/:id/files/:fileId).
   // Bez neho browser zablokuje CORS preflight a rename padne s network errorom
