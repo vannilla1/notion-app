@@ -2790,7 +2790,10 @@ router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, r
     const { resolved, notes } = req.body;
     const update = {
       resolved: !!resolved,
-      notes: notes?.slice(0, 2000) || null
+      // Len reťazec — číslo/objekt → `.slice` TypeError 500, pole by prešlo
+      // Array.prototype.slice a padlo až na Mongoose cast do String.
+      notes: typeof notes === 'string' && notes ? notes.slice(0, 2000) : null
+
     };
     if (resolved) {
       update.resolvedBy = req.user.id;
