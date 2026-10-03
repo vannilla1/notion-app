@@ -1262,7 +1262,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
   if (messages.length === 0) return (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
       <div style={{ fontSize: '40px', marginBottom: '8px' }}>✉️</div>
-      <p>{tab === 'received' ? 'Žiadne prijaté odkazy' : 'Žiadne odoslané odkazy'}</p>
+      <p>{tab === 'received' ? 'Žiadne prijaté odkazy' : tab === 'sent' ? 'Žiadne odoslané odkazy' : 'Žiadne správy'}</p>
     </div>
   );
 
@@ -1296,7 +1296,9 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              <span>{tab === 'received' ? `Od: ${msg.fromUsername}` : `Pre: ${msg.toUsername}`}</span>
+              {/* Podľa správy, nie podľa záložky — na záložke Všetky sú prijaté aj
+                  odoslané spolu (v Prijaté vyjde vždy „Od", v Odoslané vždy „Pre"). */}
+              <span>{String(msg.fromUserId?._id || msg.fromUserId) === String(userId) ? `Pre: ${msg.toUsername}` : `Od: ${msg.fromUsername}`}</span>
               <span>{formatDateTime(msg.createdAt)}</span>
               {msg.dueDate && (
                 <span style={{ color: isOverdue ? 'var(--danger)' : 'var(--text-muted)' }}>
