@@ -174,7 +174,15 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
       return reject(new Error(`HTTP/2 connect failed: ${err.message}`));
     }
 
+    // Timeout 10 s. destroy() namiesto close(): close() je v http2 GRACEFUL
+    // a čaká na dobehnutie streamov — zaseknutý request bez odpovede od Apple
+    // by session aj TLS socket držal otvorené navždy (únik spojení). Timer sa
+    // ruší pri každom ukončení, inak by každý push nechal 10 s visiaci timer.
+    let timer = null;
+    const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
     client.on('error', (err) => {
+      clearTimer();
       logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
       reject(err);
     });
@@ -203,6 +211,7 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
     });
 
     req.on('end', () => {
+      clearTimer();
       client.close();
       if (statusCode === 200) {
         resolve({ success: true, status: statusCode });
@@ -217,6 +226,7 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
     });
 
     req.on('error', (err) => {
+      clearTimer();
       client.close();
       reject(err);
     });
@@ -224,11 +234,13 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
     req.write(JSON.stringify(payload));
     req.end();
 
-    // Timeout after 10s
-    setTimeout(() => {
-      try { client.close(); } catch {}
+    timer = setTimeout(() => {
+      timer = null;
+      try { req.close(http2.constants.NGHTTP2_CANCEL); } catch {}
+      try { client.destroy(); } catch {}
       reject(new Error('APNs request timeout'));
     }, 10000);
+    timer.unref?.();
   });
 };
 
