@@ -31,13 +31,13 @@ const billingAppleRoutes = require('./routes/billingApple');
 const contactFormRoutes = require('./routes/contact-form');
 const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
-const { scheduleDueDateChecks } = require('./services/dueDateChecker');
+const { scheduleDueDateChecks, stopDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { schedulePlanExpiration } = require('./services/planExpiration');
 const { scheduleSubscriptionReminders } = require('./services/subscriptionReminders');
 const emailUnsubscribeRoutes = require('./routes/emailUnsubscribe');
 const announcementsRoutes = require('./routes/announcements');
-const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
+const { scheduleErrorAlerter, stop: stopErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
@@ -561,6 +561,15 @@ const gracefulShutdown = (signal) => {
   if (shutdownInProgress) return; // dvojnásobný SIGTERM ignorujeme
   shutdownInProgress = true;
   logger.info(`${signal} received — starting graceful shutdown`);
+
+  // Zastav periodické joby, aby počas ~10 s drain okna nespúšťali dotazy
+  // proti práve zatváranému Mongo spojeniu (chyby „Scheduled check failed"
+  // pri každom deployi). Joby bez stop() (planExpiration, subscription*,
+  // Google polling) tu nie sú — viď REPORT.md.
+  try { stopDueDateChecks(); } catch { /* best-effort */ }
+  try { stopErrorAlerter(); } catch { /* best-effort */ }
+  try { require('./jobs/healthMonitor').stop(); } catch { /* best-effort */ }
+  try { require('./jobs/commissionScheduler').stop(); } catch { /* best-effort */ }
 
   // Idle keep-alive spojenia zavrieme explicitne (Node ≥ 18.2), aby
   // httpServer.close nečakal na ich timeout.
