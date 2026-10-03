@@ -110,6 +110,13 @@
   display: none;
   flex-direction: column;
   gap: 5px;
+  /* Tri čiary 24×2 + padding 4px dávali ~32×24px cieľ; 44×44 je odporúčané
+     minimum (Apple HIG / Material). Centrovanie drží čiary v strede
+     väčšieho boxu. */
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   background: none;
   border: none;
   cursor: pointer;
@@ -1352,6 +1359,7 @@
 
 .lp-cookie-btn {
   padding: 8px 16px;
+  min-height: 44px; /* ~34px pri 13.5px písme bolo pod dotykovým minimom */
   border-radius: 10px;
   font-size: 13.5px;
   font-weight: 600;
