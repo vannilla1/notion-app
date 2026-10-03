@@ -368,7 +368,9 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       query.toUserId = req.user.id;
     }
 
-    if (status && status !== 'all') {
+    // Len string: rozšírený query parser (qs) z ?status[$ne]=x spraví objekt
+    // a Mongoose (bez sanitizeFilter) by ho pustil do filtra ako operátor.
+    if (typeof status === 'string' && status && status !== 'all') {
       query.status = status;
     }
 
@@ -394,6 +396,12 @@ router.get('/by-linked', authenticateToken, requireWorkspace, async (req, res) =
     const { linkedType, linkedId } = req.query;
     if (!linkedType || !linkedId) {
       return res.status(400).json({ message: 'linkedType a linkedId sú povinné' });
+    }
+    // Len stringy z povoleného rozsahu: ?linkedType[$ne]=x&linkedId[$ne]=y by
+    // cez qs prešlo ako operátory a vrátilo správy CELÉHO workspace-u (aj
+    // cudzie vlákna), nie len prepojené s kontaktom/úlohou.
+    if (!['contact', 'task'].includes(linkedType) || typeof linkedId !== 'string' || linkedId.length > 128) {
+      return res.status(400).json({ message: 'Neplatné linkedType/linkedId' });
     }
 
     const messages = await Message.find(
