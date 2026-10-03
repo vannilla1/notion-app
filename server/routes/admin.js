@@ -4039,27 +4039,38 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
     const paymentRange = dateRange(from, to, 'T23:59:59');
     if (paymentRange) q.paymentDate = paymentRange;
 
-    let commissions = await Commission.find(q)
-      .sort({ paymentDate: -1 })
-      .populate('referrerId', 'username email')
-      .populate('referredUserId', 'username email')
-      .populate('promoCodeId', 'code name')
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
-    const total = await Commission.countDocuments(q);
-
-    // Search filter (post-fetch — small dataset, akceptovateľné)
-    if (search) {
-      const s = String(search).toLowerCase();
-      commissions = commissions.filter((c) =>
-        (c.referrerId?.username || '').toLowerCase().includes(s) ||
-        (c.referredUserId?.username || '').toLowerCase().includes(s) ||
-        (c.promoCodeId?.code || '').toLowerCase().includes(s)
-      );
+    // Search PRED stránkovaním (username affiliateho/zákazníka alebo kód) —
+    // rovnaký prístup ako /email-logs. Predtým sa filtrovala už stránkovaná
+    // odpoveď, takže hľadanie našlo iba zhody na aktuálnej stránke a `total`
+    // ostal nefiltrovaný (stránkovanie s vyhľadávaním bolo nekonzistentné).
+    const listQ = { ...q };
+    if (typeof search === 'string' && search.trim()) {
+      const rx = { $regex: escapeRegex(search.trim().slice(0, 100)), $options: 'i' };
+      const [matchingUsers, matchingCodes] = await Promise.all([
+        User.find({ username: rx }).select('_id').limit(500).lean(),
+        PromoCode.find({ code: rx }).select('_id').limit(500).lean()
+      ]);
+      const userIds = matchingUsers.map((u) => u._id);
+      listQ.$or = [
+        { referrerId: { $in: userIds } },
+        { referredUserId: { $in: userIds } },
+        { promoCodeId: { $in: matchingCodes.map((p) => p._id) } }
+      ];
     }
 
-    // Aggregated summary pre header (nezávislé od page-u)
+    const [commissions, total] = await Promise.all([
+      Commission.find(listQ)
+        .sort({ paymentDate: -1 })
+        .populate('referrerId', 'username email')
+        .populate('referredUserId', 'username email')
+        .populate('promoCodeId', 'code name')
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Commission.countDocuments(listQ)
+    ]);
+
+    // Aggregated summary pre header (nezávislé od page-u aj od search-u)
     const summary = await Commission.aggregate([
       { $match: q },
       { $group: { _id: '$status', total: { $sum: '$commissionAmount' }, count: { $sum: 1 } } }
@@ -4090,9 +4101,14 @@ router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async
     if (c.status !== 'eligible') {
       return res.status(400).json({ message: `Commission je v stave "${c.status}" — možno označiť ako paid iba stav "eligible"` });
     }
+    // enum ['bank','stripe','paypal'] — inak ValidationError až pri save() → 500
+    if (paidMethod && !['bank', 'stripe', 'paypal'].includes(paidMethod)) {
+      return res.status(400).json({ message: 'Neplatná metóda platby' });
+    }
     c.status = 'paid';
     c.paidAt = new Date();
     c.paidMethod = paidMethod || 'bank';
+
     c.paidReference = paidReference || '';
     if (notes) c.notes = (c.notes || '') + `\n[${new Date().toISOString()}] ${notes}`;
     await c.save();
