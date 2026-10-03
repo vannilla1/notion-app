@@ -14,6 +14,7 @@ const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
 const oauthService = require('../services/oauthService');
+const { userFacingError } = require('../utils/userFacingError');
 
 const router = express.Router();
 
@@ -436,6 +437,7 @@ async function getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi) {
       );
       e.cause = insertErr;
       e.status = insertErr.code || 500;
+      e.userFacing = true;
       throw e;
     }
   }
@@ -671,7 +673,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Workspace toggle error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + userFacingError(error) });
   }
 });
 
@@ -1487,7 +1489,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Sync error', { error: error.message, stack: error.stack, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   }
 });
 
@@ -1623,7 +1625,7 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     });
   } catch (error) {
     logger.error('[Google Tasks] Migration error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + userFacingError(error) });
   }
 });
 
@@ -1653,7 +1655,7 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Reset sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri resetovaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri resetovaní: ' + userFacingError(error) });
   }
 });
 
@@ -1755,7 +1757,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
     });
   } catch (error) {
     logger.error('[Google Tasks] Cleanup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri čistení: ' + userFacingError(error) });
   }
 });
 
@@ -1822,7 +1824,7 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Nuke & recreate error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní úloh: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní úloh: ' + userFacingError(error) });
   }
 });
 
@@ -1955,7 +1957,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Delete by search error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + userFacingError(error) });
   }
 });
 
@@ -2131,7 +2133,7 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
     });
   } catch (error) {
     logger.error('[Google Tasks] Sync completed error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   }
 });
 

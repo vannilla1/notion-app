@@ -15,6 +15,7 @@ const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
 const oauthService = require('../services/oauthService');
+const { userFacingError } = require('../utils/userFacingError');
 
 const router = express.Router();
 
@@ -576,7 +577,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Workspace toggle error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + userFacingError(error) });
   }
 });
 
@@ -1584,7 +1585,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   } finally {
     releaseCalendarLock(fullSyncLockKey);
   }
@@ -1745,7 +1746,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
     res.json({ success: true, message: 'Úloha bola synchronizovaná' });
   } catch (error) {
     logger.error('[Google Calendar] Single task sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   } finally {
     releaseCalendarLock(singleSyncLockKey);
   }
@@ -1794,7 +1795,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
     res.json({ success: true, message: 'Udalosť bola odstránená z kalendára' });
   } catch (error) {
     logger.error('[Google Calendar] Event delete error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri odstraňovaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri odstraňovaní: ' + userFacingError(error) });
   }
 });
 
@@ -1894,7 +1895,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
     });
   } catch (error) {
     logger.error('[Google Calendar] Cleanup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri čistení: ' + userFacingError(error) });
   }
 });
 
@@ -2038,7 +2039,7 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
     });
   } catch (error) {
     logger.error('[Google Calendar] Dedup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri deduplikácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri deduplikácii: ' + userFacingError(error) });
   }
 });
 
@@ -2225,7 +2226,7 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     });
   } catch (error) {
     logger.error('[Google Calendar] Migration error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + userFacingError(error) });
   }
 });
 
@@ -2272,7 +2273,7 @@ router.post('/delete-all', authenticateToken, async (req, res) => {
           logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
         } else {
           logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code });
-          return res.status(500).json({ message: 'Nepodarilo sa vymazať kalendár: ' + e.message });
+          return res.status(500).json({ message: 'Nepodarilo sa vymazať kalendár: ' + userFacingError(e) });
         }
       }
     } else {
@@ -2350,7 +2351,7 @@ router.post('/delete-all', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Delete-all error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + userFacingError(error) });
   }
 });
 
@@ -2626,6 +2627,7 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
       );
       e.cause = insertErr;
       e.status = insertErr.code || 500;
+      e.userFacing = true;
       throw e;
     }
 
