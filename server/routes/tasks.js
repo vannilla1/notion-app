@@ -521,12 +521,15 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
       exportedTaskIds = [];
     }
 
-    // Only fetch contacts with tasks for current workspace, exclude files.data
-    const contacts = await Contact.find(
-      { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
-      { name: 1, tasks: 1 }
-    ).lean();
-    const globalTasks = await Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).lean();
+    // Only fetch contacts with tasks for current workspace, exclude files.data.
+    // Oba dotazy sú nezávislé — paralelne (Atlas M0 ~100-300 ms na dotaz).
+    const [contacts, globalTasks] = await Promise.all([
+      Contact.find(
+        { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
+        { name: 1, tasks: 1 }
+      ).lean(),
+      Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).lean()
+    ]);
     const events = [];
     const newExportedIds = [];
 
@@ -808,14 +811,17 @@ router.get('/calendar/feed/:token', async (req, res) => {
     }
 
     const workspaceFilter = { workspaceId: user.currentWorkspaceId };
-    const globalTasks = await Task.find(
-      { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
-      { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
-    ).lean();
-    const contacts = await Contact.find(
-      { ...workspaceFilter, 'tasks.dueDate': { $exists: true } },
-      { name: 1, tasks: 1 }
-    ).lean();
+    // Nezávislé dotazy paralelne — feed pollujú kalendárne klienty každých 15 min.
+    const [globalTasks, contacts] = await Promise.all([
+      Task.find(
+        { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
+        { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
+      ).lean(),
+      Contact.find(
+        { ...workspaceFilter, 'tasks.dueDate': { $exists: true } },
+        { name: 1, tasks: 1 }
+      ).lean()
+    ]);
 
     const events = [];
 
@@ -1041,17 +1047,17 @@ router.put('/reorder', authenticateToken, requireWorkspace, async (req, res) => 
       await Task.bulkWrite(bulkOps);
     }
 
-    // Update contact task orders
-    for (const [contactId, taskOrders] of Object.entries(contactUpdates)) {
+    // Update contact task orders — každý kontakt je samostatný dokument,
+    // findOne+save idú paralelne namiesto kontakt po kontakte.
+    await Promise.all(Object.entries(contactUpdates).map(async ([contactId, taskOrders]) => {
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
-      if (contact && contact.tasks) {
-        for (const item of taskOrders) {
-          const task = contact.tasks.find(t => t.id === item.id);
-          if (task) task.order = item.order;
-        }
-        await contact.save();
+      if (!contact || !contact.tasks) return;
+      for (const item of taskOrders) {
+        const task = contact.tasks.find(t => t.id === item.id);
+        if (task) task.order = item.order;
       }
-    }
+      await contact.save();
+    }));
 
     res.json({ message: 'Poradie aktualizované' });
   } catch (error) {
@@ -1297,6 +1303,10 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     const createdTasks = [];
     const updatedContacts = [];
 
+    // Rovnaký vstup pre každý kontakt — stačí jeden dotaz pred slučkou
+    // (predtým N rovnakých dotazov na User pri projekte do N kontaktov).
+    const assignedUsers = await populateAssignedUsers(assignedTo);
+
     for (const cId of finalContactIds) {
       // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
       if (!isObjectIdString(cId)) continue;
@@ -1340,8 +1350,6 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       contact.markModified('tasks');
       await contact.save();
 
-      // Get assigned users info
-      const assignedUsers = await populateAssignedUsers(assignedTo);
       createdTasks.push({
         ...newTask,
         contactId: contact._id.toString(),
