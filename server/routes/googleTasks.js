@@ -484,9 +484,9 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
-    // Check and reset quota if needed
-    checkAndResetQuota(user);
-    await user.save();
+    // Check and reset quota if needed — ukladáme len keď sa kvóta reálne
+    // resetovala (nový deň), nie pri každom GET /status.
+    if (checkAndResetQuota(user)) await user.save();
 
     const remainingQuota = getRemainingQuota(user);
     const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
