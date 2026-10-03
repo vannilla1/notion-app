@@ -9,7 +9,7 @@ import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../util
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
-import { alertUnlessPlanGate } from '../utils/planGate';
+import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
@@ -762,29 +762,38 @@ function Tasks() {
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
 
   // Define fetch functions early so they can be used in useEffects
-  const exportTasksCsv = () => {
+  const exportTasksCsv = async () => {
     const token = getStoredToken();
     // Surový fetch obchádza axios interceptor — X-Workspace-Id treba pridať
     // ručne, inak server spadne na DB fallback a exportuje INÉ prostredie.
     const wsId = getStoredWorkspaceId();
-    fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        ...(wsId ? { 'X-Workspace-Id': wsId } : {})
+    try {
+      const res = await fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          ...(wsId ? { 'X-Workspace-Id': wsId } : {})
+        }
+      });
+      if (!res.ok) {
+        // Mimo axios interceptora si plánový limit (403 FEATURE_NOT_IN_PLAN)
+        // aj ostatné chyby (401, 500) musíme spracovať sami — inak by sa
+        // chybový JSON potichu uložil ako „projekty.csv".
+        let data = null;
+        try { data = await res.json(); } catch { /* odpoveď nie je JSON */ }
+        if (data?.code && PLAN_GATE_CODES.has(data.code)) {
+          dispatchPlanGate({ code: data.code, message: data.message });
+        } else {
+          alert(data?.message || 'Chyba pri exporte');
+        }
+        return;
       }
-    })
-      .then(response => response.blob())
-      .then(blob => {
-        const link = document.createElement('a');
-        const objUrl = window.URL.createObjectURL(blob);
-        link.href = objUrl;
-        link.download = 'projekty.csv';
-        link.click();
-        // Uvoľni blob URL — inak leží v pamäti do reloadu (na iOS WKWebView
-        // prispieva k memory jetsam). Malý timeout, nech stihne prebehnúť download.
-        setTimeout(() => window.URL.revokeObjectURL(objUrl), 10000);
-      })
-      .catch(() => alert('Chyba pri exporte'));
+      const blob = await res.blob();
+      // downloadBlob rieši iOS (fileDownload bridge), Android (NativeBridge.saveFile)
+      // aj web — priamy <a download> je v natívnych shelloch tichý no-op.
+      downloadBlob(blob, 'projekty.csv');
+    } catch {
+      alert('Chyba pri exporte');
+    }
   };
 
   const fetchTasks = useCallback(async () => {
