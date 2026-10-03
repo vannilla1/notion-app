@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, invalidateUserCache } = require('../middleware/auth');
 const { adminLoginLimiter } = require('../middleware/rateLimiter');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
@@ -440,6 +440,10 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
     const oldRole = targetUser.role;
     targetUser.role = role;
     await targetUser.save();
+    // middleware/auth cachuje usera 30 s (Redis/mem) a req.user.role sa používa
+    // na autorizáciu (routes/push.js) — bez invalidácie by nová rola platila
+    // až po vypršaní cache.
+    await invalidateUserCache(targetUser._id);
 
     logger.info('Admin role change', { targetUserId: req.params.userId, newRole: role, changedBy: req.user.id });
 
@@ -549,6 +553,7 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
     const oldPlan = targetUser.subscription?.plan || 'free';
     targetUser.subscription = { plan };
     await targetUser.save();
+    await invalidateUserCache(targetUser._id);
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
 
@@ -657,6 +662,9 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
 
     // 3) Final delete user document
     await User.findByIdAndDelete(targetUserId);
+    // Inak by zmazaný user s platným JWT ešte 30 s prechádzal authenticateToken.
+    await invalidateUserCache(targetUserId);
+
 
     logger.info('Admin delete user', { targetUserId: req.params.userId, deletedBy: req.user.id });
 
@@ -1483,6 +1491,7 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 
     const updateQuery = action === 'plan' ? { 'subscription.plan': value } : { role: value };
     const result = await User.updateMany({ _id: { $in: filteredIds } }, updateQuery);
+    await Promise.all(filteredIds.map((id) => invalidateUserCache(id)));
 
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
