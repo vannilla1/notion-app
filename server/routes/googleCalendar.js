@@ -568,6 +568,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
 router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     // --- Cleanup BEFORE revoking token (token must still be valid here) ---
     //
@@ -1269,6 +1270,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   }
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -1729,6 +1731,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
   try {
     const { taskId } = req.params;
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     if (!user.googleCalendar?.enabled) {
       return res.json({ success: true, message: 'Google Calendar nie je pripojený' });
@@ -1775,6 +1778,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
 router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
@@ -1891,6 +1895,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
     }
