@@ -480,6 +480,11 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     res.setHeader('Content-Disposition', 'attachment; filename="projekty.csv"');
     res.send(csv);
   } catch (error) {
+    // Bez logu a recordError bola príčina 500-ky neviditeľná (captureResponseErrors
+    // zachytí len route+status bez stacku) — vzor z PUT podúlohy nižšie.
+    logger.error('CSV export error', { error: error.message, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
@@ -1105,6 +1110,9 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('GET /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1359,6 +1367,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       });
     }
   } catch (error) {
+    logger.error('POST /tasks error', { error: error.message, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1999,6 +2010,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('PUT /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2127,6 +2141,9 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('DELETE /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2498,6 +2515,9 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('Subtask create error', { error: error.message, taskId: req.params.taskId, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2905,6 +2925,9 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
+    logger.error('Subtask delete error', { error: error.message, taskId: req.params.taskId, subtaskId: req.params.subtaskId, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
