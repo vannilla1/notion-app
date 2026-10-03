@@ -24,18 +24,19 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       query.read = false;
     }
 
-    const notifications = await Notification.find(query)
-      .sort({ createdAt: -1 })
-      .skip(parsedOffset)
-      .limit(parsedLimit)
-      .lean();
-
-    const total = await Notification.countDocuments(query);
-    const unreadCount = await Notification.countDocuments({
-      userId: req.user.id,
-      workspaceId: req.workspaceId,
-      read: false
-    });
+    // Tri nezávislé dotazy (všetky pokryté indexom { userId, workspaceId,
+    // read, createdAt }) bežia paralelne namiesto sekvenčne — menej RTT na
+    // hot path (zvonček sa načítava pri každom štarte klienta).
+    const unreadQuery = { userId: req.user.id, workspaceId: req.workspaceId, read: false };
+    const [notifications, total, unreadCount] = await Promise.all([
+      Notification.find(query)
+        .sort({ createdAt: -1 })
+        .skip(parsedOffset)
+        .limit(parsedLimit)
+        .lean(),
+      Notification.countDocuments(query),
+      Notification.countDocuments(unreadQuery)
+    ]);
 
     res.json({
       notifications: notifications.map(n => ({
