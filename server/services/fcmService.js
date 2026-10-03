@@ -149,8 +149,13 @@ const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
         };
         await admin.messaging(fcmApp).send(message);
         result.sent++;
-        device.lastUsed = new Date();
-        await device.save();
+        // lastUsed v samostatnom try — zlyhanie zápisu do DB nesmie doručený
+        // push započítať ako „Send failed" (sent + failed by nesedeli).
+        try {
+          await FcmDevice.updateOne({ _id: device._id }, { lastUsed: new Date() });
+        } catch (saveErr) {
+          logger.debug('[FCM] lastUsed update failed', { error: saveErr.message });
+        }
       } catch (err) {
         const code = err?.errorInfo?.code || err?.code || '';
         // messaging/invalid-argument vracia FCM aj pri chybnom PAYLOADE (napr.
