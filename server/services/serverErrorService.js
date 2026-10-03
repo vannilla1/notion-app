@@ -137,44 +137,54 @@ async function recordError(err, req, extraContext) {
     if (!shouldSample(fingerprint)) return;
 
     const now = new Date();
-    const existing = await ServerError.findOne({ fingerprint });
 
-    if (existing) {
-      // Update only aggregation fields
-      existing.count += 1;
-      existing.lastSeen = now;
-      // Ak bola resolved a opäť sa objavila → re-open
-      if (existing.resolved) {
-        existing.resolved = false;
-        existing.resolvedAt = null;
-      }
-      await existing.save();
-    } else {
-      const doc = new ServerError({
-        fingerprint,
-        message: err?.message?.slice(0, 1000) || 'Unknown error',
-        stack: err?.stack?.slice(0, 10000) || '',
-        name: err?.name || 'Error',
-        method: req?.method,
-        path: req?.path,
-        statusCode: err?.status || err?.statusCode || 500,
-        userId: req?.user?.id || null,
-        // req.user workspaceId nemá — správne pole je req.workspaceId
-        // (middleware/workspace.js); inak bol každý záznam workspaceId: null.
-        workspaceId: req?.workspaceId || req?.workspace?._id || null,
-        userAgent: req?.get?.('user-agent')?.slice(0, 500),
-        ipAddress: req?.ip || req?.connection?.remoteAddress,
-        context: {
-          query: req?.query && Object.keys(req.query).length ? req.query : undefined,
-          body: scrubBody(req?.body),
-          params: req?.params && Object.keys(req.params).length ? req.params : undefined,
-          ...(extraContext && typeof extraContext === 'object' ? extraContext : {})
-        },
-        firstSeen: now,
-        lastSeen: now,
-        count: 1
-      });
+    // Atomický update agregačných polí ($inc) namiesto findOne → save:
+    // pri súbežných výskytoch (hromadný 5xx po výpadku externej služby) sa
+    // paralelné `count += 1; save()` navzájom prepisovali a count
+    // podhodnocoval. Ak bola resolved a opäť sa objavila → re-open
+    // (admin pri unresolve tiež nastavuje resolvedAt: null).
+    const updated = await ServerError.findOneAndUpdate(
+      { fingerprint },
+      { $inc: { count: 1 }, $set: { lastSeen: now, resolved: false, resolvedAt: null } },
+      { new: true }
+    );
+    if (updated) return;
+
+    const doc = new ServerError({
+      fingerprint,
+      message: err?.message?.slice(0, 1000) || 'Unknown error',
+      stack: err?.stack?.slice(0, 10000) || '',
+      name: err?.name || 'Error',
+      method: req?.method,
+      path: req?.path,
+      statusCode: err?.status || err?.statusCode || 500,
+      userId: req?.user?.id || null,
+      // req.user workspaceId nemá — správne pole je req.workspaceId
+      // (middleware/workspace.js); inak bol každý záznam workspaceId: null.
+      workspaceId: req?.workspaceId || req?.workspace?._id || null,
+      userAgent: req?.get?.('user-agent')?.slice(0, 500),
+      ipAddress: req?.ip || req?.connection?.remoteAddress,
+      context: {
+        query: req?.query && Object.keys(req.query).length ? req.query : undefined,
+        body: scrubBody(req?.body),
+        params: req?.params && Object.keys(req.params).length ? req.params : undefined,
+        ...(extraContext && typeof extraContext === 'object' ? extraContext : {})
+      },
+      firstSeen: now,
+      lastSeen: now,
+      count: 1
+    });
+    try {
       await doc.save();
+    } catch (saveErr) {
+      // Dva súbežné PRVÉ výskyty: oba prešli findOneAndUpdate ako null,
+      // druhý insert padne na unique fingerprint (E11000). Namiesto
+      // zahodenia výskytu ho pripočítame k práve vloženému záznamu.
+      if (saveErr?.code !== 11000) throw saveErr;
+      await ServerError.updateOne(
+        { fingerprint },
+        { $inc: { count: 1 }, $set: { lastSeen: now } }
+      );
     }
   } catch (dbErr) {
     // Watcher sa nesmie sám rozbiť. Len zaloguj a pokračuj.
@@ -267,25 +277,33 @@ async function recordClientError(payload, context = {}) {
       ? payload.release.trim().slice(0, 40)
       : 'web';
 
-    if (existing) {
-      existing.count += 1;
-      existing.lastSeen = now;
+    // Agregačná vetva pre existujúci záznam. Ostáva findOne + save (nie
+    // atomický $inc) kvôli kľúčom releaseCounts s bodkami ("1.2.3"), ktoré
+    // by $inc interpretoval ako vnorenú cestu; používa sa aj pri E11000
+    // retry nižšie.
+    const bumpExisting = async (doc) => {
+      doc.count += 1;
+      doc.lastSeen = now;
       // Per-release rozpad + posledná videná verzia — kľúčové, aby panel vedel
       // rozlíšiť "prší na opravenej verzii" od "dokvapkávajú staré buildy".
-      existing.lastRelease = release;
-      if (!existing.firstRelease) existing.firstRelease = release; // backfill starých
-      const counts = (existing.releaseCounts && typeof existing.releaseCounts === 'object')
-        ? existing.releaseCounts : {};
+      doc.lastRelease = release;
+      if (!doc.firstRelease) doc.firstRelease = release; // backfill starých
+      const counts = (doc.releaseCounts && typeof doc.releaseCounts === 'object')
+        ? doc.releaseCounts : {};
       counts[release] = (counts[release] || 0) + 1;
-      existing.releaseCounts = counts;
-      existing.markModified('releaseCounts'); // Mixed — inak sa zmena neuloží
+      doc.releaseCounts = counts;
+      doc.markModified('releaseCounts'); // Mixed — inak sa zmena neuloží
       // Ak bola resolved a opäť sa objavila → re-open
-      if (existing.resolved) {
-        existing.resolved = false;
-        existing.resolvedAt = null;
+      if (doc.resolved) {
+        doc.resolved = false;
+        doc.resolvedAt = null;
       }
-      await existing.save();
-      return existing;
+      await doc.save();
+      return doc;
+    };
+
+    if (existing) {
+      return await bumpExisting(existing);
     }
 
     // Z URL urob path pre UI ("Route" stĺpec)
@@ -333,8 +351,16 @@ async function recordClientError(payload, context = {}) {
       lastSeen: now,
       count: 1
     });
-    await doc.save();
-    return doc;
+    try {
+      await doc.save();
+      return doc;
+    } catch (saveErr) {
+      // Dva súbežné PRVÉ výskyty: oba prešli findOne ako null, druhý insert
+      // padne na unique fingerprint (E11000) → pripočítaj k vloženému záznamu.
+      if (saveErr?.code !== 11000) throw saveErr;
+      const raced = await ServerError.findOne({ fingerprint });
+      return raced ? await bumpExisting(raced) : null;
+    }
   } catch (dbErr) {
     logger.error('serverErrorService: failed to record client error', {
       recordError: dbErr.message,
