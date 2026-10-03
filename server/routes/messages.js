@@ -1584,19 +1584,29 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, r
 // DELETE /api/messages/:id/files/:fileId — delete file from message
 router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
-    const message = await Message.findOne({
+    const filter = {
       _id: req.params.id,
       workspaceId: req.workspaceId,
       $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
-    });
-    if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
+    };
+    // Len id + r2Key súborov (žiadne base64): kľúč blobu treba prečítať PRED
+    // $pull — po ňom už niet odkiaľ. Rovnaký atomický vzor ako DELETE
+    // komentára. Pôvodné read → filter → save() posielalo $set CELÉHO poľa
+    // files, takže dve súbežné operácie (mazanie dvoch súborov, mazanie +
+    // POST /:id/files) sa prepísali — posledný zápis vyhral.
+    const pre = await Message.findOne(filter, { 'files.id': 1, 'files.r2Key': 1 }).lean();
+    if (!pre) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
-    const removed = (message.files || []).find(f => f.id === req.params.fileId);
-    message.files = message.files.filter(f => f.id !== req.params.fileId);
-    await message.save();
-    // Blob v R2 až po uložení metadát — keby save() zlyhal, súbor ostane.
-    if (removed?.r2Key) deleteBlobs([removed.r2Key]);
-    res.json(stripAttachmentData(message));
+    const removed = (pre.files || []).find(f => f.id === req.params.fileId) || null;
+    if (removed) {
+      await Message.updateOne(filter, { $pull: { files: { id: req.params.fileId } } });
+      // Blob v R2 až po zápise metadát — keby $pull zlyhal, súbor ostane.
+      if (removed.r2Key) deleteBlobs([removed.r2Key]);
+    }
+
+    const updated = await Message.findById(req.params.id, NO_BASE64_PROJECTION).lean();
+    if (!updated) return res.status(404).json({ message: 'Odkaz nenájdený' });
+    res.json(stripAttachmentData(updated));
   } catch (error) {
     logger.error('Delete message file error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
