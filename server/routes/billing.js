@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 // timeout: default SDK je 80 s — pri degradácii Stripe API by /status a
 // /checkout viseli dlhšie, než klient (mobilný WebView) čaká. 2 retry SDK
@@ -240,7 +241,12 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       return res.status(503).json({ message: 'Billing not configured' });
     }
 
-    const { plan, period, promoCode: promoCodeStr } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
+    const { plan, period } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
+    // Promo kód len ako krátky string — pole/objekt by spadol na
+    // .toUpperCase() (500) namiesto toho, aby sa ticho ignoroval.
+    const promoCodeStr = typeof req.body.promoCode === 'string' && req.body.promoCode.length <= 64
+      ? req.body.promoCode.trim()
+      : null;
 
     if (!['team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
@@ -315,7 +321,10 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       billing_address_collection: 'auto'
     };
 
-    // If user provided a promo code, attach Stripe promotion code
+    // If user provided a promo code, attach Stripe promotion code.
+    // Použitie kódu (usedCount/redemptions) sa NEzapisuje tu, ale až vo
+    // webhooku checkout.session.completed — opustený checkout (zavretá
+    // Stripe stránka) by inak kód s maxUsesPerUser=1 navždy „spotreboval“.
     let appliedPromoCode = null;
     if (promoCodeStr) {
       const promoDoc = await PromoCode.findOne({ code: promoCodeStr.toUpperCase() });
@@ -341,15 +350,7 @@ router.post('/checkout', authenticateToken, async (req, res) => {
 
     const session = await stripe.checkout.sessions.create(checkoutOptions);
 
-    // Record promo code usage after successful session creation
     if (appliedPromoCode) {
-      appliedPromoCode.usedCount += 1;
-      appliedPromoCode.redemptions.push({
-        userId: user._id,
-        plan,
-        period
-      });
-      await appliedPromoCode.save();
       logger.info('[Billing] Promo code applied to checkout', {
         code: appliedPromoCode.code,
         userId: user._id.toString(),
@@ -476,7 +477,7 @@ router.post('/validate-promo', authenticateToken, async (req, res) => {
   try {
     const { code, plan, period } = req.body;
 
-    if (!code) {
+    if (!code || typeof code !== 'string' || code.length > 64) {
       return res.status(400).json({ message: 'Zadajte promo kód' });
     }
 
@@ -656,6 +657,34 @@ async function handleCheckoutCompleted(session) {
     period,
     paidUntil: user.subscription.paidUntil
   });
+
+  await recordPromoRedemption(session, user._id, plan, period);
+}
+
+/**
+ * Započíta použitie nášho promo kódu až po dokončenom checkoute.
+ * Atomický $inc + $push (žiadny lost update pri paralelných platbách) a
+ * idempotentný cez `redemptions.sessionId` — Stripe retry toho istého
+ * eventu použitie nezapočíta druhýkrát.
+ */
+async function recordPromoRedemption(session, userId, plan, period) {
+  const promoCodeId = session.metadata?.promoCodeId;
+  if (!promoCodeId || !mongoose.Types.ObjectId.isValid(promoCodeId)) return;
+
+  const result = await PromoCode.updateOne(
+    { _id: promoCodeId, 'redemptions.sessionId': { $ne: session.id } },
+    {
+      $inc: { usedCount: 1 },
+      $push: { redemptions: { userId, plan, period, sessionId: session.id } }
+    }
+  );
+  if (result.modifiedCount > 0) {
+    logger.info('[Billing] Promo code redemption recorded', {
+      promoCodeId,
+      userId: String(userId),
+      sessionId: session.id
+    });
+  }
 }
 
 async function handleSubscriptionUpdated(subscription) {

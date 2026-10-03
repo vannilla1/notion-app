@@ -103,7 +103,10 @@ const promoCodeSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     redeemedAt: { type: Date, default: Date.now },
     plan: String,
-    period: String
+    period: String,
+    // Stripe Checkout Session ID — idempotencia zápisu z webhooku
+    // checkout.session.completed (retry eventu nezapočíta použitie 2×).
+    sessionId: { type: String, default: null }
   }],
   // ───────────────────────────────────────────────────────────────────
   // AFFILIATE FIELDS (referral program)
