@@ -1306,21 +1306,27 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     // (predtým N rovnakých dotazov na User pri projekte do N kontaktov).
     const assignedUsers = await populateAssignedUsers(assignedTo);
 
-    for (const cId of finalContactIds) {
-      // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
-      if (!isObjectIdString(cId)) continue;
-      const contact = await Contact.findOne({ _id: cId, workspaceId: req.workspaceId });
-      if (!contact) continue;
+    // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
+    const validContactIds = [...new Set(finalContactIds.filter(isObjectIdString).map(String))];
+    if (validContactIds.length > 50) {
+      return res.status(400).json({ message: 'Projekt možno naraz vytvoriť najviac v 50 kontaktoch' });
+    }
+    // Všetky kontakty jedným dopytom a limit overený PRED prvým zápisom —
+    // predtým sa projekt uložil do prvých kontaktov a 403 PLAN_LIMIT prišlo
+    // až pri ďalšom (čiastočne vykonaná operácia, klient ukázal chybu).
+    const foundContacts = await Contact.find({ _id: { $in: validContactIds }, workspaceId: req.workspaceId });
+    const contactsById = new Map(foundContacts.map(c => [String(c._id), c]));
+    const contactsInOrder = validContactIds.map(id => contactsById.get(id)).filter(Boolean);
+    if (isLimited && contactsInOrder.some(c => (c.tasks?.length || 0) >= maxTasks)) {
+      // Apple Guideline 3.1.1 — neutrálna správa pre iOS native shell.
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+    }
 
-      // Check plan limit: tasks per contact
-      if (isLimited && contact.tasks && contact.tasks.length >= maxTasks) {
-        // Apple Guideline 3.1.1 — neutrálna správa pre iOS native shell.
-        const message = isIosNativeApp(req)
-          ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
-          : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
-        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
-        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
-      }
+    for (const contact of contactsInOrder) {
 
       // Create new embedded task for this contact
       const newTask = {
