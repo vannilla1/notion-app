@@ -196,22 +196,35 @@ const sweepExpiredPlans = async () => {
  * Start the periodic sweep. Called once from server boot (index.js).
  * Initial run is delayed 90 s so it doesn't compete with first user requests.
  */
+let sweepStartTimer = null;
+let sweepInterval = null;
+
 const schedulePlanExpiration = () => {
-  setTimeout(() => {
+  sweepStartTimer = setTimeout(() => {
     sweepExpiredPlans().catch((err) => {
       logger.error('[PlanExpiration] Initial sweep failed', { error: err.message });
     });
   }, INITIAL_DELAY_MS);
+  sweepStartTimer.unref();
 
-  setInterval(() => {
+  sweepInterval = setInterval(() => {
     sweepExpiredPlans().catch((err) => {
       logger.error('[PlanExpiration] Scheduled sweep failed', { error: err.message });
     });
   }, SCHEDULE_INTERVAL_MS);
+  sweepInterval.unref();
 
   logger.info('[PlanExpiration] Scheduled — every 6 hours', {
     intervalHours: SCHEDULE_INTERVAL_MS / (60 * 60 * 1000),
   });
+};
+
+// Graceful shutdown
+const stopPlanExpiration = () => {
+  clearTimeout(sweepStartTimer);
+  clearInterval(sweepInterval);
+  sweepStartTimer = null;
+  sweepInterval = null;
 };
 
 module.exports = {
@@ -219,5 +232,6 @@ module.exports = {
   expireUserIfNeeded,
   sweepExpiredPlans,
   schedulePlanExpiration,
+  stopPlanExpiration,
   PAID_PLANS,
 };

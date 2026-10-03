@@ -566,12 +566,16 @@ const gracefulShutdown = (signal) => {
 
   // Zastav periodické joby, aby počas ~10 s drain okna nespúšťali dotazy
   // proti práve zatváranému Mongo spojeniu (chyby „Scheduled check failed"
-  // pri každom deployi). Joby bez stop() (planExpiration, subscription*,
-  // Google polling) tu nie sú — viď REPORT.md.
+  // pri každom deployi).
   try { stopDueDateChecks(); } catch { /* best-effort */ }
   try { stopErrorAlerter(); } catch { /* best-effort */ }
   try { require('./jobs/healthMonitor').stop(); } catch { /* best-effort */ }
   try { require('./jobs/commissionScheduler').stop(); } catch { /* best-effort */ }
+  try { require('./services/planExpiration').stopPlanExpiration(); } catch { /* best-effort */ }
+  try { require('./services/subscriptionCleanup').stopCleanup(); } catch { /* best-effort */ }
+  try { require('./services/subscriptionReminders').stopSubscriptionReminders(); } catch { /* best-effort */ }
+  try { require('./routes/googleTasks').stopGoogleTasksPolling(); } catch { /* best-effort */ }
+  try { require('./routes/googleCalendar').stopCalendarWebhooks(); } catch { /* best-effort */ }
 
   // Idle keep-alive spojenia zavrieme explicitne (Node ≥ 18.2), aby
   // httpServer.close nečakal na ich timeout.

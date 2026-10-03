@@ -161,20 +161,34 @@ const runOnce = async () => {
   }
 };
 
+let remindersStartTimer = null;
+let remindersInterval = null;
+
 const scheduleSubscriptionReminders = () => {
-  setTimeout(() => {
+  remindersStartTimer = setTimeout(() => {
     runOnce().catch((err) => logger.error('[SubscriptionReminders] Initial run failed', { error: err.message }));
   }, INITIAL_DELAY_MS);
+  remindersStartTimer.unref();
 
-  setInterval(() => {
+  remindersInterval = setInterval(() => {
     runOnce().catch((err) => logger.error('[SubscriptionReminders] Scheduled run failed', { error: err.message }));
   }, RUN_INTERVAL_MS);
+  remindersInterval.unref();
 
   logger.info('[SubscriptionReminders] Scheduled — every 24 hours');
 };
 
+// Graceful shutdown
+const stopSubscriptionReminders = () => {
+  clearTimeout(remindersStartTimer);
+  clearInterval(remindersInterval);
+  remindersStartTimer = null;
+  remindersInterval = null;
+};
+
 module.exports = {
   scheduleSubscriptionReminders,
+  stopSubscriptionReminders,
   runOnce,
   findT7Candidates,
   findT1Candidates,

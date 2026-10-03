@@ -96,29 +96,43 @@ const getSubscriptionStats = async () => {
  * Schedule periodic cleanup
  * Should be called once when the server starts
  */
+let cleanupStartTimer = null;
+let cleanupInterval = null;
+
 const scheduleCleanup = () => {
   // Run initial cleanup after 1 minute (to let DB connect)
-  setTimeout(async () => {
+  cleanupStartTimer = setTimeout(async () => {
     const result = await cleanupStaleSubscriptions();
     const stats = await getSubscriptionStats();
     if (stats) {
       logger.info('[SubscriptionCleanup] Initial stats', stats);
     }
   }, 60 * 1000);
+  cleanupStartTimer.unref();
 
   // Then run periodically
-  setInterval(async () => {
+  cleanupInterval = setInterval(async () => {
     await cleanupStaleSubscriptions();
   }, CLEANUP_INTERVAL_MS);
+  cleanupInterval.unref();
 
   logger.info('[SubscriptionCleanup] Scheduled to run every 24 hours', {
     staleThresholdDays: STALE_THRESHOLD_DAYS
   });
 };
 
+// Graceful shutdown
+const stopCleanup = () => {
+  clearTimeout(cleanupStartTimer);
+  clearInterval(cleanupInterval);
+  cleanupStartTimer = null;
+  cleanupInterval = null;
+};
+
 module.exports = {
   cleanupStaleSubscriptions,
   getSubscriptionStats,
   scheduleCleanup,
+  stopCleanup,
   STALE_THRESHOLD_DAYS
 };
