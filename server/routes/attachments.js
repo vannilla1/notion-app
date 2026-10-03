@@ -31,6 +31,10 @@ const { recordError } = require('../services/serverErrorService');
 const MAX_ZIP_BYTES = 200 * 1024 * 1024;
 const MAX_ZIP_FILES = 500;
 const JOB_TTL_MS = 15 * 60 * 1000;
+// Strop živých jobov naraz — mapa je in-memory a každý job nesie až
+// MAX_ZIP_FILES položiek s názvami a trail-om; bez stropu rastie s každým
+// POST-om (sweep beží len pri ďalšom requeste).
+const MAX_LIVE_JOBS = 500;
 
 // In-memory jednorazové joby. Reštart Renderu ich stratí — používateľ dá
 // stiahnuť znova (15 min TTL), takže perzistencia nemá zmysel.
@@ -133,6 +137,13 @@ router.post('/export', authenticateToken, requireWorkspace, async (req, res) => 
     }
 
     sweepJobs();
+    // Jeden živý odkaz na používateľa — klient ho spotrebuje hneď po POST-e
+    // (navigácia), starší nespotrebovaný job (zavretá karta, zablokovaná
+    // navigácia) by inak ležal v pamäti celých 15 min aj s 500 položkami.
+    for (const [id, j] of jobs) if (j.userId === req.user.id) jobs.delete(id);
+    if (jobs.size >= MAX_LIVE_JOBS) {
+      return res.status(503).json({ message: 'Server je vyťažený, skúste o chvíľu znova' });
+    }
     // 256 bitov entropie — token JE autorizácia (GET nemá hlavičky)
     const jobId = crypto.randomBytes(32).toString('hex');
     jobs.set(jobId, {
@@ -156,6 +167,7 @@ router.post('/export', authenticateToken, requireWorkspace, async (req, res) => 
 
 // ── Stiahnutie ZIP-u (autorizácia jednorazovým tokenom v URL) ────────────
 router.get('/export/:jobId', async (req, res) => {
+  sweepJobs();
   const job = jobs.get(req.params.jobId);
   if (!job || job.expiresAt < Date.now()) {
     jobs.delete(req.params.jobId);
