@@ -123,7 +123,15 @@ router.get('/commissions', authenticateToken, requireAffiliate, async (req, res)
     const { status } = req.query;
 
     const q = { referrerId: userId };
-    if (status) q.status = status;
+    // Len povolené hodnoty enumu (models/Commission.js). Express qs parser by
+    // z ?status[$regex]=… spravil objekt a Mongoose ho poslal ako operátor.
+    const ALLOWED_STATUS = ['pending', 'eligible', 'paid', 'revoked'];
+    if (status) {
+      if (typeof status !== 'string' || !ALLOWED_STATUS.includes(status)) {
+        return res.status(400).json({ message: 'Neplatný status' });
+      }
+      q.status = status;
+    }
 
     const [commissions, total] = await Promise.all([
       Commission.find(q)
