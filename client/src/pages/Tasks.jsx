@@ -32,6 +32,16 @@ import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import { getStoredWorkspaceId } from '../utils/workspaceStorage';
 
+// dueDate je na serveri String 'YYYY-MM-DD'. `new Date('YYYY-MM-DD')` je podľa
+// špecifikácie UTC polnoc — v pásmach západne od UTC (cestujúci používateľ,
+// zahraničný člen tímu) vyjde lokálny PREDCHÁDZAJÚCI deň a termín sa posunie.
+// Parsujeme preto ako lokálnu polnoc; iné formáty (starší full-ISO reťazec)
+// padajú na pôvodné `new Date(s)`.
+const parseLocalDate = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s);
+};
+
 // Help tips for Tasks page
 const tasksHelpTips = [
   {
@@ -294,7 +304,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
   const getItemsForDate = (date) => {
     return allItems.filter(item => {
-      const d = new Date(item.dueDate);
+      const d = parseLocalDate(item.dueDate);
       return isSameDay(d, date);
     });
   };
@@ -360,7 +370,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
     const itemsByDay = {};
     for (const item of allItems) {
-      const d = new Date(item.dueDate);
+      const d = parseLocalDate(item.dueDate);
       if (d.getFullYear() === year && d.getMonth() === month) {
         const day = d.getDate();
         if (!itemsByDay[day]) itemsByDay[day] = [];
@@ -1008,7 +1018,7 @@ function Tasks() {
     for (const it of myItems) {
       if (it.item.completed) { groups.done.push(it); continue; }
       if (!it.item.dueDate) { groups.nodate.push(it); continue; }
-      const due = new Date(it.item.dueDate);
+      const due = parseLocalDate(it.item.dueDate);
       due.setHours(0, 0, 0, 0);
       const diff = Math.round((due - today) / 86400000);
       if (diff < 0) groups.overdue.push(it);
@@ -1081,7 +1091,7 @@ function Tasks() {
         <div className="my-task-meta">
           {item.dueDate && (
             <span className={`due-date ${getDueDateClass(item.dueDate, done)}`}>
-              📅 {new Date(item.dueDate).toLocaleDateString('sk-SK')}{item.dueTime ? ` ${item.dueTime}` : ''}
+              📅 {parseLocalDate(item.dueDate).toLocaleDateString('sk-SK')}{item.dueTime ? ` ${item.dueTime}` : ''}
             </span>
           )}
         </div>
@@ -1094,7 +1104,7 @@ function Tasks() {
     if (!dueDate || completed) return '';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const due = new Date(dueDate);
+    const due = parseLocalDate(dueDate);
     due.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
 
@@ -2265,7 +2275,7 @@ function Tasks() {
                 )}
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
-                    {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                    {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {parseLocalDate(subtask.dueDate).toLocaleDateString('sk-SK')}
                     {subtask.dueTime && ` ⏰ ${subtask.dueTime}`}
                   </span>
                 )}
@@ -2527,7 +2537,7 @@ function Tasks() {
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('sk-SK');
+    return parseLocalDate(dateString).toLocaleDateString('sk-SK');
   };
 
   // File attachment handlers
