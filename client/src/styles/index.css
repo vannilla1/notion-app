@@ -9668,6 +9668,21 @@ body.ios-app {
     margin-top: 2px !important;
   }
 
+  /* 24px je pod odporúčaným dotykovým cieľom; netrafený ťuk padol na
+     .subtask-item a rozbalil/zbalil strom namiesto dokončenia. Priehľadný
+     pseudo-element rozšíri dotykovú plochu na 40×40 bez zmeny vizuálu
+     (je mimo flex toku, ✓ ostáva centrované; e.target je stále checkbox,
+     takže guard v onClick riadku podúlohy platí). -8px = gap riadku, bez
+     prekrytia susedov; drag-handle je na mobile skrytý. */
+  .tasks-page .subtask-checkbox-styled::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    bottom: -8px;
+    left: -8px;
+  }
+
   /* Title takes remaining space on first row */
   .tasks-page .subtask-title {
     flex: 1 1 calc(100% - 40px) !important;
