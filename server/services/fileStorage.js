@@ -65,6 +65,21 @@ function isR2Available() {
   return isConfigured;
 }
 
+// Časový strop pre NE-streamové R2 operácie (per volanie, cez AbortSignal).
+// S3Client nemá default ŽIADNY connection/request/socket timeout (smithy
+// DEFAULT_REQUEST_TIMEOUT = 0), takže visiaci R2 request držal upload (aj
+// s 50 MB bufferom v RAM), kópiu kontaktu či delete na neurčito.
+//
+// Zámerne NIE globálne cez `requestHandler: { requestTimeout… }`: SDK zdieľa
+// pool 50 socketov a ZIP export (routes/attachments.js) otvára GetObject
+// streamy dopredu — 51. request čaká na voľný socket tak dlho, ako klient
+// sťahuje predošlé súbory, a globálny timer (beží od vytvorenia requestu,
+// nie od pridelenia socketu) by ho zabil. Preto getFileStream() a
+// getFileObject() strop nemajú; stream do odpovede chráni res 'close'.
+const TRANSFER_TIMEOUT_MS = 120 * 1000; // PutObject / GetObject s telom (≤ 50 MB, Render → R2)
+const META_TIMEOUT_MS = 30 * 1000;      // Delete / Head / ListObjects
+const withTimeout = (ms) => ({ abortSignal: AbortSignal.timeout(ms) });
+
 /**
  * Upload buffera do R2 pod daným key-om.
  *
@@ -84,7 +99,7 @@ async function uploadFile(key, buffer, contentType) {
     ContentType: contentType || 'application/octet-stream'
   });
 
-  await s3Client.send(cmd);
+  await s3Client.send(cmd, withTimeout(TRANSFER_TIMEOUT_MS));
   logger.debug('[FileStorage] Uploaded', { key, size: buffer.length });
   return key;
 }
@@ -97,7 +112,8 @@ async function uploadFile(key, buffer, contentType) {
 async function downloadFile(key) {
   if (!isConfigured) throw new Error('R2 not configured');
   const cmd = new GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
-  const response = await s3Client.send(cmd);
+  // Abort signál platí aj počas čítania tela — req.destroy() ukončí stream
+  const response = await s3Client.send(cmd, withTimeout(TRANSFER_TIMEOUT_MS));
   // Body je Readable stream (Node) alebo ReadableStream (Web)
   const chunks = [];
   for await (const chunk of response.Body) {
@@ -144,7 +160,7 @@ async function deleteFile(key) {
   if (!isConfigured) return;
   try {
     const cmd = new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key });
-    await s3Client.send(cmd);
+    await s3Client.send(cmd, withTimeout(META_TIMEOUT_MS));
     logger.debug('[FileStorage] Deleted', { key });
   } catch (err) {
     // R2 nehádže 404 pri delete, ale rate-limit alebo connectivity issue áno
@@ -174,7 +190,7 @@ async function fileExists(key) {
   if (!isConfigured) return false;
   try {
     const cmd = new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key });
-    await s3Client.send(cmd);
+    await s3Client.send(cmd, withTimeout(META_TIMEOUT_MS));
     return true;
   } catch (err) {
     if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) return false;
@@ -228,7 +244,7 @@ async function getBucketStats() {
       MaxKeys: 1000,
       ContinuationToken: continuationToken
     });
-    const response = await s3Client.send(cmd);
+    const response = await s3Client.send(cmd, withTimeout(META_TIMEOUT_MS));
     const contents = response.Contents || [];
     objectCount += contents.length;
     totalBytes += contents.reduce((sum, obj) => sum + (obj.Size || 0), 0);
