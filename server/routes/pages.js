@@ -20,8 +20,18 @@ const isValidObjectId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
 // GET /api/pages — list all pages in the active workspace
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const pages = await Page.find({ workspaceId: req.workspaceId }).sort({ updatedAt: -1 });
-    res.json(pages);
+    // Zoznam/strom potrebuje len metadáta — `content` (až 500 000 znakov na
+    // stránku) sa do zoznamu neposiela; plný obsah vracia GET /:id. Projekcia
+    // + lean() využije index { workspaceId, updatedAt }. `id` dopĺňame ručne,
+    // lebo lean() obchádza toJSON transform modelu (Page.js).
+    const pages = await Page.find(
+      { workspaceId: req.workspaceId },
+      'title icon parentId userId workspaceId createdAt updatedAt'
+    )
+      .sort({ updatedAt: -1 })
+      .limit(1000)
+      .lean();
+    res.json(pages.map(p => ({ ...p, id: p._id.toString() })));
   } catch (error) {
     logger.error('GET /pages error', { error: error.message, userId: req.user.id, workspaceId: req.workspaceId });
     res.status(500).json({ message: 'Chyba servera' });
