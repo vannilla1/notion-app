@@ -1633,7 +1633,13 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
     // mohol updatnuť task z workspace B (task._id vie byť guessable v brute-
     // force scenári). Odhalené route integračnými testami (2026-04-15).
-    let task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    //
+    // ObjectId guard (ako v GET /:id a podúlohových routách): UUID kontaktnej
+    // úlohy bez `source: 'contact'` inak hodilo CastError → 500 a fallback
+    // vetva „try to find in contacts“ nižšie sa nikdy nevykonala.
+    let task = isObjectIdString(req.params.id)
+      ? await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId })
+      : null;
 
     if (task) {
       // Save original assignedTo before update
@@ -2073,7 +2079,10 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Try to delete from global tasks first.
     // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
     // mohol DELETE taska z workspace B. Viď analogický fix v PUT /:id vyššie.
-    const task = await Task.findOneAndDelete({ _id: req.params.id, workspaceId: req.workspaceId });
+    // ObjectId guard — UUID bez `source` inak CastError → 500 (viď PUT /:id).
+    const task = isObjectIdString(req.params.id)
+      ? await Task.findOneAndDelete({ _id: req.params.id, workspaceId: req.workspaceId })
+      : null;
     if (task) {
       io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'global' });
 
