@@ -529,8 +529,11 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         if (parsedPollOptions.length > 10) {
           return res.status(400).json({ message: 'Anketa môže mať maximálne 10 možností' });
         }
+        // JSON.parse môže vrátiť aj [null, 1, {}] — null by na .text spadol
+        // TypeError (500), číslo by vrátilo undefined.trim. Nestringové
+        // položky → '' → filter ich vyhodí → 400 nižšie.
         parsedPollOptions = parsedPollOptions
-          .map(opt => ({ text: (typeof opt === 'string' ? opt : opt.text || '').trim().substring(0, 200) }))
+          .map(opt => ({ text: (typeof opt === 'string' ? opt : (opt && typeof opt.text === 'string' ? opt.text : '')).trim().substring(0, 200) }))
           .filter(opt => opt.text.length > 0);
         if (parsedPollOptions.length < 2) {
           return res.status(400).json({ message: 'Anketa musí mať aspoň 2 neprázdne možnosti' });
