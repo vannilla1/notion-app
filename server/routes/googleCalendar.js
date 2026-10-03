@@ -1749,18 +1749,27 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
     const currentTaskIds = new Set();
 
-    // Collect all current task IDs
+    // Collect all current task IDs — vrátane podúloh (ľubovoľnej hĺbky), ktoré
+    // /sync tiež synchronizuje; inak by ich udalosti vyzerali ako siroty.
     for (const task of globalTasks) {
       currentTaskIds.add(task._id.toString());
+      collectSubtaskIds(task.subtasks, currentTaskIds);
     }
 
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
           currentTaskIds.add(task.id);
+          collectSubtaskIds(task.subtasks, currentTaskIds);
         }
       }
     }
+
+    // Mapa syncedTaskIds je per-user (všetky workspace-y), ale currentTaskIds
+    // pokrýva len tento workspace. Mažeme preto iba udalosti z kalendára TOHTO
+    // workspace-u — úlohy iných workspace-ov nie sú siroty. Legacy záznamy bez
+    // mapovania kalendára (pred per-workspace kalendármi) radšej necháme.
+    const wsCalendarId = user.googleCalendar.workspaceCalendars?.get?.(String(workspaceId))?.calendarId || null;
 
     let deleted = 0;
     let errors = 0;
@@ -1775,6 +1784,8 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
       for (const [taskId, eventId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
+          const mappedCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+          if (!wsCalendarId || mappedCalendarId !== wsCalendarId) continue;
           // Task no longer exists, delete the calendar event from whichever
           // calendar it was synced to (PR2 per-workspace) — with fallback to
           // legacy single calendar.
@@ -2281,6 +2292,15 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
     if (subtask.subtasks) {
       collectSubtasksForSync(subtask.subtasks, parentTitle, contactName, tasksToSync);
     }
+  }
+}
+
+// Rekurzívne pridá id všetkých podúloh (ľubovoľnej hĺbky) do množiny idSet.
+function collectSubtaskIds(subtasks, idSet) {
+  if (!subtasks) return;
+  for (const subtask of subtasks) {
+    if (subtask?.id) idSet.add(subtask.id);
+    if (subtask?.subtasks) collectSubtaskIds(subtask.subtasks, idSet);
   }
 }
 
