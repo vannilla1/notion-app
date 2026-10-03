@@ -768,6 +768,7 @@ function Tasks() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
   const [duplicateContactIds, setDuplicateContactIds] = useState([]);
+  const [duplicating, setDuplicating] = useState(false); // POST /duplicate in-flight
 
   // Transfer modal — kopírovanie/presun projektu alebo úlohy do projektu
   // iného kontaktu. { contactId, taskId, subtaskId?, title } | null
@@ -1843,7 +1844,10 @@ function Tasks() {
   };
 
   const duplicateTask = async () => {
-    if (!duplicatingTask) return;
+    // Busy guard — modál sa zatvára až po odpovedi servera, dvojklik na
+    // „Duplikovať" by inak vytvoril dva duplikáty.
+    if (!duplicatingTask || duplicating) return;
+    setDuplicating(true);
     try {
       await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
         contactIds: duplicateContactIds,
@@ -1852,6 +1856,8 @@ function Tasks() {
       closeDuplicateModal();
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri duplikovaní projektu');
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -3903,7 +3909,7 @@ function Tasks() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
-              <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
+              <button className="btn btn-primary" onClick={duplicateTask} disabled={duplicating}>{duplicating ? 'Duplikujem...' : 'Duplikovať'}</button>
             </div>
           </div>
         </div>
