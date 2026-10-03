@@ -62,6 +62,19 @@ if (process.env.NODE_ENV === 'production') {
   }));
 }
 
+// Winston re-emituje chybu transportu (EACCES/ENOSPC/EROFS pri zápise log
+// súboru na efemérnom disku Renderu) ako 'error' na samotnom loggeri.
+// Logger je EventEmitter — bez listenera by neošetrená 'error' udalosť
+// skončila v process.on('uncaughtException') → process.exit(1). Zápis do
+// logu nesmie zhodiť server; stačí to zahlásiť na stderr.
+logger.on('error', (err) => {
+  try {
+    console.error('[logger] transport error:', err && err.message);
+  } catch {
+    // nič — ani tento fallback nesmie hodiť
+  }
+});
+
 // Helper methods for common logging patterns
 logger.http = (req, statusCode, duration) => {
   const meta = {
