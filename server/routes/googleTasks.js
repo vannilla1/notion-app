@@ -935,10 +935,13 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
-    // If force sync, reset all tracking maps
+    // Force sync: vynulujeme len hashe → každá namapovaná úloha sa v Google
+    // aktualizuje (update), nová sa vloží. Mapping syncedTaskIds ponechávame
+    // — jeho vynulovanie bez zmazania úloh v Google spôsobilo, že každý
+    // „Resync“ vložil všetky úlohy znova (duplicity). Neexistujúcu úlohu
+    // (404/400) sync znova vytvorí sám.
     if (forceSync) {
-      logger.info('[Google Tasks] Force sync - resetting tracking maps', { userId: req.user.id });
-      user.googleTasks.syncedTaskIds = new Map();
+      logger.info('[Google Tasks] Force sync - resetting content hashes', { userId: req.user.id });
       user.googleTasks.syncedTaskHashes = new Map();
     }
 
@@ -1642,7 +1645,8 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
 
-    user.googleTasks.syncedTaskIds = new Map();
+    // Len hashe (viď force sync v /sync) — mapping na existujúce Google úlohy
+    // ostáva, takže ďalší sync ich aktualizuje namiesto duplikovania.
     user.googleTasks.syncedTaskHashes = new Map();
     user.googleTasks.quotaUsedToday = 0;
     await user.save();
