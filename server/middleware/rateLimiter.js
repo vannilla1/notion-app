@@ -107,8 +107,13 @@ const registerLimiter = rateLimit({
   skip: skipInDev
 });
 
+// Kľúč pre limitery za authenticateToken: per používateľ (nie per IP —
+// za jednou NAT/CGNAT IP sú celé firmy a mobilní operátori), bez prihlásenia
+// fallback na IP (IPv6 zoskupené do /64).
+const userOrIpKey = (req) => (req.user?.id ? `user:${String(req.user.id)}` : `ip:${ipKeyGenerator(req.ip)}`);
+
 // Rate limiter for password change
-// 3 attempts per hour per user
+// 3 attempts per hour per user (beží za authenticateToken → req.user existuje)
 const passwordChangeLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3, // 3 attempts
@@ -117,14 +122,57 @@ const passwordChangeLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: userOrIpKey,
   handler: (req, res, next, options) => {
     logger.warn('Rate limit exceeded: password change', {
       ip: req.ip,
       userId: req.user?.id
     });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'password_change' });
     res.status(options.statusCode).json(options.message);
-  }
+  },
+  skip: skipInDev
 });
+
+// Pripojenie do workspace cez kód pozvánky — brute-force ochrana kódov.
+// 10 pokusov / 15 min per používateľ (+ samostatne per IP nižšie).
+const joinWorkspaceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: {
+    message: 'Príliš veľa pokusov o pripojenie. Skúste znova o 15 minút.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+  handler: (req, res, next, options) => {
+    logger.warn('Rate limit exceeded: workspace join', { ip: req.ip, userId: req.user?.id });
+    logSecurityEvent('security.rate_limited', req, { limiter: 'workspace_join' });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: skipInDev
+});
+
+// Súborové endpointy (upload/download/rename/delete príloh) — štedrejší
+// limit než apiLimiter (galéria/preview načíta veľa súborov naraz), ale
+// nie úplne bez limitu ako predtým.
+const filesLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  message: {
+    message: 'Príliš veľa požiadaviek na súbory. Skúste znova o chvíľu.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    logSecurityEvent('security.rate_limited', req, { limiter: 'files' });
+    res.status(options.statusCode).json(options.message);
+  },
+  skip: skipInDev
+});
+
+// /files ako path segment (pred/za '/' alebo koniec) — nie substring.
+const isFilesPath = (path) => /\/files(\/|$)/.test(path);
 
 // Rate limiter for "Forgot password" requests.
 // 5 per hour per IP (balance: user zabudne, ale útočník nemôže spamovať).
@@ -179,20 +227,16 @@ const apiLimiter = rateLimit({
     logSecurityEvent('security.rate_limited', req, { limiter: 'api_general' });
     res.status(options.statusCode).json(options.message);
   },
-  skip: (req) => {
-    // Skip rate limiting iba pre legitímne file upload/download endpointy
-    // (Tasks/Contacts/Messages mountované na /api, takže req.path tu má
-    // tvar /<resource>/<id>/files alebo .../files/<fileId>/download).
-    // Predtým bol `req.path.includes('/files')` substring match — útočník
-    // by vedel obísť limiter na akomkoľvek endpointe ak by URL obsahovala
-    // segment `/files` v inom kontexte. Teraz vyžadujeme `/files` ako
-    // path segment (pred/za '/' alebo koniec stringu).
-    // `/uploads` podmienky odstránené — statický mount /uploads v index.js už
-    // neexistuje (a limiter je mountovaný na /api, takže nikdy nematchli).
-    return req.path === '/health' ||
-           /\/files(\/|$)/.test(req.path);
-  }
+  // Súborové endpointy (req.path relatívne k /api, napr.
+  // /tasks/<id>/files/<fileId>/download) majú vlastný filesLimiter —
+  // apiLimiter ich preskočí, aby galéria príloh nevyčerpala bežný limit.
+  // (/health a /uploads sú mimo /api, preto tu podmienky nie sú.)
+  skip: (req) => skipInDev(req) || isFilesPath(req.path)
 });
+
+// Mount pre /api: súborové cesty → filesLimiter, ostatné → apiLimiter.
+const apiAndFilesLimiter = (req, res, next) =>
+  (isFilesPath(req.path) ? filesLimiter : apiLimiter)(req, res, next);
 
 // Rate limiter for client error reporting
 // 60 per minute per IP — dostatočne štedré aby ErrorBoundary + window.onerror
@@ -275,6 +319,9 @@ module.exports = {
   forgotPasswordLimiter,
   resetPasswordLimiter,
   apiLimiter,
+  filesLimiter,
+  apiAndFilesLimiter,
+  joinWorkspaceLimiter,
   errorReportLimiter,
   restoreLimiter,
   restoreTokenLimiter

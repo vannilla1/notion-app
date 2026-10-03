@@ -7,6 +7,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
+const { joinWorkspaceLimiter } = require('../middleware/rateLimiter');
 const { isIosNativeApp } = require('../utils/platform');
 const { logPlanGateHit } = require('../utils/planGate');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
@@ -219,14 +220,14 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Join workspace by invite code
-router.post('/join', authenticateToken, async (req, res) => {
+router.post('/join', authenticateToken, joinWorkspaceLimiter, async (req, res) => {
   try {
     const { inviteCode } = req.body;
 
     if (typeof inviteCode !== 'string' || inviteCode.trim().length === 0) {
       return res.status(400).json({ message: 'Kód pozvánky je povinný' });
     }
-    // Kód je vždy 8 alfanumerických znakov (Workspace.generateInviteCode) —
+    // Kód má 8 (staré) alebo 12 hex znakov (Workspace.generateInviteCode) —
     // iný formát v DB existovať nemôže, odpovedáme ako pri neplatnom kóde
     // bez dotazu. Trim toleruje whitespace pri kopírovaní kódu.
     const code = inviteCode.trim().toUpperCase();
@@ -298,7 +299,9 @@ router.post('/join', authenticateToken, async (req, res) => {
     const membership = new WorkspaceMember({
       workspaceId: workspace._id,
       userId: req.user.id,
-      role: workspace.settings.defaultMemberRole || 'member',
+      // Legacy 'admin' (a čokoľvek neznáme) → 'member'; WorkspaceMember enum
+      // by 'admin' odmietol a join by skončil 500.
+      role: workspace.settings?.defaultMemberRole === 'manager' ? 'manager' : 'member',
       invitedBy: null // Joined via code
     });
 

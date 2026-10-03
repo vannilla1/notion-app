@@ -41,7 +41,7 @@ const { scheduleErrorAlerter, stop: stopErrorAlerter } = require('./jobs/errorAl
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
-const { apiLimiter } = require('./middleware/rateLimiter');
+const { apiAndFilesLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
 const Page = require('./models/Page');
 const logger = require('./utils/logger');
@@ -144,7 +144,7 @@ app.post('/api/billing/webhook',
 // než server prečíta a JSON.parse-ne až 1 MB tela pri každom requeste.
 // Route-level limitery závislé od tela (loginEmailLimiter) sú v auth.js
 // a tejto zmeny sa netýkajú.
-app.use('/api', apiLimiter);
+app.use('/api', apiAndFilesLimiter);
 
 // Body parsers with size limits.
 //
