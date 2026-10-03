@@ -914,8 +914,10 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
-// Maximum sync time: 10 minutes to allow large syncs to complete
-const SYNC_TIMEOUT = 600000;
+// Maximum sync time: 9 minutes — Render ukončí HTTP request po 10 min, a po
+// dosiahnutí timeoutu ešte beží reverse sync + user.save(); pri presne 10 min
+// by odpoveď k klientovi nedorazila (rovnako ako googleCalendar.js).
+const SYNC_TIMEOUT = 9 * 60 * 1000;
 
 router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   const forceSync = req.body.force === true;
