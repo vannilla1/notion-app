@@ -89,7 +89,7 @@ function UserAffiliate() {
           <div className="crm-header-left"><HeaderLogo /></div>
           <div className="crm-header-right">
             <NotificationBell />
-            <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
+            <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
           </div>
         </header>
         <div style={{ maxWidth: 600, margin: '60px auto', padding: 24, textAlign: 'center' }}>
@@ -126,7 +126,7 @@ function UserAffiliate() {
         <div className="crm-header-right">
           <button className="btn btn-secondary" onClick={() => navigate('/app')}>← Späť</button>
           <NotificationBell />
-          <UserMenu user={user} onLogout={logout} onUpdateUser={updateUser} />
+          <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
         </div>
       </header>
 
