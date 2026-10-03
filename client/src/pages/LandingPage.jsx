@@ -18,7 +18,10 @@ export default function LandingPage() {
     setContactStatus('sending');
     setContactError('');
     try {
-      await api.post('/api/contact-form', contactForm);
+      // _noRetry: interceptor v api.js inak POST pri timeoute/výpadku siete
+      // opakuje až 3× – ak server e-mail odoslal, ale odpoveď sa stratila,
+      // support by dostal duplicitné správy a limiter (5/15 min) vrátil 429.
+      await api.post('/api/contact-form', contactForm, { _noRetry: true });
       setContactStatus('success');
       setContactForm({ name: '', email: '', message: '' });
     } catch (err) {
