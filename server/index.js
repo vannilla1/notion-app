@@ -88,8 +88,14 @@ const io = new Server(server, {
 // Security headers
 //
 // Audit MED-001 fix: CSP zapnutý ako HTTP response header (predtým bolo
-// {contentSecurityPolicy: false}). Frontend CSP via meta tag NESTAČÍ —
-// browser musí dostať header pre aktivovanie XSS protections.
+// {contentSecurityPolicy: false}).
+//
+// POZOR: táto CSP platí len pre odpovede API servera (JSON, /uploads,
+// HTML stránky odhlásenia z e-mailov). Dokument SPA (index.html) servíruje
+// samostatný Render static site `prpl-crm` — jeho CSP a bezpečnostné
+// hlavičky sú v render.yaml (headers), porušenia chodia na POST
+// /api/errors/csp. Pri zmene zdrojov (nový CDN, analytika…) treba upraviť
+// obe miesta.
 //
 // Directívy kompromis:
 //  - script-src: 'unsafe-inline' je nutné lebo index.html má inline script

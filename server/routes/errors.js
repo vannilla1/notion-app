@@ -55,4 +55,55 @@ router.post('/client', errorReportLimiter, async (req, res) => {
   }
 });
 
+/**
+ * CSP violation reporty (report-uri zo statického webu — render.yaml,
+ * Content-Security-Policy-Report-Only). Prehliadač posiela
+ * `application/csp-report` bez CORS preflightu; globálny express.json ho
+ * neparsuje, preto vlastný parser s malým limitom.
+ *
+ * Ukladá sa ako klientska chyba (Diagnostika) — rovnaký dedup cez
+ * fingerprint (direktíva + blokovaný origin), rovnaký strop nových
+ * fingerprintov per IP. Slúži na overenie politiky pred jej vynútením.
+ */
+const cspReportParser = express.json({
+  type: ['application/csp-report', 'application/reports+json', 'application/json'],
+  limit: '16kb'
+});
+
+const originOf = (value) => {
+  if (typeof value !== 'string' || !value) return 'unknown';
+  try { return new URL(value).origin; } catch { return value.slice(0, 60); }
+};
+
+router.post('/csp', errorReportLimiter, cspReportParser, (req, res) => {
+  try {
+    const raw = req.body?.['csp-report']
+      || (Array.isArray(req.body) ? req.body[0]?.body : null)
+      || {};
+    const directive = String(raw['effective-directive'] || raw.effectiveDirective
+      || raw['violated-directive'] || 'unknown').split(' ')[0].slice(0, 60);
+    const blocked = originOf(raw['blocked-uri'] || raw.blockedURL);
+    const documentUri = String(raw['document-uri'] || raw.documentURL || '').slice(0, 500);
+    const sourceFile = String(raw['source-file'] || raw.sourceFile || '').slice(0, 300);
+    const line = Number(raw['line-number'] || raw.lineNumber) || undefined;
+
+    recordClientError({
+      name: 'CSPViolation',
+      message: `CSP ${directive} blocked ${blocked}`,
+      url: documentUri,
+      // Zdroj ide do componentStack (nefiguruje vo fingerprinte) — jedno
+      // porušenie z rôznych riadkov bundla = jeden záznam s count.
+      componentStack: sourceFile ? `source: ${sourceFile}:${line || 0}` : '',
+      line,
+      release: 'csp-report-only'
+    }, {
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent')
+    }).catch(() => {});
+  } catch (err) {
+    logger.warn('POST /api/errors/csp failed', { error: err.message });
+  }
+  res.status(204).end();
+});
+
 module.exports = router;
