@@ -2068,14 +2068,16 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
     // poľom (väčšina, ale niektoré legacy kolekcie ho nemusia mať).
     const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    for (const name of collections) {
+    // Paralelne — predtým 16 kolekcií × 2 sekvenčné round-tripy na Atlas
+    // (~32 čakaní za sebou). Poradie výsledkov ostáva podľa `collections`.
+    const statsResults = await Promise.all(collections.map(async (name) => {
       try {
-        const stats = await db.command({ collStats: name });
-        let last7d = null;
-        try {
-          last7d = await db.collection(name).countDocuments({ createdAt: { $gte: week } });
-        } catch { /* createdAt may not exist on this collection */ }
-        collectionStats.push({
+        const [stats, last7d] = await Promise.all([
+          db.command({ collStats: name }),
+          db.collection(name).countDocuments({ createdAt: { $gte: week } })
+            .catch(() => null) // createdAt may not exist on this collection
+        ]);
+        return {
           name,
           count: stats.count,
           size: stats.size,
@@ -2084,11 +2086,13 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
           indexSize: stats.totalIndexSize,
           // null = createdAt sa nepodarilo zistiť, 0 = žiadne nové, čísla > 0 sú growth
           growth7d: last7d
-        });
+        };
       } catch {
-        // Collection might not exist yet
+        return null; // Collection might not exist yet
       }
-    }
+    }));
+    collectionStats.push(...statsResults.filter(Boolean));
+
 
     // Storage per workspace (contacts + tasks + messages) — excludujeme
     // workspaces super admina aby produkčné metriky neboli skreslené testovacími.
