@@ -8231,6 +8231,31 @@ body.ios-app {
   .contact-meta a {
     padding: 4px 0;
   }
+
+  /* Plošné `button { min-width/min-height: 44px }` vyššie vyhráva nad
+     width/height bez ohľadu na špecificitu (aj nad !important width), takže
+     malé × absolútne umiestnené vnútri inputov vyrástli na 44px sivý kruh cez
+     text a kompaktné zatváracie/rozbaľovacie ikony lámali layout (rovnaký
+     problém ako .workspace-reorder-btn nižšie). Vrátime im pôvodné rozmery;
+     inline × ostávajú s rozumným 32px cieľom. */
+  .search-clear,
+  .dt-clear-btn,
+  .notification-close {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .toast-close,
+  .promo-clear-btn,
+  .announcement-modal-close {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .subtask-expand-btn {
+    min-width: 28px;
+    min-height: 28px;
+  }
 }
 
 /* Landscape mode on phones */
