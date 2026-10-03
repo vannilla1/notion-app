@@ -687,6 +687,15 @@ function Tasks() {
   // je async — closure v setTimeout by čítala stale `tasks` zo svojho času.
   // Ref sa aktualizuje synchrónne v useEffect nižšie a je vždy aktuálny.
   const tasksRef = useRef([]);
+  // Ochrana proti zastaranej odpovedi: fetchTasks/fetchContacts bežia súbežne
+  // z viacerých zdrojov (mount, resume, prepnutie workspacu, socket, deep-link).
+  // Ak starší request dobehne až PO novšom (napr. ešte s X-Workspace-Id
+  // predchádzajúceho workspacu), nesmie prepísať novší stav. Zahadzujeme len
+  // odpoveď, ktorú už predbehla novšia APLIKOVANÁ odpoveď — `await fetchTasks()`
+  // volajúci (focusNextMatch cez tasksRef) tak v bežnom prípade stále dostanú
+  // čerstvé dáta.
+  const tasksFetchSeqRef = useRef({ started: 0, applied: 0 });
+  const contactsFetchSeqRef = useRef({ started: 0, applied: 0 });
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -797,8 +806,11 @@ function Tasks() {
   };
 
   const fetchTasks = useCallback(async () => {
+    const seq = ++tasksFetchSeqRef.current.started;
     try {
       const res = await api.get('/api/tasks');
+      if (seq < tasksFetchSeqRef.current.applied) return; // novšia odpoveď už je v stave
+      tasksFetchSeqRef.current.applied = seq;
       setTasks(res.data);
     } catch {
       // Silently fail — task list shows empty/loading state
@@ -808,8 +820,11 @@ function Tasks() {
   }, []);
 
   const fetchContacts = useCallback(async () => {
+    const seq = ++contactsFetchSeqRef.current.started;
     try {
       const res = await api.get('/api/contacts');
+      if (seq < contactsFetchSeqRef.current.applied) return; // novšia odpoveď už je v stave
+      contactsFetchSeqRef.current.applied = seq;
       setContacts(res.data);
     } catch {
       // Silently fail
