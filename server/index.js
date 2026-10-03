@@ -151,11 +151,15 @@ app.post('/api/billing/webhook',
 // Override pre routy ktoré reálne potrebujú väčšie JSON payloady (rich
 // content, pages editor, batch operations) idú s 5MB. Tieto sú za auth-om
 // takže útočná plocha je menšia.
+//
+// Override pre Pages (rich-text editor, content limit 500K znakov ×
+// JSON overhead ≈ 2-3MB v krajnom prípade). MUSÍ byť PRED globálnym 1MB
+// parserom: body-parser po úspešnom parse nastaví req._body a ďalší parser
+// sa preskočí; v opačnom poradí by globálny 1MB parser telo nad 1MB zamietol
+// s 413 skôr, než sa 5MB override vôbec dostane k slovu (mŕtvy kód).
+app.use('/api/pages', express.json({ limit: '5mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-// Override pre Pages (rich-text editor, content limit 500K znakov ×
-// JSON overhead ≈ 2-3MB v krajnom prípade)
-app.use('/api/pages', express.json({ limit: '5mb' }));
 
 // Apply general API rate limiting
 app.use('/api', apiLimiter);
