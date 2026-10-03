@@ -181,19 +181,35 @@ function escapeHtml(s) {
  * založí spike baseline a nechá procesu čas na stabilizáciu (errory
  * z cold-cache boot problémov nespustia alert hneď po deployi).
  */
+// Handly časovačov (ako healthMonitor / commissionScheduler) — job sa dá
+// zastaviť a druhé volanie nespustí paralelný interval (dvojité alerty).
+let timeoutHandle = null;
+let intervalHandle = null;
+
 function scheduleErrorAlerter() {
-  setTimeout(() => {
+  if (intervalHandle) return;
+  timeoutHandle = setTimeout(() => {
     checkAndAlert().catch(() => {});
   }, 10 * 60 * 1000);
+  timeoutHandle.unref?.();
 
-  setInterval(() => {
+  intervalHandle = setInterval(() => {
     checkAndAlert().catch(() => {});
   }, INTERVAL_MS);
+  intervalHandle.unref?.();
 
   logger.info(`[ErrorAlerter] Scheduled — every 1h, new>${NEW_THRESHOLD} fingerprints alebo +${SPIKE_THRESHOLD} výskytov`);
 }
 
+function stop() {
+  clearTimeout(timeoutHandle);
+  clearInterval(intervalHandle);
+  timeoutHandle = null;
+  intervalHandle = null;
+}
+
 module.exports = {
   scheduleErrorAlerter,
+  stop,
   checkAndAlert, // exportované pre testy / manual trigger
 };
