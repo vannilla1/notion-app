@@ -4172,8 +4172,11 @@ router.post('/commissions/bulk-pay', authenticateToken, requireAdmin, async (req
     const Commission = require('../models/Commission');
     const { referrerId, paidReference, paidMethod, notes } = req.body || {};
     if (!referrerId) return res.status(400).json({ message: 'referrerId je povinné' });
+    if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
 
-    const eligible = await Commission.find({ referrerId, status: 'eligible' });
+    const eligible = await Commission.find({ referrerId, status: 'eligible' })
+      .select('_id commissionAmount notes').lean();
     const totalAmount = eligible.reduce((sum, c) => sum + c.commissionAmount, 0);
 
     const MIN_PAYOUT_EUR = 20;
@@ -4185,25 +4188,41 @@ router.post('/commissions/bulk-pay', authenticateToken, requireAdmin, async (req
       });
     }
 
+    // Per dokument s podmienkou status:'eligible' — medzi find a zápisom
+    // mohol refund webhook províziu revokovať; hromadný updateMany bez
+    // guardu by ju označil ako vyplatenú a pripočítal k totalPaidEur.
+    // Poznámka sa PRIPÁJA k existujúcej histórii (predtým ju prepísala).
     const now = new Date();
-    await Commission.updateMany(
-      { _id: { $in: eligible.map((c) => c._id) } },
-      {
-        $set: {
-          status: 'paid',
-          paidAt: now,
-          paidMethod: paidMethod || 'bank',
-          paidReference: paidReference || '',
-          notes: notes ? `\n[${now.toISOString()}] ${notes}` : ''
+    const noteSuffix = notes ? `\n[${now.toISOString()}] ${str(notes, 500)}` : '';
+    let paidCount = 0;
+    let paidAmount = 0;
+    for (const c of eligible) {
+      const result = await Commission.updateOne(
+        { _id: c._id, status: 'eligible' },
+        {
+          $set: {
+            status: 'paid',
+            paidAt: now,
+            paidMethod: str(paidMethod, 50) || 'bank',
+            paidReference: str(paidReference, 200),
+            notes: (c.notes || '') + noteSuffix
+          }
         }
+      );
+      if (result.modifiedCount > 0) {
+        paidCount++;
+        paidAmount += c.commissionAmount;
       }
-    );
+    }
+    paidAmount = Math.round(paidAmount * 100) / 100;
 
-    await User.findByIdAndUpdate(referrerId, {
-      $inc: { 'affiliate.totalPaidEur': Math.round(totalAmount * 100) / 100 }
-    });
+    if (paidAmount > 0) {
+      await User.findByIdAndUpdate(referrerId, {
+        $inc: { 'affiliate.totalPaidEur': paidAmount }
+      });
+    }
 
-    res.json({ success: true, paidCount: eligible.length, paidAmount: Math.round(totalAmount * 100) / 100 });
+    res.json({ success: true, paidCount, paidAmount });
   } catch (error) {
     logger.error('[Admin] Bulk pay error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
