@@ -1146,8 +1146,13 @@ const processCalendarChanges = async (user, target = null, opts = {}) => {
         // Len vlastný čas úlohy — updatedAt kontaktu sa posúva pri každej
         // zmene ľubovoľnej jeho úlohy či poľa a zahodil by skutočné zmeny
         // z Google (napr. dve udalosti toho istého kontaktu v jednej dávke).
-        const crmModifiedRaw = (contact && taskIndex !== -1)
-          ? (contact.tasks[taskIndex].modifiedAt || contact.tasks[taskIndex].createdAt)
+        // createdAt má v schéme default (now) — Mongoose ho doplní pri načítaní
+        // aj starej úlohe bez uloženého času; taký „čas" by blokoval každú
+        // zmenu z Google, preto ho berieme len ak je naozaj uložený.
+        const ct = (contact && taskIndex !== -1) ? contact.tasks[taskIndex] : null;
+        const storedCreatedAt = ct && !(typeof ct.$isDefault === 'function' && ct.$isDefault('createdAt')) ? ct.createdAt : null;
+        const crmModifiedRaw = ct
+          ? (ct.modifiedAt || storedCreatedAt)
           : (task.modifiedAt || task.updatedAt);
         const crmModified = crmModifiedRaw ? new Date(crmModifiedRaw).getTime() : NaN;
         const eventUpdated = event.updated ? new Date(event.updated).getTime() : NaN;

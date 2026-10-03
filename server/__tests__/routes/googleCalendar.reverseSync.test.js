@@ -121,6 +121,22 @@ describe('Google Calendar — poistky spätnej synchronizácie', () => {
     expect(c.tasks.find(t => t.id === 'ct-b').dueDate).toBe('2026-10-13');
   });
 
+  it('stará úloha kontaktu bez uloženého createdAt/modifiedAt prijme zmenu z Google', async () => {
+    const Contact = require('../../models/Contact');
+    const { insertedId } = await Contact.collection.insertOne({
+      workspaceId: ws._id, userId: user._id, name: 'Legacy', status: 'new',
+      tasks: [{ id: 'leg-1', title: 'Stará', dueDate: '2026-10-10', completed: false, subtasks: [] }],
+      createdAt: new Date('2025-11-01'), updatedAt: new Date('2025-11-01')
+    });
+    await User.updateOne({ _id: user._id }, { $set: { 'googleCalendar.syncToken': 'tok-1', 'googleCalendar.syncedTaskIds.leg-1': 'evt-l' } });
+    user = await User.findById(user._id);
+    mockEventsList.mockResolvedValue({ data: { nextSyncToken: 'tok-2', items: [
+      event({ id: 'evt-l', summary: 'Stará', start: { date: '2026-10-20' }, updated: new Date(Date.now() - HOUR).toISOString(), extendedProperties: { private: { completed: 'false' } } })
+    ] } });
+    await processCalendarChanges(user);
+    expect((await Contact.findById(insertedId).lean()).tasks[0].dueDate).toBe('2026-10-20');
+  });
+
   it('úloha priradená inému sa z tohto kalendára nemení', async () => {
     await Task.updateOne({ _id: task._id }, { $set: { assignedTo: [new mongoose.Types.ObjectId()] } });
     user.googleCalendar.syncToken = 'tok-1';
