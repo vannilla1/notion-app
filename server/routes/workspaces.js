@@ -760,10 +760,12 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
       { currentWorkspaceId: null }
     );
 
-    // Delete workspace data (contacts, tasks, messages, invitations)
+    // Delete workspace data (contacts, tasks, messages, invitations, pages, notifications)
     const Contact = require('../models/Contact');
     const Task = require('../models/Task');
     const Message = require('../models/Message');
+    const Page = require('../models/Page');
+    const Notification = require('../models/Notification');
     const { deleteMessageBlobs } = require('../services/messageFiles');
     await Contact.deleteMany({ workspaceId });
     await Task.deleteMany({ workspaceId });
@@ -772,6 +774,10 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
     await deleteMessageBlobs({ workspaceId });
     await Message.deleteMany({ workspaceId });
     await Invitation.deleteMany({ workspaceId });
+    // Stránky a notifikácie sú tiež viazané na workspaceId — predtým ostávali
+    // osirelé (Pages natrvalo, Notifications až do TTL expirácie).
+    await Page.deleteMany({ workspaceId });
+    await Notification.deleteMany({ workspaceId });
 
     // Delete workspace
     await Workspace.deleteOne({ _id: workspaceId });
