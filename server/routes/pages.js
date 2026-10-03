@@ -58,10 +58,27 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+const PAGE_TITLE_MAX = 500;
+const PAGE_CONTENT_MAX = 500000;
+const pageTooLarge = (title, content) => {
+  if (title != null && String(title).length > PAGE_TITLE_MAX) {
+    return { message: `Názov stránky môže mať najviac ${PAGE_TITLE_MAX} znakov`, code: 'CONTENT_TOO_LARGE' };
+  }
+  if (content != null && String(content).length > PAGE_CONTENT_MAX) {
+    return { message: 'Obsah stránky je príliš dlhý', code: 'CONTENT_TOO_LARGE' };
+  }
+  return null;
+};
+
 // POST /api/pages — create a page in the active workspace
 router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, icon, parentId, content } = req.body;
+
+    // Príliš dlhý obsah/názov odmietneme (413) namiesto tichého orezania —
+    // substring bez chyby = strata dát, o ktorej sa používateľ nedozvie.
+    const tooLarge = pageTooLarge(title, content);
+    if (tooLarge) return res.status(413).json(tooLarge);
 
     if (parentId) {
       if (!isValidObjectId(parentId)) {
@@ -114,6 +131,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     const { title, icon, content, parentId } = req.body;
+
+    const tooLarge = pageTooLarge(title, content);
+    if (tooLarge) return res.status(413).json(tooLarge);
 
     if (title !== undefined) page.title = String(title).substring(0, 500);
     if (icon !== undefined) {

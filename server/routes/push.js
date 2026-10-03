@@ -53,14 +53,31 @@ const rateLimiter = {
 // držať proces nažive (graceful shutdown, Jest), rovnako ako v jobs/*.
 setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000).unref();
 
-// Validate endpoint URL
+// Známe push služby prehliadačov (Chrome/Edge/Opera/Samsung → FCM, Firefox →
+// Mozilla autopush, Edge legacy → WNS, Safari → Apple).
+const KNOWN_PUSH_HOST_SUFFIXES = ['.googleapis.com', '.push.services.mozilla.com', '.notify.windows.com', '.push.apple.com'];
+const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|.*\.localhost)$/i;
+const IP_LITERAL_RE = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
+
+// Validate endpoint URL. Server na endpoint posiela POST (web-push), takže
+// ľubovoľná URL od klienta = SSRF: odmietame IP literály, lokálne/interné
+// hosty a neštandardné porty. Neznámy verejný host (menej bežný prehliadač)
+// pustíme, ale zalogujeme.
 const isValidEndpoint = (endpoint) => {
   // Horný limit dĺžky — reálne push endpointy (FCM/APNs/Mozilla) majú ~100–300 znakov.
   if (!endpoint || typeof endpoint !== 'string' || endpoint.length > 2048) return false;
   try {
     const url = new URL(endpoint);
     // Only allow HTTPS endpoints (required for web push)
-    return url.protocol === 'https:';
+    if (url.protocol !== 'https:') return false;
+    if (url.port && url.port !== '443') return false;
+    if (url.username || url.password) return false;
+    const host = url.hostname.toLowerCase();
+    if (!host || IP_LITERAL_RE.test(host) || PRIVATE_HOST_RE.test(host) || !host.includes('.')) return false;
+    if (!KNOWN_PUSH_HOST_SUFFIXES.some(sfx => host.endsWith(sfx))) {
+      logger.warn('[Push] Subscription endpoint on unknown push service host', { host });
+    }
+    return true;
   } catch {
     return false;
   }

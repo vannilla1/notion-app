@@ -178,24 +178,24 @@ describe('/api/pages route', () => {
       expect(res.body.title).toBe('Untitled');
     });
 
-    it('trimuje title na max 500 znakov', async () => {
+    it('odmietne title nad 500 znakov (413, žiadne tiché orezanie)', async () => {
       const longTitle = 'A'.repeat(1000);
       const res = await request(app)
         .post('/api/pages')
         .set(authHeader(ownerCtx.token))
         .send({ title: longTitle });
-      expect(res.status).toBe(201);
-      expect(res.body.title).toHaveLength(500);
+      expect(res.status).toBe(413);
+      expect(res.body.code).toBe('CONTENT_TOO_LARGE');
     });
 
-    it('trimuje content na max 500 000 znakov', async () => {
+    it('odmietne content nad 500 000 znakov (413, žiadne tiché orezanie)', async () => {
       const hugeContent = 'B'.repeat(600000);
       const res = await request(app)
         .post('/api/pages')
         .set(authHeader(ownerCtx.token))
         .send({ title: 'X', content: hugeContent });
-      expect(res.status).toBe(201);
-      expect(res.body.content).toHaveLength(500000);
+      expect(res.status).toBe(413);
+      expect(res.body.code).toBe('CONTENT_TOO_LARGE');
     });
 
     it('P2 isolation: parentId z cudzieho workspace → 404', async () => {
