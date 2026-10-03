@@ -2294,7 +2294,23 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     const finalContactIds = contactIds && Array.isArray(contactIds) ? contactIds : [];
 
+    // Plánové limity rovnako ako POST / — duplikovanie ich predtým obchádzalo.
+    const plan = await getWorkspacePlan(req);
+    const taskLimits = { free: 5, team: 25, pro: Infinity };
+    const maxTasks = taskLimits[plan] || 5;
+    const isLimited = maxTasks !== Infinity;
+    const limitResponse = (scopeText) => {
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov ${scopeText}.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov ${scopeText}. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+    };
+
     if (finalContactIds.length === 0) {
+      if (isLimited && await Task.countDocuments({ workspaceId: req.workspaceId }) >= maxTasks) {
+        return limitResponse('bez priradenia ku kontaktu');
+      }
       // No contacts selected - create as global task
       const duplicatedTask = new Task({
         // Bez workspaceId save() padal na validácii (500) — duplikovanie
@@ -2330,12 +2346,20 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
     const duplicatedTasks = [];
     const updatedContacts = [];
 
-    for (const contactId of finalContactIds) {
-      // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
-      if (!isObjectIdString(contactId)) continue;
-      const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
-      if (!contact) continue;
+    // Neplatné ID = ako nenájdený kontakt; všetky kontakty jedným dopytom a
+    // limit overený pred prvým zápisom (viď POST /).
+    const validContactIds = [...new Set(finalContactIds.filter(isObjectIdString).map(String))];
+    if (validContactIds.length > 50) {
+      return res.status(400).json({ message: 'Projekt možno naraz duplikovať najviac do 50 kontaktov' });
+    }
+    const foundContacts = await Contact.find({ _id: { $in: validContactIds }, workspaceId: req.workspaceId });
+    const byId = new Map(foundContacts.map(c => [String(c._id), c]));
+    const contactsInOrder = validContactIds.map(id => byId.get(id)).filter(Boolean);
+    if (isLimited && contactsInOrder.some(c => (c.tasks?.length || 0) >= maxTasks)) {
+      return limitResponse('na kontakt');
+    }
 
+    for (const contact of contactsInOrder) {
       // Create new embedded task for this contact
       const now = new Date().toISOString();
       const newTask = {

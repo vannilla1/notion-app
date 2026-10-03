@@ -1195,10 +1195,26 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
       return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
 
+    if (!/^[0-9a-fA-F]{24}$/.test(String(req.params.contactId))) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    // Plánový limit projektov na kontakt — rovnako ako POST /api/tasks
+    // (predtým sa limit cez túto cestu dal obísť).
+    const plan = await getWorkspacePlan(req);
+    const taskLimits = { free: 5, team: 25, pro: Infinity };
+    const maxTasks = taskLimits[plan] || 5;
+    if (maxTasks !== Infinity && (contact.tasks?.length || 0) >= maxTasks) {
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
     }
 
     const now = new Date().toISOString();
