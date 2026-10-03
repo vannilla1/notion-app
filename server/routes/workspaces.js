@@ -596,6 +596,11 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
     const { memberId } = req.params;
     const { role } = req.body;
 
+    // Neplatný formát ID by inak skončil Mongoose CastError → 500 namiesto 400.
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: 'Neplatné ID člena' });
+    }
+
     if (!['manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
     }
@@ -633,6 +638,10 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
 router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceAdmin, async (req, res) => {
   try {
     const { memberId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: 'Neplatné ID člena' });
+    }
 
     const member = await WorkspaceMember.findOne({
       _id: memberId,
@@ -756,6 +765,10 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
 router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requireWorkspaceOwner, async (req, res) => {
   try {
     const { newOwnerId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(newOwnerId)) {
+      return res.status(400).json({ message: 'Neplatné ID používateľa' });
+    }
 
     // Find new owner's membership
     const newOwnerMembership = await WorkspaceMember.findOne({
@@ -1007,6 +1020,9 @@ router.get('/current/invitations', authenticateToken, requireWorkspace, requireW
 // Cancel invitation
 router.delete('/current/invitations/:invitationId', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.invitationId)) {
+      return res.status(400).json({ message: 'Neplatné ID pozvánky' });
+    }
     const invitation = await Invitation.findOneAndUpdate(
       { _id: req.params.invitationId, workspaceId: req.workspaceId, status: 'pending' },
       { status: 'cancelled' }
