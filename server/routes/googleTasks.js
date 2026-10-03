@@ -2297,9 +2297,11 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
-      users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true });
+      // -avatarData: Base64 avatar (až MB na používateľa) sync nepotrebuje;
+      // user.save() nižšie ukladá len zmenené cesty, takže projekcia je bezpečná.
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true }).select('-avatarData');
     } else if (action === 'delete') {
-      users = await User.find({ 'googleTasks.enabled': true });
+      users = await User.find({ 'googleTasks.enabled': true }).select('-avatarData');
     } else {
       logger.warn('[Auto-sync Tasks] Missing workspaceId — skipping to avoid cross-workspace leak', {
         taskId,
@@ -2656,7 +2658,9 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
 
 const pollGoogleTasksChanges = async () => {
   try {
-    const users = await User.find({ 'googleTasks.enabled': true });
+    // -avatarData: polling každých 5 min by inak ťahal Base64 avatar každého
+    // pripojeného používateľa (save() ukladá len zmenené cesty).
+    const users = await User.find({ 'googleTasks.enabled': true }).select('-avatarData');
     if (users.length === 0) return;
 
     // Heartbeat log — bežal v debug fáze ako [POLL_DEBUG] Cycle start, teraz
