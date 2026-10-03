@@ -983,18 +983,19 @@ const createNotification = async ({
 /**
  * Notify multiple users about an event
  */
+// Fan-out na viacerých príjemcov paralelne (poradie výsledkov zachované).
+// Predtým sekvenčný await createNotification pre každého člena — latencia
+// volajúceho handlera (napr. PUT úlohy) rástla lineárne s veľkosťou tímu.
+// allSettled: zlyhanie jedného príjemcu nezastaví ostatných.
+const createNotificationsFor = async (payloads) => {
+  const settled = await Promise.allSettled(payloads.map(p => createNotification(p)));
+  return settled.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
+};
+
 const notifyUsers = async (userIds, notificationData) => {
-  const notifications = [];
-  for (const userId of userIds) {
-    const notification = await createNotification({
-      ...notificationData,
-      userId
-    });
-    if (notification) {
-      notifications.push(notification);
-    }
-  }
-  return notifications;
+  return createNotificationsFor(
+    Array.from(userIds).map(userId => ({ ...notificationData, userId }))
+  );
 };
 
 /**
@@ -1267,16 +1268,11 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
         return [];
       }
       // Per-recipient notify so completion events can carry the right category.
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: categoryForRecipient(id)
-        });
-        if (n) out.push(n);
-      }
-      return out;
+      return createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: categoryForRecipient(id)
+      })));
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for task notification', { error: error.message });
       return [];
@@ -1375,15 +1371,11 @@ const notifyTaskPriorityChanged = async (task, oldPriority, newPriority, actor, 
 
       if (recipientIds.length === 0) return [];
 
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: 'general'
-        });
-        if (n) out.push(n);
-      }
+      const out = await createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: 'general'
+      })));
       logger.info('[NotificationService] Priority notif created', { count: out.length, userIds: out.map((n) => n.userId?.toString()) });
       return out;
     } catch (error) {
@@ -1540,16 +1532,11 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
         });
 
       if (recipientIds.length === 0) return [];
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: categoryForRecipient(id)
-        });
-        if (n) out.push(n);
-      }
-      return out;
+      return createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: categoryForRecipient(id)
+      })));
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for subtask notification', { error: error.message });
       return [];
