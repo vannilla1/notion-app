@@ -68,7 +68,12 @@ const loginEmailLimiter = rateLimit({
   // (zoskupí adresy v rovnakej /64 podsieti, aby útočník nemohol obísť limit
   // jednoduchou rotáciou suffixu IPv6 adresy v /64 ktoré má pridelené ISP).
   keyGenerator: (req) => {
-    const email = (req.body?.email || '').toLowerCase().trim();
+    // Email musí byť string — pri `{"email": {"$gt": ""}}`, poli alebo čísle
+    // (NoSQL-injection probe / chybný klient) by `.toLowerCase` hodil
+    // TypeError, express-rate-limit ho pošle do next(err) a klient dostane
+    // 500 namiesto 400 z validácie v route. Nestring → IP fallback.
+    const raw = req.body?.email;
+    const email = typeof raw === 'string' ? raw.toLowerCase().trim() : '';
     return email ? `email:${email}` : `ip:${ipKeyGenerator(req.ip)}`;
   },
   handler: (req, res, next, options) => {
