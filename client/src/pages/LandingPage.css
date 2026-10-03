@@ -1327,7 +1327,8 @@
   position: fixed;
   /* viewport-fit=cover: na iPhone X+ je spodných ~34px home indikátor —
      bez env() boli tlačidlá Súhlasím/Odmietnuť pod ním. V prehliadačoch
-     bez safe-area je env() 0. */
+     bez safe-area je env() 0; prvý riadok je fallback pre WebView bez env(). */
+  bottom: 16px;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 16px;
   right: 16px;
@@ -1397,6 +1398,7 @@
     flex-direction: column;
     align-items: stretch;
     text-align: center;
+    bottom: 12px;
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     left: 12px;
     right: 12px;

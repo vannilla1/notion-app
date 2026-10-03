@@ -8778,7 +8778,9 @@ body.ios-app {
   position: fixed;
   /* V nainštalovanej iOS PWA (black-translucent status bar) siaha obsah pod
      status bar — bez env() boli toasty pod hodinami/batériou a × ťažko
-     dostupné. V prehliadači je env() 0. */
+     dostupné. V prehliadači je env() 0; prvý riadok je fallback pre WebView
+     bez env(), kde by sa calc() zahodil a toast ostal bez top. */
+  top: 20px;
   top: calc(20px + env(safe-area-inset-top, 0px));
   right: 20px;
   z-index: 9999;
@@ -9981,7 +9983,9 @@ body.ios-app {
        (black-translucent status bar) a edge-to-edge Android WebView siahala
        hlavička pod status bar. env() držíme priamo tu (rovnaký vzor ako
        tabletové pravidlo nižšie); v bežnom prehliadači je env() 0 → bez zmeny.
-       iOS shell má vlastné neskoršie !important pravidlo, to stále vyhráva. */
+       iOS shell má vlastné neskoršie !important pravidlo, to stále vyhráva.
+       Prvý riadok je fallback pre WebView bez env() (calc by sa zahodil). */
+    padding: 6px 8px !important;
     padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px 6px !important;
     gap: 6px !important;
     flex-wrap: nowrap !important;
