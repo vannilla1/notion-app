@@ -28,6 +28,17 @@ const EXCLUDE_FILE_DATA = {
   'tasks.subtasks.subtasks.subtasks.subtasks.files.data': 0,
 };
 
+// To isté pre globálne Task dokumenty (bez `tasks.` prefixu). Zoznam úloh
+// celého workspace sa inak ťahal aj s prípadnými legacy Base64 dátami príloh
+// (fileSchema.data) – sťahovanie ide cez /files/:id/download s vlastným dotazom.
+const TASK_EXCLUDE_FILE_DATA = {
+  'files.data': 0,
+  'subtasks.files.data': 0,
+  'subtasks.subtasks.files.data': 0,
+  'subtasks.subtasks.subtasks.files.data': 0,
+  'subtasks.subtasks.subtasks.subtasks.files.data': 0,
+};
+
 const upload = multer({
   storage: multer.memoryStorage(),
   // 50 MB — bloby idú do R2 (10 GB free tier), Mongo nesie len metadata.
@@ -254,7 +265,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     // enrichment-u. Duplicity s embedded taskami nemôžu vzniknúť, lebo POST
     // /tasks vytvára BUĎ global BUĎ embedded, nikdy oboje.
     const [globalTasks, contacts] = await Promise.all([
-      Task.find({ workspaceId: req.workspaceId }).maxTimeMS(30000).lean(),
+      Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).maxTimeMS(30000).lean(),
 
       Contact.find(
         { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
@@ -389,7 +400,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
     // Get global tasks
-    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).sort({ createdAt: -1 }).lean();
+    const globalTasks = await Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).sort({ createdAt: -1 }).lean();
 
     // Get contact tasks
     const contacts = await Contact.find(
@@ -497,7 +508,7 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
       { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
       { name: 1, tasks: 1 }
     ).lean();
-    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).lean();
+    const globalTasks = await Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).lean();
     const events = [];
     const newExportedIds = [];
 
