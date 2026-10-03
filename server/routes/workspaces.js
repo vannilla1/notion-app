@@ -711,8 +711,10 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       });
     }
 
-    // Get leaving user info before deleting membership
-    const leavingUser = await User.findById(req.user.id, 'username');
+    // Meno odchádzajúceho je už v req.user (auth middleware) — ďalší dotaz na
+    // User bol zbytočný a pri medzičasom zmazanom účte by sa na null padlo až
+    // PO zmazaní membership (nekonzistentný stav + 500).
+    const leavingName = req.user.username || 'Používateľ';
     const workspaceName = req.workspace.name;
 
     await WorkspaceMember.deleteOne({ _id: req.workspaceMember._id });
@@ -734,20 +736,20 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       role: { $in: ['owner', 'manager'] }
     });
 
-    for (const admin of admins) {
-      await notificationService.createNotification({
-        userId: admin.userId.toString(),
-        workspaceId: req.workspace._id,
-        type: 'workspace',
-        title: `${leavingUser.username} opustil/a prostredie`,
-        message: `Používateľ ${leavingUser.username} opustil/a pracovné prostredie "${workspaceName}".`,
-        actorId: req.user.id,
-        actorName: leavingUser.username,
-        relatedType: 'workspace',
-        relatedId: req.workspace._id.toString(),
-        relatedName: workspaceName
-      });
-    }
+    // Paralelne — každé createNotification je save + socket emit + push,
+    // sekvenčná slučka zbytočne násobila latenciu počtom adminov.
+    await Promise.all(admins.map(admin => notificationService.createNotification({
+      userId: admin.userId.toString(),
+      workspaceId: req.workspace._id,
+      type: 'workspace',
+      title: `${leavingName} opustil/a prostredie`,
+      message: `Používateľ ${leavingName} opustil/a pracovné prostredie "${workspaceName}".`,
+      actorId: req.user.id,
+      actorName: leavingName,
+      relatedType: 'workspace',
+      relatedId: req.workspace._id.toString(),
+      relatedName: workspaceName
+    })));
 
     logger.info('User left workspace', { workspaceId: req.workspace._id, userId: req.user.id, notified: admins.length });
 
