@@ -279,6 +279,29 @@ describe('/api/auth route', () => {
       expect(res.body.message).toMatch(/registrovaný/);
     });
 
+    it('zmena e-mailu resetuje emailVerified a nevalidný e-mail/farbu odmietne', async () => {
+      await User.updateOne({ _id: user._id }, { $set: { emailVerified: true } });
+      const res = await request(app)
+        .put('/api/auth/profile')
+        .set(authHeader(token))
+        .send({ email: 'changed@test.com' });
+      expect(res.status).toBe(200);
+      const dbUser = await User.findById(user._id).lean();
+      expect(dbUser.emailVerified).toBe(false);
+
+      const bad = await request(app)
+        .put('/api/auth/profile')
+        .set(authHeader(token))
+        .send({ email: { $gt: '' } });
+      expect(bad.status).toBe(400);
+
+      const badColor = await request(app)
+        .put('/api/auth/profile')
+        .set(authHeader(token))
+        .send({ color: 'red;background:url(x)' });
+      expect(badColor.status).toBe(400);
+    });
+
     it('400 ak nové username berie iný user', async () => {
       await User.create({ username: 'takenhandle', email: 't@test.com', password: 'x' });
 
@@ -336,6 +359,31 @@ describe('/api/auth route', () => {
         .put('/api/auth/password')
         .set(authHeader(token))
         .send({ currentPassword: currentPw, newPassword: '12345' });
+      expect(res.status).toBe(400);
+    });
+
+    it('zmena hesla zneplatní staré JWT a vráti nový platný token', async () => {
+      const res = await request(app)
+        .put('/api/auth/password')
+        .set(authHeader(token))
+        .send({ currentPassword: currentPw, newPassword: 'N0v3Hesl0!2026' });
+      expect(res.status).toBe(200);
+      expect(res.body.token).toBeDefined();
+
+      const oldRes = await request(app).get('/api/auth/me').set(authHeader(token));
+      expect(oldRes.status).toBe(401);
+
+      const newRes = await request(app).get('/api/auth/me').set(authHeader(res.body.token));
+      expect(newRes.status).toBe(200);
+    });
+
+    it('400 (nie 500) pre OAuth-only účet bez hesla', async () => {
+      const oauthUser = await User.create({ username: 'oauthonly', email: 'oauth@test.com', password: null, authProviders: ['google'] });
+      const oauthToken = jwt.sign({ id: oauthUser._id.toString() }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const res = await request(app)
+        .put('/api/auth/password')
+        .set(authHeader(oauthToken))
+        .send({ currentPassword: 'whatever1', newPassword: 'N0v3Hesl0!2026' });
       expect(res.status).toBe(400);
     });
   });

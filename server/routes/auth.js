@@ -1,10 +1,10 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const User = require('../models/User');
-const { JWT_SECRET, authenticateToken, invalidateUserCache } = require('../middleware/auth');
+const mongoose = require('mongoose');
+const { authenticateToken, invalidateUserCache, signAuthToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
 const {
   loginLimiter,
@@ -24,6 +24,7 @@ const {
 } = require('../services/adminEmailService');
 const logger = require('../utils/logger');
 const { validatePassword } = require('../utils/passwordPolicy');
+const { normalizeEmail, normalizeUsername, isHexColor } = require('../utils/inputValidation');
 const {
   issueRestoreToken,
   consumeRestoreToken,
@@ -67,14 +68,44 @@ const avatarUpload = multer({
   }
 });
 
+// Skutočný typ obrázka podľa magic bytes (JPEG, PNG, GIF, WebP) alebo null.
+const sniffImageMime = (buf) => {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf.toString('ascii', 0, 4) === 'GIF8') return 'image/gif';
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+};
+
+// Časovo konštantné porovnanie tajomstiev (ADMIN_SECRET).
+const safeEqual = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+};
+
 // Register - with rate limiting
 router.post('/register', registerLimiter, async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { password } = req.body;
 
     // Validation
-    if (!username || !email || !password) {
+    if (!req.body.username || !req.body.email || !password) {
       return res.status(400).json({ message: 'Všetky polia sú povinné' });
+    }
+
+    // Typ + formát: ne-string (`{"$gt": ""}`, pole) by sa inak dostal do
+    // User.findOne ako operátor, resp. spadol na .toLowerCase() → 500.
+    const email = normalizeEmail(req.body.email);
+    if (!email) {
+      return res.status(400).json({ message: 'Zadajte platný e-mail' });
+    }
+    const username = normalizeUsername(req.body.username);
+    if (!username) {
+      return res.status(400).json({ message: 'Meno musí mať 2–50 znakov (písmená, číslice, medzera, _ . - \')' });
     }
 
     // Password policy — min 8 znakov, písmeno + číslo/špec, HIBP check.
@@ -86,7 +117,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     // Block registration with super admin email
-    if (email.toLowerCase() === 'support@prplcrm.eu') {
+    if (email === 'support@prplcrm.eu') {
       return res.status(400).json({ message: 'Registrácia zlyhala. Skúste iný email alebo používateľské meno.' });
     }
 
@@ -122,10 +153,19 @@ router.post('/register', registerLimiter, async (req, res) => {
       color,
       role
     });
-    await user.save();
+    try {
+      await user.save();
+    } catch (saveErr) {
+      // Súbežná registrácia s rovnakým e-mailom/menom → unique index E11000.
+      if (saveErr.code === 11000) {
+        logger.auth('register', null, null, false, req.ip);
+        return res.status(400).json({ message: 'Registrácia zlyhala. Skúste iný email alebo používateľské meno.' });
+      }
+      throw saveErr;
+    }
 
     // Generate token
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = signAuthToken(user);
 
     logger.auth('register', user._id, username, true, req.ip);
 
@@ -218,7 +258,12 @@ router.post('/forgot-password', forgotPasswordLimiter, async (req, res) => {
 
     // Ak nenájdeme, stále vrátime "success" odpoveď — ale nič neposielame.
     if (!user) {
-      logger.info('forgot-password: user not found', { email, ip: req.ip });
+      // Neoverený vstup od anonyma (aj cudzie e-maily pri enumeration
+      // pokusoch) — do logu len skrátený hash, nie PII.
+      logger.info('forgot-password: user not found', {
+        emailHash: crypto.createHash('sha256').update(email.toLowerCase().trim()).digest('hex').slice(0, 12),
+        ip: req.ip
+      });
       return res.json(genericResponse);
     }
 
@@ -293,7 +338,13 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
     user.password = hashedPassword;
     user.resetPasswordTokenHash = null;
     user.resetPasswordExpires = null;
+    // OAuth-only používateľ si týmto nastavil heslo → odteraz je to aj
+    // prihlasovacia metóda (inak by disconnect Google hlásil LAST_LOGIN_METHOD).
+    if (!user.authProviders.includes('password')) user.authProviders.push('password');
+    // Reset hesla zneplatní všetky existujúce JWT relácie (claim `tv`).
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
+    await invalidateUserCache(user._id);
     // Reset hesla = zneplatniť všetky Block Store obnovovacie tokeny (Android).
     await revokeAllRestoreTokens(user._id);
 
@@ -329,15 +380,20 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
 // rotujúcich IP. Útočník musí prejsť obidvomi limitermi.
 router.post('/login', loginLimiter, loginEmailLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
 
-    // Validation
-    if (!email || !password) {
+    // Validation — len stringy (objekt by bol Mongo operátor v dotaze,
+    // bcrypt.compare s ne-stringom hodí → 500). E-mail bez prísneho regexu:
+    // staré účty mohli vzniknúť s ľubovoľným reťazcom.
+    if (typeof req.body.email !== 'string' || typeof password !== 'string' ||
+        !req.body.email.trim() || !password || req.body.email.length > 254 || password.length > 1024) {
       return res.status(400).json({ message: 'Email a heslo sú povinné' });
     }
+    // E-mail je v DB lowercase (schéma) — bez normalizácie „Jan@Firma.sk“ neprešiel.
+    const email = req.body.email.trim().toLowerCase();
 
     // Block super admin from regular login
-    if (email.toLowerCase() === 'support@prplcrm.eu') {
+    if (email === 'support@prplcrm.eu') {
       return res.status(400).json({ message: 'Nesprávny email alebo heslo' });
     }
 
@@ -400,7 +456,7 @@ router.post('/login', loginLimiter, loginEmailLimiter, async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = signAuthToken(user);
 
     logger.auth('login', user._id, user.username, true, req.ip);
 
@@ -523,7 +579,7 @@ router.post('/restore', restoreLimiter, async (req, res) => {
 
     const deviceLabel = entry?.deviceLabel || '';
     const rotated = await issueRestoreToken(user._id, deviceLabel);
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = signAuthToken(user);
 
     logger.auth('restore', user._id, user.username, true, req.ip);
     auditService.logAction({
@@ -587,11 +643,14 @@ router.delete('/restore-token', restoreLimiter, async (req, res) => {
 // niekým iným) sa nedajú vypnúť — vždy idú push.
 // ─────────────────────────────────────────────────────────────────────
 
+// Zhodné s defaultmi v models/User.js (OPT-OUT model 2026-07: všetko true) —
+// inak UI používateľovi bez uložených preferencií ukazovalo „vypnuté“, kým
+// server push reálne posielal.
 const DEFAULT_NOTIFICATION_PREFS = {
-  pushTeamActivity: false,
-  pushDeadlines:    false,
-  pushOverdue:      false,
-  pushNewMember:    false
+  pushTeamActivity: true,
+  pushDeadlines:    true,
+  pushOverdue:      true,
+  pushNewMember:    true
 };
 
 router.get('/notification-preferences', authenticateToken, async (req, res) => {
@@ -654,7 +713,9 @@ router.put('/notification-preferences', authenticateToken, async (req, res) => {
 // Get user profile
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    // Len vracané polia — plný dokument by ťahal avatarData (až ~6.7 MB)
+    // a Google sync mapy a spúšťal dešifrovanie tokenov.
+    const user = await User.findById(req.user.id).select('username email color avatar role createdAt').lean();
     if (!user) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
     }
@@ -676,11 +737,35 @@ router.get('/profile', authenticateToken, async (req, res) => {
 // Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { username, email, color } = req.body;
     const userId = req.user.id;
+    const { username: rawUsername, email: rawEmail, color } = req.body;
+
+    // Validácia typov a formátu (ne-string = Mongo operátor v dotaze / 500)
+    let email = null;
+    if (rawEmail !== undefined && rawEmail !== null && rawEmail !== '') {
+      email = normalizeEmail(rawEmail);
+      if (!email) return res.status(400).json({ message: 'Zadajte platný e-mail' });
+    }
+    let username = null;
+    if (rawUsername !== undefined && rawUsername !== null && rawUsername !== '') {
+      username = normalizeUsername(rawUsername);
+      if (!username) return res.status(400).json({ message: 'Meno musí mať 2–50 znakov (písmená, číslice, medzera, _ . - \')' });
+    }
+    if (color !== undefined && color !== null && color !== '' && !isHexColor(color)) {
+      return res.status(400).json({ message: 'Neplatná farba' });
+    }
+    if (email === 'support@prplcrm.eu') {
+      return res.status(400).json({ message: 'Email je už registrovaný' });
+    }
+
+    const current = await User.findById(userId).select('email').lean();
+    if (!current) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+    const emailChanged = !!email && email !== current.email;
 
     // Check if email is taken by another user
-    if (email) {
+    if (emailChanged) {
       const existingUser = await User.findOne({ email, _id: { $ne: userId } });
       if (existingUser) {
         return res.status(400).json({ message: 'Email je už registrovaný' });
@@ -697,10 +782,26 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
     const updates = {};
     if (username) updates.username = username;
-    if (email) updates.email = email;
+    if (emailChanged) {
+      updates.email = email;
+      // Nový e-mail nie je overený — inak by ďalší Google login cez
+      // byProviderId s emailVerified=true automaticky prijal cudzie
+      // pozvánky na tento e-mail (únos workspace) a OAuth auto-link by
+      // dôveroval neoverenej adrese.
+      updates.emailVerified = false;
+    }
     if (color) updates.color = color;
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true });
+    let updatedUser;
+    try {
+      updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true })
+        .select('username email color avatar role');
+    } catch (updateErr) {
+      if (updateErr.code === 11000) {
+        return res.status(400).json({ message: 'Email alebo meno je už obsadené' });
+      }
+      throw updateErr;
+    }
 
     // Invalidate Redis user cache — username/email/color sa môžu zmeniť, bez
     // invalidation by ostatné requesty 30s ďalej videli staré hodnoty (auth
@@ -738,6 +839,13 @@ router.post('/avatar', authenticateToken, (req, res) => {
 
       const userId = req.user.id;
 
+      // MIME z multipart hlavičky si určuje klient — skutočný typ odvodíme
+      // z magic bytes a uložíme ten (Content-Type pri servírovaní avatara).
+      const sniffedMime = sniffImageMime(req.file.buffer);
+      if (!sniffedMime) {
+        return res.status(400).json({ message: 'Neplatný typ súboru. Povolené sú len obrázky (JPEG, PNG, GIF, WebP).' });
+      }
+
       // Convert to Base64
       const base64Data = req.file.buffer.toString('base64');
 
@@ -748,18 +856,19 @@ router.post('/avatar', authenticateToken, (req, res) => {
 
       user.avatar = `avatar-${userId}`;
       user.avatarData = base64Data;
-      user.avatarMimetype = req.file.mimetype;
+      user.avatarMimetype = sniffedMime;
 
       await user.save();
 
-      // Invalidate avatar cache so next request gets fresh image
-      _avatarCache.delete(userId);
+      // Invalidate avatar cache so next request gets fresh image.
+      // Kľúč je string z URL — req.user.id môže byť ObjectId (bez Redisu).
+      _avatarCache.delete(String(userId));
       // Invalidate Redis user cache — user.avatar field (filename pointer)
       // sa zmenil, ostatné requesty by inak vrátili stale starý filename
       // počas 30s TTL window.
       await invalidateUserCache(userId);
 
-      logger.info('Avatar uploaded', { userId, mimetype: req.file.mimetype, size: req.file.size });
+      logger.info('Avatar uploaded', { userId, mimetype: sniffedMime, size: req.file.size });
 
       res.json({
         message: 'Avatar bol úspešne nahraný',
@@ -824,7 +933,7 @@ router.delete('/avatar', authenticateToken, async (req, res) => {
       avatarMimetype: null
     });
     // Invalidate avatar cache + Redis user cache (analogicky k POST /avatar)
-    _avatarCache.delete(userId);
+    _avatarCache.delete(String(userId));
     await invalidateUserCache(userId);
     logger.info('Avatar deleted', { userId });
 
@@ -841,13 +950,24 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ message: 'Zadajte aktuálne heslo' });
+    }
+
     // Password policy — rovnako ako register/reset.
     const passwordError = await validatePassword(newPassword);
     if (passwordError) {
       return res.status(400).json({ message: passwordError });
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('password username email authProviders tokenVersion');
+    if (!user) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+    // OAuth-only účet heslo nemá — bcrypt.compare(s, null) by hodil → 500.
+    if (!user.password) {
+      return res.status(400).json({ message: 'Účet nemá nastavené heslo — použite „Zabudnuté heslo“ na prihlasovacej stránke.' });
+    }
 
     // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
@@ -882,7 +1002,19 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    await User.findByIdAndUpdate(userId, { password: hashedPassword });
+    // tokenVersion++ zneplatní všetky existujúce JWT (aj ukradnutý token,
+    // kvôli ktorému sa heslo typicky mení). Aktuálna relácia dostane nový
+    // token v odpovedi, takže používateľ ostane prihlásený.
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: { password: hashedPassword },
+        $inc: { tokenVersion: 1 },
+        $addToSet: { authProviders: 'password' }
+      },
+      { new: true, projection: { tokenVersion: 1 } }
+    );
+    await invalidateUserCache(userId);
     // Zmena hesla = zneplatniť všetky Block Store obnovovacie tokeny (Android).
     await revokeAllRestoreTokens(userId);
 
@@ -906,7 +1038,10 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
       workspaceId: null
     });
 
-    res.json({ message: 'Heslo bolo úspešne zmenené' });
+    res.json({
+      message: 'Heslo bolo úspešne zmenené. Ostatné zariadenia boli odhlásené.',
+      token: signAuthToken({ _id: userId, tokenVersion: updated?.tokenVersion || 0 })
+    });
   } catch (error) {
     logger.error('Password change error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba pri zmene hesla' });
@@ -947,6 +1082,106 @@ router.put('/password', authenticateToken, passwordChangeLimiter, async (req, re
 //
 // Po delete-e klient musí zmazať lokálny token (frontend sa o to postará).
 // ─────────────────────────────────────────────────────────────────────────
+
+// ─── Spoločná kaskáda mazania používateľa (DELETE /account aj admin DELETE /users/:id)
+
+// Vlastnené workspaces s inými členmi — blokujú zmazanie (strata tímovej práce).
+const findBlockingWorkspaces = async (userId) => {
+  const Workspace = require('../models/Workspace');
+  const WorkspaceMember = require('../models/WorkspaceMember');
+  const ownedWorkspaces = await Workspace.find({ ownerId: userId }).select('_id name').lean();
+  const blocking = [];
+  for (const ws of ownedWorkspaces) {
+    const otherMembers = await WorkspaceMember.countDocuments({ workspaceId: ws._id, userId: { $ne: userId } });
+    if (otherMembers > 0) blocking.push({ id: ws._id.toString(), name: ws.name, otherMembers });
+  }
+  return blocking;
+};
+
+// Zruší Stripe predplatné (okamžite). Apple sa zo servera zrušiť nedá —
+// vráti appleActive, aby ho UI vedelo upozorniť.
+const cancelBillingForDeletion = async (user) => {
+  const sub = user.subscription || {};
+  const appleActive = sub.source === 'apple' && sub.plan !== 'free' &&
+    !!sub.paidUntil && new Date(sub.paidUntil) > new Date();
+  if (!sub.stripeSubscriptionId) return { ok: true, appleActive };
+  if (!process.env.STRIPE_SECRET_KEY) {
+    logger.error('account-delete: user has Stripe subscription but Stripe is not configured', { userId: String(user._id) });
+    return { ok: false, appleActive };
+  }
+  try {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2024-11-20.acacia', timeout: 15000, maxNetworkRetries: 2
+    });
+    await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
+    logger.info('account-delete: Stripe subscription canceled', { userId: String(user._id), subscriptionId: sub.stripeSubscriptionId });
+    return { ok: true, appleActive };
+  } catch (err) {
+    // Už zrušené/neexistujúce predplatné nie je prekážka.
+    if (err.code === 'resource_missing' || err.statusCode === 404) return { ok: true, appleActive };
+    logger.error('account-delete: Stripe cancel failed', { userId: String(user._id), error: err.message });
+    return { ok: false, appleActive };
+  }
+};
+
+// Zmaže sole-owned workspaces s obsahom (vrátane príloh v R2) a dáta
+// používateľa v ostatných workspaces. Idempotentné — pri čiastočnom
+// zlyhaní ho opakovanie dokončí.
+const cascadeDeleteUserData = async (user) => {
+  const userId = user._id;
+  const Workspace = require('../models/Workspace');
+  const WorkspaceMember = require('../models/WorkspaceMember');
+  const Task = require('../models/Task');
+  const Contact = require('../models/Contact');
+  const Message = require('../models/Message');
+  const Page = require('../models/Page');
+  const Notification = require('../models/Notification');
+  const Invitation = require('../models/Invitation');
+  const APNsDevice = require('../models/APNsDevice');
+  const FcmDevice = require('../models/FcmDevice');
+  const PushSubscription = require('../models/PushSubscription');
+
+  const ownedWorkspaces = await Workspace.find({ ownerId: userId }).select('_id').lean();
+  const soleWorkspaceIds = ownedWorkspaces.map(ws => ws._id);
+
+  if (soleWorkspaceIds.length > 0) {
+    // Bloby príloh správ aj kontaktov/projektov (R2 + ContactFile) PRED
+    // deleteMany — po ňom už kľúče niet odkiaľ prečítať. Best-effort.
+    const { deleteMessageBlobs } = require('../services/messageFiles');
+    const { deleteWorkspaceFileBlobs } = require('../services/workspaceFiles');
+    await deleteMessageBlobs({ workspaceId: { $in: soleWorkspaceIds } });
+    await deleteWorkspaceFileBlobs(soleWorkspaceIds);
+    await Promise.all([
+      Task.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Contact.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Message.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Page.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Notification.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Invitation.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      WorkspaceMember.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
+      Workspace.deleteMany({ _id: { $in: soleWorkspaceIds } })
+    ]);
+  }
+
+  // Dáta používateľa v ostatných workspaces
+  await Promise.all([
+    // Memberships v cudzích workspaces (kde user nie je owner)
+    WorkspaceMember.deleteMany({ userId }),
+    // Notifications adresované userovi (vo všetkých workspaces)
+    Notification.deleteMany({ userId }),
+    // Push device tokens
+    APNsDevice.deleteMany({ userId }),
+    FcmDevice.deleteMany({ userId }),
+    PushSubscription.deleteMany({ userId }),
+    // Invitations sent BY userovi alebo TO userovmu emailu
+    Invitation.deleteMany({ $or: [{ invitedBy: userId }, { email: user.email }] })
+  ]);
+
+  // POZN: Tasks/Contacts/Messages ktoré user vytvoril v cudzích workspaces
+  // NEMAŽEME — patria tímu. FE handluje orphan userId references gracefully
+  // (zobrazí "[Zmazaný používateľ]" pri populate null).
+  return { soleWorkspaceIds };
+};
 
 router.delete('/account', authenticateToken, async (req, res) => {
   const userId = req.user.id;
@@ -989,22 +1224,7 @@ router.delete('/account', authenticateToken, async (req, res) => {
     }
 
     // ── 1) Workspace ownership check ──
-    const Workspace = require('../models/Workspace');
-    const WorkspaceMember = require('../models/WorkspaceMember');
-
-    const ownedWorkspaces = await Workspace.find({ ownerId: userId });
-    const blockingWorkspaces = []; // workspaces s inými členmi — blokujú delete
-
-    for (const ws of ownedWorkspaces) {
-      const otherMembers = await WorkspaceMember.countDocuments({
-        workspaceId: ws._id,
-        userId: { $ne: userId }
-      });
-      if (otherMembers > 0) {
-        blockingWorkspaces.push({ id: ws._id.toString(), name: ws.name, otherMembers });
-      }
-    }
-
+    const blockingWorkspaces = await findBlockingWorkspaces(userId);
     if (blockingWorkspaces.length > 0) {
       return res.status(409).json({
         message: 'Pred zmazaním účtu musíte previesť vlastníctvo workspace-ov, ktoré majú ďalších členov, alebo z nich odstrániť všetkých členov.',
@@ -1012,53 +1232,19 @@ router.delete('/account', authenticateToken, async (req, res) => {
       });
     }
 
-    // ── 2) Cascade delete sole-owned workspaces (a ich obsah) ──
-    const Task = require('../models/Task');
-    const Contact = require('../models/Contact');
-    const Message = require('../models/Message');
-    const Page = require('../models/Page');
-    const Notification = require('../models/Notification');
-    const Invitation = require('../models/Invitation');
-    const APNsDevice = require('../models/APNsDevice');
-    const FcmDevice = require('../models/FcmDevice');
-    const PushSubscription = require('../models/PushSubscription');
-
-    const soleWorkspaceIds = ownedWorkspaces.map(ws => ws._id);
-
-    if (soleWorkspaceIds.length > 0) {
-      // Bloby príloh správ (R2) PRED deleteMany — po ňom už kľúče niet odkiaľ
-      // prečítať. Best-effort, nikdy nehádže.
-      const { deleteMessageBlobs } = require('../services/messageFiles');
-      await deleteMessageBlobs({ workspaceId: { $in: soleWorkspaceIds } });
-      await Promise.all([
-        Task.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Contact.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Message.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Page.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Notification.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Invitation.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        WorkspaceMember.deleteMany({ workspaceId: { $in: soleWorkspaceIds } }),
-        Workspace.deleteMany({ _id: { $in: soleWorkspaceIds } })
-      ]);
+    // ── 1b) Predplatné — Stripe zrušíme PRED zmazaním dát. Po zmazaní
+    // User dokumentu by renewal webhooky používateľa nenašli a Stripe by
+    // ďalej strhával platby za neexistujúci účet. Zlyhanie = 502, účet
+    // ostáva nedotknutý a používateľ môže akciu zopakovať.
+    const billing = await cancelBillingForDeletion(user);
+    if (!billing.ok) {
+      return res.status(502).json({
+        message: 'Nepodarilo sa zrušiť predplatné. Účet nebol zmazaný — skúste to o chvíľu znova alebo kontaktujte support@prplcrm.eu.'
+      });
     }
 
-    // ── 3) Cleanup user-specific data v ostatných workspaces ──
-    await Promise.all([
-      // Memberships v cudzích workspaces (kde user nie je owner)
-      WorkspaceMember.deleteMany({ userId }),
-      // Notifications adresované userovi (vo všetkých workspaces)
-      Notification.deleteMany({ userId }),
-      // Push device tokens
-      APNsDevice.deleteMany({ userId }),
-      FcmDevice.deleteMany({ userId }),
-      PushSubscription.deleteMany({ userId }),
-      // Invitations sent BY userovi alebo TO userovmu emailu
-      Invitation.deleteMany({ $or: [{ invitedBy: userId }, { email: user.email }] })
-    ]);
-
-    // POZN: Tasks/Contacts/Messages ktoré user vytvoril v cudzích workspaces
-    // NEMAŽEME — patria tímu. FE handluje orphan userId references gracefully
-    // (zobrazí "[Zmazaný používateľ]" pri populate null).
+    // ── 2) + 3) Kaskáda dát ──
+    const { soleWorkspaceIds } = await cascadeDeleteUserData(user);
 
     // ── 4) Audit log PRED delete-om user dokumentu ──
     // Audit log si zapamätá username + email aj keď user record už neexistuje.
@@ -1090,8 +1276,15 @@ router.delete('/account', authenticateToken, async (req, res) => {
       deletedWorkspaces: soleWorkspaceIds.length
     });
 
+    await invalidateUserCache(userId);
+
     return res.json({
-      message: 'Tvoj účet a všetky pripojené dáta boli úspešne zmazané. Ďakujeme, že si používal Prpl CRM.'
+      message: 'Tvoj účet a všetky pripojené dáta boli úspešne zmazané. Ďakujeme, že si používal Prpl CRM.',
+      // Apple predplatné server zrušiť nevie — App Store ho ďalej obnovuje,
+      // kým ho používateľ nezruší v iOS Nastaveniach (Guideline 5.1.1(v)).
+      ...(billing.appleActive && {
+        notice: 'Predplatné cez App Store sa nezrušilo automaticky. Zrušte ho v iPhone v Nastaveniach → Apple ID → Predplatné.'
+      })
     });
   } catch (error) {
     logger.error('Account deletion error', {
@@ -1144,7 +1337,7 @@ router.post('/set-admin', authenticateToken, async (req, res) => {
     const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
     // Require separate ADMIN_SECRET (not JWT_SECRET)
-    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+    if (!ADMIN_SECRET || !safeEqual(secret, ADMIN_SECRET)) {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
@@ -1154,12 +1347,16 @@ router.post('/set-admin', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
+    if (typeof username !== 'string' || !username) {
+      return res.status(400).json({ message: 'Neplatné meno' });
+    }
     const user = await User.findOne({ username });
     if (!user) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
     }
 
     await User.findByIdAndUpdate(user._id, { role: 'admin' });
+    await invalidateUserCache(user._id);
 
     logger.info('Admin set', { username, setBy: req.user.id });
 
@@ -1176,7 +1373,7 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
     const { email, plan, secret } = req.body;
     const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
-    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+    if (!ADMIN_SECRET || !safeEqual(secret, ADMIN_SECRET)) {
       return res.status(403).json({ message: 'Neplatný prístup' });
     }
 
@@ -1189,13 +1386,20 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Neplatný plán' });
     }
 
-    const user = await User.findOne({ email });
+    const normalized = normalizeEmail(email);
+    if (!normalized) {
+      return res.status(400).json({ message: 'Neplatný e-mail' });
+    }
+    const user = await User.findOne({ email: normalized }).select('_id subscription.stripeSubscriptionId subscription.source');
     if (!user) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
     }
 
-    user.subscription = { plan };
-    await user.save();
+    // Len pole plan — priradenie celého `subscription` objektu by zmazalo
+    // Stripe/Apple väzby (webhooky by usera nenašli), paidUntil, zľavu aj
+    // stav pripomienok.
+    await User.updateOne({ _id: user._id }, { $set: { 'subscription.plan': plan } });
+    await invalidateUserCache(user._id);
 
     logger.info('Plan set', { email, plan, setBy: req.user.id });
 
@@ -1206,64 +1410,86 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete user (admin can delete managers and users, manager can delete users)
+// Delete user — len globálny admin. Predtým to vedela aj globálna rola
+// 'manager' naprieč VŠETKÝMI tenantmi a mazalo sa len User + členstvá
+// (vlastnené workspaces ostali so sirotským ownerId, predplatné bežalo
+// ďalej). Teraz rovnaká kaskáda ako DELETE /account.
 router.delete('/users/:userId', authenticateToken, async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user.id);
-    const targetUser = await User.findById(req.params.userId);
-
-    if (!targetUser) {
-      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    const targetId = req.params.userId;
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      return res.status(400).json({ message: 'Neplatné ID používateľa' });
     }
 
-    // Cannot delete yourself
-    if (req.user.id === req.params.userId) {
+    const currentUser = await User.findById(req.user.id).select('role').lean();
+    if (!currentUser || currentUser.role !== 'admin') {
+      return res.status(403).json({ message: 'Nemáte oprávnenie vymazať tohto užívateľa' });
+    }
+
+    // Cannot delete yourself — req.user.id môže byť ObjectId (bez Redisu)
+    if (String(req.user.id) === targetId) {
       return res.status(400).json({ message: 'Nemôžete vymazať vlastný účet' });
     }
 
-    // Permission check
-    const canDelete = (() => {
-      // Admin can delete managers and users
-      if (currentUser.role === 'admin') {
-        return targetUser.role !== 'admin'; // Cannot delete other admins
-      }
-      // Manager can delete users only
-      if (currentUser.role === 'manager') {
-        return targetUser.role === 'user';
-      }
-      return false;
-    })();
+    const targetUser = await User.findById(targetId).select('-avatarData');
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+    if (targetUser.role === 'admin') {
+      return res.status(403).json({ message: 'Admin nemôže vymazať iného admina' });
+    }
+    if (targetUser.email === 'support@prplcrm.eu') {
+      return res.status(403).json({ message: 'Super-admin účet nemožno zmazať' });
+    }
 
-    if (!canDelete) {
-      return res.status(403).json({
-        message: currentUser.role === 'admin'
-          ? 'Admin nemôže vymazať iného admina'
-          : 'Nemáte oprávnenie vymazať tohto užívateľa'
+    const blockingWorkspaces = await findBlockingWorkspaces(targetUser._id);
+    if (blockingWorkspaces.length > 0) {
+      return res.status(409).json({
+        message: 'Používateľ vlastní workspace s ďalšími členmi — najprv treba previesť vlastníctvo.',
+        blockingWorkspaces
       });
     }
 
-    // Delete user's workspace memberships
-    const WorkspaceMember = require('../models/WorkspaceMember');
-    await WorkspaceMember.deleteMany({ userId: req.params.userId });
+    const billing = await cancelBillingForDeletion(targetUser);
+    if (!billing.ok) {
+      return res.status(502).json({ message: 'Nepodarilo sa zrušiť predplatné používateľa. Skúste znova.' });
+    }
 
-    // Delete the user
-    await User.findByIdAndDelete(req.params.userId);
+    const { soleWorkspaceIds } = await cascadeDeleteUserData(targetUser);
+
+    auditService.logAction({
+      userId: String(req.user.id),
+      username: req.user.username,
+      email: req.user.email,
+      action: 'auth.user-deleted-by-admin',
+      category: 'auth',
+      targetType: 'user',
+      targetId,
+      targetName: targetUser.username,
+      details: { deletedWorkspaces: soleWorkspaceIds.length, email: targetUser.email },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      workspaceId: null
+    });
+
+    await User.findByIdAndDelete(targetId);
+    // JWT zmazaného používateľa inak funguje ešte do vypršania auth cache (30 s)
+    await invalidateUserCache(targetId);
 
     const io = req.app.get('io');
-    if (currentUser.currentWorkspaceId) {
-      io.to(`workspace-${currentUser.currentWorkspaceId}`).emit('user-deleted', { userId: req.params.userId });
-    } else {
-      io.to(`user-${req.params.userId}`).emit('user-deleted', { userId: req.params.userId });
-    }
+    io.to(`user-${targetId}`).emit('user-deleted', { userId: targetId });
 
     logger.info('User deleted', {
       deletedBy: req.user.id,
-      deletedByRole: currentUser.role,
-      deletedUserId: req.params.userId,
-      deletedUserRole: targetUser.role
+      deletedUserId: targetId,
+      deletedUserRole: targetUser.role,
+      deletedWorkspaces: soleWorkspaceIds.length
     });
 
-    res.json({ message: 'Užívateľ bol úspešne vymazaný' });
+    res.json({
+      message: 'Užívateľ bol úspešne vymazaný',
+      ...(billing.appleActive && { notice: 'Používateľ má aktívne Apple predplatné — zrušiť ho môže len on v App Store.' })
+    });
   } catch (error) {
     logger.error('Delete user error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
@@ -1274,10 +1500,15 @@ router.delete('/users/:userId', authenticateToken, async (req, res) => {
 router.put('/users/:userId/role', authenticateToken, async (req, res) => {
   try {
     const { role } = req.body;
+    const targetId = req.params.userId;
+
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      return res.status(400).json({ message: 'Neplatné ID používateľa' });
+    }
 
     // Check if current user is admin
-    const currentUser = await User.findById(req.user.id);
-    if (currentUser.role !== 'admin') {
+    const currentUser = await User.findById(req.user.id).select('role').lean();
+    if (!currentUser || currentUser.role !== 'admin') {
       return res.status(403).json({ message: 'Len admin môže meniť role' });
     }
 
@@ -1286,37 +1517,37 @@ router.put('/users/:userId/role', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Neplatná rola' });
     }
 
-    // Prevent removing last admin
-    if (role !== 'admin') {
-      const adminCount = await User.countDocuments({ role: 'admin' });
-      const targetUser = await User.findById(req.params.userId);
-      if (targetUser && targetUser.role === 'admin' && adminCount <= 1) {
-        return res.status(400).json({ message: 'Nemôže existovať systém bez admina' });
-      }
-    }
-
     const updatedUser = await User.findByIdAndUpdate(
-      req.params.userId,
+      targetId,
       { role },
-      { new: true }
+      { new: true, projection: { username: 1, email: 1, color: 1, avatar: 1, role: 1 } }
     );
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
     }
 
-    const io = req.app.get('io');
-    if (currentUser.currentWorkspaceId) {
-      io.to(`workspace-${currentUser.currentWorkspaceId}`).emit('user-role-updated', {
-        userId: updatedUser._id,
-        role: updatedUser.role
-      });
-    } else {
-      io.to(`user-${req.params.userId}`).emit('user-role-updated', {
-        userId: updatedUser._id,
-        role: updatedUser.role
-      });
+    // Nikdy bez admina. Kontrola PO zápise (check-then-act pred zápisom
+    // nechal dve súbežné degradácie prejsť) — ak by sme zostali bez admina,
+    // zmenu vrátime.
+    if (role !== 'admin') {
+      const adminCount = await User.countDocuments({ role: 'admin' });
+      if (adminCount === 0) {
+        await User.updateOne({ _id: targetId }, { $set: { role: 'admin' } });
+        await invalidateUserCache(targetId);
+        return res.status(400).json({ message: 'Nemôže existovať systém bez admina' });
+      }
     }
+
+    // Cieľ má inak starú rolu v req.user ešte 30 s (auth cache).
+    await invalidateUserCache(targetId);
+
+    // Emit cieľovému používateľovi (predtým išlo do workspace ADMINA).
+    const io = req.app.get('io');
+    io.to(`user-${targetId}`).emit('user-role-updated', {
+      userId: updatedUser._id,
+      role: updatedUser.role
+    });
 
     logger.info('User role updated', {
       adminId: req.user.id,
