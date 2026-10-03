@@ -846,7 +846,8 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
             ? `Dosiahli ste limit ${baseSeatLimit} členov v tíme.`
             : `Váš plán umožňuje max. ${baseSeatLimit} členov. Pre viac členov prejdite na vyšší plán.`;
           logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
-          return res.status(400).json({ message, code: 'PLAN_LIMIT' });
+          // 403 ako pri POST / a POST /join — klient reaguje na `code`, nie na status.
+          return res.status(403).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }
@@ -1058,7 +1059,13 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
-          return res.status(400).json({ message: `Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.` });
+          // Apple 3.1.1 — iOS bez zmienky o pláne/dokupovaní; rovnaký tvar
+          // (code PLAN_LIMIT + audit záznam + 403) ako ostatné plan-gate miesta.
+          const message = isIosNativeApp(req)
+            ? 'Toto pracovné prostredie je plné.'
+            : 'Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.';
+          logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
+          return res.status(403).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }
