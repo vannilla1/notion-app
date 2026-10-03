@@ -348,9 +348,10 @@ const sendAPNsNotification = async (userId, payload) => {
         }
 
         // If primary failed with token error, try the other environment
+        let fallbackRes = null;
         if (res.reason === 'BadDeviceToken' || res.reason === 'DeviceTokenNotForTopic' || res.reason === 'Unregistered') {
           logger.info('[APNs] Primary failed, trying fallback', { reason: res.reason, primarySandbox });
-          const fallbackRes = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
+          fallbackRes = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
 
           if (fallbackRes.success) {
             result.sent++;
@@ -364,9 +365,14 @@ const sendAPNsNotification = async (userId, payload) => {
           }
         }
 
-        // Both failed — remove truly invalid tokens
+        // Both failed — remove truly invalid tokens. BadDeviceToken v OBOCH
+        // prostrediach (sandbox aj production) = token je neplatný všade;
+        // inak by sa pri každej notifikácii opakovali 2 zbytočné HTTP/2
+        // spojenia na Apple. DeviceTokenNotForTopic nemažeme — môže ísť
+        // o chybu konfigurácie servera (bundle id), nie o zlý token.
         result.failed++;
-        if (res.status === 410 || res.reason === 'Unregistered') {
+        const badInBothEnvs = res.reason === 'BadDeviceToken' && fallbackRes?.reason === 'BadDeviceToken';
+        if (res.status === 410 || res.reason === 'Unregistered' || badInBothEnvs) {
           await APNsDevice.deleteOne({ _id: device._id });
           result.removed++;
           logger.info('[APNs] Removed invalid device', { reason: res.reason });
