@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
-import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
@@ -680,7 +680,6 @@ function Tasks() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [selectedTask, setSelectedTask] = useState(null);
   const [expandedTask, setExpandedTask] = useState(null);
   const { socket, isConnected } = useSocket();
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
@@ -865,16 +864,6 @@ function Tasks() {
       setLinkedMessages(prev => ({ ...prev, [taskId]: res.data }));
     } catch (error) { /* ignore */ }
   }, []);
-
-  // Sync completed tasks from Google Tasks to CRM
-  const syncCompletedFromGoogle = useCallback(async () => {
-    try {
-      await api.post('/api/google-tasks/sync-completed');
-      fetchTasks();
-    } catch {
-      // User may not have Google Tasks connected
-    }
-  }, [fetchTasks]);
 
   // Keep tasksRef in sync with tasks state — used by focusNextMatch after
   // toggle-complete, where we need to read fresh tasks AFTER fetchTasks
@@ -1155,22 +1144,6 @@ function Tasks() {
     return false;
   };
 
-  // Get IDs of subtasks matching due date class (recursive)
-  const getMatchingSubtaskIds = (subtasks, dueClass) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0) return ids;
-    for (const subtask of subtasks) {
-      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getMatchingSubtaskIds(subtask.subtasks, dueClass);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
-  };
-
   // Get IDs of parent subtasks that need to be expanded to show matching children
   const getParentSubtaskIds = (subtasks, dueClass, parentIds = new Set()) => {
     if (!subtasks || subtasks.length === 0) return parentIds;
@@ -1185,22 +1158,6 @@ function Tasks() {
       }
     }
     return parentIds;
-  };
-
-  // Get IDs of subtasks assigned to user (recursive)
-  const getAssignedSubtaskIds = (subtasks, userId) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0 || !userId) return ids;
-    for (const subtask of subtasks) {
-      if ((subtask.assignedTo || []).some(id => id?.toString() === userId)) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getAssignedSubtaskIds(subtask.subtasks, userId);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
   };
 
   // Check if any subtask is assigned to user (recursive)
@@ -1273,22 +1230,6 @@ function Tasks() {
       else if (hasNewOrModifiedSubtask(task.subtasks)) count++;
     }
     return count;
-  };
-
-  // Get IDs of subtasks that are new or modified (recursive)
-  const getNewOrModifiedSubtaskIds = (subtasks) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0) return ids;
-    for (const subtask of subtasks) {
-      if (isSubtaskNewOrModified(subtask)) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getNewOrModifiedSubtaskIds(subtask.subtasks);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
   };
 
   // Get IDs of parent subtasks that need to be expanded to show new/modified children
@@ -1598,14 +1539,10 @@ function Tasks() {
       setTasks(prev => prev.map(t =>
         t.id === updatedTask.id ? mergeTaskUpdate(t, updatedTask) : t
       ));
-      setSelectedTask(prev =>
-        prev?.id === updatedTask.id ? mergeTaskUpdate(prev, updatedTask) : prev
-      );
     };
 
     const handleTaskDeleted = ({ id }) => {
       setTasks(prev => prev.filter(t => t.id !== id));
-      setSelectedTask(prev => prev?.id === id ? null : prev);
     };
 
     // When a contact is updated, refresh tasks (debounced to avoid rapid
@@ -1719,18 +1656,6 @@ function Tasks() {
       setExpandedSubtasks(prev => ({ ...prev, ...subtasksToExpand }));
     }
   }, [filter, tasks, user]);
-
-  const refreshTask = async (taskId) => {
-    try {
-      const res = await api.get(`/api/tasks/${taskId}`);
-      setTasks(prev => prev.map(t => t.id === taskId ? res.data : t));
-      if (selectedTask?.id === taskId) {
-        setSelectedTask(res.data);
-      }
-    } catch {
-      // Silently fail
-    }
-  };
 
   const createTask = async (e) => {
     e.preventDefault();
@@ -2578,8 +2503,6 @@ function Tasks() {
   };
 
   // File attachment handlers
-  const isImage = (mimetype) => mimetype?.startsWith('image/');
-
   const getFileIcon = (mimetype) => {
     if (mimetype?.startsWith('image/')) return '🖼️';
     if (mimetype?.includes('pdf')) return '📄';
