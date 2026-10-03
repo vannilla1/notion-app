@@ -558,6 +558,12 @@ const generateNotificationUrl = (type, data = {}) => {
  * @param {Object} payload - Notification payload
  * @returns {Object} Result with sent/failed counts
  */
+// timeout (ms): bez neho čaká https.request na zavesený push endpoint
+// neobmedzene a sekvenčná slučka cez subscriptiony zastaví doručenie na
+// ostatné zariadenia používateľa. Socket timeout nemá statusCode, takže ho
+// retry logika vyššie korektne zopakuje (max 2×). TTL = default web-push.
+const WEBPUSH_OPTIONS = { timeout: 10000 };
+
 // lastUsed web push subscription — mimo try bloku odoslania (viď volajúcich).
 const touchSubscription = async (subId) => {
   try {
@@ -619,7 +625,7 @@ const sendPushNotification = async (userId, payload) => {
           await webpush.sendNotification({
             endpoint: sub.endpoint,
             keys: sub.keys
-          }, pushPayload);
+          }, pushPayload, WEBPUSH_OPTIONS);
 
           // Doručené — započítame HNEĎ. Predtým bol sub.save() v tom istom try:
           // jeho zlyhanie (DB blip) catch vyhodnotil ako sieťovú chybu bez
@@ -704,7 +710,7 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
 
     for (const sub of desktopSubs) {
       try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload);
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload, WEBPUSH_OPTIONS);
         result.sent++;
         await touchSubscription(sub._id); // zlyhanie zápisu nemení výsledok doručenia
       } catch (error) {
