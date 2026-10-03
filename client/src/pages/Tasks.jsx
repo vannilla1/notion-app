@@ -3521,13 +3521,17 @@ function Tasks() {
                               >
                                 {getPriorityLabel(task.priority)}
                               </span>
-                              {task.dueDate && (
-                                <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
-                                  {getDueDateClass(task.dueDate, task.completed) === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
-                                  {task.dueTime && ` ⏰ ${task.dueTime}`}
-                                  {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
-                                </span>
-                              )}
+                              {task.dueDate && (() => {
+                                // Raz na kartu (predtým 2× pri každom prekreslení)
+                                const dueClass = getDueDateClass(task.dueDate, task.completed);
+                                return (
+                                  <span className={`due-date ${dueClass}`}>
+                                    {dueClass === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
+                                    {task.dueTime && ` ⏰ ${task.dueTime}`}
+                                    {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
+                                  </span>
+                                );
+                              })()}
                               {(task.contactName || task.contactNames?.length > 0) && (
                                 <span
                                   className="contact-badge contact-badge-clickable"
@@ -3541,11 +3545,15 @@ function Tasks() {
                                   🏷️ {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
                                 </span>
                               )}
-                              {task.subtasks?.length > 0 && (
-                                <span className="subtask-count">
-                                  ✓ {countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total}
-                                </span>
-                              )}
+                              {task.subtasks?.length > 0 && (() => {
+                                // Rekurzívny prechod stromu raz, nie 2× na kartu
+                                const counts = countSubtasksRecursive(task.subtasks);
+                                return (
+                                  <span className="subtask-count">
+                                    ✓ {counts.completed}/{counts.total}
+                                  </span>
+                                );
+                              })()}
                               {task.files?.length > 0 && (
                                 <span className="subtask-count" title={`${task.files.length} príloha`}>
                                   📎 {task.files.length}
