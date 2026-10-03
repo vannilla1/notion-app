@@ -617,11 +617,13 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
           workspaceId: req.workspaceId,
           type: 'message.created',
           title: `📨 Nový odkaz: ${typeLabel}`,
-          message: `${req.user.username} vám poslal odkaz "${subject}"`,
+          // Uložený (skrátený) predmet, nie surový z tela — multer fieldSize
+          // je 1 MB a FCM push má limit 4 KB.
+          message: `${req.user.username} vám poslal odkaz "${message.subject}"`,
           actorName: req.user.username,
           relatedType: 'message',
           relatedId: message._id.toString(),
-          relatedName: subject,
+          relatedName: message.subject,
           data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
         });
       } catch (notifErr) {
@@ -635,7 +637,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
           id: message._id.toString(),
           fromUsername: req.user.username,
           type,
-          subject,
+          subject: message.subject,
           status: 'pending'
         });
       }
@@ -651,8 +653,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         category: 'message',
         targetType: 'message',
         targetId: message._id.toString(),
-        targetName: subject,
-        details: { subject, recipient: recipient.username, type },
+        targetName: message.subject,
+        details: { subject: message.subject, recipient: recipient.username, type },
         ipAddress: req.ip,
         userAgent: req.get('user-agent'),
         workspaceId: req.workspaceId || null
@@ -849,7 +851,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId,
         workspaceId: req.workspaceId,
         type: 'message.rejected',
         title: '❌ Odkaz zamietnutý',
-        message: `${req.user.username} zamietol váš odkaz "${message.subject}"${reason ? ` — ${reason}` : ''}`,
+        message: `${req.user.username} zamietol váš odkaz "${message.subject}"${message.rejectionReason ? ` — ${message.rejectionReason}` : ''}`,
         actorName: req.user.username,
         relatedType: 'message',
         relatedId: message._id.toString(),
