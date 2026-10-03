@@ -110,7 +110,10 @@ const getActiveAnnouncementsForUser = async (userId) => {
 };
 
 const dismissAnnouncement = async (userId, announcementId) => {
-  if (!ANNOUNCEMENTS[announcementId]) {
+  // hasOwnProperty: `ANNOUNCEMENTS[id]` je truthy aj pre zdedené mená
+  // z Object.prototype (constructor, toString, __proto__…) — tie by prešli
+  // a do User dokumentu by sa zapísal kľúč preferences.dismissedAnnouncements.constructor.
+  if (typeof announcementId !== 'string' || !Object.prototype.hasOwnProperty.call(ANNOUNCEMENTS, announcementId)) {
     return { ok: false, error: 'Unknown announcement' };
   }
   await User.updateOne(
