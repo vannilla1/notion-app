@@ -50,6 +50,11 @@ const isExpired = (user) => {
   if (new Date(sub.paidUntil) >= new Date()) return false;
   // Stripe-managed subs are renewed/cancelled via webhooks — never auto-expire.
   if (sub.stripeSubscriptionId) return false;
+  // Apple IAP: expiráciu rieši výlučne App Store notifikácia (EXPIRED /
+  // GRACE_PERIOD_EXPIRED / REFUND). paidUntil = expiresDate poslednej
+  // transakcie, ale počas billing retry / grace period má používateľ
+  // prístup ďalej a DID_RENEW príde až po úspešnom strhnutí.
+  if (sub.source === 'apple' && sub.appleOriginalTransactionId) return false;
   return true;
 };
 
@@ -74,11 +79,13 @@ const expireUserIfNeeded = async (userId) => {
         { 'subscription.stripeSubscriptionId': null },
         { 'subscription.stripeSubscriptionId': { $exists: false } },
       ],
+      $nor: [{ 'subscription.source': 'apple', 'subscription.appleOriginalTransactionId': { $type: 'string' } }],
     },
     {
       $set: {
         'subscription.plan': 'free',
         'subscription.paidUntil': null,
+        'subscription.source': null,
         // Clear discount metadata — if it was a planUpgrade with expiresAt,
         // the upgrade has now ended; if it was percentage/fixed, it was
         // tied to a Stripe subscription which doesn't exist here. Leave
@@ -168,6 +175,7 @@ const sweepExpiredPlans = async () => {
         { 'subscription.stripeSubscriptionId': null },
         { 'subscription.stripeSubscriptionId': { $exists: false } },
       ],
+      $nor: [{ 'subscription.source': 'apple', 'subscription.appleOriginalTransactionId': { $type: 'string' } }],
     }).select('_id').lean();
 
     if (candidates.length === 0) {
