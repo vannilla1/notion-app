@@ -341,6 +341,9 @@ router.post('/reset-password', resetPasswordLimiter, async (req, res) => {
     // OAuth-only používateľ si týmto nastavil heslo → odteraz je to aj
     // prihlasovacia metóda (inak by disconnect Google hlásil LAST_LOGIN_METHOD).
     if (!user.authProviders.includes('password')) user.authProviders.push('password');
+    // Odkaz prišiel na e-mail účtu → vlastníctvo e-mailu je overené (umožní
+    // bezpečné auto-prepojenie Google/Apple, viď oauthService).
+    user.emailVerified = true;
     // Reset hesla zneplatní všetky existujúce JWT relácie (claim `tv`).
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();

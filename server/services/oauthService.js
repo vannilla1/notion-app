@@ -64,11 +64,69 @@ const STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minút — po expirácii treba zn
 // Derive state secret: prefer explicit env, else HMAC(JWT_SECRET, "oauth-state")
 // Domain separation zaručí, že kompromitovaný state secret neumožní forge JWT
 // a naopak (oba secrety sú "independent" aj keď delia ten istý zdroj entropy).
-function getStateSecret() {
-  if (process.env.OAUTH_STATE_SECRET && process.env.OAUTH_STATE_SECRET.length >= 32) {
-    return process.env.OAUTH_STATE_SECRET;
+// Výsledok sa počíta raz pri štarte; príliš krátky OAUTH_STATE_SECRET sa
+// predtým potichu ignoroval — teraz o tom varujeme.
+const STATE_SECRET = (() => {
+  const explicit = process.env.OAUTH_STATE_SECRET;
+  if (explicit && explicit.length >= 32) return explicit;
+  if (explicit) {
+    logger.warn('[oauth] OAUTH_STATE_SECRET je kratší ako 32 znakov — ignorujem ho a odvodzujem secret z JWT_SECRET');
   }
   return crypto.createHmac('sha256', JWT_SECRET).update('oauth-state-domain').digest('hex');
+})();
+function getStateSecret() {
+  return STATE_SECRET;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Väzba OAuth flow na prehliadač, ktorý ho spustil (login-CSRF ochrana).
+//
+// Aplikácia nepoužíva cookies (API a SPA sú na rôznych doménach a natívne
+// shelly dokončujú flow v systémovom prehliadači), preto väzbu drží FE:
+// pred navigáciou na /login vygeneruje náhodný `cnonce`, uloží ho do
+// localStorage a pošle ho sem; nonce ide v podpísanom state a callback ho
+// vráti vo fragmente spolu s tokenom. AuthCallback token prijme LEN ak sa
+// zhoduje s uloženým nonce — URL callbacku podstrčená útočníkom (s jeho
+// code+state) sa v prehliadači obete zahodí.
+// ─────────────────────────────────────────────────────────────────────
+function normalizeClientNonce(raw) {
+  return typeof raw === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(raw) ? raw : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Odložené prepojenie (connect) — CSRF ochrana pri linkovaní účtov.
+//
+// Callback v connect móde už identitu NEPRIPÁJA. Vydá krátkodobý podpísaný
+// „pending“ token (userId zo state + overený profil od providera), ktorý FE
+// pošle na POST /api/auth/connections/complete so svojím JWT. Server
+// prepojí len ak JWT patrí rovnakému userId ako state. Útočník, ktorý obeti
+// podstrčí svoju connect URL, tak jej Google/Apple identitu k svojmu účtu
+// nepripojí (obeť má iný JWT alebo žiadny).
+// ─────────────────────────────────────────────────────────────────────
+const PENDING_KIND = 'connect-pending';
+
+function signConnectPending({ userId, provider, profile }) {
+  return signState({
+    kind: PENDING_KIND,
+    userId: String(userId),
+    provider,
+    profile: {
+      providerId: profile.providerId,
+      email: profile.email || null,
+      emailVerified: profile.emailVerified === true,
+      name: profile.name || null,
+      picture: profile.picture || null,
+      isAppleRelay: profile.isAppleRelay === true
+    }
+  });
+}
+
+function verifyConnectPending(token) {
+  const data = verifyState(token);
+  if (data.kind !== PENDING_KIND || !data.userId || !['google', 'apple'].includes(data.provider) || !data.profile?.providerId) {
+    throw new OAuthError('STATE_INVALID', 'Neplatný token prepojenia');
+  }
+  return data;
 }
 
 function signState(payload = {}) {
@@ -170,15 +228,20 @@ function shapeUserResponse(user) {
 async function generateUniqueUsername(seed) {
   const baseRaw = (seed || '').split('@')[0];
   // Sanitize: len alphanumerics + _ - (zhodne s typickými usernames v aplikácii)
-  const base = baseRaw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'user';
+  let base = baseRaw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'user';
+  if (base.length < 2) base = `${base}user`;
 
-  // 1. pokus — base bez suffixu
-  if (!(await User.findOne({ username: base }))) return base;
-
-  // 2-100 — base + suffix
+  // Jeden dopyt na všetky obsadené varianty base, base1, base2… namiesto
+  // až 101 sekvenčných findOne. base je len [A-Za-z0-9_-], takže regex je
+  // bezpečný (pomlčka mimo triedy znakov nie je metaznak).
+  const taken = new Set(
+    (await User.find({ username: { $regex: `^${base}\\d*$` } }, 'username').lean())
+      .map(u => u.username)
+  );
+  if (!taken.has(base)) return base;
   for (let i = 1; i <= 100; i++) {
     const candidate = `${base}${i}`;
-    if (!(await User.findOne({ username: candidate }))) return candidate;
+    if (!taken.has(candidate)) return candidate;
   }
 
   // Fallback (extrémne nepravdepodobné) — random 6-char hex suffix
@@ -370,7 +433,15 @@ async function resolveUserFromProfile(provider, profile) {
   if (emailLower) {
     const byEmail = await User.findOne({ email: emailLower });
     if (byEmail) {
-      if (!profile.emailVerified) {
+      // Auto-link vyžaduje overenie na OBOCH stranách: provider potvrdil
+      // e-mail A existujúci účet má e-mail overený (alebo nemá heslo).
+      // Registrácia heslom vlastníctvo e-mailu neoveruje — útočník by si inak
+      // vopred založil účet s e-mailom obete a jej neskorší Google/Apple
+      // login by sa pripojil k nemu (pre-account hijack s trvalým prístupom
+      // útočníka cez heslo). Legitímny používateľ sa prihlási heslom a
+      // pripojí účet v Nastaveniach; po resete hesla je e-mail overený.
+      const accountTrusted = byEmail.emailVerified === true || !byEmail.password;
+      if (!profile.emailVerified || !accountTrusted) {
         throw new OAuthError(
           'EMAIL_EXISTS_UNVERIFIED',
           'S týmto emailom existuje účet. Prihlás sa heslom a v Nastaveniach pripoj Google/Apple účet.',
@@ -433,8 +504,21 @@ async function createNewUserFromOAuth(provider, profile) {
     role: 'user'
   };
 
-  const user = new User(userData);
-  await user.save();
+  let user = new User(userData);
+  try {
+    await user.save();
+  } catch (err) {
+    // Súbežné prihlásenie dvoch nových používateľov s rovnakým base menom →
+    // E11000 na username. Raz zopakujeme s náhodným suffixom (e-mail /
+    // providerId duplicita je skutočný konflikt a ide ďalej).
+    if (err.code === 11000 && err.keyPattern && err.keyPattern.username) {
+      userData.username = `${username.slice(0, 24)}${crypto.randomBytes(3).toString('hex')}`;
+      user = new User(userData);
+      await user.save();
+    } else {
+      throw err;
+    }
+  }
 
   logger.info('[oauth] created new user', {
     userId: user._id.toString(),
@@ -541,6 +625,9 @@ module.exports = {
   verifyState,
   STATE_VERSION,
   STATE_MAX_AGE_MS,
+  normalizeClientNonce,
+  signConnectPending,
+  verifyConnectPending,
 
   // Helpers
   isAppleRelayEmail,

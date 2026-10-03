@@ -142,10 +142,12 @@ async function exchangeCodeForTokens(code) {
     grant_type: 'authorization_code',
     redirect_uri: APPLE_OAUTH_REDIRECT_URI
   });
+  // Timeout — bez neho callback visel pri degradácii Apple až do timeoutu proxy.
   const res = await fetch(APPLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString()
+    body: params.toString(),
+    signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -166,7 +168,19 @@ function buildSuccessRedirect(token, opts = {}) {
   if (opts.isNew) url.searchParams.set('isNew', '1');
   if (opts.linked) url.searchParams.set('linked', '1');
   url.searchParams.set('provider', 'apple');
-  url.hash = `token=${encodeURIComponent(token)}`;
+  // cnonce = väzba na prehliadač, ktorý flow spustil (viď oauthService).
+  const hash = new URLSearchParams({ token });
+  if (opts.cnonce) hash.set('cnonce', opts.cnonce);
+  url.hash = hash.toString();
+  return url.toString();
+}
+
+function buildConnectPendingRedirect(pending, opts = {}) {
+  const url = new URL(`${CLIENT_URL}/auth/callback`);
+  url.searchParams.set('mode', 'connect');
+  url.searchParams.set('provider', 'apple');
+  if (opts.returnUrl) url.searchParams.set('returnUrl', opts.returnUrl);
+  url.hash = new URLSearchParams({ pending }).toString();
   return url.toString();
 }
 
@@ -187,7 +201,8 @@ router.get('/login', async (req, res) => {
   }
   try {
     const returnUrl = sanitizeReturnUrl(req.query.returnUrl);
-    const state = oauthService.signState({ mode: 'login', returnUrl });
+    const cnonce = oauthService.normalizeClientNonce(req.query.cnonce);
+    const state = oauthService.signState({ mode: 'login', returnUrl, ...(cnonce && { cnonce }) });
     const url = new URL(APPLE_AUTH_URL);
     url.searchParams.set('client_id', APPLE_SERVICE_ID);
     url.searchParams.set('redirect_uri', APPLE_OAUTH_REDIRECT_URI);
@@ -252,9 +267,12 @@ router.post('/callback', urlencoded, async (req, res) => {
   let stateData;
   try {
     stateData = oauthService.verifyState(state);
+    if (!['login', 'connect'].includes(stateData.mode)) {
+      throw new oauthService.OAuthError('STATE_INVALID', 'Neplatný state');
+    }
   } catch (err) {
     logger.warn('[auth-apple] invalid state', { error: err.message });
-    return res.redirect(buildErrorRedirect(err.code || 'STATE_INVALID', err.message));
+    return res.redirect(buildErrorRedirect(err.code || 'STATE_INVALID'));
   }
 
   // First-time user JSON môže prísť — Apple ho posiela LEN PRI PRVOM sign-in.
@@ -285,31 +303,15 @@ router.post('/callback', urlencoded, async (req, res) => {
 
     if (stateData.mode === 'connect') {
       if (!stateData.userId) {
-        return res.redirect(buildErrorRedirect('STATE_INVALID', 'Missing userId'));
+        return res.redirect(buildErrorRedirect('STATE_INVALID'));
       }
-      try {
-        await oauthService.connectProvider(stateData.userId, 'apple', profile);
-        auditService.logAction({
-          userId: stateData.userId,
-          action: 'auth.oauth.connect',
-          category: 'auth',
-          details: { provider: 'apple' },
-          ipAddress: req.ip
-        });
-        const url = new URL(`${CLIENT_URL}/auth/callback`);
-        url.searchParams.set('mode', 'connect');
-        url.searchParams.set('provider', 'apple');
-        url.searchParams.set('connected', '1');
-        if (stateData.returnUrl) url.searchParams.set('returnUrl', stateData.returnUrl);
-        return res.redirect(url.toString());
-      } catch (err) {
-        logger.warn('[auth-apple] connect failed', {
-          error: err.message,
-          code: err.code,
-          userId: stateData.userId
-        });
-        return res.redirect(buildErrorRedirect(err.code || 'CONNECT_FAILED', err.message));
-      }
+      // Prepojenie dokončí až FE so svojím JWT (CSRF ochrana).
+      const pending = oauthService.signConnectPending({
+        userId: stateData.userId,
+        provider: 'apple',
+        profile
+      });
+      return res.redirect(buildConnectPendingRedirect(pending, { returnUrl: stateData.returnUrl }));
     }
 
     // Login flow
@@ -318,7 +320,7 @@ router.post('/callback', urlencoded, async (req, res) => {
       result = await oauthService.findOrCreateUserFromProfile('apple', profile);
     } catch (err) {
       logger.warn('[auth-apple] login findOrCreate failed', { error: err.message, code: err.code });
-      return res.redirect(buildErrorRedirect(err.code || 'LOGIN_FAILED', err.message));
+      return res.redirect(buildErrorRedirect(err.code || 'LOGIN_FAILED'));
     }
 
     const token = oauthService.issueAuthToken(result.user);
@@ -339,7 +341,8 @@ router.post('/callback', urlencoded, async (req, res) => {
     return res.redirect(buildSuccessRedirect(token, {
       returnUrl: stateData.returnUrl,
       isNew: result.isNew,
-      linked: result.linked === true
+      linked: result.linked === true,
+      cnonce: stateData.cnonce
     }));
   } catch (err) {
     logger.error('[auth-apple] callback error', {
@@ -373,11 +376,14 @@ router.post('/native', async (req, res) => {
     }
     // First-time fields z iOS — Apple ich pošle LEN PRI PRVOM sign-in.
     if (fullName && typeof fullName === 'string') profile.name = fullName.trim().slice(0, 100);
-    // Email z native môže byť aj keď id_token nemá email claim (Apple to vyžaduje
-    // pre prvý sign-in keď user nepoužije Hide My Email).
-    if (email && typeof email === 'string' && !profile.email) {
-      profile.email = email.toLowerCase().trim();
-      profile.isAppleRelay = oauthService.isAppleRelayEmail(profile.email);
+    // E-mail z tela požiadavky je klientom kontrolovaný — identitou účtu je
+    // len e-mail z podpísaného identity tokenu. Body e-mail by inak dovolil
+    // obsadiť cudzí e-mail (registrácia obete zlyhá) a pripraviť pre-hijack.
+    // Bez e-mailu v tokene nový účet nevznikne (NO_EMAIL); vracajúci sa
+    // používateľ sa nájde podľa providerId.
+    if (email && typeof email === 'string' && profile.email &&
+        email.toLowerCase().trim() !== String(profile.email).toLowerCase().trim()) {
+      logger.warn('[auth-apple] native body email differs from identity token — ignored');
     }
 
     let result;

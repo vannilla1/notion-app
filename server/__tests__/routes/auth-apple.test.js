@@ -174,9 +174,14 @@ describe('auth-apple routes', () => {
         .send({ code: 'c', state });
 
       expect(res.status).toBe(302);
-      expect(res.headers.location).toMatch(/connected=1/);
+      expect(res.headers.location).toMatch(/mode=connect/);
+      const pending = new URLSearchParams(res.headers.location.split('#')[1]).get('pending');
+      const data = oauthService.verifyConnectPending(pending);
+      expect(data.provider).toBe('apple');
+      expect(data.profile.providerId).toBe('apple-conn-x');
+      // Prepojenie dokončí až FE so svojím JWT
       const refreshed = await User.findById(user._id);
-      expect(refreshed.appleId).toBe('apple-conn-x');
+      expect(refreshed.appleId).toBeUndefined();
     });
 
     it('redirectuje s CALLBACK_FAILED keď token exchange zlyhá', async () => {

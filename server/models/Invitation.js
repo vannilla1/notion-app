@@ -46,6 +46,10 @@ const invitationSchema = new mongoose.Schema({
 // `invitationSchema.index({ token: 1 })` by spôsobil MongoServerError (dva indexy
 // s rovnakým názvom, rôznymi opciami).
 invitationSchema.index({ workspaceId: 1, email: 1 });
+// OAuth login auto-accept (oauthService.autoAcceptPendingInvites) hľadá
+// pending pozvánky podľa e-mailu naprieč workspaces — prefix workspaceId
+// v indexe vyššie mu nepomôže.
+invitationSchema.index({ email: 1, status: 1 });
 invitationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // Auto-delete expired
 
 module.exports = mongoose.model('Invitation', invitationSchema);
