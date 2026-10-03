@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
@@ -161,8 +162,11 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // Generate slug and invite code
-    const slug = await Workspace.generateSlug(name);
+    // Generate slug and invite code. generateSlug odstráni všetko mimo
+    // [a-z0-9] — pre názvy len z cyriliky/emoji/symbolov („Проект", „🚀")
+    // vráti '' a schéma (slug required) by padla na ValidationError → 500.
+    let slug = await Workspace.generateSlug(name);
+    if (!slug) slug = 'ws-' + crypto.randomBytes(4).toString('hex');
     const inviteCode = Workspace.generateInviteCode();
 
     // Create workspace
@@ -204,6 +208,11 @@ router.post('/', authenticateToken, async (req, res) => {
       role: 'owner'
     });
   } catch (error) {
+    // Súbežné POST / s rovnakým názvom: while-loop v generateSlug nie je
+    // atomický a unique index na slug hodí E11000 — nie je to chyba servera.
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'Názov prostredia je práve obsadený, skúste to znova' });
+    }
     logger.error('Create workspace error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
