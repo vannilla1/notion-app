@@ -79,7 +79,11 @@ api.interceptors.response.use(
     // (DB-readiness / auth middleware odmietli request pred spracovaním)
     // opakujeme pri každej metóde.
     const method = String(config.method || 'get').toLowerCase();
-    const idempotent = ['get', 'head', 'options', 'put', 'delete'].includes(method);
+    // `_idempotent` — POST, ktorý je na serveri bezpečné zopakovať (napr.
+    // /api/billing/apple/verify: rovnaká transakcia sa len znovu potvrdí).
+    // Bez opakovania by výpadok siete pri overení nákupu nechal zaplatené,
+    // ale neaktivované predplatné — starý iOS shell transakciu ukončí sám.
+    const idempotent = config._idempotent === true || ['get', 'head', 'options', 'put', 'delete'].includes(method);
     const retryable = is503 || (!isUpload && idempotent && (isTimeout || isNetwork));
 
     // `_noRetry` — volajúci má vlastnú slučku opakovania (AuthContext.fetchUser).
@@ -135,7 +139,14 @@ api.interceptors.response.use(
     // sa tu odhlasovalo aj pri 403: free používateľ, ktorý narazil na limit,
     // bol namiesto UpgradeModalu vyhodený na /login a v Android appke sa mu
     // navyše zmazal TokenStore a zrušil Block Store obnovovací token.
-    if (isSessionInvalidError(error) && !isCredentialRequest(config)) {
+    // 401 na request, ktorý odišiel so STARÝM tokenom (napr. 30 s polling
+    // rozbehnutý tesne pred zmenou hesla, ktorá zvýšila tokenVersion a uložila
+    // nový token) nesmie zmazať ten nový — inak sa používateľ po zmene hesla
+    // náhodne odhlási (a v Android appke by sa zrušila aj obnova prihlásenia).
+    const sentAuth = config?.headers?.Authorization || config?.headers?.authorization;
+    const currentToken = getStoredToken();
+    const staleTokenRequest = !!(sentAuth && currentToken && sentAuth !== `Bearer ${currentToken}`);
+    if (isSessionInvalidError(error) && !isCredentialRequest(config) && !staleTokenRequest) {
       // removeStoredToken() maže z sessionStorage (web) alebo localStorage (iOS)
       // + cleanup legacy kľúčov (user, starý localStorage token z predošlej verzie).
       removeStoredToken();

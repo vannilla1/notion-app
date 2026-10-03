@@ -11,22 +11,33 @@
  */
 const auditService = require('../services/auditService');
 
+const PLAN_RANK = { free: 0, trial: 0, team: 1, pro: 2 };
+
 /**
  * Plán, ktorým sa riadia limity OBSAHU workspace (kontakty, projekty,
- * podúlohy, prílohy/úložisko) = plán VLASTNÍKA workspace — rovnako ako
- * limit členov (utils/planLimits). Predtým sa bral plán volajúceho člena:
- * Free člen v Pro workspace narážal na Free limity a naopak Pro člen
- * obchádzal limity Free workspace. Osobné funkcie (Google sync, CSV export)
- * ostávajú na pláne používateľa.
+ * podúlohy, prílohy/úložisko) = VYŠŠÍ z plánov vlastníka workspace
+ * a volajúceho člena.
+ *
+ * Do 7ae8aae sa bral len plán volajúceho: Free člen v Pro/Tím workspace
+ * narážal na Free limity, hoci vlastník platí za tím. Audit (0a558a2) prepol
+ * na plán vlastníka, ale to by po nasadení zobralo funkcie platiacim členom
+ * vo workspace Free vlastníka (prílohy, limity, 10 GB → 1 GB) a upsell by
+ * im ponúkal plán, ktorý by im nič neodomkol. Vyšší z oboch = nikto nič
+ * nestratí a členovia platiaceho tímu dostanú limity tímu. Osobné funkcie
+ * (Google sync, CSV export) ostávajú na pláne používateľa.
  */
 const getWorkspacePlan = async (req) => {
   // Lazy require — planGate načítava aj auth vrstva (žiadny cyklus pri štarte)
   const User = require('../models/User');
-  const ownerId = req.workspace?.ownerId;
-  const doc = ownerId
-    ? await User.findById(ownerId).select('subscription.plan').lean()
-    : await User.findById(req.user?.id).select('subscription.plan').lean();
-  return doc?.subscription?.plan || 'free';
+  const ids = [req.workspace?.ownerId, req.user?.id].filter(Boolean);
+  if (ids.length === 0) return 'free';
+  const docs = await User.find({ _id: { $in: ids } }).select('subscription.plan').lean();
+  let best = 'free';
+  for (const doc of docs) {
+    const plan = doc?.subscription?.plan || 'free';
+    if ((PLAN_RANK[plan] ?? 0) > (PLAN_RANK[best] ?? 0)) best = plan;
+  }
+  return best;
 };
 
 const logPlanGateHit = (req, { code, feature, limit = null }) => {

@@ -1391,15 +1391,22 @@ router.post('/set-plan', authenticateToken, async (req, res) => {
     if (!normalized) {
       return res.status(400).json({ message: 'Neplatný e-mail' });
     }
-    const user = await User.findOne({ email: normalized }).select('_id subscription.stripeSubscriptionId subscription.source');
+    const user = await User.findOne({ email: normalized }).select('_id subscription.stripeSubscriptionId subscription.source subscription.appleOriginalTransactionId subscription.paidUntil');
     if (!user) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
     }
 
     // Len pole plan — priradenie celého `subscription` objektu by zmazalo
     // Stripe/Apple väzby (webhooky by usera nenašli), paidUntil, zľavu aj
-    // stav pripomienok.
-    await User.updateOne({ _id: user._id }, { $set: { 'subscription.plan': plan } });
+    // stav pripomienok. Výnimka: starý paidUntil v minulosti — inak by
+    // auto-expirácia nový platený plán hneď zrušila.
+    const sub = user.subscription || {};
+    const paidManaged = !!(sub.stripeSubscriptionId || (sub.source === 'apple' && sub.appleOriginalTransactionId));
+    const update = { 'subscription.plan': plan };
+    if (plan !== 'free' && !paidManaged && sub.paidUntil && new Date(sub.paidUntil) < new Date()) {
+      update['subscription.paidUntil'] = null;
+    }
+    await User.updateOne({ _id: user._id }, { $set: update });
     await invalidateUserCache(user._id);
 
     logger.info('Plan set', { email, plan, setBy: req.user.id });

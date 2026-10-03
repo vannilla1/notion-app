@@ -595,7 +595,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     // Check plan contact limit (len subscription — celý User nesie base64 avatar
     // a Google sync mapy, desiatky–stovky kB; viď /export/csv a upload)
-    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
     const plan = await getWorkspacePlan(req);
     const contactLimits = { free: 5, team: 25, pro: Infinity };
     const maxContacts = contactLimits[plan] || 5;
@@ -1407,7 +1407,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     }
 
     // Check plan limit for subtasks per task
-    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
     const plan = await getWorkspacePlan(req);
     const subtaskLimits = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimits[plan] || 10;
@@ -1748,7 +1748,7 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     }
 
     // Limity plánu na CIEĽOVEJ strane (zrkadlí bežné vytváranie)
-    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
     const plan = await getWorkspacePlan(req);
     if (!targetTask) {
       const taskLimits = { free: 5, team: 25, pro: Infinity };

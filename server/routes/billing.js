@@ -99,6 +99,12 @@ const isStripeConfigured = () => {
 
 // ===== Routes =====
 
+// Adresa webu pre Stripe návratové URL. CORS_ORIGIN môže byť po novom
+// zoznam oddelený čiarkou (server/index.js) — celý reťazec by dal Stripe
+// neplatnú URL a každý checkout/portál by skončil chybou 500.
+const appOrigin = () => String(process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'https://prplcrm.eu')
+  .split(',')[0].trim().replace(/\/+$/, '');
+
 // Get billing status
 router.get('/status', authenticateToken, async (req, res) => {
   try {
@@ -260,6 +266,27 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nenájdený' });
     }
 
+    // If user already has an active subscription, use Stripe billing portal instead.
+    // Kontrola PRED Apple guardom: kto platí cez Stripe aj cez Apple (dvojitá
+    // platba), musí sa vedieť dostať do portálu a Stripe predplatné zrušiť.
+    if (user.subscription?.stripeSubscriptionId) {
+      try {
+        const stripeSub = await stripe.subscriptions.retrieve(user.subscription.stripeSubscriptionId);
+        if (['active', 'trialing', 'past_due'].includes(stripeSub.status)) {
+          // Redirect to billing portal for plan change
+          const portalCustomerId = await getOrCreateCustomer(user);
+          const portalSession = await stripe.billingPortal.sessions.create({
+            customer: portalCustomerId,
+            return_url: `${appOrigin()}/app/billing`
+          });
+          return res.json({ url: portalSession.url, type: 'portal' });
+        }
+      } catch (err) {
+        // Subscription might be deleted, continue to create new checkout
+        logger.warn('[Billing] Existing subscription check failed', { error: err.message });
+      }
+    }
+
     // Double-billing guard: aktívny plán platený cez Apple IAP sa mení len
     // v iOS Nastaveniach. Stripe checkout by vytvoril druhé predplatné a
     // updateUserSubscription by prepísal source na 'stripe', kým Apple
@@ -273,24 +300,6 @@ router.post('/checkout', authenticateToken, async (req, res) => {
 
     const customerId = await getOrCreateCustomer(user);
 
-    // If user already has an active subscription, use Stripe billing portal instead
-    if (user.subscription?.stripeSubscriptionId) {
-      try {
-        const stripeSub = await stripe.subscriptions.retrieve(user.subscription.stripeSubscriptionId);
-        if (['active', 'trialing', 'past_due'].includes(stripeSub.status)) {
-          // Redirect to billing portal for plan change
-          const portalSession = await stripe.billingPortal.sessions.create({
-            customer: customerId,
-            return_url: `${process.env.CORS_ORIGIN}/app/billing`
-          });
-          return res.json({ url: portalSession.url, type: 'portal' });
-        }
-      } catch (err) {
-        // Subscription might be deleted, continue to create new checkout
-        logger.warn('[Billing] Existing subscription check failed', { error: err.message });
-      }
-    }
-
     // Build checkout session options
     const checkoutOptions = {
       customer: customerId,
@@ -300,8 +309,8 @@ router.post('/checkout', authenticateToken, async (req, res) => {
         price: priceId,
         quantity: 1
       }],
-      success_url: `${process.env.CORS_ORIGIN}/app/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CORS_ORIGIN}/app/billing?canceled=true`,
+      success_url: `${appOrigin()}/app/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appOrigin()}/app/billing?canceled=true`,
       metadata: {
         userId: user._id.toString(),
         plan,
@@ -388,7 +397,7 @@ router.post('/portal', authenticateToken, async (req, res) => {
 
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: user.subscription.stripeCustomerId,
-      return_url: `${process.env.CORS_ORIGIN}/app/billing`
+      return_url: `${appOrigin()}/app/billing`
     });
 
     res.json({ url: portalSession.url });

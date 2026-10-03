@@ -444,7 +444,7 @@ async function resolveUserFromProfile(provider, profile) {
       if (!profile.emailVerified || !accountTrusted) {
         throw new OAuthError(
           'EMAIL_EXISTS_UNVERIFIED',
-          'S týmto emailom existuje účet. Prihlás sa heslom a v Nastaveniach pripoj Google/Apple účet.',
+          'S týmto e-mailom už máš účet s heslom. Prihlás sa heslom, alebo si heslo obnov cez „Zabudnuté heslo“ — potom pôjde aj prihlásenie cez Google/Apple.',
           409
         );
       }

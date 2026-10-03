@@ -577,14 +577,23 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
     }
 
     const oldPlan = targetUser.subscription?.plan || 'free';
+    const paidManaged = !!(targetUser.subscription?.stripeSubscriptionId ||
+      (targetUser.subscription?.source === 'apple' && targetUser.subscription?.appleOriginalTransactionId));
     // Len pole plan — priradenie celého objektu zmazalo stripeCustomerId,
     // stripeSubscriptionId, appleOriginalTransactionId, source, paidUntil,
     // zľavu aj stav pripomienok (webhooky by používateľa potom nenašli).
-    await User.updateOne({ _id: targetUser._id }, { $set: { 'subscription.plan': plan } });
+    // Výnimka: starý paidUntil v minulosti (bývalý Stripe zákazník) — bez
+    // vynulovania by auto-expirácia nový platený plán pri ďalšom requeste
+    // hneď zrušila a poslala e-mail „plán vypršal".
+    const update = { 'subscription.plan': plan };
+    const paidUntil = targetUser.subscription?.paidUntil;
+    if (plan !== 'free' && !paidManaged && paidUntil && new Date(paidUntil) < new Date()) {
+      update['subscription.paidUntil'] = null;
+    }
+    await User.updateOne({ _id: targetUser._id }, { $set: update });
     targetUser.subscription.plan = plan;
+    if ('subscription.paidUntil' in update) targetUser.subscription.paidUntil = null;
     await invalidateUserCache(targetUser._id);
-    const paidManaged = !!(targetUser.subscription?.stripeSubscriptionId ||
-      (targetUser.subscription?.source === 'apple' && targetUser.subscription?.appleOriginalTransactionId));
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
 

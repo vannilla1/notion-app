@@ -37,7 +37,7 @@ function ensureInit() {
     // re-verifikujeme JWS a triggerneme UI refresh event.
     if (requestId === 'external') {
       if (result?.jws) {
-        api.post('/api/billing/apple/verify', { signedTransaction: result.jws })
+        api.post('/api/billing/apple/verify', { signedTransaction: result.jws }, { _idempotent: true })
           .then(() => ackTransaction(result.transactionId))
           .catch((err) => { if (isDefinitiveVerifyError(err)) ackTransaction(result.transactionId); });
       }
@@ -125,7 +125,7 @@ export async function purchaseIap(productId, timeoutMs = 180000) {
   // Over JWS na backende → aktivuje plán
   let verifyRes;
   try {
-    verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws });
+    verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws }, { _idempotent: true });
   } catch (err) {
     if (isDefinitiveVerifyError(err)) ackTransaction(result.transactionId);
     throw err;
@@ -144,6 +144,6 @@ export async function restoreIap(timeoutMs = 60000) {
   if (!result.success || !result.jws) {
     throw new Error(result.error || 'Žiadne predplatné na obnovenie');
   }
-  const verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws });
+  const verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws }, { _idempotent: true });
   return { success: true, subscription: verifyRes.data.subscription };
 }

@@ -280,7 +280,7 @@ function decodeErrorMessage(code) {
     MISSING_PARAMS: 'Neúplná odpoveď z prihlasovacej služby. Skús to znova.',
     STATE_INVALID: 'Bezpečnostný overovací kód nesedí. Skús to znova.',
     STATE_EXPIRED: 'Prihlasovacia relácia vypršala. Skús to znova.',
-    EMAIL_EXISTS_UNVERIFIED: 'S týmto emailom už máš účet. Prihlás sa najprv heslom a v Nastaveniach pripoj Google/Apple účet.',
+    EMAIL_EXISTS_UNVERIFIED: 'S týmto e-mailom už máš účet s heslom. Prihlás sa heslom, alebo si heslo obnov cez „Zabudnuté heslo“ — potom pôjde aj prihlásenie cez Google/Apple.',
     PROVIDER_ID_TAKEN: 'Tento účet je už pripojený k inému používateľovi.',
     NO_EMAIL: 'Provider nezdielal email. Skús povoliť zdieľanie emailu a opakuj.',
     LAST_LOGIN_METHOD: 'Nemôžeš odpojiť poslednú prihlasovaciu metódu.',

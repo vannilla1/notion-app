@@ -37,6 +37,23 @@ const INITIAL_DELAY_MS = 90 * 1000; // wait for DB warm-up after server boot
 
 const PAID_PLANS = ['team', 'pro'];
 
+// Apple IAP predplatné normálne končí App Store notifikáciou (EXPIRED /
+// GRACE_PERIOD_EXPIRED / REFUND). Poistka pre prípad, že notifikácia nedorazí
+// (zlá URL v App Store Connect, výpadok): Apple skúša strhnúť platbu najviac
+// 60 dní (billing retry), potom predplatné definitívne končí. Po 60 dňoch od
+// paidUntil bez obnovy už ide o prepadnuté predplatné → bežná expirácia.
+const APPLE_SAFETY_NET_MS = 60 * 24 * 60 * 60 * 1000;
+
+// Mongo podmienka „nie je Apple predplatné, ktoré ešte môže byť v billing
+// retry" — rovnaká logika ako v isExpired().
+const appleExpirableGuard = (now) => ({
+  $or: [
+    { 'subscription.source': { $ne: 'apple' } },
+    { 'subscription.appleOriginalTransactionId': { $not: { $type: 'string' } } },
+    { 'subscription.paidUntil': { $lt: new Date(now.getTime() - APPLE_SAFETY_NET_MS) } },
+  ],
+});
+
 /**
  * Returns true if the user record (lean object or hydrated doc) currently
  * meets the auto-expiration criteria. Pure function — no side effects.
@@ -50,11 +67,13 @@ const isExpired = (user) => {
   if (new Date(sub.paidUntil) >= new Date()) return false;
   // Stripe-managed subs are renewed/cancelled via webhooks — never auto-expire.
   if (sub.stripeSubscriptionId) return false;
-  // Apple IAP: expiráciu rieši výlučne App Store notifikácia (EXPIRED /
+  // Apple IAP: expiráciu rieši App Store notifikácia (EXPIRED /
   // GRACE_PERIOD_EXPIRED / REFUND). paidUntil = expiresDate poslednej
   // transakcie, ale počas billing retry / grace period má používateľ
-  // prístup ďalej a DID_RENEW príde až po úspešnom strhnutí.
-  if (sub.source === 'apple' && sub.appleOriginalTransactionId) return false;
+  // prístup ďalej a DID_RENEW príde až po úspešnom strhnutí. Poistka:
+  // po 60 dňoch od paidUntil (koniec Apple billing retry) už expiruje.
+  if (sub.source === 'apple' && sub.appleOriginalTransactionId &&
+      new Date(sub.paidUntil).getTime() >= Date.now() - APPLE_SAFETY_NET_MS) return false;
   return true;
 };
 
@@ -79,7 +98,7 @@ const expireUserIfNeeded = async (userId) => {
         { 'subscription.stripeSubscriptionId': null },
         { 'subscription.stripeSubscriptionId': { $exists: false } },
       ],
-      $nor: [{ 'subscription.source': 'apple', 'subscription.appleOriginalTransactionId': { $type: 'string' } }],
+      $and: [appleExpirableGuard(now)],
     },
     {
       $set: {
@@ -179,7 +198,7 @@ const sweepExpiredPlans = async () => {
         { 'subscription.stripeSubscriptionId': null },
         { 'subscription.stripeSubscriptionId': { $exists: false } },
       ],
-      $nor: [{ 'subscription.source': 'apple', 'subscription.appleOriginalTransactionId': { $type: 'string' } }],
+      $and: [appleExpirableGuard(now)],
     }).select('_id').lean();
 
     if (candidates.length === 0) {

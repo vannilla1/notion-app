@@ -293,7 +293,8 @@ function BillingPage() {
                 </p>
               )}
 
-              {billingStatus?.hasSubscription && !appleManaged && (
+              {/* Aj pri Apple pláne: kto má zároveň Stripe predplatné (dvojitá platba), musí ho vedieť zrušiť. */}
+              {billingStatus?.hasSubscription && (
                 <button
                   className="billing-manage-btn"
                   onClick={handlePortal}

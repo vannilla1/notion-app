@@ -1207,7 +1207,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       finalContactIds = [contactId];
     }
 
-    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
     const plan = await getWorkspacePlan(req);
     // Free: 5 projektov/kontakt (znížené z 10 — overené že žiadny živý Free user
     // 2026-05-07 nemal > 5 projektov na kontakt, takže táto zmena nezablokuje
