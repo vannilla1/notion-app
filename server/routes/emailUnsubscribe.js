@@ -54,7 +54,9 @@ const handleUnsubscribe = async (req, res) => {
       }));
     }
 
-    logger.info('[Unsubscribe] User opted out of marketing emails', { userId, email: user.email });
+    // Bez e-mailu v logu — userId na identifikáciu stačí (GDPR minimalizácia,
+    // logy idú do Render log streamu).
+    logger.info('[Unsubscribe] User opted out of marketing emails', { userId });
 
     return res.send(renderResult({
       ok: true,
