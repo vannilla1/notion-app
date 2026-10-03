@@ -15,6 +15,7 @@ const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
 const oauthService = require('../services/oauthService');
 const { userFacingError } = require('../utils/userFacingError');
+const { runInBackground } = require('../utils/backgroundJobs');
 
 const router = express.Router();
 
@@ -923,7 +924,7 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 // by odpoveď k klientovi nedorazila (rovnako ako googleCalendar.js).
 const SYNC_TIMEOUT = 9 * 60 * 1000;
 
-router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, runInBackground('tasks-sync', async (req, res) => {
   const forceSync = req.body.force === true;
   const syncStartTime = Date.now();
   logger.info('[Google Tasks] Sync started', { userId: req.user.id, forceSync });
@@ -1494,7 +1495,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     logger.error('[Google Tasks] Sync error', { error: error.message, stack: error.stack, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   }
-});
+}));
 
 /**
  * MIGRATE — move existing tasks from the legacy single list into new

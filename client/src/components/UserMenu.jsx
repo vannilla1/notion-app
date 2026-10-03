@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { API_BASE_URL } from '../api/api';
+import { runBackgroundJob } from '../api/backgroundJob';
 import { useAuth } from '../context/AuthContext';
 import NotificationPreferences from './NotificationPreferences';
 import ConnectedAccounts from './ConnectedAccounts';
@@ -812,9 +813,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const wsId = ws.id || ws._id;
       try {
         // Explicitný X-Workspace-Id — request interceptor ho neprepíše.
-        await api.post(`/api/${apiName}/sync`, {}, {
+        // Sync beží na serveri na pozadí (202 + polling), nie v jednom
+        // 10-minútovom HTTP spojení.
+        await runBackgroundJob(`/api/${apiName}/sync`, {}, {
           headers: { 'X-Workspace-Id': wsId },
-          timeout: AXIOS_TIMEOUT
+          maxWaitMs: AXIOS_TIMEOUT
         });
         succeeded.push(ws.name || wsId);
       } catch (e) {
@@ -955,7 +958,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
       await api.post('/api/google-tasks/reset-sync', {}, { timeout: 10000 });
 
-      const response = await api.post('/api/google-tasks/sync', { force: true }, { timeout: 660000 });
+      const response = await runBackgroundJob('/api/google-tasks/sync', { force: true }, { maxWaitMs: 15 * 60 * 1000 });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));

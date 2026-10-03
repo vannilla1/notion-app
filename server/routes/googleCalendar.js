@@ -16,6 +16,7 @@ const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
 const oauthService = require('../services/oauthService');
 const { userFacingError } = require('../utils/userFacingError');
+const { runInBackground } = require('../utils/backgroundJobs');
 
 const router = express.Router();
 
@@ -1285,7 +1286,7 @@ const ensureCalendarWatches = async () => {
 // ==================== SYNC ROUTES ====================
 
 // Sync all tasks to Google Calendar
-router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, runInBackground('calendar-sync', async (req, res) => {
   // Per-(user, workspace) lock prevents double-click duplicates and overlapping
   // manual syncs. If a sync is already running for this scope, short-circuit with
   // 409 instead of racing with Google Calendar inserts.
@@ -1601,7 +1602,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   } finally {
     releaseCalendarLock(fullSyncLockKey);
   }
-});
+}));
 
 // Sync single task to Google Calendar
 router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
