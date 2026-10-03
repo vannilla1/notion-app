@@ -1157,8 +1157,12 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo: rawAssignedTo, reminder, timeReminders } = req.body;
     const io = req.app.get('io');
 
-    if (!title || !title.trim()) {
+    // typeof — `title.trim()` na čísle/objekte hádzalo TypeError → 500 namiesto 400.
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
+    }
+    if (description != null && typeof description !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
     }
 
     // Len členovia workspace — viď sanitizeAssignedTo.
@@ -1422,6 +1426,16 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo: rawAssignedTo, reminder } = req.body;
     const io = req.app.get('io');
+
+    // Typová kontrola textových polí (ak sú zadané). Ne-reťazec v title by pri
+    // globálnej úlohe zhodil save() validáciou (500), pri kontaktnej by sa
+    // uložil ako nezmysel; description/priority smú byť aj null.
+    if (title !== undefined && typeof title !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+    if ((description != null && typeof description !== 'string') || (priority != null && typeof priority !== 'string')) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
 
     // Len členovia workspace — viď sanitizeAssignedTo. Počíta sa raz, všetky
     // tri vetvy nižšie (contact / global / fallback) pracujú už s očisteným poľom.
@@ -2339,8 +2353,12 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
 
-    if (!title || !title.trim()) {
+    // typeof — `title.trim()` na čísle/objekte hádzalo TypeError → 500 namiesto 400.
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
+    }
+    if (notes != null && typeof notes !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
     }
 
     // Len členovia workspace — viď sanitizeAssignedTo.
@@ -2562,6 +2580,11 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
   try {
     const { title, completed, source, dueDate, dueTime, notes, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
+
+    // Typová kontrola textových polí (ak sú zadané) — viď PUT /:id.
+    if ((title !== undefined && typeof title !== 'string') || (notes != null && typeof notes !== 'string')) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
 
     // Len členovia workspace — viď sanitizeAssignedTo. Musí byť hotové PRED
     // volaním synchrónnej updateSubtaskInTask, ktorá pole preberá z closure.
