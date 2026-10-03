@@ -2507,7 +2507,14 @@ let pollingIo = null; // Socket.IO instance for emitting updates
  * Apply a single Google Task change to the CRM (completion, title, due date).
  * Returns true if a CRM task was updated.
  */
-const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
+// allowedWorkspaceIds: workspace-y, kde je používateľ členom. Použije sa, keď
+// sa wsId nepodarilo zistiť (podúlohy) — bez neho by sa podúloha hľadala
+// naprieč VŠETKÝMI workspace-mi a zmena z Google Tasks bývalého člena by
+// prepísala úlohu v tíme, z ktorého už odišiel.
+const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId, allowedWorkspaceIds = null) => {
+  const wsFilter = wsId
+    ? { workspaceId: wsId }
+    : (Array.isArray(allowedWorkspaceIds) ? { workspaceId: { $in: allowedWorkspaceIds } } : {});
   const isCompleted = googleTask.status === 'completed';
   // Strip workspace prefix "[Workspace] " that we add on outbound sync,
   // otherwise the bracketed prefix leaks back into CRM titles on inbound updates.
@@ -2522,14 +2529,14 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   let taskIndex = -1;
 
   if (isValidObjectId(crmTaskId)) {
-    task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+    task = await Task.findOne({ _id: crmTaskId, ...wsFilter });
   }
 
   if (!task) {
     // Search in contacts (works for both ObjectId and UUID strings)
     contact = await Contact.findOne({
       'tasks.id': crmTaskId,
-      ...(wsId ? { workspaceId: wsId } : {})
+      ...wsFilter
     });
     if (contact) {
       taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
@@ -2539,7 +2546,7 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
 
   if (!task) {
     // Check subtasks in global tasks
-    const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+    const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...wsFilter });
     for (const parentTask of parentTasks) {
       const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
       if (subtask) {
@@ -2759,7 +2766,7 @@ const pollGoogleTasksChanges = async () => {
             continue;
           }
 
-          const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
+          const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId, userWorkspaceIds);
           if (result === 'deleted') {
             // Clean up mapping for task deleted from Google
             await User.findByIdAndUpdate(user._id, {
