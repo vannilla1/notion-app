@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '@/api/api';
 import { downloadBlob } from '../utils/fileDownload';
+import { hasLimitedInlinePdf } from '../utils/platform';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -2230,12 +2231,8 @@ function CRM() {
                   alt={previewFile.originalName}
                   className="preview-image"
                 />
-              ) : (previewFile.mimetype === 'application/pdf' || previewFile.originalName?.toLowerCase().endsWith('.pdf')) && previewUrl ? (
-                <object
-                  data={previewUrl}
-                  type="application/pdf"
-                  className="preview-pdf"
-                >
+              ) : (previewFile.mimetype === 'application/pdf' || previewFile.originalName?.toLowerCase().endsWith('.pdf')) && previewUrl ? (() => {
+                const pdfFallback = (
                   <div className="preview-pdf-fallback">
                     <span className="preview-icon">📄</span>
                     <p>PDF náhľad nie je dostupný v tomto prehliadači</p>
@@ -2246,8 +2243,18 @@ function CRM() {
                       Stiahnuť PDF
                     </button>
                   </div>
-                </object>
-              ) : previewFile.mimetype?.startsWith('video/') && previewUrl ? (
+                );
+                // iOS by ukázal len prvú stranu bez možnosti posúvať
+                return hasLimitedInlinePdf() ? pdfFallback : (
+                  <object
+                    data={previewUrl}
+                    type="application/pdf"
+                    className="preview-pdf"
+                  >
+                    {pdfFallback}
+                  </object>
+                );
+              })() : previewFile.mimetype?.startsWith('video/') && previewUrl ? (
                 <video
                   src={previewUrl}
                   controls

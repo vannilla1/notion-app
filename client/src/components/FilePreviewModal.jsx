@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/api';
 import { downloadBlob } from '../utils/fileDownload';
+import { hasLimitedInlinePdf } from '../utils/platform';
 
 const getFileIcon = (mimetype) => {
   if (mimetype?.startsWith('image/')) return '🖼️';
@@ -201,12 +202,8 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
               alt={file.originalName}
               className="preview-image"
             />
-          ) : isPdf && previewUrl ? (
-            <object
-              data={previewUrl}
-              type="application/pdf"
-              className="preview-pdf"
-            >
+          ) : isPdf && previewUrl ? (() => {
+            const pdfFallback = (
               <div className="preview-pdf-fallback">
                 <span className="preview-icon">📄</span>
                 <p>PDF náhľad nie je dostupný v tomto prehliadači</p>
@@ -214,8 +211,18 @@ function FilePreviewModal({ file, downloadUrl, onClose }) {
                   Stiahnuť PDF
                 </button>
               </div>
-            </object>
-          ) : file.mimetype?.startsWith('video/') && previewUrl ? (
+            );
+            // iOS by ukázal len prvú stranu bez možnosti posúvať
+            return hasLimitedInlinePdf() ? pdfFallback : (
+              <object
+                data={previewUrl}
+                type="application/pdf"
+                className="preview-pdf"
+              >
+                {pdfFallback}
+              </object>
+            );
+          })() : file.mimetype?.startsWith('video/') && previewUrl ? (
             <video src={previewUrl} controls className="preview-video">
               Váš prehliadač nepodporuje prehrávanie videa.
             </video>
