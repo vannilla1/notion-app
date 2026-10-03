@@ -13,6 +13,22 @@ import './styles/index.css';
 installBreadcrumbInstrumentation();
 installGlobalErrorHandlers();
 
+// Po deployi nový service worker hneď prevezme otvorené taby a zmaže starý
+// precache (skipWaiting + clientsClaim + cleanupOutdatedCaches). Tab so starým
+// bundlom potom pri prechode na lazy route žiada chunk so starým hashom →
+// „Failed to fetch dynamically imported module“. Vite to hlási udalosťou
+// vite:preloadError — jedno automatické obnovenie načíta nový bundle.
+// Poistka proti slučke: druhá chyba do 30 s už ide do RouteErrorBoundary.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'prpl_chunk_reload_at';
+  let last = 0;
+  try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch { /* storage nedostupný */ }
+  if (Date.now() - last < 30000) return;
+  try { sessionStorage.setItem(KEY, String(Date.now())); } catch { /* storage nedostupný */ }
+  event.preventDefault();
+  window.location.reload();
+});
+
 // Platformové body classes — CSS cez ne cielene upravuje padding, tap targets,
 // safe-area insets. Analóg k 'ios-app' class ktorú injectuje Swift WKWebView
 // (ios/PrplCRM/ContentView.swift), ale pre Android to musíme urobiť z JS lebo
