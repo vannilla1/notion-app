@@ -92,8 +92,20 @@ router.put('/payout-info', authenticateToken, requireAffiliate, async (req, res)
       }
       user.affiliate.payoutIban = clean;
     }
-    if (payoutBankName !== undefined) user.affiliate.payoutBankName = String(payoutBankName).trim();
-    if (payoutNote !== undefined) user.affiliate.payoutNote = String(payoutNote).trim();
+    // Len reťazce s rozumnou dĺžkou — predtým String(objekt) uložil
+    // „[object Object]" a dĺžku obmedzoval až 1 MB limit tela requestu.
+    if (payoutBankName !== undefined && payoutBankName !== null) {
+      if (typeof payoutBankName !== 'string' || payoutBankName.length > 100) {
+        return res.status(400).json({ message: 'Názov banky je neplatný alebo príliš dlhý (max. 100 znakov)' });
+      }
+      user.affiliate.payoutBankName = payoutBankName.trim();
+    }
+    if (payoutNote !== undefined && payoutNote !== null) {
+      if (typeof payoutNote !== 'string' || payoutNote.length > 500) {
+        return res.status(400).json({ message: 'Poznámka je neplatná alebo príliš dlhá (max. 500 znakov)' });
+      }
+      user.affiliate.payoutNote = payoutNote.trim();
+    }
     await user.save();
     res.json({ success: true, affiliate: user.affiliate });
   } catch (err) {
