@@ -1342,15 +1342,29 @@ const csvCell = (v) => {
 // Export users to CSV
 router.get('/export/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const users = await User.find().select('-password -avatarData').lean();
-    const members = await WorkspaceMember.find().lean();
+    // Projekcia len na exportované polia — predtým sa čítali celé dokumenty
+    // vrátane Google máp (syncedTaskIds a pod.) a OAuth tokenov.
+    const users = await User.find()
+      .select('username email role subscription.plan createdAt googleCalendar.enabled googleTasks.enabled')
+      .lean();
+    const members = await WorkspaceMember.find().select('userId workspaceId').lean();
     const workspaces = await Workspace.find().select('_id name').lean();
     const wsMap = {};
     workspaces.forEach(w => { wsMap[w._id.toString()] = w.name; });
+    // Mapa userId → názvy workspace-ov. Predtým `members.filter(...)` v slučke
+    // nad každým userom = O(U×M) porovnaní s .toString() alokáciami.
+    const wsByUser = new Map();
+    for (const m of members) {
+      const name = wsMap[String(m.workspaceId)];
+      if (!name) continue;
+      const k = String(m.userId);
+      if (!wsByUser.has(k)) wsByUser.set(k, []);
+      wsByUser.get(k).push(name);
+    }
 
     const header = 'Meno,Email,Rola,Plán,Workspace-y,Registrovaný,Google Calendar,Google Tasks\n';
     const rows = users.map(u => {
-      const userWs = members.filter(m => m.userId.toString() === u._id.toString()).map(m => wsMap[m.workspaceId.toString()] || '').filter(Boolean).join('; ');
+      const userWs = (wsByUser.get(String(u._id)) || []).join('; ');
       return [
         csvCell(u.username),
         csvCell(u.email),
@@ -1374,16 +1388,23 @@ router.get('/export/users', authenticateToken, requireAdmin, async (req, res) =>
 // Export workspaces to CSV
 router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const workspaces = await Workspace.find().lean();
-    const members = await WorkspaceMember.find().lean();
+    const workspaces = await Workspace.find().select('name slug ownerId paidSeats createdAt').lean();
+    const members = await WorkspaceMember.find().select('workspaceId').lean();
     const users = await User.find().select('_id username email').lean();
     const userMap = {};
     users.forEach(u => { userMap[u._id.toString()] = u; });
+    // Počty členov na jeden prechod — predtým O(W×M) `members.filter` v slučke.
+    const memberCountByWs = new Map();
+    for (const m of members) {
+      const k = String(m.workspaceId);
+      memberCountByWs.set(k, (memberCountByWs.get(k) || 0) + 1);
+    }
 
     const header = 'Názov,Slug,Vlastník,Email vlastníka,Počet členov,Platené miesta,Vytvorený\n';
     const rows = workspaces.map(w => {
       const owner = userMap[w.ownerId.toString()] || {};
-      const memberCount = members.filter(m => m.workspaceId.toString() === w._id.toString()).length;
+      const memberCount = memberCountByWs.get(String(w._id)) || 0;
+
       return [
         csvCell(w.name),
         csvCell(w.slug),
