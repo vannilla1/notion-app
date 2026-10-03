@@ -11272,16 +11272,6 @@ body.ios-app {
   margin-left: 8px;
 }
 
-/* Dark mode úpravy — vyššia opacity aby badge bol viditeľný proti tmavému pozadiu */
-@media (prefers-color-scheme: dark) {
-  .calendar-item-time,
-  .calendar-week-item-time,
-  .calendar-day-item-time {
-    color: #a5b4fc;
-    background: rgba(99, 102, 241, 0.22);
-  }
-}
-
 /* Mobile: čas v month view ešte menší, aby sa vmestil */
 @media (max-width: 768px) {
   .calendar-item-time {
@@ -11517,16 +11507,6 @@ body.ios-app {
   font-style: italic;
   font-size: 14px;
   text-align: center;
-}
-
-/* Dark mode úpravy */
-@media (prefers-color-scheme: dark) {
-  .calendar-day-event {
-    background: rgba(99, 102, 241, 0.25);
-  }
-  .calendar-day-hour-line {
-    border-top-color: rgba(255, 255, 255, 0.08);
-  }
 }
 
 /* Mobile */
