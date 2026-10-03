@@ -145,12 +145,16 @@ const expireUserIfNeeded = async (userId) => {
   // a circular load order — subscriptionEmailService doesn't depend on this
   // module, but we want to keep planExpiration loadable even if email
   // service has init errors.
+  // Fire-and-forget — lazy expirácia beží v auth middleware a request
+  // používateľa nesmie čakať na SMTP (až desiatky sekúnd).
   try {
     const subscriptionEmailService = require('./subscriptionEmailService');
-    await subscriptionEmailService.sendExpired({
+    subscriptionEmailService.sendExpired({
       user: previous,
       previousPlan: previous.subscription?.plan,
       triggeredBy: 'system'
+    }).catch((emailErr) => {
+      logger.warn('[PlanExpiration] Expired email failed', { error: emailErr.message });
     });
   } catch (emailErr) {
     logger.warn('[PlanExpiration] Expired email failed', { error: emailErr.message });
