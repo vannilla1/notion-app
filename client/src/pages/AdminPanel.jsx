@@ -6697,8 +6697,19 @@ function DiagErrorsSection() {
     return () => clearInterval(id);
   }, [selected, load]);
 
+  // Prompt ide do externého AI nástroja — bez osobných údajov zákazníkov
+  // (GDPR): používateľ len cez ID, URL bez query (tokeny, e-maily), e-maily a
+  // IP adresy kdekoľvek v texte (stack, kontext) sa nahradia.
+  const redactPii = (text) => String(text)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<email>')
+    .replace(/\b(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.$2.x.x');
+  const urlWithoutQuery = (url) => {
+    if (!url) return '—';
+    try { const u = new URL(url); return `${u.origin}${u.pathname}`; } catch { return String(url).split('?')[0]; }
+  };
+
   const handleSendToClaude = (err) => {
-    const prompt = `Prosím oprav túto chybu v Prpl CRM.
+    const prompt = redactPii(`Prosím oprav túto chybu v Prpl CRM.
 
 Error: ${err.message}
 Status: ${err.statusCode}
@@ -6712,11 +6723,11 @@ ${err.stack || '(bez stacku)'}
 Kontext:
 ${JSON.stringify(err.context || {}, null, 2)}
 
-User: ${err.userId?.email || 'nezalogovaný'}
+User ID: ${err.userId?._id || err.userId || 'nezalogovaný'}
 Workspace: ${err.workspaceId || 'N/A'}
-URL: ${err.url || '—'}
+URL: ${urlWithoutQuery(err.url)}
 User agent: ${err.userAgent || '—'}
-`;
+`);
     // Feature guard — mimo secure contextu je navigator.clipboard undefined
     // a volanie by spadlo na synchronnom TypeError bez hlášky.
     if (!navigator.clipboard?.writeText) { alert('Schránka nie je dostupná v tomto prehliadači.'); return; }
