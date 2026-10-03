@@ -412,6 +412,15 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
       EXCLUDE_FILE_DATA
     ).lean();
 
+    // Server beží v UTC (Render) — bez timeZone sa projekt vytvorený napr.
+    // o 23:30 SELČ ukázal v CSV s predchádzajúcim dňom. Neplatný dátum → ''.
+    const fmtSkDate = (d) => {
+      if (!d) return '';
+      const date = new Date(d);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleDateString('sk-SK', { timeZone: 'Europe/Bratislava' });
+    };
+
     const escCsv = (val) => {
       if (val == null) return '';
       let str = String(val);
@@ -447,12 +456,12 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
         escCsv(task.description),
         task.completed ? 'Dokončený' : 'Aktívny',
         escCsv(priorityMap[task.priority] || task.priority),
-        escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+        escCsv(fmtSkDate(task.dueDate)),
         escCsv(contactNames.join(', ')),
         'Globálny',
         subtaskCount,
         completedSubtasks,
-        escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+        escCsv(fmtSkDate(task.createdAt))
       ].join(','));
     }
 
@@ -467,12 +476,12 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
           escCsv(task.description),
           task.completed ? 'Dokončený' : 'Aktívny',
           escCsv(priorityMap[task.priority] || task.priority),
-          escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+          escCsv(fmtSkDate(task.dueDate)),
           escCsv(contact.name),
           'Kontaktový',
           subtaskCount,
           completedSubtasks,
-          escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+          escCsv(fmtSkDate(task.createdAt))
         ].join(','));
       }
     }
