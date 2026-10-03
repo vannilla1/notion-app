@@ -20,6 +20,7 @@ const APNsDevice = require('../models/APNsDevice');
 const PromoCode = require('../models/PromoCode');
 const ServerError = require('../models/ServerError');
 const auditService = require('../services/auditService');
+const { logSecurityEvent } = require('../services/securityAudit');
 const subscriptionEmailService = require('../services/subscriptionEmailService');
 const EmailLog = require('../models/EmailLog');
 const onlineUsers = require('../services/onlineUsers');
@@ -73,8 +74,18 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
       return res.status(403).json({ message: 'Prístup zamietnutý' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    // Heslo len ako string a účet musí heslo mať — bcrypt.compare s
+    // ne-stringom / null hashom hodí výnimku → 500 namiesto 401.
+    const isMatch = typeof password === 'string' && password.length <= 1024 && !!user.password &&
+      await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      // Durable stopa pokusov o super-admin login (throttled per IP)
+      logSecurityEvent('security.admin_login_failed', req, {});
+      auditService.logAction({
+        action: 'auth.login_failed', category: 'auth', email: SUPER_ADMIN_EMAIL,
+        details: { reason: 'admin_wrong_password' },
+        ipAddress: req.ip, userAgent: req.get('user-agent')
+      });
       return res.status(401).json({ message: 'Nesprávne heslo' });
     }
 
@@ -565,9 +576,14 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
     }
 
     const oldPlan = targetUser.subscription?.plan || 'free';
-    targetUser.subscription = { plan };
-    await targetUser.save();
+    // Len pole plan — priradenie celého objektu zmazalo stripeCustomerId,
+    // stripeSubscriptionId, appleOriginalTransactionId, source, paidUntil,
+    // zľavu aj stav pripomienok (webhooky by používateľa potom nenašli).
+    await User.updateOne({ _id: targetUser._id }, { $set: { 'subscription.plan': plan } });
+    targetUser.subscription.plan = plan;
     await invalidateUserCache(targetUser._id);
+    const paidManaged = !!(targetUser.subscription?.stripeSubscriptionId ||
+      (targetUser.subscription?.source === 'apple' && targetUser.subscription?.appleOriginalTransactionId));
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
 
@@ -591,7 +607,12 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
       ipAddress: req.ip, userAgent: req.get('user-agent')
     });
 
-    res.json({ message: 'Plán bol aktualizovaný', plan });
+    res.json({
+      message: 'Plán bol aktualizovaný',
+      plan,
+      // Plán spravuje Stripe/App Store — ďalší webhook ho môže prepísať.
+      ...(paidManaged && { warning: 'Používateľ má aktívne platené predplatné (Stripe/App Store); ďalšia zmena predplatného plán prepíše.' })
+    });
   } catch (error) {
     logger.error('Admin plan change error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri zmene plánu' });

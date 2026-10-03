@@ -5,7 +5,9 @@ const auditLogSchema = new mongoose.Schema({
   username: String,
   email: String,
   action: { type: String, required: true, index: true }, // e.g. 'user.role_changed', 'user.plan_changed', 'user.deleted', 'workspace.created', 'workspace.deleted', 'contact.created', 'task.created', etc.
-  category: { type: String, enum: ['user', 'workspace', 'contact', 'task', 'message', 'system', 'auth', 'billing', 'usage'], index: true },
+  // 'security' (securityAudit.logSecurityEvent) a 'admin' (admin akcie) v enume
+  // chýbali → validácia save() zlyhala a tieto záznamy sa NIKDY neuložili.
+  category: { type: String, enum: ['user', 'workspace', 'contact', 'task', 'message', 'system', 'auth', 'billing', 'usage', 'security', 'admin'], index: true },
   targetType: String, // 'user', 'workspace', 'contact', 'task', 'message'
   targetId: String,
   targetName: String,
