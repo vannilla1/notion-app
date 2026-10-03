@@ -1058,9 +1058,10 @@ function Dashboard() {
                           </span>
                           {msg.attachment && <span className="meta-text">📎 Príloha</span>}
                         </div>
-                        {msg.body && (
-                          <div className="detail-item-description" style={{ marginTop: '4px' }}>
-                            {msg.body.length > 100 ? msg.body.substring(0, 100) + '...' : msg.body}
+                        {/* Model správy má pole `description` (nie `body`) — náhľad textu */}
+                        {msg.description && (
+                          <div className="detail-item-description" style={{ marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {msg.description.length > 100 ? msg.description.substring(0, 100) + '...' : msg.description}
                           </div>
                         )}
                       </div>
@@ -1403,9 +1404,9 @@ function Dashboard() {
                                 </span>
                                 {msg.attachment && <span>📎</span>}
                               </div>
-                              {msg.body && (
+                              {msg.description && (
                                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {msg.body.length > 80 ? msg.body.substring(0, 80) + '...' : msg.body}
+                                  {msg.description.length > 80 ? msg.description.substring(0, 80) + '...' : msg.description}
                                 </div>
                               )}
                             </div>
