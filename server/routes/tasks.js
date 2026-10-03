@@ -19,6 +19,10 @@ const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHel
 const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../utils/idempotency');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
+// POZOR: len pre READ-ONLY dotazy. Dokument načítaný s touto projekciou sa
+// nesmie ukladať cez markModified('tasks') + save() — $set celého poľa by
+// legacy base64 `files[].data` (prílohy spred migrácie do R2) natrvalo
+// zmazal. Zápisové cesty preto načítavajú kontakt bez projekcie.
 const EXCLUDE_FILE_DATA = {
   'files.data': 0,
   'tasks.files.data': 0,
@@ -1936,7 +1940,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // Task not found in global tasks, try to find in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
       if (taskIndex !== -1) {
@@ -2103,7 +2107,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     // If source is 'contact', delete from contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
         if (taskIndex !== -1) {
@@ -2181,7 +2185,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // If not found in global tasks, try contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
       if (taskIndex !== -1) {
@@ -2477,7 +2481,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     // If source is specified as contact, look in contacts first
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -2580,7 +2584,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     }
 
     // If not found in global, search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
@@ -2699,7 +2703,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -2823,7 +2827,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     }
 
     // Search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
@@ -2934,7 +2938,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -3001,7 +3005,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
     }
 
     // Search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
