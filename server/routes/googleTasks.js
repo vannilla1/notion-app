@@ -3,6 +3,7 @@ const { google } = require('googleapis');
 const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
+const { escapeRegex } = require('../utils/regexHelpers');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
 const { logPlanGateHit } = require('../utils/planGate');
@@ -1819,8 +1820,10 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
   try {
     const { searchTerm } = req.body;
 
-    if (!searchTerm || searchTerm.length < 2) {
-      return res.status(400).json({ message: 'Vyhľadávací výraz musí mať aspoň 2 znaky' });
+    // Len reťazec rozumnej dĺžky — pole/objekt by prešli `length` kontrolou
+    // a z ľubovoľného textu sa nižšie skladá regex.
+    if (typeof searchTerm !== 'string' || searchTerm.length < 2 || searchTerm.length > 100) {
+      return res.status(400).json({ message: 'Vyhľadávací výraz musí mať 2 až 100 znakov' });
     }
 
     const user = await User.findById(req.user.id);
@@ -1848,7 +1851,10 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
 
     // Collect matching tasks from ALL task lists
     let allMatchingTasks = []; // { taskListId, task }
-    const searchRegex = new RegExp(searchTerm, 'i');
+    // escapeRegex: výraz z tela requestu sa hľadá ako obyčajný text. Bez neho
+    // by pattern typu `(a+)+$` (ReDoS) zablokoval event loop pri teste na
+    // každý názov úlohy vo všetkých Google zoznamoch.
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
 
     for (const taskList of taskLists) {
       let pageToken = null;
