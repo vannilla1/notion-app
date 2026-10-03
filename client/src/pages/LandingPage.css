@@ -223,8 +223,10 @@
 
 /* ===== Hero ===== */
 .lp-hero {
-  min-height: 100dvh;
+  /* vh je fallback, dvh (dynamický panel prehliadača) ho musí nasledovať —
+     v opačnom poradí vždy vyhralo 100vh a hero bolo vyššie než viewport. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
