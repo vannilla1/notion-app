@@ -43,6 +43,18 @@
                 <string>CA92.1</string>
             </array>
         </dict>
+        <!-- File Timestamp API — pruneStaleDownloadDirs (ContentView.swift)
+             číta creationDateKey dočasných priečinkov sťahovaní vo vlastnom
+             kontajneri appky. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- C617.1: timestamps of files inside the app container -->
+                <string>C617.1</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

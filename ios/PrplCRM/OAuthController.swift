@@ -249,7 +249,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
               let identityTokenData = credential.identityToken,
               let identityToken = String(data: identityTokenData, encoding: .utf8) else {
-            print("[AppleSignIn] Missing identity token in credential")
+            debugLog("[AppleSignIn] Missing identity token in credential")
             return
         }
 
@@ -275,7 +275,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
                 case .success(let jwt):
                     webViewRef?.injectPrplCrmAuthToken(jwt)
                 case .failure(let error):
-                    print("[AppleSignIn] Backend exchange failed: \(error.localizedDescription)")
+                    debugLog("[AppleSignIn] Backend exchange failed: \(error.localizedDescription)")
                     NativeErrorReporter.report(name: "iOSAppleSignInBackendFailed", message: error.localizedDescription, url: "https://prplcrm.eu/native/apple-signin")
                     OAuthController.showAlert(in: self.presentingWindow,
                         title: "Apple prihlásenie",
@@ -302,7 +302,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
         // (nie alarmujúce "kontaktujte podporu"). Ak by 1000 masovo pribúdalo,
         // prejaví sa to ako "nedá sa prihlásiť cez Apple" — iný, hlučnejší signál.
         if nsErr.code == ASAuthorizationError.unknown.rawValue {
-            print("[AppleSignIn] Benign unknown (1000) — likely dismiss/transient, not reporting")
+            debugLog("[AppleSignIn] Benign unknown (1000) — likely dismiss/transient, not reporting")
             OAuthController.showAlert(in: presentingWindow,
                 title: "Apple prihlásenie sa nepodarilo",
                 message: "Skúste to prosím znova, prípadne použite prihlásenie cez Google alebo email.")
@@ -312,7 +312,7 @@ class AppleSignInController: NSObject, ASAuthorizationControllerDelegate, ASAuth
         // Ostatné kódy (1002/1003/1004/1005) sú reálne, akčné — hlásime do
         // diagnostiky (užitočné pri App review 2.1(a)) a ukážeme user-friendly hlášku.
         let humanReadable = AppleSignInController.appleSignInErrorMessage(for: nsErr)
-        print("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
+        debugLog("[AppleSignIn] Authorization error code=\(nsErr.code) domain=\(nsErr.domain) desc=\(error.localizedDescription)")
         NativeErrorReporter.report(name: "iOSAppleSignInAuthError", message: "code=\(nsErr.code) domain=\(nsErr.domain): \(error.localizedDescription)", url: "https://prplcrm.eu/native/apple-signin")
 
         OAuthController.showAlert(in: presentingWindow,
@@ -387,7 +387,7 @@ class GoogleSignInController {
                 let nsErr = error as NSError
                 // User cancel — ticho.
                 if nsErr.code == GIDSignInError.canceled.rawValue { return }
-                print("[GoogleSignIn] Error: \(error.localizedDescription)")
+                debugLog("[GoogleSignIn] Error: \(error.localizedDescription)")
                 NativeErrorReporter.report(name: "iOSGoogleSignInError", message: "code=\(nsErr.code): \(error.localizedDescription)", url: "https://prplcrm.eu/native/google-signin")
                 OAuthController.showAlert(in: presentingViewController.view.window,
                     title: "Google prihlásenie",
@@ -407,7 +407,7 @@ class GoogleSignInController {
                     case .success(let jwt):
                         webView?.injectPrplCrmAuthToken(jwt)
                     case .failure(let err):
-                        print("[GoogleSignIn] Backend exchange failed: \(err.localizedDescription)")
+                        debugLog("[GoogleSignIn] Backend exchange failed: \(err.localizedDescription)")
                         NativeErrorReporter.report(name: "iOSGoogleSignInBackendFailed", message: err.localizedDescription, url: "https://prplcrm.eu/native/google-signin")
                         OAuthController.showAlert(in: presentingViewController.view.window,
                             title: "Google prihlásenie",
@@ -429,7 +429,7 @@ class GoogleSignInController {
 enum OAuthController {
     static func startGoogleSignIn(from webView: WKWebView) {
         guard let viewController = topPresentedViewController(from: webView) else {
-            print("[OAuth] No view controller available")
+            debugLog("[OAuth] No view controller available")
             return
         }
         #if canImport(GoogleSignIn)

@@ -54,7 +54,7 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
+		<false/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Prpl CRM potrebuje pristup ku kamere na pridavanie fotiek a videi k projektom a kontaktom.</string>
@@ -64,6 +64,8 @@
 	<string>Prpl CRM potrebuje pristup k mikrofonu pri nahravani videa k priloham projektov a kontaktov.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Prpl CRM potrebuje pristup k fotoalbumu na pridavanie fotiek k projektom a kontaktom.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Prpl CRM potrebuje prístup na uloženie stiahnutých fotiek a videí do fotoalbumu.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
