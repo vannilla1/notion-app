@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const { recordError } = require('../services/serverErrorService');
@@ -26,6 +27,8 @@ const NO_BASE64_PROJECTION = {
   'files.data': 0,
   'comments.attachment.data': 0
 };
+
+const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
 const router = express.Router();
 
@@ -472,6 +475,14 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         return res.status(400).json({ message: 'Príjemca, typ a predmet sú povinné' });
       }
 
+      // Len string v tvare ObjectId: express.json je globálne a multer JSON
+      // telo prepustí, takže `{"toUserId": {"$ne": null}}` by šlo do filtra
+      // _id ako operátor (vybral by prvého používateľa) a kontrola self-send
+      // nižšie by sa na objekt nevzťahovala.
+      if (typeof toUserId !== 'string' || !OBJECT_ID_RE.test(toUserId)) {
+        return res.status(400).json({ message: 'Neplatný príjemca' });
+      }
+
       if (!['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) {
         return res.status(400).json({ message: 'Neplatný typ odkazu' });
       }
@@ -500,8 +511,20 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         pollMultipleChoice = req.body.pollMultipleChoice === 'true' || req.body.pollMultipleChoice === true;
       }
 
-      // Get recipient
-      const recipient = await User.findById(toUserId);
+      // Príjemca musí byť členom AKTUÁLNEHO workspace-u — inak by sa dala
+      // poslať správa (+ notifikácia a socket event s predmetom) používateľovi
+      // z cudzieho tenanta a odpoveď by prezradila jeho username podľa ID.
+      // Index { workspaceId, userId } existuje (WorkspaceMember.js).
+      const membership = await WorkspaceMember.findOne({ workspaceId: req.workspaceId, userId: toUserId })
+        .select('_id')
+        .lean();
+      if (!membership) {
+        return res.status(404).json({ message: 'Príjemca nie je členom tohto pracovného prostredia' });
+      }
+
+      // Len _id + username — celý dokument nesie aj avatarData (base64, až
+      // niekoľko MB), ktoré auth cache zámerne vynecháva.
+      const recipient = await User.findById(toUserId).select('username').lean();
       if (!recipient) {
         return res.status(404).json({ message: 'Príjemca nenájdený' });
       }
