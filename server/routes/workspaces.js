@@ -85,9 +85,12 @@ router.put('/reorder', authenticateToken, async (req, res) => {
 // Get current workspace details
 router.get('/current', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
-
-    const owner = await User.findById(req.workspace.ownerId);
+    // Z vlastníka čítame len subscription.plan — bez .select() by sa pri každom
+    // štarte klienta načítal celý User vrátane avatarData (Base64, až ~6,7 MB).
+    const [memberCount, owner] = await Promise.all([
+      WorkspaceMember.countDocuments({ workspaceId: req.workspace._id }),
+      User.findById(req.workspace.ownerId).select('subscription').lean()
+    ]);
     const paidSeats = req.workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
     const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
@@ -240,9 +243,12 @@ router.post('/join', authenticateToken, async (req, res) => {
     }
 
     // Check workspace member limits based on owner's plan and paid seats
-    const joiningUser = await User.findById(req.user.id);
-    const owner = await User.findById(workspace.ownerId);
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+    // (len email + subscription — nie celý User s avatarData blobom)
+    const [joiningUser, owner, memberCount] = await Promise.all([
+      User.findById(req.user.id).select('email').lean(),
+      User.findById(workspace.ownerId).select('email subscription').lean(),
+      WorkspaceMember.countDocuments({ workspaceId: workspace._id })
+    ]);
 
     // Team Pro emails bypass capacity check
     const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
@@ -363,8 +369,10 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
     // v jednom React render tiku atomicky nastavil currentWorkspaceId +
     // currentWorkspace. Second roundtrip GET /current by otvoril race window
     // (cross-workspace deep-link bug, commit c18a9b2).
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
-    const owner = await User.findById(workspace.ownerId);
+    const [memberCount, owner] = await Promise.all([
+      WorkspaceMember.countDocuments({ workspaceId: workspace._id }),
+      User.findById(workspace.ownerId).select('subscription').lean()
+    ]);
     const paidSeats = workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
     const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
@@ -469,7 +477,7 @@ router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (re
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { paidSeats: Math.floor(paidSeats) });
 
-    const owner = await User.findById(req.workspace.ownerId);
+    const owner = await User.findById(req.workspace.ownerId).select('subscription').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
     const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
     const baseLimit = seatLimits[ownerPlan] || 2;
@@ -586,8 +594,8 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
     // If removing self (leaving workspace)
     if (member.userId.toString() === req.user.id) {
       // Clear current workspace if this is it
-      const user = await User.findById(req.user.id);
-      if (user.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
+      const user = await User.findById(req.user.id).select('currentWorkspaceId').lean();
+      if (user?.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
         // Find another workspace to switch to
         const otherMembership = await WorkspaceMember.findOne({
           userId: req.user.id,
@@ -603,7 +611,7 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
     await WorkspaceMember.deleteOne({ _id: memberId });
 
     // Clear removed user's current workspace if needed
-    const removedUser = await User.findById(member.userId);
+    const removedUser = await User.findById(member.userId).select('currentWorkspaceId').lean();
     if (removedUser?.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
       const otherMembership = await WorkspaceMember.findOne({
         userId: member.userId,
@@ -795,12 +803,12 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
 
     // Check workspace capacity
     const workspace = await Workspace.findById(req.workspaceId);
-    const owner = await User.findById(workspace.ownerId);
+    const owner = await User.findById(workspace.ownerId).select('subscription').lean();
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
     // Team Pro emails bypass capacity check entirely
     const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const inviterUser = await User.findById(req.user.id);
+    const inviterUser = await User.findById(req.user.id).select('email username').lean();
     const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
 
     if (!isTeamPro) {
@@ -996,7 +1004,7 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       return res.status(404).json({ message: 'Pracovné prostredie už neexistuje' });
     }
 
-    const owner = await User.findById(workspace.ownerId);
+    const owner = await User.findById(workspace.ownerId).select('email subscription').lean();
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
     // Team Pro emails bypass capacity check
