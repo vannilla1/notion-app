@@ -159,7 +159,7 @@ export default function TermsOfService() {
         <h2 style={s.h2}>10. Ochrana osobných údajov</h2>
         <p>10.1. Poskytovateľ spracúva osobné údaje Používateľov v súlade s nariadením (EÚ) 2016/679 (GDPR) a zákonom č. 18/2018 Z.z. o ochrane osobných údajov.</p>
         <p>10.2. Podrobné informácie o spracúvaní osobných údajov sú uvedené v samostatnom dokumente{' '}
-          <Link to="/ochrana-udajov/" style={s.a}>Zásady ochrany osobných údajov</Link>.
+          <Link to={privacyLink} style={s.a}>Zásady ochrany osobných údajov</Link>.
         </p>
         <p>10.3. Používateľ berie na vedomie, že ako prevádzkovateľ osobných údajov svojich kontaktov a klientov uložených v Službe je zodpovedný za súlad s GDPR voči týmto osobám.</p>
         <p>10.4. Poskytovateľ vystupuje vo vzťahu k osobným údajom uloženým Používateľom v Službe ako sprostredkovateľ v zmysle čl. 28 GDPR.</p>
