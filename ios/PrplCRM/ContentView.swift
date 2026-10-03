@@ -9,6 +9,12 @@ struct ContentView: View {
     @State private var loadError = false
     @State private var isLocked = false
     @State private var biometricFailed = false
+    // Biometrický zámok aj po návrate z pozadia (predtým len pri cold starte).
+    // Krátke odbočky (OAuth v Safari, share sheet, výber súboru) zámok
+    // nespustia — až pobyt na pozadí dlhší ako relockAfter.
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var backgroundedAt: Date? = nil
+    private let relockAfter: TimeInterval = 5 * 60
     // Automatické opakovanie po zlyhaní prvého načítania (bez siete, server 5xx):
     // 3, 5, 10, 20, 30 s… Používateľ nemusí klepať na „Skúsiť znova" — po návrate
     // siete alebo odznení výpadku servera appka nabehne sama (parita s Androidom).
@@ -78,6 +84,18 @@ struct ContentView: View {
             if KeychainHelper.getToken() != nil {
                 isLocked = true
                 authenticate()
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background {
+                backgroundedAt = Date()
+            } else if phase == .active {
+                let awayFor = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+                backgroundedAt = nil
+                if !isLocked, awayFor > relockAfter, KeychainHelper.getToken() != nil {
+                    isLocked = true
+                    authenticate()
+                }
             }
         }
     }
@@ -304,9 +322,18 @@ enum WKKeyboardDisplayFix {
     static func apply() {
         guard !applied else { return }
         applied = true
-        guard let contentViewClass: AnyClass = NSClassFromString("WKContentView") else { return }
+        // Privátne WebKit API — ak ho nová verzia iOS premenuje, fix potichu
+        // prestane fungovať (klávesnica sa po natívnom pickeri neotvorí).
+        // Nahlásime to do Diagnostiky, nech sa to dozvieme z produkcie.
+        guard let contentViewClass: AnyClass = NSClassFromString("WKContentView") else {
+            NativeErrorReporter.report(name: "iOSKeyboardFixClassMissing", message: "WKContentView class not found", url: "https://prplcrm.eu/native/keyboard")
+            return
+        }
         let selector = sel_getUid("_elementDidFocus:userIsInteracting:blurPreviousNode:activityStateChanges:userObject:")
-        guard let method = class_getInstanceMethod(contentViewClass, selector) else { return }
+        guard let method = class_getInstanceMethod(contentViewClass, selector) else {
+            NativeErrorReporter.report(name: "iOSKeyboardFixSelectorMissing", message: "WKContentView _elementDidFocus selector not found (iOS \(UIDevice.current.systemVersion))", url: "https://prplcrm.eu/native/keyboard")
+            return
+        }
         let originalImp = method_getImplementation(method)
         let block: @convention(block) (Any, UnsafeRawPointer, Bool, Bool, Bool, Any?) -> Void = { target, node, _, blurPrevious, changes, userObject in
             let original = unsafeBitCast(originalImp, to: ElementDidFocusClosure.self)
@@ -324,6 +351,113 @@ struct WebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
+    }
+
+    // Obnova tokenu z Keychainu PRED spustením JS stránky — len ak je
+    // localStorage prázdne (viď komentár v makeUIView) a LEN na prplcrm.eu.
+    // WKUserScript nemá obmedzenie na origin: bez podmienky by sa JWT zapísal
+    // do localStorage akejkoľvek stránky, ktorá sa dostane do hlavného frame.
+    static func makeTokenRestoreScript(token: String) -> WKUserScript {
+        let escapedToken = token.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        return WKUserScript(
+            source: "if (location.hostname === 'prplcrm.eu' && !localStorage.getItem('token')) { localStorage.setItem('token', '\(escapedToken)'); }",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+    }
+
+    // Základný skript (safe-area CSS, natívny OAuth flag, most token ↔ native).
+    // Samostatne, aby ho Coordinator vedel po prihlásení/odhlásení znova
+    // pridať bez tokenu z predošlej session (reinstallUserScripts).
+    static func makeBaseUserScript() -> WKUserScript {
+        return WKUserScript(
+            source: """
+            // Len na našej doméne — cudzí dokument v hlavnom frame nesmie
+            // dostať natívny most ani hooky na localStorage (token).
+            if (location.hostname === 'prplcrm.eu') {
+                document.documentElement.style.setProperty('--sat', 'env(safe-area-inset-top)');
+                document.documentElement.style.setProperty('--sab', 'env(safe-area-inset-bottom)');
+                document.documentElement.style.setProperty('--sal', 'env(safe-area-inset-left)');
+                document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
+                document.body.classList.add('ios-app');
+
+                // Phase 4 native OAuth bridge — AKTIVOVANÝ.
+                // FE OAuthButtons.jsx kontroluje window.__nativeOAuthSupported a ak
+                // je true, použije postMessage cez webkit.messageHandlers.iosNative
+                // ({type:'startGoogleSignIn'} / {type:'startAppleSignIn'}) namiesto
+                // window.location.assign na backend.
+                // ContentView.userContentController spustí OAuthController, ktorý
+                // používa native ASAuthorizationAppleIDProvider / GoogleSignIn-iOS
+                // SDK, POSTne id_token na /api/auth/{provider}/native, dostane Prpl
+                // CRM JWT a injectne ho cez window.__nativeAuthLogin.
+                window.__nativeOAuthSupported = true;
+
+                // Force header padding for status bar - inject CSS directly
+                var iosStyle = document.createElement('style');
+                iosStyle.textContent = '.crm-header { padding-top: calc(env(safe-area-inset-top, 59px) + 16px) !important; }';
+                document.head.appendChild(iosStyle);
+
+                // Extract auth token from localStorage and send to native
+                (function() {
+                    function sendTokenToNative(token) {
+                        try {
+                            if (token && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
+                                window.webkit.messageHandlers.iosNative.postMessage({ type: 'authToken', token: token });
+                                return true;
+                            }
+                        } catch(e) {}
+                        return false;
+                    }
+
+                    // Try immediately
+                    var token = localStorage.getItem('token');
+                    if (token) {
+                        sendTokenToNative(token);
+                    }
+
+                    // Watch for token changes (after login)
+                    try {
+                        var origSetItem = localStorage.setItem.bind(localStorage);
+                        localStorage.setItem = function(key, value) {
+                            origSetItem(key, value);
+                            if (key === 'token') {
+                                sendTokenToNative(value);
+                            }
+                        };
+                    } catch(e) {}
+
+                    // Watch for logout (token removal)
+                    try {
+                        var origRemoveItem = localStorage.removeItem.bind(localStorage);
+                        localStorage.removeItem = function(key) {
+                            origRemoveItem(key);
+                            if (key === 'token') {
+                                try {
+                                    window.webkit.messageHandlers.iosNative.postMessage({ type: 'logout' });
+                                } catch(e) {}
+                            }
+                        };
+                    } catch(e) {}
+
+                    // Fallback: retry every 3s for 30s in case token arrives late
+                    var attempts = 0;
+                    var checkInterval = setInterval(function() {
+                        attempts++;
+                        var t = localStorage.getItem('token');
+                        if (t) {
+                            sendTokenToNative(t);
+                            clearInterval(checkInterval);
+                        } else if (attempts >= 10) {
+                            clearInterval(checkInterval);
+                        }
+                    }, 3000);
+                })();
+            }
+            """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -392,102 +526,12 @@ struct WebView: UIViewRepresentable {
         // guard preserves any fresh token already in localStorage from the current
         // session.
         if let savedToken = KeychainHelper.getToken() {
-            let escapedToken = savedToken.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-            let restoreScript = WKUserScript(
-                source: "if (!localStorage.getItem('token')) { localStorage.setItem('token', '\(escapedToken)'); }",
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: true
-            )
-            config.userContentController.addUserScript(restoreScript)
+            config.userContentController.addUserScript(WebView.makeTokenRestoreScript(token: savedToken))
             debugLog("[Keychain] Injecting saved token into WebView localStorage (only if empty)")
         }
 
         // Inject CSS safe area variables + auth token bridge
-        let script = WKUserScript(
-            source: """
-            document.documentElement.style.setProperty('--sat', 'env(safe-area-inset-top)');
-            document.documentElement.style.setProperty('--sab', 'env(safe-area-inset-bottom)');
-            document.documentElement.style.setProperty('--sal', 'env(safe-area-inset-left)');
-            document.documentElement.style.setProperty('--sar', 'env(safe-area-inset-right)');
-            document.body.classList.add('ios-app');
-
-            // Phase 4 native OAuth bridge — AKTIVOVANÝ.
-            // FE OAuthButtons.jsx kontroluje window.__nativeOAuthSupported a ak
-            // je true, použije postMessage cez webkit.messageHandlers.iosNative
-            // ({type:'startGoogleSignIn'} / {type:'startAppleSignIn'}) namiesto
-            // window.location.assign na backend.
-            // ContentView.userContentController spustí OAuthController, ktorý
-            // používa native ASAuthorizationAppleIDProvider / GoogleSignIn-iOS
-            // SDK, POSTne id_token na /api/auth/{provider}/native, dostane Prpl
-            // CRM JWT a injectne ho cez window.__nativeAuthLogin.
-            window.__nativeOAuthSupported = true;
-
-            // Force header padding for status bar - inject CSS directly
-            var iosStyle = document.createElement('style');
-            iosStyle.textContent = '.crm-header { padding-top: calc(env(safe-area-inset-top, 59px) + 16px) !important; }';
-            document.head.appendChild(iosStyle);
-
-            // Extract auth token from localStorage and send to native
-            (function() {
-                function sendTokenToNative(token) {
-                    try {
-                        if (token && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosNative) {
-                            window.webkit.messageHandlers.iosNative.postMessage({ type: 'authToken', token: token });
-                            return true;
-                        }
-                    } catch(e) {}
-                    return false;
-                }
-
-                // Try immediately
-                var token = localStorage.getItem('token');
-                if (token) {
-                    sendTokenToNative(token);
-                }
-
-                // Watch for token changes (after login)
-                try {
-                    var origSetItem = localStorage.setItem.bind(localStorage);
-                    localStorage.setItem = function(key, value) {
-                        origSetItem(key, value);
-                        if (key === 'token') {
-                            sendTokenToNative(value);
-                        }
-                    };
-                } catch(e) {}
-
-                // Watch for logout (token removal)
-                try {
-                    var origRemoveItem = localStorage.removeItem.bind(localStorage);
-                    localStorage.removeItem = function(key) {
-                        origRemoveItem(key);
-                        if (key === 'token') {
-                            try {
-                                window.webkit.messageHandlers.iosNative.postMessage({ type: 'logout' });
-                            } catch(e) {}
-                        }
-                    };
-                } catch(e) {}
-
-                // Fallback: retry every 3s for 30s in case token arrives late
-                var attempts = 0;
-                var checkInterval = setInterval(function() {
-                    attempts++;
-                    var t = localStorage.getItem('token');
-                    if (t) {
-                        sendTokenToNative(t);
-                        clearInterval(checkInterval);
-                    } else if (attempts >= 10) {
-                        clearInterval(checkInterval);
-                    }
-                }, 3000);
-            })();
-            """,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        config.userContentController.addUserScript(script)
+        config.userContentController.addUserScript(WebView.makeBaseUserScript())
 
         // Store reference for deep link navigation + start foreground observer
         context.coordinator.webView = webView
@@ -499,8 +543,8 @@ struct WebView: UIViewRepresentable {
         // Backend dostane authoritatívny update cez ASSN webhook; toto je
         // len UI sync. requestId 'external' nemá web-side promise, ale
         // window.__iapResult ho môže použiť na trigger re-fetch.
-        StoreKitManager.shared.onExternalTransaction = { [weak coordinator = context.coordinator] jws in
-            coordinator?.injectIapResultRaw(requestId: "external", dict: ["success": true, "jws": jws, "external": true])
+        StoreKitManager.shared.onExternalTransaction = { [weak coordinator = context.coordinator] jws, transactionId in
+            coordinator?.injectIapResultRaw(requestId: "external", dict: ["success": true, "jws": jws, "external": true, "transactionId": transactionId])
         }
 
         // If a push notification arrived before the app launched, load the
@@ -626,7 +670,6 @@ struct WebView: UIViewRepresentable {
         // medzi NotificationCenter cestou a updateUIView fallbackom, ktoré
         // dostávajú ten istý link dvakrát (viď PrplCRMApp.dispatchDeepLink).
         fileprivate var lastDeepLinkHandled: (raw: String, at: Date)?
-        var pendingDeepLinkJS: String?
         // Track last successfully loaded URL so we can restore it if the
         // WebContent process terminates (iOS jetsam kills it under memory
         // pressure — common when scrolling long lists). Without this the
@@ -672,6 +715,13 @@ struct WebView: UIViewRepresentable {
                 name: Notification.Name("PrplCRMDeepLinkReceived"),
                 object: nil
             )
+            // prplcrm://auth z PrplCRMApp.onOpenURL (OAuth dokončený v Safari)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleExternalAuthReceived(_:)),
+                name: Notification.Name("PrplCRMExternalAuthReceived"),
+                object: nil
+            )
         }
 
         @objc private func handleDeepLinkReceived(_ notification: Notification) {
@@ -684,6 +734,12 @@ struct WebView: UIViewRepresentable {
             // linky historicky ako bare path ("/tasks?..."). Normalizujeme oboje
             // do plnej URL, inak by buildDeepLinkURL-like logika zlyhala na prefix.
             let isFullUrl = urlString.hasPrefix("http://") || urlString.hasPrefix("https://")
+            // Plná URL len na našu doménu — cudzia by sa načítala do appky
+            // (a s ňou restore skript / natívny most).
+            if isFullUrl, !Self.isOwnHost(URL(string: urlString)?.host ?? "") {
+                debugLog("[Push] Coordinator: ignoring deep link to foreign host")
+                return
+            }
             let base = "https://prplcrm.eu"
             let normalized: String
             if isFullUrl {
@@ -707,6 +763,62 @@ struct WebView: UIViewRepresentable {
             lastDeepLinkHandled = (urlString, Date())
             DispatchQueue.main.async { [weak self] in
                 self?.navigateReplacingHistory(fullUrl, fallback: url)
+            }
+        }
+
+        /// User skripty sú zapečené pri vytvorení WebView. Po prihlásení /
+        /// odhlásení ich treba prebaliť, aby restore skript vždy zodpovedal
+        /// Keychainu (po odhlásení žiadny token). Platí od ďalšieho načítania
+        /// dokumentu; message handlery ostávajú.
+        func reinstallUserScripts(token: String?) {
+            guard let controller = webView?.configuration.userContentController else { return }
+            controller.removeAllUserScripts()
+            if let token = token {
+                controller.addUserScript(WebView.makeTokenRestoreScript(token: token))
+            }
+            controller.addUserScript(WebView.makeBaseUserScript())
+        }
+
+        @objc private func handleExternalAuthReceived(_ notification: Notification) {
+            // Nevolať OAuth-return fallback reload — prihlásenie dorieši web.
+            didHandleDeepLinkThisCycle = true
+            DispatchQueue.main.async { [weak self] in
+                self?.deliverPendingExternalAuth()
+            }
+        }
+
+        /// Token z `prplcrm://auth` (OAuth dokončený v Safari) odovzdá webu cez
+        /// window.__nativeAuthLogin s cnonce — web ho prijme len ak flow spustil
+        /// tento WebView (nonce z OAuthButtons). Do Keychainu sa token dostane
+        /// až potom bežnou cestou (authToken správa). Čaká na načítanú stránku
+        /// (studený štart); bez fallbacku na priamy zápis do localStorage, ktorý
+        /// by kontrolu nonce obišiel.
+        func deliverPendingExternalAuth(attempt: Int = 0) {
+            guard let webView = webView, hasFinishedInitialLoad,
+                  let auth = parent.pushManager.pendingExternalAuth else { return }
+            parent.pushManager.pendingExternalAuth = nil
+            let js = """
+            if (typeof window.__nativeAuthLogin !== 'function') { return 'not-ready'; }
+            return window.__nativeAuthLogin(token, { cnonce: cnonce, returnUrl: returnUrl }) ? 'ok' : 'rejected';
+            """
+            webView.callAsyncJavaScript(
+                js,
+                arguments: ["token": auth.token, "cnonce": auth.cnonce, "returnUrl": auth.returnUrl],
+                in: nil,
+                in: .page
+            ) { [weak self] result in
+                guard let self = self else { return }
+                var status = "error"
+                if case .success(let value) = result { status = (value as? String) ?? "unknown" }
+                if (status == "not-ready" || status == "error") && attempt < 20 {
+                    // React (AuthContext) ešte nenainštaloval handler — skúsime znova.
+                    self.parent.pushManager.pendingExternalAuth = auth
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        self?.deliverPendingExternalAuth(attempt: attempt + 1)
+                    }
+                    return
+                }
+                debugLog("[OAuth] External auth delivery: \(status)")
             }
         }
 
@@ -842,6 +954,13 @@ struct WebView: UIViewRepresentable {
             if message.name == "openExternal",
                let urlString = message.body as? String,
                let url = URL(string: urlString) {
+                // Len bežné schémy — XSS na našej doméne by inak vedel otvoriť
+                // itms-services://, schémy iných appiek či prplcrm://auth.
+                let scheme = url.scheme?.lowercased() ?? ""
+                guard ["http", "https", "mailto", "tel"].contains(scheme) else {
+                    debugLog("[WebView] openExternal: blocked scheme \(scheme)")
+                    return
+                }
                 debugLog("[WebView] Opening external URL: \(urlString.prefix(60))")
                 UIApplication.shared.open(url)
                 return
@@ -853,16 +972,30 @@ struct WebView: UIViewRepresentable {
 
             if type == "authToken", let token = body["token"] as? String {
                 debugLog("[Push] Got auth token from WebView: \(token.prefix(20))...")
-                parent.pushManager.authToken = token
-                // Save to Keychain for persistent login + Face ID
-                KeychainHelper.saveToken(token)
-                // Registration is triggered automatically via authToken didSet
+                // Skript posiela token pri KAŽDOM načítaní stránky — Keychain
+                // (SecItemDelete + SecItemAdd), prebalenie skriptov a APNs
+                // registráciu robíme len pri zmene.
+                if KeychainHelper.getToken() != token {
+                    // Save to Keychain for persistent login + Face ID
+                    KeychainHelper.saveToken(token)
+                    reinstallUserScripts(token: token)
+                }
+                if parent.pushManager.authToken != token {
+                    let wasLoggedOut = parent.pushManager.authToken == nil
+                    // Registration is triggered automatically via authToken didSet
+                    parent.pushManager.authToken = token
+                    // Po prihlásení (SPA bez reloadu → žiadne nové iapReady)
+                    if wasLoggedOut { deliverUnfinishedIapTransactions() }
+                }
             }
 
             if type == "logout" {
                 debugLog("[Auth] User logged out, clearing Keychain")
                 KeychainHelper.deleteToken()
                 parent.pushManager.authToken = nil
+                // Zapečený restore skript by inak pri najbližšom plnom načítaní
+                // (reload po pozadí, deep link, jetsam recovery) session obnovil.
+                reinstallUserScripts(token: nil)
             }
 
             // ── Native OAuth bridge (Phase 4) ──────────────────────────
@@ -910,6 +1043,24 @@ struct WebView: UIViewRepresentable {
                 }
             }
 
+            // Web po úspešnom (alebo definitívne zamietnutom) /verify — až teraz
+            // transakciu ukončíme.
+            if type == "iapFinish",
+               let idString = body["transactionId"] as? String,
+               let transactionId = UInt64(idString) {
+                debugLog("[IAP] finish transaction \(idString)")
+                Task {
+                    await StoreKitManager.shared.finishTransaction(id: transactionId)
+                }
+            }
+
+            // Web bridge je pripravený (každé načítanie stránky) — neukončené
+            // transakcie pošleme na overenie znova. Bez prihlásenia nemá zmysel
+            // (/verify vyžaduje JWT); po prihlásení príde ďalšie iapReady.
+            if type == "iapReady", parent.pushManager.authToken != nil {
+                deliverUnfinishedIapTransactions()
+            }
+
             if type == "iapRestore" {
                 let requestId = body["requestId"] as? String ?? ""
                 debugLog("[IAP] restore requestId=\(requestId)")
@@ -929,8 +1080,8 @@ struct WebView: UIViewRepresentable {
         func injectIapResult(requestId: String, outcome: StoreKitManager.PurchaseOutcome) {
             var dict: [String: Any] = [:]
             switch outcome {
-            case .success(let jws):
-                dict = ["success": true, "jws": jws]
+            case .success(let jws, let transactionId):
+                dict = ["success": true, "jws": jws, "transactionId": transactionId]
             case .userCancelled:
                 dict = ["success": false, "cancelled": true]
             case .pending:
@@ -939,6 +1090,18 @@ struct WebView: UIViewRepresentable {
                 dict = ["success": false, "error": message]
             }
             injectIapResultRaw(requestId: requestId, dict: dict)
+        }
+
+        /// Neukončené StoreKit transakcie → web ich znova overí (/verify) a
+        /// potvrdí iapFinish. Volá sa pri iapReady (načítanie stránky) a po
+        /// prihlásení (zmena authToken).
+        func deliverUnfinishedIapTransactions() {
+            Task {
+                let unfinished = await StoreKitManager.shared.unfinishedTransactions()
+                for tx in unfinished {
+                    self.injectIapResultRaw(requestId: "external", dict: ["success": true, "jws": tx.jws, "external": true, "transactionId": tx.transactionId])
+                }
+            }
         }
 
         func injectIapResultRaw(requestId: String, dict: [String: Any]) {
@@ -1117,19 +1280,10 @@ struct WebView: UIViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.parent.isLoading = false
                 }
-
-                // Safety net: if a deep link was deferred (edge case where
-                // updateUIView fires before didFinish), execute it now.
-                // Normally cold-start deep links are handled by loading the
-                // deep link URL directly in ContentView.
-                if let deepLinkJS = pendingDeepLinkJS {
-                    pendingDeepLinkJS = nil
-                    debugLog("[Push] Executing deferred deep link after page load")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        webView.evaluateJavaScript(deepLinkJS, completionHandler: nil)
-                    }
-                }
             }
+
+            // prplcrm://auth prijatý pred načítaním stránky (studený štart).
+            deliverPendingExternalAuth()
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -1212,7 +1366,8 @@ struct WebView: UIViewRepresentable {
                 // či ide o ojedinelý self-heal (#1) alebo reálnu slučku (#2+).
                 reportNativeError(
                     name: "iOSWebContentProcessTerminated",
-                    message: "WKWebView WebContent process terminated (memory jetsam, AKTÍVNA appka) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \(fullURL.absoluteString)"
+                    // Bez query/fragmentu — URL môže niesť reset/invite token.
+                    message: "WKWebView WebContent process terminated (memory jetsam, AKTÍVNA appka) [#\(repeatCount) za \(Int(terminationWindow))s]. URL: \((Self.strippedOfQuery(fullURL) ?? fullURL).absoluteString)"
                 )
             }
             recoveryURL = restoreURL
@@ -1265,12 +1420,18 @@ struct WebView: UIViewRepresentable {
         private func reportNativeError(name: String, message: String, url: URL? = nil, details: [String] = []) {
             // Deleguje na zdieľaný NativeErrorReporter (OAuthController.swift) —
             // jedna implementácia POST /api/errors/client pre celý target.
-            NativeErrorReporter.report(name: name, message: message, url: (url ?? lastURL ?? parent.url).absoluteString, details: details)
+            // Query/fragment preč — lastURL môže byť /reset-password?token=… či
+            // invite odkaz z Universal Linku.
+            let reportURL = url ?? lastURL ?? parent.url
+            NativeErrorReporter.report(name: name, message: message, url: (Self.strippedOfQuery(reportURL) ?? reportURL).absoluteString, details: details)
         }
 
         // Handle JavaScript alert()
+        // topPresenter(): rootViewController.present ticho zlyhá, keď už niečo
+        // prezentuje (share sheet, alert) — completion handler by sa nezavolal
+        // a JS alert()/confirm() by visel.
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-            guard let viewController = webView.window?.rootViewController else {
+            guard let viewController = topPresenter() else {
                 completionHandler()
                 return
             }
@@ -1281,7 +1442,7 @@ struct WebView: UIViewRepresentable {
 
         // Handle JavaScript confirm()
         func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-            guard let viewController = webView.window?.rootViewController else {
+            guard let viewController = topPresenter() else {
                 completionHandler(false)
                 return
             }
@@ -1297,7 +1458,7 @@ struct WebView: UIViewRepresentable {
                 let host = url.host ?? ""
                 // Open external URLs (Stripe, etc.) in Safari
                 let isExternal = host.contains("stripe.com") ||
-                                 (!host.isEmpty && !host.contains("prplcrm.eu") && !host.contains("localhost"))
+                                 (!host.isEmpty && !Self.isOwnHost(host))
                 if isExternal {
                     UIApplication.shared.open(url)
                     return nil
@@ -1323,8 +1484,10 @@ struct WebView: UIViewRepresentable {
                 return
             }
 
-            let host = url.host ?? ""
-            let isInternal = host.isEmpty || host.contains("prplcrm.eu") || host.contains("localhost")
+            let host = (url.host ?? "").lowercased()
+            // Presná zhoda domény — predtým `contains("prplcrm.eu")` pustil aj
+            // prplcrm.eu.attacker.tld či evil-prplcrm.eu ako „interné“.
+            let isInternal = host.isEmpty || Self.isOwnHost(host)
 
             // Google blocks OAuth in WKWebView — must open in Safari
             let isGoogleAuth = host.contains("accounts.google.com") || host.contains("accounts.youtube.com")
@@ -1358,12 +1521,35 @@ struct WebView: UIViewRepresentable {
                     return
                 }
                 decisionHandler(.allow)
-            } else if navigationAction.navigationType == .linkActivated {
-                UIApplication.shared.open(url)
-                decisionHandler(.cancel)
             } else {
-                decisionHandler(.allow)
+                // Cudzí host: v hlavnom frame sa NIČ nenačíta v appke (predtým len
+                // linkActivated išlo do Safari — window.location, meta refresh,
+                // 302 či formulár načítali cudzí dokument do shellu appky).
+                // Výnimka: API cesty, ktoré appka potrebuje vo WebView.
+                let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+                if isMainFrame && Self.isAllowedApiNavigation(host: host, path: url.path) {
+                    decisionHandler(.allow)
+                } else if isMainFrame || navigationAction.navigationType == .linkActivated {
+                    UIApplication.shared.open(url)
+                    decisionHandler(.cancel)
+                } else {
+                    // iframe na cudzom hoste (embed) — ako doteraz
+                    decisionHandler(.allow)
+                }
             }
+        }
+
+        static func isOwnHost(_ host: String) -> Bool {
+            let h = host.lowercased()
+            return h == "prplcrm.eu" || h.hasSuffix(".prplcrm.eu")
+        }
+
+        /// API navigácie v hlavnom frame, ktoré musia ostať vo WebView:
+        /// štart OAuth (302 ďalej na Google → Safari; Apple web flow sa vráti
+        /// cez /api/auth/apple/callback) a hromadný ZIP export príloh (WKDownload).
+        static func isAllowedApiNavigation(host: String, path: String) -> Bool {
+            guard host.lowercased() == "perun-crm-api.onrender.com" else { return false }
+            return path.hasPrefix("/api/auth/") || path.hasPrefix("/api/attachments/")
         }
 
         // MARK: - Natívne sťahovanie súborov (WKDownload)
@@ -1549,7 +1735,7 @@ struct WebView: UIViewRepresentable {
         func downloadDidFinish(_ download: WKDownload) {
             guard let url = downloadDestinations.removeValue(forKey: download) else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let vc = self?.webView?.window?.rootViewController else { return }
+                guard let vc = self?.topPresenter() else { return }
                 let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
                 if let popover = activityVC.popoverPresentationController {
                     popover.sourceView = vc.view
@@ -1564,7 +1750,7 @@ struct WebView: UIViewRepresentable {
             downloadDestinations.removeValue(forKey: download)
             debugLog("[Download] Zlyhalo: \(error.localizedDescription)")
             DispatchQueue.main.async { [weak self] in
-                guard let vc = self?.webView?.window?.rootViewController else { return }
+                guard let vc = self?.topPresenter() else { return }
                 let alert = UIAlertController(title: "Sťahovanie zlyhalo",
                                               message: "Súbor sa nepodarilo stiahnuť. Skúste to znova.",
                                               preferredStyle: .alert)
