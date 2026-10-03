@@ -13,7 +13,7 @@ const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
@@ -595,8 +595,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     // Check plan contact limit (len subscription — celý User nesie base64 avatar
     // a Google sync mapy, desiatky–stovky kB; viď /export/csv a upload)
-    const user = await User.findById(req.user.id).select('subscription').lean();
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     const contactLimits = { free: 5, team: 25, pro: Infinity };
     const maxContacts = contactLimits[plan] || 5;
     if (maxContacts !== Infinity) {
@@ -1371,8 +1371,8 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     }
 
     // Check plan limit for subtasks per task
-    const user = await User.findById(req.user.id).select('subscription').lean();
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     const subtaskLimits = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimits[plan] || 10;
     if (maxSubtasks !== Infinity) {
@@ -1712,8 +1712,8 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     }
 
     // Limity plánu na CIEĽOVEJ strane (zrkadlí bežné vytváranie)
-    const user = await User.findById(req.user.id).select('subscription').lean();
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     if (!targetTask) {
       const taskLimits = { free: 5, team: 25, pro: Infinity };
       const maxTasks = taskLimits[plan] || 5;
@@ -2155,8 +2155,8 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       // Plan-feature gate: file attachments len pre Tím+. Plus per-plan
       // celková storage kvóta (Tím=1GB, Pro=10GB).
-      const uploader = await User.findById(req.user.id).select('subscription').lean();
-      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      // Prílohy a kvóta úložiska patria workspace → plán vlastníka
+      const uploaderPlan = await getWorkspacePlan(req);
       if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
         const message = isIosNativeApp(req)
           // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.

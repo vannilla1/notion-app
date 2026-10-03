@@ -12,7 +12,7 @@ const fileStorage = require('../services/fileStorage');
 const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
@@ -1203,9 +1203,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       finalContactIds = [contactId];
     }
 
-    // Check plan limits (len subscription — rovnako ako ostatné miesta v súbore)
-    const user = await User.findById(req.user.id).select('subscription').lean();
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = plán vlastníka (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     // Free: 5 projektov/kontakt (znížené z 10 — overené že žiadny živý Free user
     // 2026-05-07 nemal > 5 projektov na kontakt, takže táto zmena nezablokuje
     // existujúcich userov pri pridávaní). Tím a Pro bez zmeny.
@@ -2398,8 +2397,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     // existoval iba pre contact-path (POST /api/contacts/.../subtasks),
     // ale pre global path (POST /api/tasks/:taskId/subtasks) chýbal —
     // user mohol obísť limit cez global projekt.
-    const subtaskUser = await User.findById(req.user.id).select('subscription').lean();
-    const subtaskPlan = subtaskUser?.subscription?.plan || 'free';
+    const subtaskPlan = await getWorkspacePlan(req);
     const subtaskLimitsMap = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimitsMap[subtaskPlan] || 10;
     const isSubtaskLimited = maxSubtasks !== Infinity;
@@ -3189,8 +3187,8 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       // Plan gate + storage kvóta — zrkadlí POST /contacts/:id/files.
       // Historicky task upload nemal ani jedno (prílohy sa dali nahrávať
       // mimo plánu aj mimo kvóty cez 📎 pri úlohe).
-      const uploader = await User.findById(req.user.id).select('subscription').lean();
-      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      // Prílohy a kvóta úložiska patria workspace → plán vlastníka
+      const uploaderPlan = await getWorkspacePlan(req);
       if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
         const message = isIosNativeApp(req)
           // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.

@@ -15,7 +15,7 @@ const { attachmentFileFilter, sanitizeDisplayName, effectiveExtension } = requir
 const fileStorage = require('../services/fileStorage');
 const { publicAttachment, isInlineAttachment, collectMessageR2Keys, deleteBlobs, R2_KEY_PROJECTION } = require('../services/messageFiles');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
 const { isIosNativeApp } = require('../utils/platform');
 
 // Projection that excludes ALL Base64 blobs so comment CRUD never pulls
@@ -298,8 +298,8 @@ const persistUpload = async (file) => {
  * Vráti telo 403 alebo null.
  */
 const messageStorageQuotaError = async (req, fileSize) => {
-  const uploader = await User.findById(req.user.id).select('subscription').lean();
-  const plan = uploader?.subscription?.plan || 'free';
+  // Kvóta úložiska patrí workspace → plán vlastníka
+  const plan = await getWorkspacePlan(req);
   const storageBytes = STORAGE_LIMITS[plan];
   if (!storageBytes) return null;
   const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);

@@ -11,6 +11,24 @@
  */
 const auditService = require('../services/auditService');
 
+/**
+ * Plán, ktorým sa riadia limity OBSAHU workspace (kontakty, projekty,
+ * podúlohy, prílohy/úložisko) = plán VLASTNÍKA workspace — rovnako ako
+ * limit členov (utils/planLimits). Predtým sa bral plán volajúceho člena:
+ * Free člen v Pro workspace narážal na Free limity a naopak Pro člen
+ * obchádzal limity Free workspace. Osobné funkcie (Google sync, CSV export)
+ * ostávajú na pláne používateľa.
+ */
+const getWorkspacePlan = async (req) => {
+  // Lazy require — planGate načítava aj auth vrstva (žiadny cyklus pri štarte)
+  const User = require('../models/User');
+  const ownerId = req.workspace?.ownerId;
+  const doc = ownerId
+    ? await User.findById(ownerId).select('subscription.plan').lean()
+    : await User.findById(req.user?.id).select('subscription.plan').lean();
+  return doc?.subscription?.plan || 'free';
+};
+
 const logPlanGateHit = (req, { code, feature, limit = null }) => {
   try {
     auditService.logAction({
@@ -30,4 +48,4 @@ const logPlanGateHit = (req, { code, feature, limit = null }) => {
   } catch { /* audit je bonus — nikdy nezhodí request */ }
 };
 
-module.exports = { logPlanGateHit };
+module.exports = { logPlanGateHit, getWorkspacePlan };
