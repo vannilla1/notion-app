@@ -2812,9 +2812,11 @@ function Tasks() {
       }));
       await api.put('/api/tasks/reorder', { tasks: reorderData });
     } catch {
-      // Silently fail — optimistic update already applied
+      // Server poradie neuložil — resync, inak by lokálne poradie ostalo
+      // iné než na serveri (a u ostatných členov tímu).
+      fetchTasks();
     }
-  }, [sortedFilteredTasks]);
+  }, [sortedFilteredTasks, fetchTasks]);
 
   // Handle subtask drag end
   const handleSubtaskDragEnd = useCallback(async (task, parentSubtasks, event) => {
@@ -2855,7 +2857,7 @@ function Tasks() {
       return newTasks;
     });
 
-    // Save to server (fire and forget, don't rollback on error to avoid visual glitch)
+    // Save to server
     try {
       const subtaskOrders = reordered.map((s, idx) => ({ id: s.id, order: idx }));
       await api.put('/api/tasks/reorder-subtasks', {
@@ -2865,9 +2867,11 @@ function Tasks() {
         subtasks: subtaskOrders
       });
     } catch {
-      // Silently fail — optimistic update already applied
+      // Server poradie neuložil — resync, inak by lokálne poradie ostalo
+      // iné než na serveri (a u ostatných členov tímu).
+      fetchTasks();
     }
-  }, []);
+  }, [fetchTasks]);
 
   const filterCounts = useMemo(() => {
     const userId = user?.id?.toString();
