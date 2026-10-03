@@ -61,6 +61,11 @@ const sanitizeTimeReminders = (raw) => {
     .sort((a, b) => b - a);
 };
 
+// Hodnota z tela požiadavky / z DB, ktorá sa smie dostať do `_id` filtra alebo
+// do `$in` nad ObjectId poľom. Objekt (operátorová injekcia) alebo reťazec
+// mimo tvaru ObjectId by Mongoose buď prepustil, alebo hodil CastError → 500.
+const isObjectIdString = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
+
 // Helper to sync to both Google Calendar and Google Tasks
 const autoSyncToGoogle = async (taskData, action) => {
   await Promise.all([
@@ -185,7 +190,11 @@ const subtaskWithCloseFlag = (subtask, eligible) => {
 // Helper function to populate assigned users info
 const populateAssignedUsers = async (assignedToIds) => {
   if (!assignedToIds || assignedToIds.length === 0) return [];
-  const users = await User.find({ _id: { $in: assignedToIds } }, 'username color avatar').lean();
+  // Kontaktné úlohy majú assignedTo: [String] bez validácie — jediná
+  // necastovateľná hodnota ('abc', '') by zhodila celý dotaz CastError-om.
+  const ids = Array.from(assignedToIds).map(String).filter(isObjectIdString);
+  if (ids.length === 0) return [];
+  const users = await User.find({ _id: { $in: ids } }, 'username color avatar').lean();
   return users.map(u => ({
     id: u._id.toString(),
     username: u.username,
@@ -257,8 +266,13 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     globalTasks.forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id.toString())));
     contacts.forEach(c => (c.tasks || []).forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id))));
 
-    // Fetch all assigned users at once
-    const assignedUsers = await User.find({ _id: { $in: Array.from(allAssignedIds) } }, 'username color avatar').lean();
+    // Fetch all assigned users at once. Neplatné hodnoty (kontaktné úlohy
+    // ukladajú assignedTo ako String) vynecháme — inak CastError → 500 pre
+    // celý zoznam úloh workspace, kým sa hodnota ručne neopraví v DB.
+    const assignedIdList = Array.from(allAssignedIds).filter(isObjectIdString);
+    const assignedUsers = assignedIdList.length > 0
+      ? await User.find({ _id: { $in: assignedIdList } }, 'username color avatar').lean()
+      : [];
     const usersMap = {};
     assignedUsers.forEach(u => {
       usersMap[u._id.toString()] = {
