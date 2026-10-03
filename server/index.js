@@ -7,7 +7,6 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-const path = require('path');
 const { connectDB } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const authGoogleRoutes = require('./routes/auth-google');
@@ -234,8 +233,11 @@ app.use('/api', (req, res, next) => {
 // Make io accessible to routes
 app.set('io', io);
 
-// Static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// POZN: pôvodný `app.use('/uploads', express.static(...))` bol odstránený.
+// Všetky uploady idú cez multer.memoryStorage() do Mongo/R2 a nič v
+// server/ ani client/ na /uploads neodkazuje — mount len verejne (bez auth,
+// mimo apiLimiter aj DB-readiness guardu) servíroval obsah adresára
+// server/uploads/.
 
 // Routes
 // OAuth routery sú mounted na podadresároch /api/auth/google, /api/auth/apple,

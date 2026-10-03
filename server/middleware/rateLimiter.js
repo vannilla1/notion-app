@@ -182,9 +182,9 @@ const apiLimiter = rateLimit({
     // by vedel obísť limiter na akomkoľvek endpointe ak by URL obsahovala
     // segment `/files` v inom kontexte. Teraz vyžadujeme `/files` ako
     // path segment (pred/za '/' alebo koniec stringu).
+    // `/uploads` podmienky odstránené — statický mount /uploads v index.js už
+    // neexistuje (a limiter je mountovaný na /api, takže nikdy nematchli).
     return req.path === '/health' ||
-           req.path.startsWith('/uploads/') ||
-           req.path === '/uploads' ||
            /\/files(\/|$)/.test(req.path);
   }
 });
