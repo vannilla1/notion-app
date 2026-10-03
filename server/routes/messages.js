@@ -36,6 +36,14 @@ const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 // záznam v Diagnostike). Nestring = prázdny text.
 const str = (v) => (typeof v === 'string' ? v : '');
 
+// linkedId/linkedName nemajú v modeli maxlength, telo môže mať až 1 MB
+// (multer fieldSize / express.json) a hodnoty idú do každého výpisu (GET /
+// až 100 správ, /by-linked). Prázdne → null ako doteraz.
+const linkedField = (v, max) => {
+  const s = str(v).trim();
+  return s ? s.slice(0, max) : null;
+};
+
 const router = express.Router();
 
 // Neplatné ObjectId v URL → 400/404 hneď. Bez toho šlo „not-valid" priamo do
@@ -590,8 +598,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         description: str(description).trim().substring(0, 5000),
         attachment,
         linkedType: linkedType || null,
-        linkedId: linkedId || null,
-        linkedName: linkedName || null,
+        linkedId: linkedField(linkedId, 128),
+        linkedName: linkedField(linkedName, 200),
         dueDate: dueDate || null,
         pollOptions: type === 'poll' ? parsedPollOptions : [],
         pollMultipleChoice: type === 'poll' ? pollMultipleChoice : false,
@@ -682,8 +690,8 @@ router.put('/:id', authenticateToken, requireWorkspace, requireMessageId, (req, 
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
         message.linkedType = linkedType || null;
-        message.linkedId = linkedId || null;
-        message.linkedName = linkedName || null;
+        message.linkedId = linkedField(linkedId, 128);
+        message.linkedName = linkedField(linkedName, 200);
       }
 
       // Handle attachment: new file replaces old, or remove existing.
