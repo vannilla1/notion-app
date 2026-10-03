@@ -406,9 +406,15 @@ router.post('/portal', authenticateToken, async (req, res) => {
 // Verify checkout session (called after redirect from Stripe)
 router.get('/verify-session/:sessionId', authenticateToken, async (req, res) => {
   try {
+    if (!isStripeConfigured()) {
+      return res.status(503).json({ message: 'Billing not configured' });
+    }
+
     const session = await stripe.checkout.sessions.retrieve(req.params.sessionId);
 
-    if (session.metadata?.userId !== req.user.id) {
+    // req.user.id je pri Redis cache hite string, pri miss/bez Redis
+    // ObjectId — striktné !== by vlastníkovi session vrátilo 403.
+    if (String(session.metadata?.userId || '') !== String(req.user.id)) {
       return res.status(403).json({ message: 'Neplatná session' });
     }
 
@@ -419,6 +425,9 @@ router.get('/verify-session/:sessionId', authenticateToken, async (req, res) => 
       period: session.metadata?.period
     });
   } catch (error) {
+    if (error.statusCode === 404 || error.code === 'resource_missing') {
+      return res.status(404).json({ message: 'Session neexistuje' });
+    }
     logger.error('[Billing] Verify session error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
