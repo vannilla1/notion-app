@@ -206,7 +206,10 @@ router.get('/export/:jobId', async (req, res) => {
 
   try {
     const ids = job.entries.map(e => e.fileId);
-    const blobs = await ContactFile.find({ fileId: { $in: ids } }).lean();
+    // Projekcia BEZ `data` — legacy base64 bloby (nemigrované riadky) by sa
+    // inak natiahli všetky naraz (až 500 × base64) do RAM ešte pred prvým
+    // zápisom do archívu. Dotiahnu sa lenivo po jednom v cykle nižšie.
+    const blobs = await ContactFile.find({ fileId: { $in: ids } }, { fileId: 1, r2Key: 1, contactId: 1 }).lean();
     const byId = new Map(blobs.map(b => [b.fileId, b]));
     const used = new Set();
     const manifest = ['Kontakt;Projekt;Úloha;Súbor;Veľkosť (B);Nahraté'];
@@ -228,8 +231,16 @@ router.get('/export/:jobId', async (req, res) => {
           // Stream priamo z R2 do ZIP-u — súbor sa nikdy nedrží celý v RAM
           const stream = await fileStorage.getFileStream(rec.r2Key);
           archive.append(stream, { name: path });
-        } else if (rec && rec.data) {
-          archive.append(Buffer.from(rec.data, 'base64'), { name: path }); // legacy base64
+        } else if (rec) {
+          // Legacy base64 (nemigrovaný riadok / R2 nedostupné) — blob sa
+          // načíta až tu, takže v pamäti je vždy najviac jeden
+          const legacy = await ContactFile.findOne({ _id: rec._id }, { data: 1 }).lean();
+          if (legacy?.data) {
+            archive.append(Buffer.from(legacy.data, 'base64'), { name: path });
+          } else {
+            failed++;
+            logger.warn('[Attachments] Príloha bez obsahu — preskočená', { fileId: entry.fileId });
+          }
         } else {
           failed++;
           logger.warn('[Attachments] Príloha bez obsahu — preskočená', { fileId: entry.fileId });
