@@ -744,11 +744,8 @@ function Messages() {
     return '📎';
   };
 
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
+  // formatFileSize: importovaná z utils/constants (rovnaký formát ako v
+  // Projektoch/Kontaktoch) — lokálna kópia ju tu predtým zatieňovala.
 
   const triggerMsgFileUpload = (messageId) => {
     setActiveFileMessageId(messageId);
