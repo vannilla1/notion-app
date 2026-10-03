@@ -1729,7 +1729,10 @@ router.delete('/users/:userId/discount', authenticateToken, requireAdmin, async 
 // User growth over time (registrations per day for last 90 days)
 router.get('/charts/user-growth', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 90;
+    // Clamp 1..730 (UI ponúka 7/30/90/365) — cyklus nižšie iteruje po dňoch,
+    // takže neobmedzené ?days=100000000 znamenalo 10^8 iterácií + alokácií
+    // na jeden request. Rovnako ako /email-logs-stats.
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 90));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1768,7 +1771,7 @@ router.get('/charts/user-growth', authenticateToken, requireAdmin, async (req, r
 // Activity over time (audit log entries per day for last 30 days)
 router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1819,7 +1822,7 @@ router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res)
 // odrážali produkčné metriky.
 router.get('/charts/workspaces-growth', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1864,7 +1867,7 @@ router.get('/charts/workspaces-growth', authenticateToken, requireAdmin, async (
 //  - pre PrplCRM scale je to akceptabilná aproximácia
 router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1900,7 +1903,8 @@ router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async 
 // total za obdobie. Beží sériovo s ostatnými chart endpoint-mi v UI.
 router.get('/charts/summary', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
+
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
