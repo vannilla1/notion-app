@@ -638,9 +638,14 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         // "Prpl CRM"; some testing left behind "Prpl CRM — workspace" calendars
         // we never tracked in workspaceCalendars). Without this pass, users
         // see 2+ copies of Prpl CRM calendars piling up in Google.
+        // Zoznam kalendárov si odložíme aj pre Pass 3 — predtým sa ten istý
+        // calendarList.list volal druhýkrát (zbytočné volanie Google API počas
+        // už aj tak dlhého synchrónneho requestu).
+        let calendarListItems = null;
         try {
           const listResp = await calendar.calendarList.list({ maxResults: 250 });
-          for (const item of (listResp.data.items || [])) {
+          calendarListItems = listResp.data.items || [];
+          for (const item of calendarListItems) {
             const s = item.summary || '';
             if (s === 'Prpl CRM' || s.startsWith('Prpl CRM —') || s.startsWith('Prpl CRM -')) {
               if (item.id) dedicatedIds.add(item.id);
@@ -670,8 +675,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         // invisible to this list() filter.
         let calendarsToScan = [];
         try {
-          const listResp = await calendar.calendarList.list({ maxResults: 250 });
-          calendarsToScan = (listResp.data.items || [])
+          // Rovnaký zoznam ako v Pass 2 (už zmazané dedikované kalendáre aj
+          // tak odfiltruje dedicatedIds); ak Pass 2 zlyhal, načítame znova.
+          const items = calendarListItems !== null
+            ? calendarListItems
+            : ((await calendar.calendarList.list({ maxResults: 250 })).data.items || []);
+          calendarsToScan = items
             .map(c => c.id)
             .filter(id => id && !dedicatedIds.has(id)); // skip lists we already wholesale-deleted
           // Ensure primary is always scanned even if it didn't appear in calendarList
