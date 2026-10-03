@@ -29,6 +29,12 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const nativeIOS = isNativeIOSApp();
   const fetchUserRetryRef = useRef(null); // timer opakovania /me pri prechodnej chybe
+  // true kým nový web tab čaká (max 400 ms) na token z iného tabu. Dovtedy
+  // nesmieme vypnúť loading — inak route vyrenderuje <Navigate to="/login">
+  // a pôvodná cieľová URL (/crm, /app/billing…) sa stratí.
+  const tokenBootstrapPendingRef = useRef(
+    !nativeIOS && !token && typeof BroadcastChannel !== 'undefined'
+  );
   const fetchUserRunRef = useRef(0);      // generácia — zahodí odpoveď zastaraného /me (iný token, unmount)
 
   // ── Bootstrap: ak nemáme token, spýtaj sa ostatných tabov ───────────────
@@ -50,6 +56,7 @@ export const AuthProvider = ({ children }) => {
       if (resolved) return;
       if (e.data?.type === 'auth:token_response' && e.data.token) {
         resolved = true;
+        tokenBootstrapPendingRef.current = false;
         setStoredToken(e.data.token);
         setToken(e.data.token); // triggerne fetchUser cez useEffect([token])
         channel.close();
@@ -62,6 +69,7 @@ export const AuthProvider = ({ children }) => {
     const timeout = setTimeout(() => {
       if (resolved) return;
       resolved = true;
+      tokenBootstrapPendingRef.current = false;
       channel.close();
       setLoading(false); // nikto neodpovedal → sme nepriihlásení
     }, 400);
@@ -102,7 +110,8 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       fetchUser();
-    } else {
+    } else if (!tokenBootstrapPendingRef.current) {
+      // Počas BroadcastChannel dopytu loading vypne až timeout/odpoveď.
       setLoading(false);
     }
     // Návrat siete počas čakania na ďalší pokus → skús hneď.
