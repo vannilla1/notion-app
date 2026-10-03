@@ -1352,9 +1352,17 @@ router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorksp
     }
 
     // Ak výsledný stav je reakcia (nie odstránenie), pridáme novú.
+    // Podmienka „používateľ ešte nemá reakciu" je priamo vo filtri
+    // ($elemMatch na komentár; pozičný $ sa viaže naň): dva rýchle kliknutia
+    // (double-tap) sa inak obe vyhodnotili z toho istého `meta` ešte pred
+    // zápisom prvého a obe spravili $push → 2 reakcie jedného používateľa.
+    // matchedCount 0 = reakcia medzitým pribudla → nič nepíšeme.
     if (finalType) {
       await Message.updateOne(
-        { _id: meta._id, 'comments._id': req.params.commentId },
+        {
+          _id: meta._id,
+          comments: { $elemMatch: { _id: req.params.commentId, 'reactions.userId': { $ne: req.user.id } } }
+        },
         {
           $push: {
             'comments.$.reactions': {
