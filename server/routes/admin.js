@@ -21,6 +21,7 @@ const PromoCode = require('../models/PromoCode');
 const ServerError = require('../models/ServerError');
 const auditService = require('../services/auditService');
 const { logSecurityEvent } = require('../services/securityAudit');
+const { normalizeEmail } = require('../utils/inputValidation');
 const subscriptionEmailService = require('../services/subscriptionEmailService');
 const EmailLog = require('../models/EmailLog');
 const onlineUsers = require('../services/onlineUsers');
@@ -3975,15 +3976,32 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
   try {
     const { email, name, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
     if (userId && !isOid(userId)) return res.status(400).json({ message: 'Neplatné userId' });
+    if (email !== undefined && email !== null && email !== '' && !normalizeEmail(email)) {
+      return res.status(400).json({ message: 'Neplatný e-mail' });
+    }
+    // Výplatné údaje: IBAN (bez medzier, veľké písmená) a dĺžky ako v
+    // affiliate.js /payout-info.
+    let cleanIban;
+    if (payoutIban !== undefined && payoutIban !== null && payoutIban !== '') {
+      if (typeof payoutIban !== 'string') return res.status(400).json({ message: 'Neplatný IBAN' });
+      cleanIban = payoutIban.replace(/\s+/g, '').toUpperCase();
+      if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(cleanIban)) {
+        return res.status(400).json({ message: 'Neplatný formát IBAN' });
+      }
+    }
+    if ((payoutBankName !== undefined && payoutBankName !== null && (typeof payoutBankName !== 'string' || payoutBankName.length > 100)) ||
+        (payoutNote !== undefined && payoutNote !== null && (typeof payoutNote !== 'string' || payoutNote.length > 500))) {
+      return res.status(400).json({ message: 'Názov banky (max 100) alebo poznámka (max 500) je neplatná' });
+    }
     let user = userId
       ? await User.findById(userId)
-      : await User.findOne({ email: (email || '').toLowerCase().trim() });
+      : await User.findOne({ email: normalizeEmail(email) || '' });
 
     let createdNew = false;
     if (!user) {
       // Externý affiliate — neexistujúci v CRM. Potrebujeme aspoň name a email.
-      const cleanEmail = (email || '').toLowerCase().trim();
-      const cleanName = (name || '').trim();
+      const cleanEmail = normalizeEmail(email) || '';
+      const cleanName = (typeof name === 'string' ? name : '').trim().slice(0, 50);
       if (!cleanEmail) return res.status(400).json({ message: 'Email je povinný' });
       if (!cleanName) {
         return res.status(400).json({
@@ -4003,6 +4021,10 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
         username: candidateUsername,
         email: cleanEmail,
         password: null, // bez hesla — nemôže sa prihlásiť cez password flow
+        // Žiadna prihlasovacia metóda (default by bol ['password'] bez hesla —
+        // UI pripojených účtov aj LAST_LOGIN_METHOD guard by klamali). Partner
+        // si prístup nastaví cez „Zabudnuté heslo“ alebo Google/Apple.
+        authProviders: [],
         // Random color z palette (pre konzistenciu s register flow)
         color: '#6D28D9'
       });
@@ -4014,9 +4036,9 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
     user.affiliate.enrolled = true;
     user.affiliate.status = 'active';
     user.affiliate.enrolledAt = user.affiliate.enrolledAt || new Date();
-    if (payoutIban !== undefined) user.affiliate.payoutIban = payoutIban;
-    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName;
-    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote;
+    if (payoutIban !== undefined) user.affiliate.payoutIban = cleanIban || '';
+    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName || '';
+    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote || '';
     await user.save();
 
     logger.info('[Admin] Affiliate enrolled', { userId: user._id.toString(), email: user.email, createdNew });
@@ -4034,7 +4056,7 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
     if (error.code === 11000) {
       return res.status(409).json({ message: 'User s týmto emailom alebo username už existuje', code: 'DUPLICATE' });
     }
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
