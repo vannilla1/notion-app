@@ -128,7 +128,10 @@ const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
       for (const [k, v] of Object.entries(payload.data)) {
         if (v === null || v === undefined) continue;
         if (data[k] !== undefined) continue; // don't overwrite structured fields
-        data[k] = String(v);
+        // Orezanie: FCM data payload má limit 4096 B — dlhý názov úlohy /
+        // kontaktu / workspace-u by inak zhodil celé doručenie
+        // (INVALID_ARGUMENT). title/body sú orezané vyššie.
+        data[k] = String(v).slice(0, 500);
       }
     }
 
@@ -150,10 +153,17 @@ const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
         await device.save();
       } catch (err) {
         const code = err?.errorInfo?.code || err?.code || '';
+        // messaging/invalid-argument vracia FCM aj pri chybnom PAYLOADE (napr.
+        // data nad 4 KB) — vtedy je token v poriadku a mazať zariadenie by
+        // znamenalo, že používateľ prestane dostávať VŠETKY push notifikácie,
+        // kým appku znova neotvorí. Pri invalid-argument mažeme len ak chyba
+        // výslovne hovorí o registračnom tokene.
+        const tokenInvalidArg = code === 'messaging/invalid-argument' &&
+          /registration token/i.test(err?.message || '');
         if (
           code === 'messaging/registration-token-not-registered' ||
           code === 'messaging/invalid-registration-token' ||
-          code === 'messaging/invalid-argument'
+          tokenInvalidArg
         ) {
           await FcmDevice.deleteOne({ _id: device._id });
           result.removed++;
