@@ -855,6 +855,10 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
     const Page = require('../models/Page');
     const Notification = require('../models/Notification');
     const { deleteMessageBlobs } = require('../services/messageFiles');
+    const { deleteWorkspaceFileBlobs } = require('../services/workspaceFiles');
+    // Prílohy kontaktov/projektov (ContactFile + R2) PRED zmazaním Contact/
+    // Task — fileId sa zisťujú z ich dokumentov. Best-effort, nehádže.
+    await deleteWorkspaceFileBlobs(workspaceId);
     await Contact.deleteMany({ workspaceId });
     await Task.deleteMany({ workspaceId });
     // Bloby príloh správ (R2) PRED deleteMany — po ňom už kľúče niet odkiaľ
