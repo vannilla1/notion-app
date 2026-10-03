@@ -36,6 +36,21 @@ const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
 // Nezmenená uložená hodnota sa NEskracuje — staršie podúlohy môžu mať dlhšiu
 // poznámku/názov (route pre jednu podúlohu limit nemá) a uloženie celého
 // stromu (napr. zaškrtnutie v Dashboarde) by ich inak ticho orezalo.
+// Uložený uzol aj s podstromom prevezmeme bez zmien — každé ID najviac raz
+// (seenIds), takže výstup nikdy nie je väčší než uložený strom.
+const preserveStored = (raw, seenIds) => {
+  const node = toPlain(raw);
+  if (!node || typeof node !== 'object' || node.id == null) return null;
+  const id = String(node.id);
+  if (seenIds.has(id)) return null;
+  seenIds.add(id);
+  return {
+    ...node,
+    subtasks: Array.isArray(node.subtasks)
+      ? node.subtasks.map(c => preserveStored(c, seenIds)).filter(Boolean)
+      : []
+  };
+};
 const keepOrClip = (v, serverV, max) => (typeof v === 'string' && typeof serverV === 'string' && v === serverV
   ? v
   : str(v, max));
@@ -59,7 +74,7 @@ const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
   if (counter.n >= MAX_NODES) {
     // Nad strop sa nové uzly nepridajú, ale už uložené sa nezahodia.
     const known = typeof s.id === 'string' ? serverMap.get(s.id) : null;
-    return known ? toPlain(known) : null;
+    return known ? preserveStored(known, seenIds) : null;
   }
   counter.n++;
 
@@ -80,6 +95,9 @@ const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
   // Zmena termínu → odoslané pripomienky sa vynulujú (rovnako ako pri
   // úprave podúlohy cez jej vlastnú routu).
   const dueChanged = !server || server.dueDate !== dueDate || (server.dueTime || '') !== dueTime;
+  // Úroveň naliehavosti a pripomienka „X dní pred" sú len podľa DÁTUMU —
+  // zmena času ich nesmie vynulovať (ranné upozornenie by prišlo znova).
+  const dateChanged = !server || server.dueDate !== dueDate;
   const reminderChanged = !server || (server.reminder ?? null) !== reminder;
 
   const node = {
@@ -102,14 +120,14 @@ const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
     order: Number.isFinite(Number(s.order)) ? Number(s.order) : 0,
     // ── serverové polia ──
     files: server && Array.isArray(server.files) ? server.files : [],
-    reminderSent: server && !reminderChanged && !dueChanged ? !!server.reminderSent : false,
+    reminderSent: server && !reminderChanged && !dateChanged ? !!server.reminderSent : false,
     timeRemindersSent: server && !dueChanged && Array.isArray(server.timeRemindersSent) ? server.timeRemindersSent : [],
-    lastUrgencyLevel: server && !dueChanged ? (server.lastUrgencyLevel ?? null) : null,
+    lastUrgencyLevel: server && !dateChanged ? (server.lastUrgencyLevel ?? null) : null,
     createdAt: server?.createdAt || new Date().toISOString(),
     // Pod stropom hĺbky sa nové úrovne nepridajú, už uložené ostanú.
     subtasks: depth < MAX_DEPTH
       ? sanitizeTree(s.subtasks, serverMap, depth + 1, counter, seenIds)
-      : (Array.isArray(server?.subtasks) ? server.subtasks.map(toPlain) : [])
+      : (Array.isArray(server?.subtasks) ? server.subtasks.map(c => preserveStored(c, seenIds)).filter(Boolean) : [])
   };
   if (server?.copiedFrom) node.copiedFrom = server.copiedFrom;
   return node;

@@ -808,6 +808,30 @@ const WATCH_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (Google max)
  * Creates a push notification channel so Google sends us a POST when events change.
  * We include a signed token so incoming webhook POSTs can be verified (HMAC of userId+channelId).
  */
+// Východiskový syncToken kalendára (bez aplikovania udalostí) — berie sa
+// hneď pri vytvorení kanála, aby prvá skutočná zmena z Google (prvá
+// notifikácia) mala s čím porovnať a nezahodila sa. Parametre musia
+// zodpovedať úvodnej synchronizácii v processCalendarChanges.
+const fetchBaselineSyncToken = async (calendar, calendarId) => {
+  try {
+    const params = {
+      calendarId, singleEvents: true, maxResults: 250,
+      timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    };
+    let pageToken = null;
+    for (let page = 0; page < 40; page++) {
+      if (pageToken) params.pageToken = pageToken;
+      const resp = await calendar.events.list(params);
+      if (resp.data.nextSyncToken) return resp.data.nextSyncToken;
+      pageToken = resp.data.nextPageToken;
+      if (!pageToken) return null;
+    }
+  } catch (err) {
+    logger.warn('[Calendar Watch] Baseline sync token failed', { calendarId, error: err.message });
+  }
+  return null;
+};
+
 const startCalendarWatch = async (user) => {
   try {
     const calendar = await getCalendarClient(user);
@@ -828,6 +852,9 @@ const startCalendarWatch = async (user) => {
     user.googleCalendar.watchChannelId = channelId;
     user.googleCalendar.watchResourceId = res.data.resourceId;
     user.googleCalendar.watchExpiry = new Date(Number(res.data.expiration));
+    if (!user.googleCalendar.syncToken) {
+      user.googleCalendar.syncToken = await fetchBaselineSyncToken(calendar, user.googleCalendar.calendarId || 'primary');
+    }
     await user.save();
 
     logger.info('[Calendar Watch] Channel created', {
@@ -912,8 +939,9 @@ const startWorkspaceCalendarWatch = async (user, calendarId) => {
       calendarId,
       resourceId: resp.data.resourceId,
       expiry: new Date(Number(resp.data.expiration)),
-      // syncToken zachováme — kanál sa len obnovuje, história zmien platí
-      syncToken: previous[0]?.syncToken || null
+      // syncToken zachováme — kanál sa len obnovuje, história zmien platí.
+      // Nový kanál dostane východiskový token hneď (viď fetchBaselineSyncToken).
+      syncToken: previous[0]?.syncToken || await fetchBaselineSyncToken(calendar, calendarId)
     };
     await User.updateOne({ _id: user._id }, { $pull: { 'googleCalendar.workspaceWatches': { calendarId } } });
     await User.updateOne({ _id: user._id }, { $push: { 'googleCalendar.workspaceWatches': entry } });
@@ -963,7 +991,7 @@ const stopAllCalendarWatches = async (user) => {
  */
 // `target` (voliteľný) = per-workspace kanál { channelId, calendarId, syncToken };
 // bez neho legacy kalendár so syncToken v googleCalendar.syncToken.
-const processCalendarChanges = async (user, target = null) => {
+const processCalendarChanges = async (user, target = null, opts = {}) => {
   try {
     const calendar = await getCalendarClient(user);
     const calendarId = target?.calendarId || user.googleCalendar.calendarId || 'primary';
@@ -1004,7 +1032,10 @@ const processCalendarChanges = async (user, target = null) => {
         if (err.code === 410) {
           logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id, calendarId });
           await saveSyncToken(null);
-          return processCalendarChanges(user, target); // recursive call without syncToken
+          // Bez syncTokenu, ale zmeny sa APLIKUJÚ (s poistkami nižšie) —
+          // inak by sa zahodila práve zmena, ktorá notifikáciu vyvolala.
+          if (target) target.syncToken = null;
+          return processCalendarChanges(user, target, { resync: true });
         }
         throw err;
       }
@@ -1034,7 +1065,7 @@ const processCalendarChanges = async (user, target = null) => {
     // (napr. kópie úloh kolegov z hromadného /sync pred 10/2026). Ich aplikácia
     // by v CRM vrátila dokončené projekty do „nedokončené“ a prepísala termíny
     // aj názvy. Zmeny z Google sa preberajú až od tohto bodu.
-    if (!currentSyncToken) {
+    if (!currentSyncToken && !opts.resync) {
       await persistSyncToken();
       logger.info('[Calendar Webhook] Baseline sync — token established, no changes applied', {
         userId: user._id, calendarId, eventCount: allEvents.length
@@ -1112,8 +1143,11 @@ const processCalendarChanges = async (user, target = null) => {
         // CRM je novšie než udalosť → udalosť je zastaraná (napr. echo našej
         // staršej zmeny, kým sa v CRM medzitým zmenilo niečo ďalšie) — prebratie
         // by vrátilo starý stav. Preberáme len zmeny urobené v Google NESKÔR.
+        // Len vlastný čas úlohy — updatedAt kontaktu sa posúva pri každej
+        // zmene ľubovoľnej jeho úlohy či poľa a zahodil by skutočné zmeny
+        // z Google (napr. dve udalosti toho istého kontaktu v jednej dávke).
         const crmModifiedRaw = (contact && taskIndex !== -1)
-          ? (contact.tasks[taskIndex].modifiedAt || contact.updatedAt)
+          ? (contact.tasks[taskIndex].modifiedAt || contact.tasks[taskIndex].createdAt)
           : (task.modifiedAt || task.updatedAt);
         const crmModified = crmModifiedRaw ? new Date(crmModifiedRaw).getTime() : NaN;
         const eventUpdated = event.updated ? new Date(event.updated).getTime() : NaN;
@@ -3321,5 +3355,7 @@ const stopCalendarWebhooks = () => {
 module.exports = router;
 module.exports.autoSyncTaskToCalendar = autoSyncTaskToCalendar;
 module.exports.autoDeleteTaskFromCalendar = autoDeleteTaskFromCalendar;
+// Len pre testy (poistky spätnej synchronizácie).
+module.exports._processCalendarChanges = processCalendarChanges;
 module.exports.initializeCalendarWebhooks = initializeCalendarWebhooks;
 module.exports.stopCalendarWebhooks = stopCalendarWebhooks;

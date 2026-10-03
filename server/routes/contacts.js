@@ -168,6 +168,9 @@ const upload = multer({
 // Validation helpers
 const isValidEmail = (email) => {
   if (!email) return true;
+  // Dĺžka PRED regexom — regex nižšie backtrackuje kvadraticky a 1 MB reťazec
+  // by na minúty zablokoval event loop celého servera (RFC 5321: max 254).
+  if (typeof email !== 'string' || email.length > 254) return false;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
@@ -1034,14 +1037,6 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(400).json({ message: `Neplatná hodnota poľa ${badType}` });
     }
 
-    if (email && !isValidEmail(email)) {
-      return res.status(400).json({ message: 'Neplatný formát emailu' });
-    }
-
-    if (phone && !isValidPhone(phone)) {
-      return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
-    }
-
     // Načítame pôvodný kontakt PRED updatom — potrebujeme:
     //   1. starý status na detekciu prechodu → terminal,
     //   2. celý strom tasks/subtasks, ktorý po update-e stále existuje
@@ -1060,6 +1055,16 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     const badField = badContactField(req.body, previousContact);
     if (badField) {
       return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    }
+
+    // Formát až po kontrole dĺžky (regex nesmie dostať neohraničený vstup);
+    // nezmenená staršia hodnota ostáva povolená ako pri ostatných poliach.
+    if (email && email !== previousContact.email && !isValidEmail(email)) {
+      return res.status(400).json({ message: 'Neplatný formát emailu' });
+    }
+
+    if (phone && phone !== previousContact.phone && !isValidPhone(phone)) {
+      return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
     }
 
     const previousStatus = previousContact.status;
@@ -1534,7 +1539,8 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
     // Posunutý termín → plánovač musí znovu upozorniť (viď tasks.js PUT subtask).
     const nextDueDate = dueDate !== undefined ? dueDate : found.subtask.dueDate;
     const nextDueTime = dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || '');
-    const dueMoved = nextDueDate !== found.subtask.dueDate || (nextDueTime || '') !== (found.subtask.dueTime || '');
+    const dateMoved = nextDueDate !== found.subtask.dueDate;
+    const dueMoved = dateMoved || (nextDueTime || '') !== (found.subtask.dueTime || '');
     found.parent[found.index] = {
       ...subPlain,
       id: found.subtask.id, // Ensure ID is preserved
@@ -1547,7 +1553,9 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       subtasks: subPlain.subtasks || [], // Preserve nested subtasks
       createdAt: found.subtask.createdAt, // Preserve createdAt
       modifiedAt: new Date().toISOString(), // Set modification timestamp
-      ...(dueMoved ? { lastUrgencyLevel: null, reminderSent: false, timeRemindersSent: [] } : {})
+      // Dátum → úroveň naliehavosti a „X dní pred"; čas → len časové pripomienky.
+      ...(dateMoved ? { lastUrgencyLevel: null, reminderSent: false } : {}),
+      ...(dueMoved ? { timeRemindersSent: [] } : {})
     };
 
     contact.markModified('tasks');

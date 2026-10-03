@@ -2677,9 +2677,10 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
         const newReminders = timeReminders !== undefined
           ? sanitizeTimeReminders(timeReminders)
           : oldReminders;
-        const dueMoved =
-          (dueDate !== undefined && dueDate !== found.subtask.dueDate) ||
-          newDueTime !== oldDueTime;
+        // Úroveň naliehavosti a „X dní pred" sú len podľa dátumu; čas mení
+        // len časové pripomienky (timeRemindersSent).
+        const dateMoved = dueDate !== undefined && dueDate !== found.subtask.dueDate;
+        const dueMoved = dateMoved || newDueTime !== oldDueTime;
         const dueChangedForTimeReminders =
           dueMoved || JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
 
@@ -2711,7 +2712,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           // Plánovač upozorní len pri RASTE úrovne nad uloženú — bez vynulovania
           // by podúloha presunutá z „po termíne" na budúci týždeň už nikdy
           // neupozornila (pred .toObject() fixom sa to nulovalo náhodou).
-          ...(dueMoved ? { lastUrgencyLevel: null, reminderSent: false } : {})
+          ...(dateMoved ? { lastUrgencyLevel: null, reminderSent: false } : {})
         };
         return { updated: found.parent[found.index], originalAssignedTo };
       }

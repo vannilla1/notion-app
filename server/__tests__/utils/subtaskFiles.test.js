@@ -121,4 +121,27 @@ describe('withServerSubtaskFiles — staršie dáta sa pri uložení stromu neor
     expect(same[0].reminderSent).toBe(true);
     expect(same[0].lastUrgencyLevel).toBe('overdue');
   });
+
+  it('zmena len času nevynuluje úroveň ani pripomienku „X dní pred", len časové pripomienky', () => {
+    const existing = [{ id: 's1', title: 'A', dueDate: '2026-09-01', dueTime: '10:00', reminder: 1, reminderSent: true, lastUrgencyLevel: 'overdue', timeRemindersSent: [60] }];
+    const out = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-09-01', dueTime: '14:00', reminder: 1 }], existing);
+    expect(out[0].reminderSent).toBe(true);
+    expect(out[0].lastUrgencyLevel).toBe('overdue');
+    expect(out[0].timeRemindersSent).toEqual([]);
+  });
+
+  it('nad stropom uzlov sa uložený uzol zachová najviac raz — strom sa nedá znásobiť', () => {
+    const existing = [{ id: 'R', title: 'R', subtasks: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, title: `c${i}` })) }];
+    const incoming = [
+      ...Array.from({ length: 1000 }, () => ({})),
+      ...Array.from({ length: 5000 }, () => ({ id: 'R' }))
+    ];
+    const out = withServerSubtaskFiles(incoming, existing);
+    expect(countSubtaskNodes(out)).toBeLessThanOrEqual(1000 + 51);
+    const ids = [];
+    const walk = (n) => n.forEach(x => { ids.push(x.id); walk(x.subtasks || []); });
+    walk(out);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
+

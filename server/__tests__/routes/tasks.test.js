@@ -432,6 +432,13 @@ describe('/api/tasks route', () => {
         .set(authHeader(ownerCtx.token))
         .send({ title: 'Premenovaná' });
       expect((await Task.findById(task._id).lean()).subtasks[0].lastUrgencyLevel).toBe('warning');
+
+      // Zmena len času (formulár posiela dátum aj čas) — úroveň ostáva
+      await request(app)
+        .put(`/api/tasks/${task._id}/subtasks/sub-1`)
+        .set(authHeader(ownerCtx.token))
+        .send({ dueDate: '2026-11-20', dueTime: '14:00' });
+      expect((await Task.findById(task._id).lean()).subtasks[0].lastUrgencyLevel).toBe('warning');
     });
   });
 
