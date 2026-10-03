@@ -1256,9 +1256,16 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Get tasks for the workspace from which the sync was triggered
-    const globalTasks = workspaceId ? await Task.find({ workspaceId }) : [];
-    const contacts = workspaceId ? await Contact.find({ workspaceId }) : [];
+    // Get tasks for the workspace from which the sync was triggered.
+    // Úlohy sa tu len čítajú (skladá sa tasksToSync) — lean() + bez legacy
+    // base64 príloh (files[].data), oba dotazy paralelne. Exclusion projekcia
+    // (MongoDB nedovolí miešať inclusion a exclusion).
+    const [globalTasks, contacts] = workspaceId
+      ? await Promise.all([
+          Task.find({ workspaceId }, { files: 0, 'subtasks.files': 0 }).lean(),
+          Contact.find({ workspaceId }, { files: 0, 'tasks.files': 0, 'tasks.subtasks.files': 0 }).lean()
+        ])
+      : [[], []];
 
     const tasksToSync = [];
 
@@ -1756,9 +1763,13 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
     const calendar = await getCalendarClient(user);
 
-    // Get all current task IDs — scoped to workspace
-    const globalTasks = await Task.find({ workspaceId });
-    const contacts = await Contact.find({ workspaceId });
+    // Get all current task IDs — scoped to workspace. Treba len id úloh
+    // a podúloh (aj vnorených) — projekcia + lean() namiesto plných dokumentov
+    // s base64 prílohami.
+    const [globalTasks, contacts] = await Promise.all([
+      Task.find({ workspaceId }, { _id: 1, 'subtasks.id': 1, 'subtasks.subtasks': 1 }).lean(),
+      Contact.find({ workspaceId }, { 'tasks.id': 1, 'tasks.subtasks.id': 1, 'tasks.subtasks.subtasks': 1 }).lean()
+    ]);
 
     const currentTaskIds = new Set();
 
