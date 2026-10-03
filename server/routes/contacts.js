@@ -177,6 +177,18 @@ const isValidPhone = (phone) => {
   return phoneRegex.test(phone);
 };
 
+// Typ a dĺžka textových polí kontaktu (POST / a PUT /:id). Objekt či pole
+// v `name`/`notes` by inak skončili CastError → 500 a jedinou hranicou
+// dĺžky bol 1 MB JSON limit. Limity sú zámerne štedré a odmietajú 400 —
+// tiché orezanie by stratilo dáta. null/undefined = pole neposlané.
+const FIELD_MAX = { name: 300, email: 254, phone: 50, company: 300, website: 2048, notes: 50000 };
+const badContactField = (body) => Object.keys(FIELD_MAX).find(
+  k => body?.[k] != null && (typeof body[k] !== 'string' || body[k].length > FIELD_MAX[k])
+);
+// status nemá v schéme enum a findOneAndUpdate beží bez runValidators —
+// klient (ContactForm, CSV export statusMap) pozná len tieto štyri.
+const ALLOWED_STATUS = new Set(['new', 'active', 'completed', 'cancelled']);
+
 // Helper function to convert contact to plain object with deep copy of nested subtasks
 const contactToPlainObject = (contact) => {
   const obj = contact.toObject ? contact.toObject() : contact;
@@ -558,6 +570,15 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
+
+    const badField = badContactField(req.body);
+    if (badField) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    }
+    // '' sa správa ako neposlané (nižšie `status || 'new'`)
+    if (status != null && status !== '' && !ALLOWED_STATUS.has(status)) {
+      return res.status(400).json({ message: 'Neplatný stav kontaktu' });
+    }
 
     // Check plan contact limit
     const user = await User.findById(req.user.id);
@@ -965,6 +986,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
+    const badField = badContactField(req.body);
+    if (badField) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    }
+
     if (email && !isValidEmail(email)) {
       return res.status(400).json({ message: 'Neplatný formát emailu' });
     }
@@ -989,6 +1015,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     const previousStatus = previousContact.status;
+
+    // Nezmenená (legacy) hodnota ostáva povolená — starší kontakt s iným
+    // stavom sa musí dať ďalej editovať (napr. len poznámka).
+    if (status != null && status !== '' && !ALLOWED_STATUS.has(status) && status !== previousStatus) {
+      return res.status(400).json({ message: 'Neplatný stav kontaktu' });
+    }
 
     const contact = await Contact.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.workspaceId },
