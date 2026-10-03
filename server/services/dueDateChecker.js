@@ -18,6 +18,16 @@ const logger = require('../utils/logger');
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 const isObjectId = (v) => OBJECT_ID_RE.test(String(v == null ? '' : v));
 
+// Podúloha môže mať vlastných riešiteľov (subtaskSchema.assignedTo) — tí
+// majú dostať pripomienku k SVOJEJ podúlohe, nielen riešitelia/autor
+// rodičovského projektu. resolveRecipientIds nižšie preloží username → _id
+// a zahodí neplatné hodnoty.
+const addSubtaskAssignees = (set, subtask) => {
+  if (subtask && Array.isArray(subtask.assignedTo)) {
+    subtask.assignedTo.forEach(id => { if (id != null) set.add(String(id)); });
+  }
+};
+
 /**
  * Resolve a collection of raw recipient identifiers (ObjectId strings alebo
  * legacy usernames) na pole platných ObjectId stringov. Username hodnoty
@@ -533,6 +543,7 @@ const runDueDateCheck = async () => {
             // Send full notification (in-app + web push + APNs) to each user.
             // Resolve username→_id a vyhoď nevalidné, nech sa subtask vetva
             // nezasekne na createdBy="mkm" (legacy username v ObjectId poli).
+            addSubtaskAssignees(usersToNotify, change.type === 'subtask' ? change.subtask : null);
             const recipientIds = await resolveRecipientIds(usersToNotify);
             for (const userId of recipientIds) {
               try {
@@ -601,6 +612,7 @@ const runDueDateCheck = async () => {
           if (task.createdBy) {
             usersToNotify.add(task.createdBy.toString());
           }
+          addSubtaskAssignees(usersToNotify, rem.type === 'subtask' ? rem.subtask : null);
 
           const recipientIds = await resolveRecipientIds(usersToNotify);
           for (const userId of recipientIds) {
@@ -687,6 +699,7 @@ const runDueDateCheck = async () => {
               task.assignedTo.forEach(uid => usersToNotify.add(uid.toString()));
             }
             if (task.createdBy) usersToNotify.add(task.createdBy.toString());
+            addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
 
             const recipientIds = await resolveRecipientIds(usersToNotify);
             for (const userId of recipientIds) {
@@ -806,6 +819,7 @@ const checkContactDueDates = async (morningWindow = true) => {
               const usersToNotify = new Set();
               if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
               usersToNotify.add(contact.userId.toString());
+              addSubtaskAssignees(usersToNotify, change.type === 'subtask' ? change.subtask : null);
 
               const recipientIds = await resolveRecipientIds(usersToNotify);
               for (const userId of recipientIds) {
@@ -857,6 +871,7 @@ const checkContactDueDates = async (morningWindow = true) => {
               const usersToNotify = new Set();
               if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
               usersToNotify.add(contact.userId.toString());
+              addSubtaskAssignees(usersToNotify, rem.type === 'subtask' ? rem.subtask : null);
 
               const recipientIds = await resolveRecipientIds(usersToNotify);
               for (const userId of recipientIds) {
@@ -924,6 +939,7 @@ const checkContactDueDates = async (morningWindow = true) => {
               const usersToNotify = new Set();
               if (task.assignedTo?.length > 0) task.assignedTo.forEach(uid => usersToNotify.add(uid));
               usersToNotify.add(contact.userId.toString());
+              addSubtaskAssignees(usersToNotify, f.kind === 'task' ? null : f.subtask);
 
               const recipientIds = await resolveRecipientIds(usersToNotify);
               for (const userId of recipientIds) {
