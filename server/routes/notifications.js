@@ -144,7 +144,12 @@ router.put('/read-by-section/:section', authenticateToken, requireWorkspace, asy
     messages: /^message\./
   };
 
-  const regex = sectionMap[req.params.section];
+  // hasOwnProperty — pre section 'constructor' / '__proto__' by lookup na
+  // obyčajnom objekte vrátil truthy prototypovú hodnotu, prešiel kontrolou
+  // a $regex by skončil CastError → 500 namiesto 400.
+  const regex = Object.prototype.hasOwnProperty.call(sectionMap, req.params.section)
+    ? sectionMap[req.params.section]
+    : null;
   if (!regex) {
     return res.status(400).json({ message: 'Neplatná sekcia' });
   }
