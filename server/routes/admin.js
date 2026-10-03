@@ -2874,7 +2874,8 @@ router.get('/performance/errors-by-route', authenticateToken, requireAdmin, asyn
     res.json({
       routes: metrics.topRoutes || [],
       statusCodes: metrics.statusCodes || {},
-      hourly: metrics.hourly || []
+      hourly: metrics.hourlyData || [] // getMetrics() exportuje `hourlyData`, nie `hourly`
+
     });
   } catch (error) {
     logger.error('Performance errors-by-route error', { error: error.message });
