@@ -979,7 +979,8 @@ function Dashboard() {
                           key={s}
                           onClick={() => setDetailView(`messages-${s}`)}
                           style={{
-                            padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                            // minHeight: dotykový cieľ (pôvodných ~24 px bolo na mobile ťažké trafiť)
+                            padding: '6px 12px', minHeight: '36px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
                             background: isActive ? 'var(--accent-color)' : 'var(--bg-card)',
                             color: isActive ? 'white' : 'var(--text-secondary)',
                             cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0

@@ -981,7 +981,8 @@ function Messages() {
                 key={s}
                 onClick={() => setStatusFilter(s)}
                 style={{
-                  padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                  // minHeight: dotykový cieľ (pôvodných ~24 px bolo na mobile ťažké trafiť)
+                  padding: '6px 12px', minHeight: '36px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
                   background: statusFilter === s ? (s === 'poll' ? '#EC4899' : 'var(--accent-color)') : 'var(--bg-card)',
                   color: statusFilter === s ? 'white' : 'var(--text-secondary)',
                   cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
@@ -1690,12 +1691,12 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                           <div style={{ display: 'flex', gap: '4px' }}>
                             <button
                               onClick={() => { setEditingCommentId(c._id); setEditingCommentText(c.text); }}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', minWidth: '32px', minHeight: '32px', fontSize: '14px', color: 'var(--text-muted)', borderRadius: '4px' }}
                               title="Upraviť komentár"
                             >✏️</button>
                             <button
                               onClick={() => onDeleteComment(msg.id || msg._id, c._id)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', minWidth: '32px', minHeight: '32px', fontSize: '14px', color: 'var(--text-muted)', borderRadius: '4px' }}
                               title="Vymazať komentár"
                             >🗑️</button>
                           </div>
@@ -1767,6 +1768,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                         alignItems: 'center',
                         gap: '5px',
                         padding: '4px 10px',
+                        minHeight: '30px', // dotykový cieľ (lineHeight 1 dával ~22 px)
                         borderRadius: '999px',
                         border: '1px solid rgba(99, 102, 241, 0.18)',
                         background: 'rgba(99, 102, 241, 0.06)',
