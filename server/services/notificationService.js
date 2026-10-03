@@ -272,13 +272,15 @@ const getAPNsStatus = () => ({
 /**
  * Send APNs push notification to iOS devices via native HTTP/2
  */
-const sendAPNsNotification = async (userId, payload) => {
+// preloadedDevices: createNotification zariadenia už načítal (rozhoduje
+// podľa nich, ktoré kanály spustiť) — netreba ich ťahať z DB druhýkrát.
+const sendAPNsNotification = async (userId, payload, preloadedDevices = null) => {
   if (!apnConfigured) return { sent: 0, failed: 0 };
 
   const result = { sent: 0, failed: 0, removed: 0 };
 
   try {
-    const devices = await APNsDevice.find({ userId });
+    const devices = Array.isArray(preloadedDevices) ? preloadedDevices : await APNsDevice.find({ userId });
     if (devices.length === 0) return result;
 
     const url = generateNotificationUrl(payload.type, payload.data);
@@ -925,12 +927,12 @@ const createNotification = async ({
 
         // iOS native
         if (apnsDevices.length > 0) {
-          jobs.push(sendAPNsNotification(userId, pushPayload));
+          jobs.push(sendAPNsNotification(userId, pushPayload, apnsDevices));
         }
 
         // Android native (FCM data-only) — podobná rola ako APNs pre iOS
         if (fcmDevices.length > 0) {
-          jobs.push(sendFCMNotification(userId, pushPayload, url));
+          jobs.push(sendFCMNotification(userId, pushPayload, url, fcmDevices));
         }
 
         // Web Push — ak má user iOS devices, vynechaj Apple web push endpointy

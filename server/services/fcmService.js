@@ -105,12 +105,14 @@ const getFCMStatus = () => ({
  * `generateNotificationUrl` sa volá z caller-a (notificationService) a URL
  * sa pošle v data.url — appka ju použije ako EXTRA_DEEP_LINK.
  */
-const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
+// preloadedDevices: voliteľne zariadenia, ktoré volajúci (createNotification)
+// už načítal — ušetrí druhý dotaz na FcmDevice pri každej notifikácii.
+const sendFCMNotification = async (userId, payload, urlFromCaller = null, preloadedDevices = null) => {
   const result = { sent: 0, failed: 0, removed: 0 };
   if (!fcmConfigured) return result;
 
   try {
-    const devices = await FcmDevice.find({ userId });
+    const devices = Array.isArray(preloadedDevices) ? preloadedDevices : await FcmDevice.find({ userId });
     if (devices.length === 0) return result;
 
     const title = String(payload.title || '').slice(0, 100);
