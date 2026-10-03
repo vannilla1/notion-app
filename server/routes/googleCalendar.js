@@ -1028,6 +1028,20 @@ const processCalendarChanges = async (user, target = null) => {
       return;
     }
 
+    // Prvá synchronizácia kanála (alebo po 410) NIČ neaplikuje — len založí
+    // syncToken. Bez syncTokenu Google vráti celý stav kalendára (30 dní dozadu
+    // + budúce udalosti) vrátane udalostí, ktoré CRM už roky neaktualizuje
+    // (napr. kópie úloh kolegov z hromadného /sync pred 10/2026). Ich aplikácia
+    // by v CRM vrátila dokončené projekty do „nedokončené“ a prepísala termíny
+    // aj názvy. Zmeny z Google sa preberajú až od tohto bodu.
+    if (!currentSyncToken) {
+      await persistSyncToken();
+      logger.info('[Calendar Webhook] Baseline sync — token established, no changes applied', {
+        userId: user._id, calendarId, eventCount: allEvents.length
+      });
+      return;
+    }
+
     logger.info('[Calendar Webhook] Processing changes', {
       userId: user._id,
       eventCount: allEvents.length
@@ -1089,6 +1103,21 @@ const processCalendarChanges = async (user, target = null) => {
         }
 
         if (!task) continue; // Task no longer exists in CRM or not in user's workspace
+
+        // Úloha priradená iným (nie tomuto používateľovi) — jeho kalendár môže
+        // mať jej starú kópiu; zmena v ňom nesmie prepisovať úlohu kolegov.
+        const assignees = (task.assignedTo || []).map(a => a && a.toString()).filter(Boolean);
+        if (assignees.length > 0 && !assignees.includes(user._id.toString())) continue;
+
+        // CRM je novšie než udalosť → udalosť je zastaraná (napr. echo našej
+        // staršej zmeny, kým sa v CRM medzitým zmenilo niečo ďalšie) — prebratie
+        // by vrátilo starý stav. Preberáme len zmeny urobené v Google NESKÔR.
+        const crmModifiedRaw = (contact && taskIndex !== -1)
+          ? (contact.tasks[taskIndex].modifiedAt || contact.updatedAt)
+          : (task.modifiedAt || task.updatedAt);
+        const crmModified = crmModifiedRaw ? new Date(crmModifiedRaw).getTime() : NaN;
+        const eventUpdated = event.updated ? new Date(event.updated).getTime() : NaN;
+        if (!isDeleted && Number.isFinite(crmModified) && Number.isFinite(eventUpdated) && eventUpdated <= crmModified) continue;
 
         if (isDeleted) {
           // Event was deleted in Google Calendar — remove mapping atomically.
