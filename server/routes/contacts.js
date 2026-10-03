@@ -1112,16 +1112,19 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Bez tohto zostanú orphaned files (MongoDB base64 alebo R2 objects)
     // aj po zmazaní kontaktu. R2 účtuje per-GB, nie per-object, ale aj tak
     // sa hromadí storage cost ak by sme to nemazali.
+    //
+    // Poradie: r2Keys sa načítajú PRED mazaním, ale bloby v R2 a ContactFile
+    // riadky sa mažú až PO úspešnom zmazaní kontaktu. Keby Task.updateMany
+    // alebo findByIdAndDelete zlyhali (výpadok DB, timeout), kontakt by
+    // v DB ostal s metadátami bez dát a bloby by boli nenávratne preč.
+    // Sirota v ContactFile po zlyhaní deleteMany je opraviteľná skriptom.
+    let r2Files = [];
     if (fileStorage.isR2Available()) {
-      // Najprv získať všetky r2Keys patriace k tomuto kontaktu
-      const r2Files = await ContactFile.find(
+      r2Files = await ContactFile.find(
         { contactId: req.params.id, r2Key: { $ne: null } },
         { r2Key: 1 }
       ).lean();
-      // Paralel delete z R2 (fire-and-forget, individual errors logged inside)
-      Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
     }
-    await ContactFile.deleteMany({ contactId: req.params.id });
 
     // Odpoj zmazaný kontakt od samostatných (global) projektov priradených
     // cez contactIds — inak by ostal висieť dangling contactId (projekt by na
@@ -1134,6 +1137,10 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     );
 
     await Contact.findByIdAndDelete(req.params.id);
+
+    // Paralel delete z R2 (fire-and-forget, individual errors logged inside)
+    Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
+    await ContactFile.deleteMany({ contactId: req.params.id });
 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-deleted', { id: req.params.id });
