@@ -302,7 +302,25 @@ router.post('/join', authenticateToken, async (req, res) => {
       invitedBy: null // Joined via code
     });
 
-    await membership.save();
+    try {
+      await membership.save();
+    } catch (saveErr) {
+      // Súbežný join (dvojklik/retry): unique index { workspaceId, userId }
+      // hodil E11000, ale členstvo už existuje → rovnaká odpoveď ako vetva
+      // "už člen" vyššie namiesto 500.
+      if (saveErr.code !== 11000) throw saveErr;
+      const existing = await WorkspaceMember.findOne({ workspaceId: workspace._id, userId: req.user.id });
+      await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
+      return res.json({
+        message: 'Už ste členom tohto pracovného prostredia',
+        workspace: {
+          id: workspace._id,
+          name: workspace.name,
+          slug: workspace.slug,
+          role: existing?.role || membership.role
+        }
+      });
+    }
 
     // Set as current workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
@@ -1147,13 +1165,23 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       }
     }
 
-    // Create membership
-    await WorkspaceMember.create({
-      workspaceId: invitation.workspaceId,
-      userId: req.user.id,
-      role: invitation.role,
-      invitedBy: invitation.invitedBy
-    });
+    // Create membership. Unique index { workspaceId, userId } — pri dvojkliku
+    // / retry klienta prejde druhý request kontrolou "už člen" ešte pred
+    // vznikom membership a create() hodí E11000; členstvo však existuje,
+    // takže odpovedáme ako pri existujúcom členovi namiesto 500.
+    try {
+      await WorkspaceMember.create({
+        workspaceId: invitation.workspaceId,
+        userId: req.user.id,
+        role: invitation.role,
+        invitedBy: invitation.invitedBy
+      });
+    } catch (createErr) {
+      if (createErr.code !== 11000) throw createErr;
+      invitation.status = 'accepted';
+      await invitation.save();
+      return res.json({ message: 'Už ste členom tohto prostredia', workspaceId: invitation.workspaceId });
+    }
 
     // Switch user to the new workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: invitation.workspaceId });
