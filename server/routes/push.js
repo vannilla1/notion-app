@@ -16,8 +16,12 @@ const rateLimiter = {
   windowMs: 60000, // 1 minute window
 
   check(userId) {
+    // req.user.id je ObjectId (auth cache miss) alebo string (Redis hit).
+    // Map porovnáva objekty podľa identity — s ObjectId kľúčom by každý
+    // request založil nový záznam a limit by sa nikdy neuplatnil.
+    const key = String(userId);
     const now = Date.now();
-    const userRequests = this.requests.get(userId) || [];
+    const userRequests = this.requests.get(key) || [];
 
     // Clean old requests
     const validRequests = userRequests.filter(time => now - time < this.windowMs);
@@ -27,7 +31,7 @@ const rateLimiter = {
     }
 
     validRequests.push(now);
-    this.requests.set(userId, validRequests);
+    this.requests.set(key, validRequests);
     return true;
   },
 
