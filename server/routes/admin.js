@@ -3082,10 +3082,22 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
         .sort({ [sortField]: sortDir })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('userId', 'username email avatar avatarData avatarMimetype color')
+        .populate('userId', 'username email avatar color')
         .select('-htmlSnapshot') // omit big blob from list view
         .lean()
     ]);
+
+    // hasAvatarData potrebujeme len ako boolean — predtým populate ťahal
+    // celý Base64 avatarData (až MB na usera) pre každý z až 200 riadkov,
+    // len aby sa z neho spravilo `!!`. Zistíme to samostatným dopytom nad
+    // ID-čkami aktuálnej stránky s projekciou iba na _id.
+    const pageUserIds = [...new Set(logs.filter((l) => l.userId?._id).map((l) => String(l.userId._id)))];
+    const withAvatar = new Set(
+      pageUserIds.length
+        ? (await User.find({ _id: { $in: pageUserIds }, avatarData: { $nin: [null, ''] } }).select('_id').lean())
+          .map((u) => String(u._id))
+        : []
+    );
 
     res.json({
       total,
@@ -3099,8 +3111,9 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
           email: l.userId.email,
           color: l.userId.color,
           avatar: l.userId.avatar,
-          hasAvatarData: !!l.userId.avatarData
+          hasAvatarData: withAvatar.has(String(l.userId._id))
         } : null,
+
         userId: l.userId?._id || null
       }))
     });
