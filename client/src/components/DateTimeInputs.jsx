@@ -135,8 +135,10 @@ function DateTimeInput({ type, value, onChange, disabled, className, style, titl
         // context pre showPicker(). Plus pokrýva touch (iOS posiela
         // syntetický mouseDown). onFocus už voláme len pri kbd-tab cez form
         // a len ak hodnota chýba (vtedy chceme rovnaký pickerovo-otvárací UX).
+        // Bez onTouchStart: ten sa spustí aj pri scrollovaní prstom cez input
+        // a picker sa otváral nechtiac; po ťuknutí (nie po scrolle) iOS aj
+        // Android pošlú syntetický mouseDown.
         onMouseDown={openPicker}
-        onTouchStart={openPicker}
         onFocus={!hasValue ? openPicker : undefined}
         disabled={disabled}
         className={`form-input dt-input ${className}`}
