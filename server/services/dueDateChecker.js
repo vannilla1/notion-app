@@ -432,7 +432,27 @@ const updateSubtaskUrgencyLevels = (subtasks) => {
 /**
  * Check all tasks for due date urgency changes and send notifications
  */
+// Ochrana proti prekrývaniu behov: interval je 5 min, ale beh prechádza
+// sekvenčne všetky úlohy a kontakty s mnohými await — pri väčšom objeme
+// trvá dlhšie a druhý beh by poslal tie isté notifikácie znova (stav
+// „odoslané" sa ukladá až na konci spracovania úlohy). Platí v rámci jednej
+// inštancie; pri viacerých inštanciách by bol potrebný zdieľaný zámok.
+let checkInProgress = false;
+
 const checkDueDates = async () => {
+  if (checkInProgress) {
+    logger.warn('[DueDateChecker] Predošlý beh ešte prebieha — tento sa preskakuje');
+    return { notificationsSent: 0, tasksUpdated: 0, skipped: true };
+  }
+  checkInProgress = true;
+  try {
+    return await runDueDateCheck();
+  } finally {
+    checkInProgress = false;
+  }
+};
+
+const runDueDateCheck = async () => {
   try {
     logger.info('[DueDateChecker] Starting due date check...');
 
