@@ -32,6 +32,14 @@ const healthMonitor = require('../jobs/healthMonitor');
 
 const router = express.Router();
 
+// ── Validácia ID vo vstupoch ──────────────────────────────────────
+// Nevalidný ObjectId v path/body skončí v Mongoose ako CastError → catch →
+// 500 „Chyba servera“, ktoré captureResponseErrors zapíše do Diagnostiky ako
+// serverovú chybu. Express `qs`/JSON parser navyše dovolí poslať objekt
+// (`{"$ne": null}`), ktorý Mongoose pre ObjectId path prepustí ako operátor —
+// preto prijímame iba 24-znakový hex reťazec.
+const isOid = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
+
 // Middleware: require super admin (only support@prplcrm.eu)
 const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
 
@@ -404,6 +412,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
 // ─── UPDATE USER ROLE (system-wide) ─────────────────────────────
 router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { role } = req.body;
     if (!['admin', 'manager', 'user'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
@@ -446,12 +455,19 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
 // ─── UPDATE WORKSPACE MEMBER ROLE ───────────────────────────────
 router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { workspaceId, role } = req.body;
     if (!['owner', 'manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná workspace rola' });
     }
     if (!workspaceId) {
       return res.status(400).json({ message: 'Chýba workspaceId' });
+    }
+    // Objekt typu {"$ne": null} by vo findOne({ userId, workspaceId }) prešiel
+    // ako operátor a zmenil rolu v PRVOM nájdenom členstve usera namiesto
+    // konkrétneho workspace-u (a do audit logu by sa zapísal objekt).
+    if (!isOid(workspaceId)) {
+      return res.status(400).json({ message: 'Neplatné workspaceId' });
     }
 
     const membership = await WorkspaceMember.findOne({
@@ -513,6 +529,7 @@ router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, asy
 // ─── UPDATE USER PLAN ───────────────────────────────────────────
 router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { plan } = req.body;
     if (!['free', 'team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
@@ -559,6 +576,7 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
 // ─── DELETE USER ────────────────────────────────────────────────
 router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     // ObjectId vs string porovnanie — viď PUT /users/:userId/role komentár.
     // Bez .toString() táto ochrana nefungovala; self-delete bol nepriamo
     // blokovaný len ochranou "iný admin". Po odinštalovaní admin role by
@@ -1451,6 +1469,7 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 // Update user subscription details
 router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
@@ -1533,6 +1552,7 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
 // Apply discount to user
 router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
@@ -1614,6 +1634,7 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
 // Remove discount from user
 router.delete('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
@@ -2422,6 +2443,7 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
 // Update promo code (toggle active, update limits)
 router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id);
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2511,6 +2533,7 @@ router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res)
 // Delete promo code
 router.delete('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id);
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2544,6 +2567,7 @@ router.delete('/promo-codes/:id', authenticateToken, requireAdmin, async (req, r
 // Get promo code stats
 router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id).populate('redemptions.userId', 'username email');
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2651,6 +2675,7 @@ router.get('/errors/stats', authenticateToken, requireAdmin, async (req, res) =>
 // GET /api/admin/errors/:id — detail
 router.get('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const err = await ServerError.findById(req.params.id)
       .populate('userId', 'username email')
       .populate('resolvedBy', 'username email')
@@ -2666,6 +2691,7 @@ router.get('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
 // PUT /api/admin/errors/:id/resolve — označiť opravené / znova otvoriť
 router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const { resolved, notes } = req.body;
     const update = {
       resolved: !!resolved,
@@ -2690,6 +2716,7 @@ router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, r
 // DELETE /api/admin/errors/:id — manuálne zmazať záznam
 router.delete('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const result = await ServerError.findByIdAndDelete(req.params.id);
     if (!result) return res.status(404).json({ message: 'Chyba nenájdená' });
     res.json({ success: true });
@@ -3514,6 +3541,7 @@ router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => 
 // Manuálny trigger reminder/winback emailu — pre support workflow
 router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { type } = req.body;
     const allowed = ['reminder_t7', 'reminder_t1', 'winback', 'expired', 'welcome_pro', 'subscription_assigned', 'discount_assigned'];
     if (!allowed.includes(type)) {
@@ -3817,6 +3845,7 @@ router.get('/affiliates', authenticateToken, requireAdmin, async (req, res) => {
 router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { email, name, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
+    if (userId && !isOid(userId)) return res.status(400).json({ message: 'Neplatné userId' });
     let user = userId
       ? await User.findById(userId)
       : await User.findOne({ email: (email || '').toLowerCase().trim() });
@@ -3883,6 +3912,7 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
 // PUT update affiliate payout info + status (admin akcia)
 router.put('/affiliates/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { payoutIban, payoutBankName, payoutNote, status } = req.body || {};
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'User nenájdený' });
@@ -3963,6 +3993,8 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
 // POST mark single commission as paid
 router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
+
     const Commission = require('../models/Commission');
     const { paidMethod, paidReference, notes } = req.body || {};
     const c = await Commission.findById(req.params.id);
