@@ -303,10 +303,6 @@ export default function LandingPage() {
             </button>
           </div>
 
-          {/* Helper SVG components — extracting do mini funkcií zníži duplicitu
-              z ~70 SVG inline výskytov v 3 kartách na 3 spoločné helpre. */}
-          {(() => null)()}
-
           <div className="lp-pricing-cards">
             {/* Free */}
             <div className="lp-pricing-card">
