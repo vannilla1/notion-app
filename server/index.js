@@ -347,18 +347,27 @@ io.on('connection', async (socket) => {
   // change takes effect on next reconnect. Acceptable — REST API enforces
   // membership on every request anyway; this only affects real-time deltas.
   const userWorkspaceIds = new Set();
-  try {
-    const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
-    for (const m of memberships) {
-      const wsId = m.workspaceId.toString();
-      socket.join(`workspace-${wsId}`);
-      userWorkspaceIds.add(wsId);
-    }
-    logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
-  } catch (err) {
-    logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
-  }
   socket.data.userWorkspaceIds = userWorkspaceIds;
+  // Načítanie členstva ZÁMERNE bez await na vrchu handlera: Socket.IO
+  // emitne 'connection' hneď po CONNECT acku a klient má 'join-page' často
+  // už v sendBuffer (PageView volá joinPage hneď, ako existuje socket
+  // objekt). Ak by sme tu await-ovali Mongo dotaz, všetky socket.on(...)
+  // nižšie by sa zaregistrovali až po ňom a skorý join-page by sa bez logu
+  // zahodil. Takto sa listenery registrujú synchrónne a canAccessPage na
+  // výsledok počká cez `await membershipReady`.
+  const membershipReady = (async () => {
+    try {
+      const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
+      for (const m of memberships) {
+        const wsId = m.workspaceId.toString();
+        socket.join(`workspace-${wsId}`);
+        userWorkspaceIds.add(wsId);
+      }
+      logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
+    } catch (err) {
+      logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
+    }
+  })();
   // Cache pageId → workspaceId after a successful join-page check, so
   // re-joining or re-checking the same page in this session is a Set lookup,
   // not a Mongo query.
@@ -378,6 +387,8 @@ io.on('connection', async (socket) => {
   async function canAccessPage(pageId) {
     if (typeof pageId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(pageId)) return false;
     if (socket.data.pageAccess.has(pageId)) return true;
+    // Skorý join-page počká na načítanie členstva namiesto odmietnutia.
+    await membershipReady;
     try {
       const page = await Page.findById(pageId, 'workspaceId').lean();
       if (!page) return false;
