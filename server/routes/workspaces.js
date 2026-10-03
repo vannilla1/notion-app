@@ -562,7 +562,10 @@ router.get('/current/members', authenticateToken, requireWorkspace, async (req, 
     const members = await WorkspaceMember.find({ workspaceId: req.workspace._id })
       .populate('userId', 'username email color avatar');
 
-    const membersData = members.map(m => ({
+    // populate vráti null pre osirelé membership (User zmazaný mimo štandardného
+    // flow / ručný zásah v DB) — bez filtra by jedno také zhodilo celý zoznam
+    // členov na 500 pre všetkých členov workspace-u.
+    const membersData = members.filter(m => m.userId).map(m => ({
       id: m._id,
       userId: m.userId._id,
       username: m.userId.username,
@@ -573,6 +576,12 @@ router.get('/current/members', authenticateToken, requireWorkspace, async (req, 
       joinedAt: m.joinedAt,
       canEdit: req.workspaceMember.canAdmin() && m.role !== 'owner'
     }));
+    if (membersData.length !== members.length) {
+      logger.warn('Orphaned memberships skipped', {
+        workspaceId: req.workspace._id,
+        orphans: members.length - membersData.length
+      });
+    }
 
     res.json(membersData);
   } catch (error) {
