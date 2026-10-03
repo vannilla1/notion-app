@@ -426,6 +426,17 @@ userSchema.index({ role: 1 });
 // watchChannelId — bez indexu išlo zakaždým o COLLSCAN celej kolekcie.
 userSchema.index({ 'subscription.stripeSubscriptionId': 1 }, { sparse: true });
 userSchema.index({ 'subscription.stripeCustomerId': 1 }, { sparse: true });
+// Jedna Apple transakcia (originalTransactionId) = jeden účet. Check-then-
+// act v /apple/verify nestačí pri súbehu. Partial filter: default null by
+// v unique indexe kolidoval (sparse vynecháva len chýbajúce pole).
+userSchema.index(
+  { 'subscription.appleOriginalTransactionId': 1 },
+  {
+    unique: true,
+    name: 'uniq_apple_original_tx',
+    partialFilterExpression: { 'subscription.appleOriginalTransactionId': { $type: 'string' } }
+  }
+);
 userSchema.index({ 'googleCalendar.watchChannelId': 1 }, { sparse: true });
 userSchema.index({ 'googleCalendar.workspaceWatches.channelId': 1 }, { sparse: true });
 

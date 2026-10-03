@@ -67,6 +67,18 @@ async function applyTransactionToUser(user, txPayload, environment) {
 // (môže mať aj Stripe históriu), ale zruší Apple subscription state.
 async function downgradeUserToFree(user, reason) {
   const sub = user.subscription;
+  // Používateľ medzičasom prešiel na Stripe (source 'stripe') — expirácia
+  // starého Apple predplatného nesmie zrušiť platený Stripe plán.
+  if (sub.source && sub.source !== 'apple' && sub.plan !== 'free') {
+    sub.appleProductId = null;
+    await user.save();
+    logger.info('[AppleIAP] Apple subscription ended, non-Apple plan kept', {
+      userId: user._id.toString(),
+      source: sub.source,
+      reason
+    });
+    return;
+  }
   sub.plan = 'free';
   sub.source = null;
   sub.billingPeriod = null;
@@ -146,13 +158,46 @@ router.post('/verify', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
+    // Refundovaná / revokovaná transakcia (Family Sharing revoke, refund) —
+    // replay jej JWS by inak znova aktivoval plán až do expiresDate.
+    if (payload.revocationDate) {
+      logger.warn('[AppleIAP] /verify revoked transaction', {
+        userId: user._id.toString(),
+        originalTransactionId: payload.originalTransactionId,
+        revocationReason: payload.revocationReason
+      });
+      return res.status(400).json({ message: 'Transakcia bola refundovaná alebo zrušená' });
+    }
+
+    // Sandbox transakcie (TestFlight, App Review) sú bezplatné. Predvolene
+    // ich prijímame — App Review testuje produkčný build so sandbox účtom a
+    // nákup musí odomknúť funkcie. Prísnejší režim: APPLE_SANDBOX_POLICY=
+    // allowlist + APPLE_SANDBOX_ALLOWED_EMAILS (čiarkou oddelené).
+    if (environment === 'Sandbox' && process.env.APPLE_SANDBOX_POLICY === 'allowlist') {
+      const allowed = (process.env.APPLE_SANDBOX_ALLOWED_EMAILS || '')
+        .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!allowed.includes(String(user.email || '').toLowerCase()) && user.role !== 'admin') {
+        logger.warn('[AppleIAP] /verify sandbox transaction rejected by policy', { userId: user._id.toString() });
+        return res.status(400).json({ message: 'Testovacie (sandbox) nákupy nie sú pre tento účet povolené' });
+      }
+    }
+
     // Ak je expiresDate v minulosti, transakcia je expirovaná — neaktivuj.
     if (payload.expiresDate && payload.expiresDate < Date.now()) {
       logger.info('[AppleIAP] /verify expired transaction', { userId: user._id.toString(), expiresDate: payload.expiresDate });
       return res.status(400).json({ message: 'Transakcia je expirovaná' });
     }
 
-    await applyTransactionToUser(user, payload, environment);
+    try {
+      await applyTransactionToUser(user, payload, environment);
+    } catch (applyErr) {
+      // Unique index na appleOriginalTransactionId — súbežný /verify iného
+      // účtu s tou istou transakciou (check-then-act vyššie nestačí).
+      if (applyErr.code === 11000) {
+        return res.status(409).json({ message: 'Táto transakcia je už priradená inému účtu' });
+      }
+      throw applyErr;
+    }
 
     res.json({
       success: true,
@@ -215,14 +260,18 @@ router.post('/notifications', async (req, res) => {
       'subscription.appleOriginalTransactionId': tx.originalTransactionId
     });
     if (!user) {
-      // Môže nastať pri SUBSCRIBED notifikácii ktorá príde skôr než /verify
-      // stihne uložiť usera — Apple retryuje, takže pri ďalšom pokuse už
-      // user bude existovať. Logujeme a vrátime 200.
-      logger.info('[AppleIAP] No user for notification (may resolve on retry)', {
+      // SUBSCRIBED/DID_RENEW môže prísť skôr, než /verify uloží väzbu na
+      // používateľa. Apple notifikáciu opakuje LEN pri ne-2xx odpovedi
+      // (5 pokusov počas ~3 dní) — pri aktivačných typoch preto 500, aby
+      // sa po /verify spracovala; ostatné (EXPIRED, REFUND…) pre neznámeho
+      // používateľa nemajú čo zmeniť → 200.
+      const ACTIVATING = ['SUBSCRIBED', 'DID_RENEW', 'OFFER_REDEEMED', 'DID_CHANGE_RENEWAL_PREF'];
+      logger.info('[AppleIAP] No user for notification', {
         notificationType,
-        originalTransactionId: tx.originalTransactionId
+        originalTransactionId: tx.originalTransactionId,
+        willRetry: ACTIVATING.includes(notificationType)
       });
-      return res.status(200).end();
+      return res.status(ACTIVATING.includes(notificationType) ? 500 : 200).end();
     }
 
     // ── Notification type routing ──
@@ -231,8 +280,17 @@ router.post('/notifications', async (req, res) => {
       case 'DID_RENEW':
       case 'OFFER_REDEEMED':
       case 'DID_CHANGE_RENEWAL_PREF': // upgrade/downgrade/crossgrade — nový productId
+        // Revokovaná transakcia nesmie plán predĺžiť
+        if (tx.revocationDate) {
+          await downgradeUserToFree(user, `${notificationType}/revoked`);
+          break;
+        }
         // Aktivuj/predĺž podľa aktuálnej transakcie
         await applyTransactionToUser(user, tx, environment);
+        // Nový cyklus → pripomienky (T-7/T-1) sa môžu poslať znova
+        if (notificationType === 'DID_RENEW') {
+          require('../services/subscriptionEmailService').resetReminderFlags(user._id).catch(() => {});
+        }
         break;
 
       case 'DID_CHANGE_RENEWAL_STATUS':

@@ -231,7 +231,10 @@ const apiLimiter = rateLimit({
   // /tasks/<id>/files/<fileId>/download) majú vlastný filesLimiter —
   // apiLimiter ich preskočí, aby galéria príloh nevyčerpala bežný limit.
   // (/health a /uploads sú mimo /api, preto tu podmienky nie sú.)
-  skip: (req) => skipInDev(req) || isFilesPath(req.path)
+  // Apple App Store Server Notifications prichádzajú zo zdieľaných IP
+  // Apple (autenticita cez JWS podpis) — ako Stripe webhook nesmú naraziť
+  // na limit pre bežných klientov.
+  skip: (req) => skipInDev(req) || isFilesPath(req.path) || req.path === '/billing/apple/notifications'
 });
 
 // Mount pre /api: súborové cesty → filesLimiter, ostatné → apiLimiter.
