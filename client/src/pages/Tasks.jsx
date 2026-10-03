@@ -899,12 +899,15 @@ function Tasks() {
   // endpoint is idempotent, so re-firing on the same id is harmless.
   useEffect(() => {
     if (!expandedTask) return;
-    api.put('/api/notifications/read-for-related', {
-      relatedType: 'task',
-      relatedId: expandedTask
-    }).then(() => {
-      window.dispatchEvent(new CustomEvent('notifications-updated'));
-    }).catch(() => {});
+    (async () => {
+      try {
+        await api.put('/api/notifications/read-for-related', {
+          relatedType: 'task',
+          relatedId: expandedTask
+        });
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      } catch { /* ignore */ }
+    })();
   }, [expandedTask]);
 
   // Handle Google Calendar and Google Tasks OAuth callback parameters.
@@ -1468,30 +1471,34 @@ function Tasks() {
       lastNavTimestampRef.current = urlTimestamp || 'unread';
       navigate(location.pathname, { replace: true, state: {} });
 
-      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
-        const taskNotifs = (res.data.notifications || []).filter(n =>
-          n.type?.startsWith('task.') || n.type?.startsWith('subtask.')
-        );
-        const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
-        if (ids.size > 0) {
-          // Zvýraznenie neprečítaných funguje len v strome projektov — viď
-          // komentár pri spracovaní pending highlightu.
-          setViewMode('list');
-          setContactFilter(null);
-          setFilter('all');
-          setSearchQuery('');
-          setHighlightedTaskIds(ids);
-          // Expand first highlighted task
-          const firstId = [...ids][0];
-          setExpandedTask(firstId);
-          setTimeout(() => {
-            if (taskRefs.current[firstId]) {
-              taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }, 200);
-          setTimeout(() => setHighlightedTaskIds(new Set()), 4000);
-        }
-      }).catch(() => {});
+      const run = async () => {
+        try {
+          const res = await api.get('/api/notifications?unreadOnly=true&limit=50');
+          const taskNotifs = (res.data.notifications || []).filter(n =>
+            n.type?.startsWith('task.') || n.type?.startsWith('subtask.')
+          );
+          const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
+          if (ids.size > 0) {
+            // Zvýraznenie neprečítaných funguje len v strome projektov — viď
+            // komentár pri spracovaní pending highlightu.
+            setViewMode('list');
+            setContactFilter(null);
+            setFilter('all');
+            setSearchQuery('');
+            setHighlightedTaskIds(ids);
+            // Expand first highlighted task
+            const firstId = [...ids][0];
+            setExpandedTask(firstId);
+            setTimeout(() => {
+              if (taskRefs.current[firstId]) {
+                taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 200);
+            setTimeout(() => setHighlightedTaskIds(new Set()), 4000);
+          }
+        } catch { /* ignore */ }
+      };
+      run();
     }
   }, [location.search]);
 
