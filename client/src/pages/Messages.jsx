@@ -1071,9 +1071,11 @@ function Messages() {
       </main>
       </div>
 
-      {/* New message modal */}
+      {/* New message modal — trieda modal-overlay aktivuje globálny iOS zámok
+          scrollu tela (MutationObserver v App.jsx hľadá len '.modal-overlay');
+          vizuál ostáva z inline štýlov, ktoré triedu prepíšu. */}
       {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) { setShowForm(false); resetForm(); } }}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflow: 'auto', boxShadow: 'var(--shadow-xl)' }}>
             <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Nová správa</h3>
@@ -1232,7 +1234,7 @@ function Messages() {
       )}
 
       {showRejectDialog && selectedMessage && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowRejectDialog(false); }}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: 'var(--shadow-xl)' }}>
             <h3 style={{ marginBottom: '12px', fontSize: '16px' }}>❌ Zamietnuť odkaz</h3>
