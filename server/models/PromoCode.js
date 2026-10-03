@@ -140,6 +140,11 @@ const promoCodeSchema = new mongoose.Schema({
   }
 });
 
+// invoice.payment_succeeded webhook hľadá náš kód podľa Stripe ID
+// ($or nižšie v billing.js) — sparse indexy namiesto skenu kolekcie.
+promoCodeSchema.index({ stripePromotionCodeId: 1 }, { sparse: true });
+promoCodeSchema.index({ stripeCouponId: 1 }, { sparse: true });
+
 // Check if code is currently valid
 promoCodeSchema.methods.isValid = function() {
   if (!this.isActive) return false;

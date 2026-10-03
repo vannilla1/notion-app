@@ -368,7 +368,22 @@ const userSchema = new mongoose.Schema({
     virtuals: true,
     transform: function(doc, ret) {
       ret.id = ret._id.toString();
+      // Obrana do hĺbky — res.json(user) / socket emit nikdy nepošle
+      // heslo, reset token, OAuth tokeny ani tajný token kalendárového feedu.
       delete ret.password;
+      delete ret.resetPasswordTokenHash;
+      delete ret.resetPasswordExpires;
+      delete ret.calendarFeedToken;
+      delete ret.restoreTokens;
+      delete ret.tokenVersion;
+      if (ret.googleCalendar) {
+        delete ret.googleCalendar.accessToken;
+        delete ret.googleCalendar.refreshToken;
+      }
+      if (ret.googleTasks) {
+        delete ret.googleTasks.accessToken;
+        delete ret.googleTasks.refreshToken;
+      }
       return ret;
     }
   },
@@ -385,6 +400,12 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ 'googleCalendar.enabled': 1 });
 userSchema.index({ 'googleTasks.enabled': 1 });
 userSchema.index({ role: 1 });
+// Stripe webhooky hľadajú používateľa podľa subscription/customer ID pri
+// každom evente; Google Calendar webhook (neautentifikovaný) podľa
+// watchChannelId — bez indexu išlo zakaždým o COLLSCAN celej kolekcie.
+userSchema.index({ 'subscription.stripeSubscriptionId': 1 }, { sparse: true });
+userSchema.index({ 'subscription.stripeCustomerId': 1 }, { sparse: true });
+userSchema.index({ 'googleCalendar.watchChannelId': 1 }, { sparse: true });
 
 // At-rest encryption pre OAuth tokeny (audit MED-003 v2).
 //
@@ -452,6 +473,11 @@ userSchema.post('init', function (doc) {
       // a následný API call s ňou zlyhá → /reconnect flow user pre-založí.
       if (decrypted !== null && decrypted !== value) {
         doc.set(path, decrypted);
+        // doc.set() cestu označí ako modified → každé user.save() (profil,
+        // billing webhook, push preferencie…) by token znova zapísalo a
+        // prepísalo medzitým obnovený token iným requestom (lost update).
+        // Vrátime ju do stavu 'init'; pre('save') šifruje len reálnu zmenu.
+        doc.unmarkModified(path);
       }
     }
   }
