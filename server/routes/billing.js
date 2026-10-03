@@ -640,6 +640,7 @@ module.exports.handleWebhook = async (req, res) => {
  */
 function isTransientWebhookError(error) {
   if (!error) return false;
+  if (error.transient === true) return true;
   const name = error.name || '';
   if (/^Mongo(Network|ServerSelection|NotConnected|Pool|WaitQueue)/.test(name)) return true;
   if (name === 'MongoServerError' && Array.isArray(error.errorLabels) && error.errorLabels.includes('RetryableWriteError')) return true;
@@ -1031,12 +1032,70 @@ async function handleChargeRefunded(charge) {
 
   if (commission.status === 'revoked') return; // už revoked
 
-  commission.status = 'revoked';
-  commission.notes = (commission.notes || '') + `\n[${new Date().toISOString()}] Auto-revoked: Stripe charge ${charge.id} refunded`;
-  await commission.save();
-  logger.info('[Affiliate] Commission revoked due to refund', {
+  // charge.refunded event chodí aj pri čiastočnom refunde (amount_refunded
+  // < amount, charge.refunded=false). Vtedy províziu len prepočítame zo
+  // zostávajúcej sumy; úplne revokujeme iba pri plnom refunde.
+  // amount_refunded je kumulatívne → výpočet je idempotentný.
+  const amount = charge.amount || 0;
+  const refunded = charge.amount_refunded || 0;
+  const fullRefund = charge.refunded === true || (amount > 0 && refunded >= amount);
+  const prevStatus = commission.status;
+  const prevAmount = commission.commissionAmount || 0;
+  const stamp = new Date().toISOString();
+
+  let update;
+  let delta; // o koľko klesne zárobok affiliate partnera
+  if (fullRefund) {
+    delta = prevAmount;
+    update = {
+      $set: {
+        status: 'revoked',
+        notes: (commission.notes || '') + `\n[${stamp}] Auto-revoked: Stripe charge ${charge.id} refunded`
+      }
+    };
+  } else {
+    const remaining = Math.max(0, amount - refunded) / 100;
+    const newAmount = Math.round(remaining * ((commission.commissionPercent || 0) / 100) * 100) / 100;
+    if (newAmount >= prevAmount) return; // už prepočítané (retry eventu)
+    delta = Math.round((prevAmount - newAmount) * 100) / 100;
+    update = {
+      $set: {
+        commissionAmount: newAmount,
+        notes: (commission.notes || '') + `\n[${stamp}] Partial refund ${refunded / 100} € (charge ${charge.id}): ${prevAmount} → ${newAmount} €`
+      }
+    };
+  }
+
+  // Guard na pôvodný stav — commissionScheduler môže medzitým prepnúť
+  // pending → eligible; v tom prípade by sme counter neopravili.
+  const applied = await Commission.findOneAndUpdate(
+    { _id: commission._id, status: prevStatus, commissionAmount: prevAmount },
+    update,
+    { new: true }
+  );
+  if (!applied) {
+    logger.warn('[Affiliate] Commission changed concurrently during refund — will be retried by Stripe', {
+      commissionId: commission._id.toString()
+    });
+    const err = new Error('Commission changed concurrently');
+    err.transient = true; // webhook vráti 500 a Stripe event zopakuje
+    throw err;
+  }
+
+  // Eligible provízia už bola pripočítaná do User.affiliate.totalEarnedEur.
+  if (prevStatus === 'eligible' && delta > 0) {
+    await User.updateOne(
+      { _id: commission.referrerId },
+      { $inc: { 'affiliate.totalEarnedEur': -delta } }
+    );
+  }
+
+  logger.info(fullRefund ? '[Affiliate] Commission revoked due to refund' : '[Affiliate] Commission reduced due to partial refund', {
     commissionId: commission._id.toString(),
-    chargeId: charge.id
+    chargeId: charge.id,
+    previousAmount: prevAmount,
+    newAmount: applied.commissionAmount,
+    status: applied.status
   });
 }
 
