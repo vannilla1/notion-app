@@ -124,6 +124,20 @@ const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../u
 
 const router = express.Router();
 
+// Všetky :id / :contactId v tomto súbore sú ObjectId kontaktu. Neplatná
+// hodnota by inak skončila CastError → 500 „Chyba servera" + falošný záznam
+// UnhandledServerResponse v Diagnostike (finish-hook). Rovnaká guard ako
+// tasks.js GET /:id. router.param beží pred authenticateToken, takže
+// neplatné id bez tokenu dostane 404 namiesto 401 — skutoční klienti
+// posielajú len id, ktoré dostali zo servera.
+const ensureObjectId = (req, res, next, value) => (
+  /^[0-9a-fA-F]{24}$/.test(String(value))
+    ? next()
+    : res.status(404).json({ message: 'Kontakt nenájdený' })
+);
+router.param('id', ensureObjectId);
+router.param('contactId', ensureObjectId);
+
 // Auto-invalidate contacts cache after any mutation (POST/PUT/DELETE)
 router.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
