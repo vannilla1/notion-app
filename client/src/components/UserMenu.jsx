@@ -175,6 +175,20 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     return () => clearInterval(interval);
   }, [isOpen, fetchUnreadByWs]);
 
+  // Návrat z pripojenia Google/Apple účtu (AuthCallback → ?openConnections=1
+  // &connected=google) — otvoríme modál „Pripojené účty“, ktorý zobrazí
+  // potvrdenie. Bez toho bol modál zatvorený a správa sa nikdy neukázala.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('openConnections') !== '1') return;
+      params.delete('openConnections');
+      const qs = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+      setShowConnectedAccounts(true);
+    } catch { /* ignore */ }
+  }, []);
+
   // Po OAuth návrate z Google (query ?google_calendar=connected | ?google_tasks=connected)
   // automaticky otvoríme "Synchronizácia kalendára" modal a scrollneme k relevantnej
   // sekcii. User začínal flow klikom na "Pripojiť Google ..." v tomto modali — vracať
