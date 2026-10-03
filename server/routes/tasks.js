@@ -381,7 +381,11 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     res.json(allTasks);
   } catch (error) {
     logger.error('GET /tasks error', { error: error.message, workspaceId: req.workspaceId?.toString() });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
+    // Interný text chyby (CastError s cestou a modelom, názvy polí…) patrí do
+    // logu/Diagnostiky, nie klientovi; klient číta len `message`.
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
