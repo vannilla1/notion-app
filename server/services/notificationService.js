@@ -502,17 +502,22 @@ const initialize = (socketIo) => {
 const generateNotificationUrl = (type, data = {}) => {
   logger.debug('[NotificationService] generateNotificationUrl', { type, data });
 
+  // URL-encoding identifikátorov — väčšina sú ObjectId (bez zmeny), ale
+  // subtask.id je obyčajný String od klienta; znaky & = # ? by inak
+  // rozbili/podvrhli query parametre deep-linku (web push, APNs, FCM).
+  const enc = (v) => encodeURIComponent(String(v ?? ''));
+
   // Helper: append ws=<workspaceId> so the client can switch workspace
   // before navigating to the target entity. Required for multi-workspace users.
   const withWs = (url) => {
     if (!data.workspaceId) return url;
     const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}ws=${data.workspaceId}`;
+    return `${url}${sep}ws=${enc(data.workspaceId)}`;
   };
 
   // Contact notifications -> /crm with contact expansion
   if (type?.startsWith('contact') && data.contactId) {
-    return withWs(`/crm?expandContact=${data.contactId}`);
+    return withWs(`/crm?expandContact=${enc(data.contactId)}`);
   }
 
   // Task notifications -> /tasks with task highlight
@@ -521,19 +526,19 @@ const generateNotificationUrl = (type, data = {}) => {
   // highlightTask a user by skončil vo filtrovanom zozname bez zvýraznenia.
   // highlightTask stačí na scroll + flash animáciu.
   if (type?.startsWith('task') && data.taskId) {
-    return withWs(`/tasks?highlightTask=${data.taskId}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}`);
   }
 
   // Subtask notifications -> /tasks with parent task highlight (rovnaký dôvod
   // ako vyššie — žiadny contactId v notifikačnej URL).
   if (type?.startsWith('subtask') && data.taskId) {
-    return withWs(`/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}&subtask=${enc(data.subtaskId || '')}`);
   }
 
   // Message notifications -> /messages with message highlight (+ comment scroll)
   if (type?.startsWith('message') && data.messageId) {
-    let url = `/messages?highlight=${data.messageId}`;
-    if (data.commentId) url += `&comment=${data.commentId}`;
+    let url = `/messages?highlight=${enc(data.messageId)}`;
+    if (data.commentId) url += `&comment=${enc(data.commentId)}`;
     return withWs(url);
   }
 
@@ -544,14 +549,14 @@ const generateNotificationUrl = (type, data = {}) => {
 
   // Fallback: try to determine URL from data fields alone
   if (data.messageId) {
-    let url = `/messages?highlight=${data.messageId}`;
-    if (data.commentId) url += `&comment=${data.commentId}`;
+    let url = `/messages?highlight=${enc(data.messageId)}`;
+    if (data.commentId) url += `&comment=${enc(data.commentId)}`;
     return withWs(url);
   }
-  if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${data.contactId}`);
+  if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${enc(data.contactId)}`);
   if (data.taskId) {
     // Viď poznámku vyššie — contactId do task URL nedávame.
-    return withWs(`/tasks?highlightTask=${data.taskId}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}`);
   }
 
   logger.warn('[NotificationService] No URL match, returning /app', { type, data });
