@@ -995,14 +995,20 @@ router.put('/reorder', authenticateToken, requireWorkspace, async (req, res) => 
     const contactUpdates = {};
 
     for (const item of tasks) {
+      // Hodnoty z tela idú priamo do `_id` filtra a $set — objekt (operátorová
+      // injekcia) by zasiahol „ľubovoľný prvý“ dokument workspace, neplatný
+      // reťazec/order by hodil CastError → 500. Neplatné položky preskočíme.
+      if (!item || typeof item !== 'object') continue;
+      if (!Number.isFinite(Number(item.order))) continue;
       if (item.source === 'global') {
+        if (!isObjectIdString(item.id)) continue;
         bulkOps.push({
           updateOne: {
             filter: { _id: item.id, workspaceId: req.workspaceId },
             update: { $set: { order: item.order } }
           }
         });
-      } else if (item.source === 'contact' && item.contactId) {
+      } else if (item.source === 'contact' && isObjectIdString(item.contactId)) {
         if (!contactUpdates[item.contactId]) {
           contactUpdates[item.contactId] = [];
         }
@@ -1058,12 +1064,16 @@ router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req,
     subtasks.forEach(s => { orderMap[s.id] = s.order; });
 
     if (source === 'global') {
-      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      // ObjectId guard — inak CastError → 500 (UUID/objekt v `_id`).
+      const task = isObjectIdString(taskId)
+        ? await Task.findOne({ _id: taskId, workspaceId: req.workspaceId })
+        : null;
       if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
       reorderSubtasksRecursive(task.subtasks, orderMap);
       task.markModified('subtasks');
       await task.save();
     } else if (source === 'contact' && contactId) {
+      if (!isObjectIdString(contactId)) return res.status(400).json({ message: 'Neplatné dáta' });
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       if (!contact) return res.status(404).json({ message: 'Kontakt nenájdený' });
       const task = contact.tasks.find(t => t.id === taskId);
@@ -1263,6 +1273,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     const updatedContacts = [];
 
     for (const cId of finalContactIds) {
+      // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
+      if (!isObjectIdString(cId)) continue;
       const contact = await Contact.findOne({ _id: cId, workspaceId: req.workspaceId });
       if (!contact) continue;
 
@@ -1420,7 +1432,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       // Optimization: if contactId is provided, use it directly
       // Otherwise use MongoDB query with index on tasks.id
       let contact;
-      if (contactId) {
+      // Neplatný contactId (nie ObjectId reťazec) → fallback lookup cez tasks.id
+      // namiesto CastError → 500.
+      if (isObjectIdString(contactId)) {
         contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       } else {
         contact = await Contact.findOne({ 'tasks.id': req.params.id, workspaceId: req.workspaceId });
@@ -1657,12 +1671,17 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       let contactNames = [];
 
       if (contactIds !== undefined) {
-        finalContactIds = Array.isArray(contactIds) ? contactIds : [];
+        // Len platné ObjectId reťazce — objekt/neplatný reťazec v `$in` by
+        // prepustil operátor alebo hodil CastError → 500.
+        finalContactIds = (Array.isArray(contactIds) ? contactIds : []).filter(isObjectIdString);
         if (finalContactIds.length > 0) {
           const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       } else if (contactId !== undefined) {
+        if (contactId && !isObjectIdString(contactId)) {
+          return res.status(400).json({ message: 'Neplatné ID kontaktu' });
+        }
         finalContactIds = contactId ? [contactId] : [];
         if (contactId) {
           const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
@@ -1671,9 +1690,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           }
         }
       } else {
-        // Keep existing and fetch names
+        // Keep existing and fetch names (staré záznamy môžu niesť neplatné
+        // hodnoty — do `$in` idú len castovateľné, uložené pole sa nemení)
         if (finalContactIds.length > 0) {
-          const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
+          const contacts = await Contact.find({ _id: { $in: finalContactIds.filter(isObjectIdString) }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       }
@@ -2263,6 +2283,8 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
     const updatedContacts = [];
 
     for (const contactId of finalContactIds) {
+      // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
+      if (!isObjectIdString(contactId)) continue;
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       if (!contact) continue;
 
