@@ -1548,6 +1548,9 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
   }
   try {
     const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
@@ -1556,13 +1559,23 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
 
     const calendar = await getCalendarClient(user);
 
-    // Find task (could be global or contact task) — scoped to workspace
-    let task = await Task.findOne({ _id: taskId, workspaceId });
+    // Find task (could be global or contact task) — scoped to workspace.
+    // Kontaktové úlohy a podúlohy majú UUID id — Task.findOne s UUID v _id by
+    // hodil CastError (→ 500), preto top-level Task len pri platnom ObjectId.
+    let task = mongoose.Types.ObjectId.isValid(taskId)
+      ? await Task.findOne({ _id: taskId, workspaceId })
+      : null;
     let contactName = null;
 
     if (!task) {
-      // Search in contacts within workspace only
-      const contacts = await Contact.find({ workspaceId });
+      // Search in contacts within workspace only. Úlohy sa tu len čítajú —
+      // lean() + bez legacy base64 príloh (files[].data), inak sa kvôli jednej
+      // úlohe hydratovali plné dokumenty všetkých kontaktov workspace-u.
+      const contacts = await Contact.find(
+        { workspaceId },
+        // Len exclusion projekcia — MongoDB nedovolí miešať inclusion a exclusion.
+        { files: 0, 'tasks.files': 0, 'tasks.subtasks.files': 0 }
+      ).lean();
       for (const contact of contacts) {
         const found = contact.tasks?.find(t => t.id === taskId);
         if (found) {
