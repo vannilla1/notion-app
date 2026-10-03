@@ -622,26 +622,37 @@ server.listen(PORT, () => {
       // Set Pro plan for team accounts (skip if user has active Stripe subscription)
       const User = require('./models/User');
       try {
-        const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-        for (const email of proEmails) {
-          const existing = await User.findOne({ email });
-          if (!existing) continue;
-          // Don't override if user has an active Stripe subscription
-          if (existing.subscription?.stripeSubscriptionId) {
-            logger.info(`Skipping pro override for ${email} — has Stripe subscription`);
-            continue;
-          }
-          existing.subscription = {
-            ...existing.subscription?.toObject(),
-            plan: 'pro',
-            paidUntil: new Date('2099-12-31')
-          };
-          await existing.save();
-          logger.info(`Pro plan ensured for ${email} (plan: pro)`);
+        // Zoznam z env PRO_EMAILS (utils/planLimits — dočasný legacy fallback
+        // s varovaním, kým env na Renderi nie je nastavená).
+        const { getProEmails } = require('./utils/planLimits');
+        for (const email of getProEmails()) {
+          // Atomicky a len pole plan/paidUntil — bez Stripe predplatného
+          // (aktívne Stripe predplatné nikdy neprepisujeme). Predtým save()
+          // celého subscription objektu prepisoval paralelné zápisy.
+          const res = await User.updateOne(
+            {
+              email,
+              $or: [
+                { 'subscription.stripeSubscriptionId': null },
+                { 'subscription.stripeSubscriptionId': { $exists: false } }
+              ]
+            },
+            { $set: { 'subscription.plan': 'pro', 'subscription.paidUntil': new Date('2099-12-31') } }
+          );
+          if (res.modifiedCount > 0) logger.info('Pro plan ensured for team account', { emailDomain: email.split('@')[1] });
         }
       } catch (err) {
         logger.error('Failed to set pro plans', { error: err.message });
       }
+
+      // One-shot migrácie guardované markerom v app_migrations — bez neho
+      // bežali pri každom boote ako sken celej kolekcie (bez indexu).
+      const runOnceMigration = async (key, fn) => {
+        const migrations = require('mongoose').connection.db.collection('app_migrations');
+        if (await migrations.findOne({ _id: key })) return;
+        const modified = await fn();
+        await migrations.insertOne({ _id: key, at: new Date(), modified });
+      };
 
       // One-shot migration: 'trial' plán bol odstránený z aplikácie. Užívatelia
       // ktorí v DB stále majú 'trial' (z čias keď to bola validná hodnota)
@@ -649,25 +660,31 @@ server.listen(PORT, () => {
       // nemá 'trial' to môžeme odstrániť. Ponechávame aj tu (defenzívne)
       // aby sa zlé dáta neprekĺzli cez enum validáciu po deployi.
       try {
-        const migrated = await User.updateMany(
-          { 'subscription.plan': 'trial' },
-          { $set: { 'subscription.plan': 'free' }, $unset: { 'subscription.trialEndsAt': '' } }
-        );
-        if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} legacy trial users to free plan`);
+        await runOnceMigration('legacy_trial_to_free', async () => {
+          const migrated = await User.updateMany(
+            { 'subscription.plan': 'trial' },
+            { $set: { 'subscription.plan': 'free' }, $unset: { 'subscription.trialEndsAt': '' } }
+          );
+          if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} legacy trial users to free plan`);
+          return migrated.modifiedCount;
+        });
       } catch (err) {
         logger.error('Failed to migrate legacy trial users', { error: err.message });
       }
 
       // Migrate workspace members with 'admin' role to 'manager'
       try {
-        const WorkspaceMember = require('./models/WorkspaceMember');
-        const migrated = await WorkspaceMember.updateMany(
-          { role: 'admin' },
-          { role: 'manager' }
-        );
-        if (migrated.modifiedCount > 0) {
-          logger.info(`Migrated ${migrated.modifiedCount} workspace members from admin to manager`);
-        }
+        await runOnceMigration('workspace_member_admin_to_manager', async () => {
+          const WorkspaceMember = require('./models/WorkspaceMember');
+          const migrated = await WorkspaceMember.updateMany(
+            { role: 'admin' },
+            { role: 'manager' }
+          );
+          if (migrated.modifiedCount > 0) {
+            logger.info(`Migrated ${migrated.modifiedCount} workspace members from admin to manager`);
+          }
+          return migrated.modifiedCount;
+        });
       } catch (err) {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }

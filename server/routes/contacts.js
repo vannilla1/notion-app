@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
+const { getMaxMembers } = require('../utils/planLimits');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const Task = require('../models/Task');
@@ -710,9 +711,8 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
 
     // 3a) Member-over-limit (zrkadlí enforceWorkspaceLimits) — ak je cieľ nad
     // seat limitom vlastníka, je v read-only režime a nepridávame doň obsah.
-    const memberLimits = { free: 2, trial: 2, team: 10 };
     if (ownerPlan !== 'pro') {
-      const maxMembers = (memberLimits[ownerPlan] || 2) + (targetWs.paidSeats || 0);
+      const maxMembers = getMaxMembers(ownerPlan, targetWs.paidSeats || 0);
       const memberCount = await WorkspaceMember.countDocuments({ workspaceId: targetWorkspaceId });
       if (memberCount > maxMembers) {
         return res.status(403).json({ message: 'Cieľové prostredie prekročilo limit členov a je len na čítanie.' });

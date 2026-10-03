@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const WorkspaceMember = require('../models/WorkspaceMember');
+const { getMaxMembers } = require('../utils/planLimits');
 const Workspace = require('../models/Workspace');
 const User = require('../models/User');
 const logger = require('../utils/logger');
@@ -263,9 +264,7 @@ const enforceWorkspaceLimits = async (req, res, next) => {
     // Pro has no member limits
     if (ownerPlan === 'pro') return next();
 
-    const memberLimits = { free: 2, trial: 2, team: 10 };
-    const baseLimit = memberLimits[ownerPlan] || 2;
-    const maxMembers = baseLimit + (req.workspace.paidSeats || 0);
+    const maxMembers = getMaxMembers(ownerPlan, req.workspace.paidSeats || 0);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     if (memberCount > maxMembers) {

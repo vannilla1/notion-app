@@ -39,6 +39,7 @@ const Invitation = require('../models/Invitation');
 const Workspace = require('../models/Workspace');
 const { JWT_SECRET, invalidateUserCache, signAuthToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { isProEmail, getBaseSeatLimit } = require('../utils/planLimits');
 
 // ─────────────────────────────────────────────────────────────────────
 // State HMAC — CSRF ochrana pre OAuth redirect flow.
@@ -278,13 +279,10 @@ async function autoAcceptPendingInvites(user) {
 
       // Seat capacity (mirror /invitation/:token/accept).
       const owner = await User.findById(workspace.ownerId).select('email subscription');
-      const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk')
-        .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-      const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
+      const isTeamPro = isProEmail(owner?.email);
       if (!isTeamPro) {
         const ownerPlan = owner?.subscription?.plan || 'free';
-        const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-        const baseSeatLimit = seatLimits[ownerPlan] || 2;
+        const baseSeatLimit = getBaseSeatLimit(ownerPlan);
         if (baseSeatLimit !== Infinity) {
           const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
           const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);

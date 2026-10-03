@@ -8,6 +8,7 @@ const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const { joinWorkspaceLimiter } = require('../middleware/rateLimiter');
+const { isProEmail, getBaseSeatLimit, getMaxMembers } = require('../utils/planLimits');
 const { isIosNativeApp } = require('../utils/platform');
 const { logPlanGateHit } = require('../utils/planGate');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
@@ -100,9 +101,7 @@ router.get('/current', authenticateToken, requireWorkspace, async (req, res) => 
     ]);
     const paidSeats = req.workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = memberLimitsMap[ownerPlan] || 2;
-    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
+    const maxMembers = getMaxMembers(ownerPlan, paidSeats);
 
     const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
 
@@ -275,13 +274,11 @@ router.post('/join', authenticateToken, joinWorkspaceLimiter, async (req, res) =
     ]);
 
     // Team Pro emails bypass capacity check
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase()) || proEmails.includes(joiningUser?.email?.toLowerCase());
+    const isTeamPro = isProEmail(owner?.email) || isProEmail(joiningUser?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const memberLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = memberLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
@@ -419,9 +416,7 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
     ]);
     const paidSeats = workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = memberLimitsMap[ownerPlan] || 2;
-    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
+    const maxMembers = getMaxMembers(ownerPlan, paidSeats);
     const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
 
     logger.info('Workspace switched', { workspaceId: objectId, userId: req.user.id });
@@ -544,8 +539,7 @@ router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (re
 
     const owner = await User.findById(req.workspace.ownerId).select('subscription').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = seatLimits[ownerPlan] || 2;
+    const baseLimit = getBaseSeatLimit(ownerPlan);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     res.json({
@@ -929,14 +923,12 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
     // Team Pro emails bypass capacity check entirely
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
     const inviterUser = await User.findById(req.user.id).select('email username').lean();
-    const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
+    const isTeamPro = isProEmail(inviterUser?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
@@ -1151,13 +1143,11 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
     // Team Pro emails bypass capacity check
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
+    const isTeamPro = isProEmail(owner?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
