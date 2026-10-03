@@ -24,13 +24,40 @@ object TokenStore {
     private const val KEY_FCM_TOKEN = "fcm_token_last_synced"
     private const val KEY_FCM_LAST_STATUS = "fcm_last_status"
 
+    // Jedna inštancia na proces. Predtým sa MasterKey + EncryptedSharedPreferences
+    // (Keystore + Tink inicializácia) vytvárali pri KAŽDOM čítaní/zápise —
+    // aj na UI vlákne v onCreate/onPageStarted/onResume.
+    @Volatile
+    private var cached: SharedPreferences? = null
+
     private fun prefs(context: Context): SharedPreferences {
-        val masterKey = MasterKey.Builder(context.applicationContext)
+        cached?.let { return it }
+        return synchronized(this) {
+            cached ?: create(context.applicationContext).also { cached = it }
+        }
+    }
+
+    private fun create(app: Context): SharedPreferences = try {
+        open(app)
+    } catch (e: Exception) {
+        // Poškodený keyset / Keystore (obnova zálohy na iné zariadenie, OEM chyba):
+        // radšej nabootovať odhlásený než spadnúť pri každom štarte.
+        android.util.Log.e("TokenStore", "EncryptedSharedPreferences unreadable — resetting", e)
+        app.deleteSharedPreferences(PREFS_NAME)
+        try {
+            java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                .deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+        } catch (_: Exception) { /* kľúč neexistuje */ }
+        open(app)
+    }
+
+    private fun open(app: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(app)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
 
         return EncryptedSharedPreferences.create(
-            context.applicationContext,
+            app,
             PREFS_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
@@ -72,6 +99,8 @@ object TokenStore {
         prefs(context).getString(KEY_FCM_LAST_STATUS, null)
 
     fun setLastFcmStatus(context: Context, status: String?) {
+        // Rovnaký stav (napr. „skip: token unchanged“ pri každom onResume) nezapisujeme.
+        if (getLastFcmStatus(context) == status) return
         prefs(context).edit().apply {
             if (status.isNullOrEmpty()) remove(KEY_FCM_LAST_STATUS)
             else putString(KEY_FCM_LAST_STATUS, status)

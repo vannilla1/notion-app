@@ -97,6 +97,12 @@ class MainActivity : AppCompatActivity() {
     // používateľ vrátil presne tam, kde bol, a nie na /app.
     private var pendingWebViewState: Bundle? = null
 
+    // Obnova session z Block Store beží (splash, ≤ 3 s). Deep link z
+    // onNewIntent sa vtedy len zapamätá — inak by ho neskorší proceedToWeb
+    // so starou startUrl z onCreate prepísal.
+    private var restoreInProgress = false
+    private var pendingStartUrl: String? = null
+
     /** Requestuje notification permission pri prvom spustení na Android 13+. */
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -217,15 +223,22 @@ class MainActivity : AppCompatActivity() {
         // EŠTE PRED načítaním webu — user nabootuje rovno prihlásený, bez
         // login obrazovky. Splash ostáva, kým sa nerozhodne (max 3 s).
         // Dizajn: docs/superpowers/specs/2026-09-02-play-zero-tap-block-store-design.md
+        pendingStartUrl = startUrl
         if (JwtUtils.isExpired(TokenStore.getAuthToken(this))) {
             var restoring = true
+            restoreInProgress = true
             splash.setKeepOnScreenCondition { restoring }
             RestoreSession.tryRestore(
                 this,
                 onLateSuccess = { if (!isFinishing && !isDestroyed) webView.reload() }
             ) { _ ->
                 restoring = false
-                proceedToWeb(startUrl)
+                restoreInProgress = false
+                // Callback príde cez Handler až po ≤ 3 s — Activity medzitým mohla
+                // skončiť (Späť počas splashu); launch() na odregistrovanom
+                // ActivityResultLauncher by spadol.
+                if (isFinishing || isDestroyed) return@tryRestore
+                proceedToWeb(pendingStartUrl ?: startUrl)
             }
         } else {
             proceedToWeb(startUrl)
@@ -234,6 +247,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Načíta web appku a spustí veci, ktoré potrebujú (prípadne obnovený) auth token. */
     private fun proceedToWeb(startUrl: String) {
+        if (isFinishing || isDestroyed) return
         // Rekonštrukcia Activity (viď KEY_WEBVIEW_STATE): obnov poslednú stránku
         // a históriu namiesto štartu z /app. restoreState vráti null, ak je
         // bundle prázdny/nekompatibilný — vtedy fallback na startUrl.
@@ -263,7 +277,12 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        resolveStartUrl(intent)?.let { webView.loadUrl(it) }
+        val deepLink = resolveStartUrl(intent) ?: return
+        if (restoreInProgress) {
+            pendingStartUrl = deepLink
+        } else {
+            webView.loadUrl(deepLink)
+        }
     }
 
     /**
@@ -353,10 +372,17 @@ class MainActivity : AppCompatActivity() {
             // sa číta v isNativeIOSApp() / isNativePlatform() util funkciách).
             userAgentString = "$userAgentString PrplCRM-Android/${BuildConfig.VERSION_NAME}"
         }
-        // Cookies — web appka používa ich len pre auth bridge; povolíme third-party
-        // kvôli Google OAuth redirectom.
+        // Cookies — API volania idú s Bearer tokenom (CORS credentials: false)
+        // a OAuth beží v systémovom prehliadači (cudzí host → mimo WebView),
+        // takže third-party cookies netreba.
         CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
+
+        // NativeBridge PRED prvým loadUrl — objekt sa viaže pri vytvorení window
+        // objektu dokumentu; pridanie až v onPageStarted platilo spoľahlivo až
+        // pre ďalší dokument. onPageStarted ho na cudzom hoste odoberá a
+        // WebAppInterface navyše kontroluje pageOnOurHost.
+        webView.addJavascriptInterface(WebAppInterface(this, webView), "NativeBridge")
 
         // Sťahovanie z priamej URL (hromadný ZIP export príloh). DownloadManager
         // streamuje na disk mimo WebView — pamäť appky sa nezaťaží ani pri
@@ -382,7 +408,18 @@ class MainActivity : AppCompatActivity() {
                     setDescription("Prpl CRM")
                     addRequestHeader("User-Agent", userAgent)
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                    // Android 7–9: verejný priečinok vyžaduje WRITE_EXTERNAL_STORAGE,
+                    // ktoré appka za behu nežiada → vlastný priečinok appky (súbor
+                    // otvorí notifikácia DownloadManagera).
+                    val legacyWithoutPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                        ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        ) != PackageManager.PERMISSION_GRANTED
+                    if (legacyWithoutPermission) {
+                        setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, fileName)
+                    } else {
+                        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                    }
                 }
                 val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 dm.enqueue(request)
@@ -473,14 +510,22 @@ class MainActivity : AppCompatActivity() {
                     return true
                 }
                 // External http(s) linky (iné domény) otvoríme v systémovom
-                // prehliadači namiesto v našom WebView.
+                // prehliadači — cudzí host sa vo WebView NIKDY nenačíta. Predtým
+                // `startsWith("https://prplcrm.eu")` pustil prplcrm.eu.evil.com
+                // aj prplcrm.eu@evil.com priamo do brandovaného okna appky.
                 val urlStr = url.toString()
-                val ourHost = Uri.parse(getString(R.string.webapp_url)).host
-                if (url.host != null && url.host != ourHost && !urlStr.startsWith("https://prplcrm.eu")) {
+                if (!isOurHost(urlStr)) {
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, url))
-                        return true
-                    } catch (_: Exception) { /* fall through, load in WebView */ }
+                    } catch (_: Exception) { /* žiadny prehliadač — nenačítať ani tu */ }
+                    return true
+                }
+                // http:// na vlastnú doménu → https (cleartext je v manifeste
+                // zakázaný; ERR_CLEARTEXT_NOT_PERMITTED by skončil v slučke
+                // automatických opakovaní prekrytia chyby).
+                if (scheme == "http") {
+                    view?.loadUrl(url.buildUpon().scheme("https").build().toString())
+                    return true
                 }
                 return false
             }
@@ -498,6 +543,8 @@ class MainActivity : AppCompatActivity() {
                 // druhá vrstva pre edge cases (in-document redirect, history.pushState).
                 val ourHost = Uri.parse(getString(R.string.webapp_url)).host
                 val currentHost = url?.let { Uri.parse(it).host }
+                pageOnOurHost = currentHost == ourHost
+                webAppReady = false
                 if (currentHost == ourHost) {
                     webView.addJavascriptInterface(WebAppInterface(this@MainActivity, webView), "NativeBridge")
                     url?.let { lastLoadedUrl = it } // pre crash recovery
@@ -514,12 +561,14 @@ class MainActivity : AppCompatActivity() {
                 val token = TokenStore.getAuthToken(this@MainActivity)
                 val workspaceId = TokenStore.getCurrentWorkspaceId(this@MainActivity)
                 val sb = StringBuilder("(function(){try{")
+                // JSONObject.quote — bezpečný JS string literál; hodnoty pochádzajú
+                // z TokenStore (zapisuje ich JS cez bridge) a z /api/auth/restore,
+                // tvar sa nedá predpokladať.
                 if (!token.isNullOrEmpty()) {
-                    // Quoting: token je JWT (iba base64url + dots), bezpečný pre JS string.
-                    sb.append("localStorage.setItem('token',\"").append(token).append("\");")
+                    sb.append("localStorage.setItem('token',").append(org.json.JSONObject.quote(token)).append(");")
                 }
                 if (!workspaceId.isNullOrEmpty()) {
-                    sb.append("localStorage.setItem('currentWorkspaceId',\"").append(workspaceId).append("\");")
+                    sb.append("localStorage.setItem('currentWorkspaceId',").append(org.json.JSONObject.quote(workspaceId)).append(");")
                 }
                 sb.append("}catch(e){}})();")
                 view?.evaluateJavascript(sb.toString(), null)
@@ -544,6 +593,7 @@ class MainActivity : AppCompatActivity() {
                 if (isRetryableLoadError(error)) {
                     loadState.onNetworkFailure()
                     val online = isOnline()
+                    webAppReady = false
                     loadErrorOverlay.show(offline = !online)
                     recordLoadFailure(detail, safeUrl, online)
                 } else {
@@ -564,6 +614,7 @@ class MainActivity : AppCompatActivity() {
                 // takže na hlavnom rámci reálne nenastáva) — tá sa hlási hneď.
                 if (status >= 500) {
                     loadState.onHttpFailure()
+                    webAppReady = false
                     loadErrorOverlay.show(offline = false)
                     recordLoadFailure(detail, safeUrl, online = true)
                 } else {
@@ -578,6 +629,7 @@ class MainActivity : AppCompatActivity() {
                 if (loadState.onPageFinished()) {
                     loadErrorOverlay.hide()
                     endLoadIncident()
+                    webAppReady = pageOnOurHost
                 } else {
                     loadErrorOverlay.attemptEnded()
                 }
@@ -605,6 +657,7 @@ class MainActivity : AppCompatActivity() {
                     "https://prplcrm.eu/native-android/render-gone"
                 )
                 // Mŕtvy WebView treba nahradiť novým — inak biela obrazovka.
+                webAppReady = false
                 recreateWebViewAfterCrash()
                 return true // appka nespadne
             }
@@ -614,7 +667,11 @@ class MainActivity : AppCompatActivity() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                 // Users nikdy nevidia, ale pri `adb logcat` si môžeme prečítať
                 // web app JS errory pri debugingu.
-                android.util.Log.d("WebViewConsole", "${consoleMessage?.message()} -- ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}")
+                // Len v debug buildoch — správy webu nesú mená, e-maily a odpovede
+                // API a logcat sa prenáša v bug reportoch.
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d("WebViewConsole", "${consoleMessage?.message()} -- ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}")
+                }
                 return true
             }
 
@@ -885,7 +942,12 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            try {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } catch (e: IllegalStateException) {
+                // Launcher po zničení Activity — žiadost sa zopakuje pri ďalšom štarte
+                android.util.Log.w("MainActivity", "Notification permission request skipped: ${e.message}")
+            }
         }
     }
 
@@ -949,7 +1011,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun isRetryableLoadError(error: WebResourceError?): Boolean {
         val desc = error?.description?.toString().orEmpty()
-        if (desc.contains("ERR_ABORTED") || desc.contains("ERR_BLOCKED_BY")) return false
+        if (desc.contains("ERR_ABORTED") || desc.contains("ERR_BLOCKED_BY") ||
+            desc.contains("ERR_CLEARTEXT_NOT_PERMITTED")) return false
         return when (error?.errorCode) {
             WebViewClient.ERROR_HOST_LOOKUP,
             WebViewClient.ERROR_CONNECT,
@@ -1087,6 +1150,22 @@ class MainActivity : AppCompatActivity() {
          */
         @Volatile
         var isAppInForeground: Boolean = false
+
+        /**
+         * Hlavný dokument WebView je na našej doméne (nastavuje onPageStarted).
+         * WebAppInterface beží na JavaBridge vlákne a webView.url čítať nesmie —
+         * podľa tohto flagu odmietne čítanie/zápis tokenu z cudzej stránky.
+         */
+        @Volatile
+        var pageOnOurHost: Boolean = false
+
+        /**
+         * Web appka je načítaná na našej doméne bez prekrytia chyby — len vtedy
+         * má zmysel spoliehať sa na jej in-app toast (WebSocket). PrplFcmService
+         * push v popredí potlačí iba ak platí aj toto.
+         */
+        @Volatile
+        var webAppReady: Boolean = false
     }
 }
 

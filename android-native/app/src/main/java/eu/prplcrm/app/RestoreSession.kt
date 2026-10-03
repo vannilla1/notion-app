@@ -42,6 +42,18 @@ object RestoreSession {
             .build()
     }
 
+    // 3 s je UX rozpočet splashu (tryRestore). Vydanie/zrušenie tokenu beží na
+    // pozadí po logine/logoute — pri cold starte Renderu by 3 s nestačili a
+    // Block Store by potichu ostal bez tokenu.
+    private val backgroundClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+    private const val ISSUE_RETRY_DELAY_MS = 30_000L
+
     private fun apiUrl(context: Context, path: String): String =
         context.getString(R.string.api_base_url).removeSuffix("/") + path
 
@@ -49,7 +61,7 @@ object RestoreSession {
         JSONObject().apply { pairs.forEach { (k, v) -> put(k, v) } }.toString().toRequestBody(JSON)
 
     /** Po každom novom logine: vydaj obnovovací token a ulož ho do Block Store. */
-    fun issueAfterLogin(context: Context, jwt: String) {
+    fun issueAfterLogin(context: Context, jwt: String, attempt: Int = 0) {
         val app = context.applicationContext
         val label = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(120)
         val request = Request.Builder()
@@ -57,9 +69,20 @@ object RestoreSession {
             .post(jsonBody("deviceLabel" to label))
             .addHeader("Authorization", "Bearer $jwt")
             .build()
-        client.newCall(request).enqueue(object : Callback {
+        backgroundClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.w(TAG, "issue failed: ${e.javaClass.simpleName}")
+                if (attempt == 0) {
+                    // Jedno zopakovanie s odstupom (cold start servera, slabá sieť)
+                    mainHandler.postDelayed({ issueAfterLogin(app, jwt, attempt + 1) }, ISSUE_RETRY_DELAY_MS)
+                } else {
+                    NativeErrorReporter.report(
+                        app,
+                        "AndroidRestoreTokenIssueFailed",
+                        "issue failed twice: ${e.javaClass.simpleName}",
+                        "https://prplcrm.eu/native-android/restore-token"
+                    )
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -150,7 +173,7 @@ object RestoreSession {
                     .url(apiUrl(app, "/api/auth/restore-token"))
                     .delete(jsonBody("restoreToken" to token))
                     .build()
-                client.newCall(request).enqueue(object : Callback {
+                backgroundClient.newCall(request).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) {
                         Log.w(TAG, "revoke failed: ${e.javaClass.simpleName}")
                     }

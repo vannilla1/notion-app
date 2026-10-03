@@ -102,9 +102,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
 
-    // Biometric — BiometricPrompt API (Face/Fingerprint unlock). Pre teraz len
-    // dependency pripravená; aktivuje sa v druhej iterácii (bio lock na resume).
-    implementation("androidx.biometric:biometric:1.1.0")
+    // androidx.biometric odstránené — nikde sa nepoužívalo (len zväčšovalo AAB).
+    // Pridať späť spolu s BiometricPrompt kódom (viď AndroidManifest.xml).
 
     // OkHttp — HTTP klient pre register FCM token na náš backend (/api/push/fcm/register).
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
