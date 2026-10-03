@@ -3481,14 +3481,56 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
+    // RFC 6266: ASCII fallback vo `filename=` (diakritika odstránená cez NFD,
+    // iné ne-ASCII znaky a úvodzovky/spätné lomky → '_'; res.set by pri
+    // ne-ASCII hodnote hodil ERR_INVALID_CHAR) + plný UTF-8 názov vo
+    // `filename*=`. Predtým bol vo `filename=` percent-enkódovaný názov, ktorý
+    // prehliadač/WebView pri priamom otvorení URL uložil doslova ako
+    // `fakt%C3%BAra%20%C4%8D.%205.pdf`. Webový klient hlavičku nečíta
+    // (sťahuje blob a názov berie z metadát), takže preň sa nič nemení.
+    const setDownloadHeaders = (contentLength) => {
+      const safeName = String(fileMeta.originalName || 'subor');
+      const asciiName = safeName
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\x20-\x7e]/g, '_')
+        .replace(/["\\]/g, '_') || 'subor';
+      // RFC 5987 attr-char: encodeURIComponent necháva ' ( ) * — doenkódovať.
+      const utf8Name = encodeURIComponent(safeName)
+        .replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+      res.set({
+        'Content-Type': fileMeta.mimetype || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+        'X-Content-Type-Options': 'nosniff'
+      });
+      if (Number.isFinite(contentLength)) res.set('Content-Length', String(contentLength));
+    };
+
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
+      // STREAM z R2 priamo do odpovede (ako contacts.js) — downloadFile()
+      // skladal celý súbor (až 50 MB) do Buffera a paralelné sťahovania
+      // nemali na 512 MB inštancii žiadny strop.
+      let r2Object;
       try {
-        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
-        logger.debug('Task file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+        r2Object = await fileStorage.getFileObject(contactFile.r2Key);
       } catch (r2Err) {
         logger.error('Task file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
         return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
       }
+      const { stream, contentLength } = r2Object;
+      logger.debug('Task file download: from R2 (stream)', { fileId, r2Key: contactFile.r2Key, size: contentLength });
+      setDownloadHeaders(contentLength);
+      stream.on('error', (streamErr) => {
+        logger.error('Task file download: R2 stream failed', { fileId, r2Key: contactFile.r2Key, error: streamErr.message });
+        if (res.headersSent) return res.destroy();
+        for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+        res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      });
+      // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+      res.on('close', () => {
+        if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+      });
+      stream.pipe(res);
+      return;
     } else if (contactFile?.data) {
       fileBuffer = Buffer.from(contactFile.data, 'base64');
       logger.debug('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
@@ -3507,26 +3549,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
-    // RFC 6266: ASCII fallback vo `filename=` (diakritika odstránená cez NFD,
-    // iné ne-ASCII znaky a úvodzovky/spätné lomky → '_'; res.set by pri
-    // ne-ASCII hodnote hodil ERR_INVALID_CHAR) + plný UTF-8 názov vo
-    // `filename*=`. Predtým bol vo `filename=` percent-enkódovaný názov, ktorý
-    // prehliadač/WebView pri priamom otvorení URL uložil doslova ako
-    // `fakt%C3%BAra%20%C4%8D.%205.pdf`. Webový klient hlavičku nečíta
-    // (sťahuje blob a názov berie z metadát), takže preň sa nič nemení.
-    const safeName = String(fileMeta.originalName || 'subor');
-    const asciiName = safeName
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^\x20-\x7e]/g, '_')
-      .replace(/["\\]/g, '_') || 'subor';
-    // RFC 5987 attr-char: encodeURIComponent necháva ' ( ) * — doenkódovať.
-    const utf8Name = encodeURIComponent(safeName)
-      .replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
-    res.set({
-      'Content-Type': fileMeta.mimetype,
-      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
-      'Content-Length': fileBuffer.length
-    });
+    setDownloadHeaders(fileBuffer.length);
     res.send(fileBuffer);
   } catch (error) {
     logger.error('Task file download error', { error: error.message, stack: error.stack, taskId: req.params.taskId, fileId: req.params.fileId, subtaskId: req.query.subtaskId });
