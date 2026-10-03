@@ -448,6 +448,9 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
       updates,
       { new: true }
     );
+    // requireWorkspace kešuje celý Workspace dokument 60 s — bez invalidácie by
+    // GET /current žiadateľa vrátil starý názov/farbu/inviteCodeEnabled.
+    invalidateCache(req.user.id);
 
     logger.info('Workspace updated', { workspaceId: workspace._id, userId: req.user.id, updates: Object.keys(updates) });
 
@@ -476,6 +479,7 @@ router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (re
     }
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { paidSeats: Math.floor(paidSeats) });
+    invalidateCache(req.user.id);
 
     const owner = await User.findById(req.workspace.ownerId).select('subscription').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
@@ -501,6 +505,7 @@ router.post('/current/regenerate-invite', authenticateToken, requireWorkspaceAdm
     const newCode = Workspace.generateInviteCode();
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { inviteCode: newCode });
+    invalidateCache(req.user.id);
 
     logger.info('Invite code regenerated', { workspaceId: req.workspace._id, userId: req.user.id });
 
@@ -562,6 +567,9 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
 
     member.role = role;
     await member.save();
+    // Membership je kešovaná 60 s v requireWorkspace — bez invalidácie by člen
+    // ešte minútu pracoval so starými oprávneniami (canAdmin()).
+    invalidateCache(String(member.userId));
 
     logger.info('Member role updated', { workspaceId: req.workspace._id, memberId, newRole: role, userId: req.user.id });
 
@@ -609,6 +617,8 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
     }
 
     await WorkspaceMember.deleteOne({ _id: memberId });
+    // Odstránený člen nesmie ďalších 60 s prechádzať requireWorkspace z cache.
+    invalidateCache(String(member.userId));
 
     // Clear removed user's current workspace if needed
     const removedUser = await User.findById(member.userId).select('currentWorkspaceId').lean();
@@ -647,6 +657,7 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
     const workspaceName = req.workspace.name;
 
     await WorkspaceMember.deleteOne({ _id: req.workspaceMember._id });
+    invalidateCache(req.user.id);
 
     // Find another workspace to switch to
     const otherMembership = await WorkspaceMember.findOne({
@@ -721,6 +732,10 @@ router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requir
     // Update workspace owner
     await Workspace.findByIdAndUpdate(req.workspace._id, { ownerId: newOwnerId });
 
+    // Obaja majú v cache staré membership (rola) aj starý Workspace.ownerId.
+    invalidateCache(req.user.id);
+    invalidateCache(String(newOwnerId));
+
     logger.info('Ownership transferred', { workspaceId: req.workspace._id, oldOwnerId: req.user.id, newOwnerId });
 
     res.json({ message: 'Vlastníctvo bolo prevedené' });
@@ -759,6 +774,7 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
 
     // Delete workspace
     await Workspace.deleteOne({ _id: workspaceId });
+    invalidateCache(req.user.id);
 
     logger.info('Workspace deleted', { workspaceId, userId: req.user.id });
 
