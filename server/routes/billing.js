@@ -1,14 +1,9 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
-// timeout: default SDK je 80 s — pri degradácii Stripe API by /status a
-// /checkout viseli dlhšie, než klient (mobilný WebView) čaká. 2 retry SDK
-// robí len pri sieťových chybách / 409 / 5xx a posiela Idempotency-Key.
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2024-11-20.acacia',
-  timeout: 15000,
-  maxNetworkRetries: 2
-});
+// Zdieľaný lazy klient (services/stripeClient): 15 s timeout + 2 sieťové
+// retry; modul sa dá načítať aj bez STRIPE_SECRET_KEY.
+const { stripe } = require('../services/stripeClient');
 const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const { authenticateToken } = require('../middleware/auth');

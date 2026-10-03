@@ -1113,9 +1113,7 @@ const cancelBillingForDeletion = async (user) => {
     return { ok: false, appleActive };
   }
   try {
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2024-11-20.acacia', timeout: 15000, maxNetworkRetries: 2
-    });
+    const { stripe } = require('../services/stripeClient');
     await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
     logger.info('account-delete: Stripe subscription canceled', { userId: String(user._id), subscriptionId: sub.stripeSubscriptionId });
     return { ok: true, appleActive };

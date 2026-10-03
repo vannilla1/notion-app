@@ -2337,7 +2337,9 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
 
 // ─── PROMO CODES MANAGEMENT ──────────────────────────────────
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-11-20.acacia' });
+// Lazy klient — bez STRIPE_SECRET_KEY by require('stripe')(undefined) hodil
+// výnimku pri načítaní modulu a server by nenaštartoval.
+const { stripe } = require('../services/stripeClient');
 
 // List all promo codes
 router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
