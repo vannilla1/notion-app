@@ -576,6 +576,7 @@ const gracefulShutdown = (signal) => {
   try { require('./services/subscriptionReminders').stopSubscriptionReminders(); } catch { /* best-effort */ }
   try { require('./routes/googleTasks').stopGoogleTasksPolling(); } catch { /* best-effort */ }
   try { require('./routes/googleCalendar').stopCalendarWebhooks(); } catch { /* best-effort */ }
+  try { require('./services/notificationService').closeApnsSessions(); } catch { /* best-effort */ }
 
   // Idle keep-alive spojenia zavrieme explicitne (Node ≥ 18.2), aby
   // httpServer.close nečakal na ich timeout.

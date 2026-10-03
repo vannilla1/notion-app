@@ -176,30 +176,49 @@ const truncatePushData = (data) => {
   return out;
 };
 
+// Perzistentné HTTP/2 spojenie per host (production/sandbox). Apple odporúča
+// spojenie s APNs udržiavať — nové TLS spojenie pre každé zariadenie a každý
+// push znamenalo ~100–300 ms navyše a riziko throttlingu pri väčšom objeme.
+// Session sa zahodí pri chybe, GOAWAY, zatvorení alebo po nečinnosti a ďalší
+// push otvorí novú.
+const APNS_IDLE_MS = 5 * 60 * 1000;
+const APNS_REQUEST_TIMEOUT_MS = 10000;
+const apnsSessions = new Map(); // host → { session, active }
+
+const getApnsSession = (host) => {
+  const existing = apnsSessions.get(host);
+  if (existing && !existing.session.closed && !existing.session.destroyed) return existing;
+
+  const entry = { session: http2.connect(`https://${host}`), active: 0 };
+  const { session } = entry;
+  const drop = () => { if (apnsSessions.get(host) === entry) apnsSessions.delete(host); };
+  session.on('error', (err) => {
+    logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
+    drop();
+  });
+  session.on('goaway', drop);
+  session.on('close', drop);
+  session.setTimeout(APNS_IDLE_MS, () => {
+    drop();
+    session.close();
+  });
+  // Nečinná session nesmie držať proces nažive (graceful shutdown, skripty).
+  session.unref();
+  apnsSessions.set(host, entry);
+  return entry;
+};
+
+const closeApnsSessions = () => {
+  for (const { session } of apnsSessions.values()) {
+    try { session.close(); } catch { /* best-effort */ }
+  }
+  apnsSessions.clear();
+};
+
 const sendToAPNs = (deviceToken, payload, sandbox = false) => {
   return new Promise((resolve, reject) => {
     const host = sandbox ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
     const jwt = getApnJwt();
-
-    let client;
-    try {
-      client = http2.connect(`https://${host}`);
-    } catch (err) {
-      return reject(new Error(`HTTP/2 connect failed: ${err.message}`));
-    }
-
-    // Timeout 10 s. destroy() namiesto close(): close() je v http2 GRACEFUL
-    // a čaká na dobehnutie streamov — zaseknutý request bez odpovede od Apple
-    // by session aj TLS socket držal otvorené navždy (únik spojení). Timer sa
-    // ruší pri každom ukončení, inak by každý push nechal 10 s visiaci timer.
-    let timer = null;
-    const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
-
-    client.on('error', (err) => {
-      clearTimer();
-      logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
-      reject(err);
-    });
 
     const headers = {
       ':method': 'POST',
@@ -212,10 +231,39 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
       'content-type': 'application/json'
     };
 
-    const req = client.request(headers);
+    let entry;
+    let req;
+    try {
+      entry = getApnsSession(host);
+      req = entry.session.request(headers);
+    } catch (err) {
+      if (entry) apnsSessions.delete(host);
+      return reject(new Error(`HTTP/2 request failed: ${err.message}`));
+    }
+
+    // Počas requestu session drží proces (inak by unref() mohol ukončiť skript
+    // pred odpoveďou); po poslednom requeste sa znova uvoľní.
+    entry.active += 1;
+    if (entry.active === 1) entry.session.ref();
+
+    // Timer sa ruší pri každom ukončení, inak by každý push nechal 10 s
+    // visiaci timer. settled: 'close' streamu po chybe session nesmie
+    // promise vyriešiť druhýkrát.
+    let timer = null;
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      entry.active -= 1;
+      if (entry.active === 0 && !entry.session.destroyed) entry.session.unref();
+      fn(value);
+    };
+
     let responseData = '';
     let statusCode = 0;
 
+    req.setEncoding('utf8');
     req.on('response', (hdrs) => {
       statusCode = hdrs[':status'];
     });
@@ -225,35 +273,35 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
     });
 
     req.on('end', () => {
-      clearTimer();
-      client.close();
       if (statusCode === 200) {
-        resolve({ success: true, status: statusCode });
+        finish(resolve, { success: true, status: statusCode });
       } else {
         let reason = 'Unknown';
         try {
           const parsed = JSON.parse(responseData);
           reason = parsed.reason || reason;
         } catch {}
-        resolve({ success: false, status: statusCode, reason });
+        finish(resolve, { success: false, status: statusCode, reason });
       }
     });
 
-    req.on('error', (err) => {
-      clearTimer();
-      client.close();
-      reject(err);
-    });
+    req.on('error', (err) => finish(reject, err));
+    // Stream zrušený bez odpovede (zánik session) — inak by promise visel.
+    req.on('close', () => finish(reject, new Error('APNs stream closed without response')));
 
     req.write(JSON.stringify(payload));
     req.end();
 
+    // Timeout 10 s: zrušíme stream aj session. destroy() namiesto close():
+    // close() je v http2 GRACEFUL a čaká na dobehnutie streamov — zaseknuté
+    // spojenie by sa inak nikdy neuvoľnilo; ďalší push otvorí nové.
     timer = setTimeout(() => {
       timer = null;
       try { req.close(http2.constants.NGHTTP2_CANCEL); } catch {}
-      try { client.destroy(); } catch {}
-      reject(new Error('APNs request timeout'));
-    }, 10000);
+      if (apnsSessions.get(host) === entry) apnsSessions.delete(host);
+      try { entry.session.destroy(); } catch {}
+      finish(reject, new Error('APNs request timeout'));
+    }, APNS_REQUEST_TIMEOUT_MS);
     timer.unref?.();
   });
 };
@@ -1642,6 +1690,7 @@ const resetMetrics = () => {
 
 module.exports = {
   initialize,
+  closeApnsSessions,
   createNotification,
   notifyUsers,
   notifyTaskPriorityChanged,
