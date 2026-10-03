@@ -25,6 +25,17 @@ const htmlToText = (html) => {
     .trim();
 };
 
+// Escapovanie používateľských hodnôt vkladaných do HTML e-mailov. username
+// si nastavuje používateľ sám a názov prostredia vlastník — bez escapovania
+// by `<a href="https://phish…">` alebo `<img>` v mene prešli do pozvánky
+// odoslanej z našej domény (HTML injekcia / phishing).
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 let transporter = null;
 
 const initializeEmail = () => {
@@ -61,14 +72,14 @@ const sendAdminEmail = async (subject, html) => {
 const notifyNewRegistration = (user) => {
   sendAdminEmail('Nová registrácia',
     `<p>Nový používateľ sa zaregistroval:</p>
-    <ul><li><strong>${user.username}</strong></li><li>${user.email}</li>
+    <ul><li><strong>${escapeHtml(user.username)}</strong></li><li>${escapeHtml(user.email)}</li>
     <li>Dátum: ${new Date().toLocaleString('sk-SK')}</li></ul>`
   );
 };
 
 const notifyError = (context, error) => {
   sendAdminEmail(`Chyba: ${context}`,
-    `<p>Nastala chyba v systéme:</p><pre>${context}\n${error}</pre>
+    `<p>Nastala chyba v systéme:</p><pre>${escapeHtml(context)}\n${escapeHtml(error)}</pre>
     <p>Čas: ${new Date().toLocaleString('sk-SK')}</p>`
   );
 };
@@ -102,7 +113,7 @@ const sendInvitationEmail = async ({ toEmail, inviterName, workspaceName, role, 
         <tr><td style="padding:32px 28px;">
           <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj,</p>
           <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
-            <strong>${inviterName}</strong> vás pozýva do prostredia <strong>${workspaceName}</strong> v aplikácii PrplCRM ako <strong>${roleLabel}</strong>.
+            <strong>${escapeHtml(inviterName)}</strong> vás pozýva do prostredia <strong>${escapeHtml(workspaceName)}</strong> v aplikácii PrplCRM ako <strong>${roleLabel}</strong>.
           </p>
           <!-- CTA Button -->
           <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
@@ -192,7 +203,7 @@ const sendWelcomeEmail = async ({ toEmail, username }) => {
   const appUrl = `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/app`;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       ďakujeme, že ste si vytvorili účet v <strong>PrplCRM</strong>. Sme radi, že vás tu máme! 🎉
     </p>
@@ -279,7 +290,7 @@ const sendPasswordResetEmail = async ({ toEmail, username, resetLink }) => {
   }
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${username || ''}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       dostali sme žiadosť o obnovenie hesla pre váš účet v <strong>PrplCRM</strong>.
       Ak ste žiadosť neposielali vy, tento email môžete ignorovať — vaše heslo sa nezmení.
