@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useAppResume } from '../hooks/useAppResume';
 import api from '../api/api';
 
 const HeaderLogo = ({ active, onClick }) => {
@@ -13,6 +14,9 @@ const HeaderLogo = ({ active, onClick }) => {
   // returns null on mobile, so the dot was invisible in the iOS WKWebView).
   const fetchUnread = useCallback(async () => {
     if (!currentWorkspace?.id) return;
+    // Na pozadí (karta/PWA/TWA skrytá) nepollovať — zbytočné requesty a
+    // batéria; po návrate do popredia sa bodka obnoví cez useAppResume nižšie.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     try {
       const res = await api.get('/api/notifications/unread-by-workspace');
       const data = res.data || {};
@@ -30,6 +34,10 @@ const HeaderLogo = ({ active, onClick }) => {
     const interval = setInterval(fetchUnread, 30000);
     return () => clearInterval(interval);
   }, [fetchUnread]);
+
+  // Okamžitý refresh po návrate z pozadia (visibilitychange / iOS
+  // viewDidAppear) — inak by používateľ čakal až 30 s na aktuálnu bodku.
+  useAppResume(fetchUnread);
 
   // Click header → go to dashboard. On iOS WKWebView there was a past bug
   // where scroll-start taps synthesized a click; that was fixed by the modal
