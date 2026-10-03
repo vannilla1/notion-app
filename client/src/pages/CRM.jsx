@@ -12,7 +12,6 @@ import WorkspaceSwitcher from '../components/WorkspaceSwitcher';
 import HeaderLogo from '../components/HeaderLogo';
 import NotificationBell from '../components/NotificationBell';
 import AnnouncementBanner from '../components/AnnouncementBanner';
-import { DateInput, TimeInput } from '../components/DateTimeInputs';
 import { linkifyText } from '../utils/linkify';
 import { FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
@@ -20,7 +19,6 @@ import { alertUnlessPlanGate } from '../utils/planGate';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
 import FileRenameModal from '../components/FileRenameModal';
-import ConfirmModal from '../components/ConfirmModal';
 import { useWorkspace } from '../context/WorkspaceContext';
 
 // Help tips for CRM/Contacts page
@@ -158,30 +156,6 @@ function CRM() {
   const [editingContact, setEditingContact] = useState(null);
   const [editForm, setEditForm] = useState({});
 
-  // Task states
-  const [taskInputs, setTaskInputs] = useState({});
-  const [taskDueDates, setTaskDueDates] = useState({});
-  const [editingTask, setEditingTask] = useState(null);
-  const [editTaskTitle, setEditTaskTitle] = useState('');
-  const [editTaskDueDate, setEditTaskDueDate] = useState('');
-  const [editTaskDescription, setEditTaskDescription] = useState('');
-
-  // Subtask states
-  const [subtaskInputs, setSubtaskInputs] = useState({});
-  const [subtaskDueDates, setSubtaskDueDates] = useState({});
-  const [subtaskDueTimes, setSubtaskDueTimes] = useState({});
-  const [subtaskNotes, setSubtaskNotes] = useState({});
-  const [showSubtaskDateInput, setShowSubtaskDateInput] = useState({});
-  const [showSubtaskNotesInput, setShowSubtaskNotesInput] = useState({});
-  const [editingSubtask, setEditingSubtask] = useState(null);
-  const [editSubtaskTitle, setEditSubtaskTitle] = useState('');
-  const [editSubtaskNotes, setEditSubtaskNotes] = useState('');
-  const [editSubtaskDueDate, setEditSubtaskDueDate] = useState('');
-  const [editSubtaskDueTime, setEditSubtaskDueTime] = useState('');
-  const [expandedTasks, setExpandedTasks] = useState({});
-  const [expandedSubtasks, setExpandedSubtasks] = useState({});
-  const [showNotesFor, setShowNotesFor] = useState(null);
-
   // Fronta nahrávaní beží mimo tejto stránky (aj po jej opustení), takže
   // zoznam kontaktov obnovíme až keď príloha reálne dorazí na server.
   // Zlyhania (aj plánové limity) ukazuje globálne UploadQueueIndicator na
@@ -195,10 +169,6 @@ function CRM() {
   }), []);
   const [pendingUpload, setPendingUpload] = useState(null); // { file, contactId } — čaká na pomenovanie
   const [renamingFile, setRenamingFile] = useState(null); // { contactId, fileId, currentName } — premenovanie existujúceho
-  // Po dokončení poslednej podúlohy globálneho projektu — potvrdenie uzavretia
-  // (server projekt už automaticky nezatvára). Len global projekty (contact
-  // projekty sa auto-nezatvárali nikdy).
-  const [projectClosePrompt, setProjectClosePrompt] = useState(null); // { taskId, title }
   // Kopírovanie kontaktu do iného pracovného prostredia
   const [copyingContact, setCopyingContact] = useState(null); // { id, name, key } — otvorí picker cieľa
   const [copyBusy, setCopyBusy] = useState(false);
@@ -234,17 +204,6 @@ function CRM() {
     }
   };
 
-  const confirmCloseProject = async () => {
-    if (!projectClosePrompt) return;
-    const { taskId } = projectClosePrompt;
-    setProjectClosePrompt(null);
-    try {
-      await api.put(`/api/tasks/${taskId}`, { completed: true, source: 'global' });
-      await fetchGlobalTasks();
-    } catch {
-      alert('Nepodarilo sa uzavrieť projekt');
-    }
-  };
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContact, setPreviewContact] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -272,11 +231,6 @@ function CRM() {
 
   // Linked messages
   const [linkedMessages, setLinkedMessages] = useState({});
-
-  // Duplicate modal states
-  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
-  const [duplicatingTask, setDuplicatingTask] = useState(null);
-  const [duplicateContactIds, setDuplicateContactIds] = useState([]);
 
   // Highlight state for push notification navigation
   const [highlightedContactId, setHighlightedContactId] = useState(null);
@@ -390,28 +344,6 @@ function CRM() {
   // Track navTimestamp to detect new navigation even when on same page
   const lastNavTimestampRef = useRef(null);
 
-  // Helper function to process contact highlight
-  const processContactHighlight = useCallback((contactId) => {
-    if (contacts.length > 0) {
-      setExpandedContact(contactId);
-      setHighlightedContactId(contactId);
-
-      setTimeout(() => {
-        const contactElement = document.querySelector(`[data-contact-id="${contactId}"]`);
-        if (contactElement) {
-          contactElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
-
-      setTimeout(() => {
-        setHighlightedContactId(null);
-      }, 3000);
-    } else {
-      // Contacts not loaded yet, store for later
-      pendingHighlightRef.current = { contactId };
-    }
-  }, [contacts.length]);
-
   // Handle notification deep links — unified via URL query params
   // Both service worker (postMessage → App.jsx navigate) and iOS (location.href) use this
   useEffect(() => {
@@ -494,22 +426,6 @@ function CRM() {
       }, 3000));
     }
   }, [contacts]);
-
-  // Helper function to get due date status class
-  const getDueDateClass = (dueDate, completed) => {
-    if (!dueDate || completed) return '';
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const due = new Date(dueDate);
-    due.setHours(0, 0, 0, 0);
-    const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return 'overdue'; // po termíne - červená + výkričník
-    if (diffDays <= 3) return 'due-danger'; // do 3 dní - červená
-    if (diffDays <= 7) return 'due-warning'; // do 7 dní - žltá
-    if (diffDays <= 14) return 'due-success'; // do 14 dní - zelená
-    return '';
-  };
 
   // Get all tasks for a contact — both embedded and global Task docs that
   // reference this contact via contactIds. Pre fix: counter ignoroval global
@@ -887,34 +803,6 @@ function CRM() {
     setPreviewError(null);
   };
 
-  // Duplicate task functions
-  const openDuplicateModal = (task, currentContactId) => {
-    setDuplicatingTask({ ...task, currentContactId });
-    setDuplicateContactIds([]);
-    setShowDuplicateModal(true);
-  };
-
-  const closeDuplicateModal = () => {
-    setShowDuplicateModal(false);
-    setDuplicatingTask(null);
-    setDuplicateContactIds([]);
-  };
-
-  const duplicateTask = async () => {
-    if (!duplicatingTask) return;
-    try {
-      await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
-        contactIds: duplicateContactIds,
-        source: duplicatingTask.source
-      });
-      closeDuplicateModal();
-      fetchGlobalTasks();
-      fetchContacts();
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri duplikovaní projektu');
-    }
-  };
-
   const startEditContact = (contact) => {
     setEditingContact(contact.id);
     setEditForm({
@@ -940,536 +828,6 @@ function CRM() {
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri ukladaní kontaktu');
     }
-  };
-
-  // Task functions
-  const addTask = async (e, contact) => {
-    e.preventDefault();
-    const taskTitle = taskInputs[contact.id] || '';
-    const taskDueDate = taskDueDates[contact.id] || null;
-    if (!taskTitle.trim()) return;
-
-    try {
-      await api.post(`/api/contacts/${contact.id}/tasks`, {
-        title: taskTitle,
-        dueDate: taskDueDate
-      });
-      setTaskInputs(prev => ({ ...prev, [contact.id]: '' }));
-      setTaskDueDates(prev => ({ ...prev, [contact.id]: '' }));
-      await fetchContacts();
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri vytváraní projektu');
-    }
-  };
-
-  const toggleTask = async (contact, task) => {
-    if (!task.completed) {
-      if (!window.confirm(`Naozaj chcete označiť projekt "${task.title}" ako dokončený?`)) return;
-    }
-    try {
-      if (task.source === 'global') {
-        // Global task - use /api/tasks endpoint
-        await api.put(`/api/tasks/${task.id}`, {
-          completed: !task.completed,
-          source: 'global'
-        });
-        await fetchGlobalTasks();
-      } else {
-        // Contact embedded task
-        await api.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
-          completed: !task.completed
-        });
-        await fetchContacts();
-      }
-    } catch {
-      // Silently fail
-    }
-  };
-
-  const deleteTask = async (contact, task) => {
-    if (!window.confirm(`Naozaj chcete vymazať projekt "${task.title}"?`)) return;
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        await api.delete(`/api/tasks/${task.id}?source=global`);
-        await fetchGlobalTasks();
-      } else {
-        if (!contact.id || !task.id) {
-          alert('Chyba: Chýbajúce údaje pre vymazanie projektu');
-          return;
-        }
-        await api.delete(`/api/contacts/${contact.id}/tasks/${task.id}`);
-        await fetchContacts();
-      }
-    } catch {
-      alert('Chyba pri mazaní projektu');
-    }
-  };
-
-  const startEditTask = (contact, task) => {
-    setEditingTask({ contactId: contact.id, taskId: task.id, source: task.source });
-    setEditTaskTitle(task.title);
-    setEditTaskDueDate(task.dueDate || '');
-    setEditTaskDescription(task.description || '');
-  };
-
-  const saveTask = async (contact, task) => {
-    if (!editTaskTitle.trim()) return;
-    try {
-      if (task.source === 'global') {
-        // Global task
-        await api.put(`/api/tasks/${task.id}`, {
-          title: editTaskTitle,
-          dueDate: editTaskDueDate || null,
-          description: editTaskDescription,
-          source: 'global'
-        });
-        await fetchGlobalTasks();
-      } else {
-        // Contact embedded task
-        await api.put(`/api/contacts/${contact.id}/tasks/${task.id}`, {
-          title: editTaskTitle,
-          dueDate: editTaskDueDate || null,
-          description: editTaskDescription
-        });
-        await fetchContacts();
-      }
-      setEditingTask(null);
-      setEditTaskTitle('');
-      setEditTaskDueDate('');
-      setEditTaskDescription('');
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri ukladaní projektu');
-    }
-  };
-
-  const cancelEditTask = () => {
-    setEditingTask(null);
-    setEditTaskTitle('');
-    setEditTaskDueDate('');
-    setEditTaskDescription('');
-  };
-
-  // Subtask functions - with recursive support
-  const toggleTaskExpanded = (taskId) => {
-    setExpandedTasks(prev => ({
-      ...prev,
-      [taskId]: !prev[taskId]
-    }));
-  };
-
-  const toggleSubtaskExpanded = (subtaskId) => {
-    setExpandedSubtasks(prev => ({
-      ...prev,
-      [subtaskId]: !prev[subtaskId]
-    }));
-  };
-
-  // Count all subtasks recursively
-  const countSubtasksRecursive = (subtasks) => {
-    if (!subtasks || subtasks.length === 0) return { total: 0, completed: 0 };
-    let total = 0;
-    let completed = 0;
-    for (const subtask of subtasks) {
-      total++;
-      if (subtask.completed) completed++;
-      if (subtask.subtasks && subtask.subtasks.length > 0) {
-        const childCounts = countSubtasksRecursive(subtask.subtasks);
-        total += childCounts.total;
-        completed += childCounts.completed;
-      }
-    }
-    return { total, completed };
-  };
-
-  const addSubtask = async (e, task, parentSubtaskId = null) => {
-    e.preventDefault();
-    // Use unique key: contactId-taskId for embedded tasks, or parentSubtaskId for nested subtasks
-    const inputKey = parentSubtaskId || (task.contactId ? `${task.contactId}-${task.id}` : task.id);
-    const subtaskTitle = subtaskInputs[inputKey] || '';
-    const subtaskDueDate = subtaskDueDates[inputKey] || null;
-    const subtaskDueTime = subtaskDueTimes[inputKey] || '';
-    const subtaskNote = subtaskNotes[inputKey] || '';
-    if (!subtaskTitle.trim()) return;
-
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        await api.post(`/api/tasks/${task.id}/subtasks`, {
-          title: subtaskTitle,
-          dueDate: subtaskDueDate,
-          dueTime: subtaskDueDate ? subtaskDueTime : '',
-          notes: subtaskNote,
-          source: 'global',
-          parentSubtaskId: parentSubtaskId
-        });
-        await fetchGlobalTasks();
-      } else {
-        if (!task.contactId || !task.id) {
-          alert('Chyba: Chýbajúce údaje');
-          return;
-        }
-        await api.post(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks`, {
-          title: subtaskTitle,
-          dueDate: subtaskDueDate,
-          dueTime: subtaskDueDate ? subtaskDueTime : '',
-          notes: subtaskNote,
-          parentSubtaskId: parentSubtaskId
-        });
-        await fetchContacts();
-      }
-      setSubtaskInputs(prev => ({ ...prev, [inputKey]: '' }));
-      setSubtaskDueDates(prev => ({ ...prev, [inputKey]: '' }));
-      setSubtaskDueTimes(prev => ({ ...prev, [inputKey]: '' }));
-      setSubtaskNotes(prev => ({ ...prev, [inputKey]: '' }));
-      setShowSubtaskNotesInput(prev => ({ ...prev, [inputKey]: false }));
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri vytvarani ulohy');
-    }
-  };
-
-  const toggleSubtask = async (task, subtask) => {
-    if (!subtask.completed) {
-      if (!window.confirm(`Naozaj chcete označiť úlohu "${subtask.title}" ako dokončenú?`)) return;
-    }
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        const res = await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
-          completed: !subtask.completed,
-          source: 'global'
-        });
-        await fetchGlobalTasks();
-        // Posledná podúloha otvoreného projektu → spýtaj sa na uzavretie
-        // (server projekt už automaticky nezatvára).
-        if (res?.data?.projectAutoCloseEligible) {
-          setProjectClosePrompt({ taskId: task.id, title: task.title });
-        }
-      } else {
-        if (!task.contactId || !task.id || !subtask.id) {
-          alert('Chyba: Chýbajúce údaje');
-          return;
-        }
-        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
-          completed: !subtask.completed
-        });
-        await fetchContacts();
-      }
-    } catch {
-      alert('Chyba pri aktualizácii úlohy');
-    }
-  };
-
-  const deleteSubtask = async (task, subtask) => {
-    if (!window.confirm(`Naozaj chcete vymazať úlohu "${subtask.title}"?`)) return;
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        await api.delete(`/api/tasks/${task.id}/subtasks/${subtask.id}?source=global`);
-        await fetchGlobalTasks();
-      } else {
-        if (!task.contactId || !task.id || !subtask.id) {
-          alert('Chyba: Chýbajúce údaje pre vymazanie úlohy');
-          return;
-        }
-        await api.delete(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`);
-        await fetchContacts();
-      }
-    } catch {
-      alert('Chyba pri mazaní úlohy');
-    }
-  };
-
-  const startEditSubtask = (task, subtask) => {
-    setEditingSubtask({ taskId: task.id, subtaskId: subtask.id, source: task.source });
-    setEditSubtaskTitle(subtask.title);
-    setEditSubtaskNotes(subtask.notes || '');
-    setEditSubtaskDueDate(subtask.dueDate || '');
-    setEditSubtaskDueTime(subtask.dueTime || '');
-  };
-
-  const saveSubtask = async (task, subtask) => {
-    if (!editSubtaskTitle.trim()) return;
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
-          title: editSubtaskTitle,
-          notes: editSubtaskNotes,
-          dueDate: editSubtaskDueDate || null,
-          dueTime: editSubtaskDueDate ? editSubtaskDueTime : '',
-          source: 'global'
-        });
-        await fetchGlobalTasks();
-      } else {
-        if (!task.contactId || !task.id || !subtask.id) {
-          alert('Chyba: Chýbajúce údaje');
-          return;
-        }
-        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
-          title: editSubtaskTitle,
-          notes: editSubtaskNotes,
-          dueDate: editSubtaskDueDate || null,
-          dueTime: editSubtaskDueDate ? editSubtaskDueTime : ''
-        });
-        await fetchContacts();
-      }
-      setEditingSubtask(null);
-      setEditSubtaskTitle('');
-      setEditSubtaskNotes('');
-      setEditSubtaskDueDate('');
-      setEditSubtaskDueTime('');
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri ukladani ulohy');
-    }
-  };
-
-  const cancelEditSubtask = () => {
-    setEditingSubtask(null);
-    setEditSubtaskTitle('');
-    setEditSubtaskNotes('');
-    setEditSubtaskDueDate('');
-  };
-
-  const updateSubtaskDueDate = async (task, subtask, dueDate) => {
-    try {
-      const source = task.source || 'contact';
-      if (source === 'global') {
-        await api.put(`/api/tasks/${task.id}/subtasks/${subtask.id}`, {
-          dueDate: dueDate || null,
-          source: 'global'
-        });
-        await fetchGlobalTasks();
-      } else {
-        if (!task.contactId || !task.id || !subtask.id) {
-          alert('Chyba: Chýbajúce údaje');
-          return;
-        }
-        await api.put(`/api/contacts/${task.contactId}/tasks/${task.id}/subtasks/${subtask.id}`, {
-          dueDate: dueDate || null
-        });
-        await fetchContacts();
-      }
-    } catch (error) {
-      alertUnlessPlanGate(error, 'Chyba pri nastavovaní termínu');
-    }
-  };
-
-  // Recursive subtask renderer for CRM
-  const renderCRMSubtasks = (task, subtasks, depth = 0) => {
-    if (!subtasks || subtasks.length === 0) return null;
-
-    return subtasks.map(subtask => {
-      const hasChildren = subtask.subtasks && subtask.subtasks.length > 0;
-      const isExpanded = expandedSubtasks[subtask.id];
-      const childCounts = hasChildren ? countSubtasksRecursive(subtask.subtasks) : { total: 0, completed: 0 };
-
-      return (
-        <div key={subtask.id} className="subtask-tree-item" style={{ marginLeft: depth * 16 }}>
-          <div className={`subtask-item ${subtask.completed ? 'completed' : ''}`}>
-            <div
-              className="subtask-checkbox-styled"
-              onClick={() => !subtask.completed && toggleSubtask(task, subtask)}
-              style={{
-                backgroundColor: subtask.completed ? 'var(--accent-color)' : 'transparent'
-              }}
-            >
-              {subtask.completed && '✓'}
-            </div>
-
-            {hasChildren && (
-              <button
-                className="subtask-expand-btn"
-                onClick={() => toggleSubtaskExpanded(subtask.id)}
-              >
-                {isExpanded ? '▼' : '▶'}
-              </button>
-            )}
-
-            {editingSubtask?.taskId === task.id && editingSubtask?.subtaskId === subtask.id ? (
-              <div className="subtask-edit-form-full">
-                <div className="subtask-edit-row">
-                  <input
-                    type="text"
-                    value={editSubtaskTitle}
-                    onChange={(e) => setEditSubtaskTitle(e.target.value)}
-                    className="form-input form-input-sm"
-                    autoFocus
-                    placeholder="Názov úlohy"
-                  />
-                </div>
-                <div className="subtask-edit-row" style={{ display: 'flex', gap: '6px' }}>
-                  <DateInput
-                    value={editSubtaskDueDate}
-                    onChange={(val) => {
-                      setEditSubtaskDueDate(val);
-                      if (!val) setEditSubtaskDueTime('');
-                    }}
-                    className="form-input-sm task-date-input"
-                    title="Termín úlohy"
-                    style={{ flex: 2 }}
-                  />
-                  <TimeInput
-                    value={editSubtaskDueTime}
-                    onChange={setEditSubtaskDueTime}
-                    disabled={!editSubtaskDueDate}
-                    className="form-input-sm"
-                    title={editSubtaskDueDate ? 'Čas (voliteľné)' : 'Najskôr nastavte dátum'}
-                    style={{ flex: 1 }}
-                  />
-                </div>
-                <div className="subtask-edit-row">
-                  <textarea
-                    value={editSubtaskNotes}
-                    onChange={(e) => setEditSubtaskNotes(e.target.value)}
-                    className="form-input form-input-sm subtask-notes-input"
-                    placeholder="Poznámka..."
-                    rows={2}
-                  />
-                </div>
-                <div className="subtask-edit-actions">
-                  <button onClick={() => saveSubtask(task, subtask)} className="btn btn-primary btn-sm">Uložiť</button>
-                  <button onClick={cancelEditSubtask} className="btn btn-secondary btn-sm">Zrušiť</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <span
-                  className="subtask-title"
-                  onDoubleClick={() => startEditSubtask(task, subtask)}
-                  title="Dvojklik pre upravu"
-                >
-                  {subtask.title}
-                </span>
-                {subtask.notes && (
-                  <span className="subtask-notes-indicator" title={subtask.notes}>📝</span>
-                )}
-                {subtask.dueDate && (
-                  <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
-                    📅 {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
-                    {subtask.dueTime && ` ⏰ ${subtask.dueTime}`}
-                  </span>
-                )}
-                {hasChildren && (
-                  <span className="subtask-child-count">
-                    ({childCounts.completed}/{childCounts.total})
-                  </span>
-                )}
-                <div className="subtask-actions">
-                  <button
-                    onClick={() => {
-                      setExpandedSubtasks(prev => ({ ...prev, [subtask.id]: true }));
-                      setSubtaskInputs(prev => ({ ...prev, [subtask.id]: '' }));
-                    }}
-                    className="btn-icon-sm btn-add-child"
-                    title="Pridat ulohu"
-                  >
-                    +
-                  </button>
-                  <button onClick={() => startEditSubtask(task, subtask)} className="btn-icon-sm" title="Upravit">✏️</button>
-                  <button onClick={() => deleteSubtask(task, subtask)} className="btn-icon-sm btn-delete" title="Vymazat">×</button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Notes display */}
-          {subtask.notes && !(editingSubtask?.subtaskId === subtask.id) && (
-            <div className="subtask-notes-display" style={{ marginLeft: depth * 16 + 24 }}>
-              {subtask.notes}
-            </div>
-          )}
-
-          {/* Nested subtasks */}
-          {isExpanded && hasChildren && (
-            <div className="subtask-children">
-              {renderCRMSubtasks(task, subtask.subtasks, depth + 1)}
-            </div>
-          )}
-
-          {/* Add child subtask form */}
-          {isExpanded && subtaskInputs[subtask.id] !== undefined && (
-            <div className="add-subtask-wrapper" style={{ marginLeft: (depth + 1) * 16 }}>
-              <form
-                onSubmit={(e) => addSubtask(e, task, subtask.id)}
-                className="add-subtask-form nested"
-              >
-                <input
-                  type="text"
-                  value={subtaskInputs[subtask.id] || ''}
-                  onChange={(e) => setSubtaskInputs(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                  placeholder="Nová podúloha..."
-                  className="form-input form-input-sm"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  className={`btn btn-secondary btn-sm ${showSubtaskDateInput[subtask.id] ? 'active' : ''}`}
-                  onClick={() => setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
-                  title="Termín"
-                >
-                  📅
-                </button>
-                {showSubtaskDateInput[subtask.id] && (
-                  <div className="add-subtask-expansion" style={{ display: 'flex', gap: '6px' }}>
-                    <DateInput
-                      value={subtaskDueDates[subtask.id] || ''}
-                      onChange={(val) => {
-                        setSubtaskDueDates(prev => ({ ...prev, [subtask.id]: val }));
-                        if (!val) setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: '' }));
-                      }}
-                      className="form-input-sm"
-                      style={{ flex: 2 }}
-                      autoFocus
-                    />
-                    <TimeInput
-                      value={subtaskDueTimes[subtask.id] || ''}
-                      onChange={(val) => setSubtaskDueTimes(prev => ({ ...prev, [subtask.id]: val }))}
-                      disabled={!subtaskDueDates[subtask.id]}
-                      className="form-input-sm"
-                      style={{ flex: 1 }}
-                    />
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className={`btn btn-secondary btn-sm ${showSubtaskNotesInput[subtask.id] ? 'active' : ''}`}
-                  onClick={() => setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: !prev[subtask.id] }))}
-                  title="Pridať poznámku"
-                >
-                  📝
-                </button>
-                {showSubtaskNotesInput[subtask.id] && (
-                  <textarea
-                    value={subtaskNotes[subtask.id] || ''}
-                    onChange={(e) => setSubtaskNotes(prev => ({ ...prev, [subtask.id]: e.target.value }))}
-                    placeholder="Poznámka k úlohe..."
-                    className="form-input form-input-sm subtask-notes-input add-subtask-expansion"
-                    rows={2}
-                  />
-                )}
-                <button type="submit" className="btn btn-primary btn-sm add-subtask-submit" title="Uložiť úlohu (Enter)"><span className="desktop-only">+</span><span className="ios-only">Uložiť</span></button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    setSubtaskInputs(prev => {
-                      const newInputs = { ...prev };
-                      delete newInputs[subtask.id];
-                      return newInputs;
-                    });
-                    setShowSubtaskDateInput(prev => ({ ...prev, [subtask.id]: false }));
-                    setShowSubtaskNotesInput(prev => ({ ...prev, [subtask.id]: false }));
-                  }}
-                >
-                  Zrušiť
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
-      );
-    });
   };
 
   const getStatusColor = (status) => {
@@ -2070,56 +1428,6 @@ function CRM() {
         </main>
       </div>
 
-      {/* Duplicate Modal */}
-      {showDuplicateModal && duplicatingTask && (
-        <div className="modal-overlay" onClick={closeDuplicateModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Duplikovať projekt</h3>
-              <button className="modal-close" onClick={closeDuplicateModal}>×</button>
-            </div>
-            <div className="modal-body">
-              <p className="duplicate-info">
-                Duplikuje sa projekt: <strong>{duplicatingTask.title}</strong>
-                {duplicatingTask.subtasks?.length > 0 && (
-                  <span className="subtask-info"> (vrátane {duplicatingTask.subtasks.length} úloh)</span>
-                )}
-              </p>
-
-              <div className="form-group">
-                <label>Priradiť ku kontaktom</label>
-                <div className="multi-select-contacts">
-                  {contacts.map(contact => (
-                    <label key={contact.id} className="contact-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={duplicateContactIds.includes(contact.id)}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setDuplicateContactIds(prev =>
-                            checked
-                              ? [...prev, contact.id]
-                              : prev.filter(id => id !== contact.id)
-                          );
-                        }}
-                      />
-                      <span>{contact.name} {contact.company ? `(${contact.company})` : ''}</span>
-                    </label>
-                  ))}
-                  {contacts.length === 0 && (
-                    <span className="no-contacts">Žiadne kontakty</span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
-              <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Pomenovanie prílohy pred nahratím (prepíše "image.jpg" z fotoaparátu) */}
       {pendingUpload && (
         <FileRenameModal
@@ -2137,18 +1445,6 @@ function CRM() {
           confirmLabel="Uložiť"
           onConfirm={handleFileRename}
           onCancel={() => setRenamingFile(null)}
-        />
-      )}
-
-      {/* Potvrdenie uzavretia projektu po dokončení poslednej úlohy */}
-      {projectClosePrompt && (
-        <ConfirmModal
-          title="Uzavrieť projekt?"
-          message={`Všetky úlohy v projekte „${projectClosePrompt.title}" sú hotové. Chcete celý projekt uzavrieť, alebo ho ešte nechať otvorený?`}
-          confirmLabel="Uzavrieť projekt"
-          cancelLabel="Nechať otvorený"
-          onConfirm={confirmCloseProject}
-          onCancel={() => setProjectClosePrompt(null)}
         />
       )}
 
