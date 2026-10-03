@@ -139,6 +139,13 @@ app.post('/api/billing/webhook',
   billingRoutes.handleWebhook
 );
 
+// Apply general API rate limiting — PRED body parsermi: limiter kľúčuje len
+// podľa IP a telo nepotrebuje, takže klient nad limitom dostane 429 skôr,
+// než server prečíta a JSON.parse-ne až 1 MB tela pri každom requeste.
+// Route-level limitery závislé od tela (loginEmailLimiter) sú v auth.js
+// a tejto zmeny sa netýkajú.
+app.use('/api', apiLimiter);
+
 // Body parsers with size limits.
 //
 // Audit MED-004 fix: globálny limit znížený z 20MB na 1MB. 20MB na
@@ -159,9 +166,6 @@ app.post('/api/billing/webhook',
 app.use('/api/pages', express.json({ limit: '5mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Apply general API rate limiting
-app.use('/api', apiLimiter);
 
 // Track API requests for admin metrics
 app.use('/api', trackRequest);
