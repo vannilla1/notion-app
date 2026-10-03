@@ -268,7 +268,6 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     }
     if (andConds.length) filter.$and = andConds;
 
-
     // Last login lookup z AuditLog. Robíme single aggregation (max createdAt)
     // na všetkých userov v poslednom rezultsete — efektívnejšie ako N+1.
     //
@@ -679,7 +678,6 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
     await User.findByIdAndDelete(targetUserId);
     // Inak by zmazaný user s platným JWT ešte 30 s prechádzal authenticateToken.
     await invalidateUserCache(targetUserId);
-
 
     logger.info('Admin delete user', { targetUserId: req.params.userId, deletedBy: req.user.id });
 
@@ -1430,14 +1428,12 @@ router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, re
     const rows = workspaces.map(w => {
       const owner = userMap[w.ownerId.toString()] || {};
       const memberCount = memberCountByWs.get(String(w._id)) || 0;
-
       return [
         csvCell(w.name),
         csvCell(w.slug),
         csvCell(owner.username),
         csvCell(owner.email),
         memberCount,
-
         w.paidSeats || 0,
         w.createdAt ? new Date(w.createdAt).toLocaleDateString('sk-SK') : ''
       ].join(',');
@@ -1524,7 +1520,6 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error('Admin bulk update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri hromadnej úprave' });
-
   }
 });
 
@@ -1576,7 +1571,6 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
   } catch (error) {
     logger.error('Admin subscription update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri úprave predplatného' });
-
   }
 });
 
@@ -1606,7 +1600,6 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
       User.updateMany({ currentWorkspaceId: id }, { $set: { currentWorkspaceId: null } }),
       Workspace.findByIdAndDelete(id)
     ]);
-
 
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
@@ -1686,7 +1679,6 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
     if (type === 'freeMonths') {
       const current = user.subscription.paidUntil ? new Date(user.subscription.paidUntil) : new Date();
       current.setMonth(current.getMonth() + numValue);
-
       user.subscription.paidUntil = current;
     }
 
@@ -1931,7 +1923,6 @@ router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async 
 router.get('/charts/summary', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
-
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -2092,7 +2083,6 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
       }
     }));
     collectionStats.push(...statsResults.filter(Boolean));
-
 
     // Storage per workspace (contacts + tasks + messages) — excludujeme
     // workspaces super admina aby produkčné metriky neboli skreslené testovacími.
@@ -2702,7 +2692,6 @@ router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     // Aj dolná hranica — záporný limit by šiel do skip()/limit() → MongoServerError 500
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
-
     const skip = (page - 1) * limit;
 
     const filter = {};
@@ -2793,7 +2782,6 @@ router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, r
       // Len reťazec — číslo/objekt → `.slice` TypeError 500, pole by prešlo
       // Array.prototype.slice a padlo až na Mongoose cast do String.
       notes: typeof notes === 'string' && notes ? notes.slice(0, 2000) : null
-
     };
     if (resolved) {
       update.resolvedBy = req.user.id;
@@ -2875,7 +2863,6 @@ router.get('/performance/errors-by-route', authenticateToken, requireAdmin, asyn
       routes: metrics.topRoutes || [],
       statusCodes: metrics.statusCodes || {},
       hourly: metrics.hourlyData || [] // getMetrics() exportuje `hourlyData`, nie `hourly`
-
     });
   } catch (error) {
     logger.error('Performance errors-by-route error', { error: error.message });
@@ -3237,7 +3224,6 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
           avatar: l.userId.avatar,
           hasAvatarData: withAvatar.has(String(l.userId._id))
         } : null,
-
         userId: l.userId?._id || null
       }))
     });
@@ -3469,10 +3455,8 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
     if (!res.headersSent) {
       res.status(500).json({ message: 'Chyba broadcast' });
     }
-
   }
 });
-
 
 /**
  * MED-003 follow-up — bulk encrypt plaintext OAuth tokens.
@@ -4108,7 +4092,6 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
 router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
-
     const Commission = require('../models/Commission');
     const { paidMethod, paidReference, notes } = req.body || {};
     const c = await Commission.findById(req.params.id);
@@ -4123,7 +4106,6 @@ router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async
     c.status = 'paid';
     c.paidAt = new Date();
     c.paidMethod = paidMethod || 'bank';
-
     c.paidReference = paidReference || '';
     if (notes) c.notes = (c.notes || '') + `\n[${new Date().toISOString()}] ${notes}`;
     await c.save();
@@ -4199,7 +4181,6 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
     const paymentRange = dateRange(from, to, 'T23:59:59');
     if (paymentRange) q.paymentDate = paymentRange;
     const rows = await Commission.find(q)
-
       .sort({ paymentDate: -1 })
       .populate('referrerId', 'username email')
       .populate('referredUserId', 'username email')
@@ -4212,7 +4193,6 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
       // CSV injection protection — apostrof VNÚTRI úvodzoviek. Predtým chýbala
       // otváracia úvodzovka (`'text"`), takže bunka s čiarkou rozbila riadok.
       if (/^[=+\-@\t\r]/.test(s)) return `"'${s.replace(/"/g, '""')}"`;
-
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
