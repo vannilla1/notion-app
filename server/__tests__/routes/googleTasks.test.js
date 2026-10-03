@@ -16,6 +16,19 @@ const Task = require('../../models/Task');
 const Contact = require('../../models/Contact');
 const Workspace = require('../../models/Workspace');
 const WorkspaceMember = require('../../models/WorkspaceMember');
+const oauthService = require('../../services/oauthService');
+
+// Callback akceptuje len podpísaný state (oauthService.signState).
+const gtState = (userId) => oauthService.signState({ mode: 'gtasks', userId: String(userId) });
+// Legacy task list sa po connecte resolvuje na pozadí (setImmediate).
+const waitForTaskList = async (userId) => {
+  for (let i = 0; i < 50; i++) {
+    const u = await User.findById(userId).lean();
+    if (u?.googleTasks?.taskListId) return u;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return User.findById(userId).lean();
+};
 
 /**
  * /api/google-tasks route testy — OAuth Google Tasks sync.
@@ -161,16 +174,20 @@ describe('/api/google-tasks route', () => {
       expect(mockGenerateAuthUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           scope: expect.arrayContaining(['https://www.googleapis.com/auth/tasks']),
-          state: ctx.user._id.toString()
+          state: expect.any(String)
         })
       );
+      const { state } = mockGenerateAuthUrl.mock.calls[mockGenerateAuthUrl.mock.calls.length - 1][0];
+      const decoded = oauthService.verifyState(state);
+      expect(decoded.mode).toBe('gtasks');
+      expect(decoded.userId).toBe(ctx.user._id.toString());
     });
   });
 
   describe('GET /callback', () => {
     it('redirect na error ak chýba code', async () => {
       const res = await request(app)
-        .get(`/api/google-tasks/callback?state=${ctx.user._id}`);
+        .get(`/api/google-tasks/callback?state=${encodeURIComponent(gtState(ctx.user._id))}`);
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('google_tasks=error');
       expect(res.headers.location).toContain('missing_params');
@@ -183,22 +200,29 @@ describe('/api/google-tasks route', () => {
       expect(res.headers.location).toContain('invalid_state');
     });
 
+    it('redirect na invalid_state pri holom userId v state (CSRF — nepodpísaný state)', async () => {
+      const res = await request(app)
+        .get(`/api/google-tasks/callback?code=abc&state=${ctx.user._id}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('invalid_state');
+    });
+
     it('redirect na error ak user neexistuje', async () => {
       const fake = new mongoose.Types.ObjectId().toString();
       const res = await request(app)
-        .get(`/api/google-tasks/callback?code=abc&state=${fake}`);
+        .get(`/api/google-tasks/callback?code=abc&state=${encodeURIComponent(gtState(fake))}`);
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('user_not_found');
     });
 
     it('úspešný callback nájde existujúci Prpl CRM zoznam', async () => {
       const res = await request(app)
-        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+        .get(`/api/google-tasks/callback?code=valid&state=${encodeURIComponent(gtState(ctx.user._id))}`);
 
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('google_tasks=connected');
 
-      const updated = await User.findById(ctx.user._id);
+      const updated = await waitForTaskList(ctx.user._id);
       expect(updated.googleTasks.enabled).toBe(true);
       expect(updated.googleTasks.taskListId).toBe('existing-list');
       // insert sa nevolal (list existuje)
@@ -209,14 +233,13 @@ describe('/api/google-tasks route', () => {
       mockTasklistsList.mockResolvedValueOnce({ data: { items: [] } });
 
       const res = await request(app)
-        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+        .get(`/api/google-tasks/callback?code=valid&state=${encodeURIComponent(gtState(ctx.user._id))}`);
 
       expect(res.status).toBe(302);
+      const updated = await waitForTaskList(ctx.user._id);
       expect(mockTasklistsInsert).toHaveBeenCalledWith({
         resource: { title: 'Prpl CRM' }
       });
-
-      const updated = await User.findById(ctx.user._id);
       expect(updated.googleTasks.taskListId).toBe('new-list-id');
     });
 
@@ -226,10 +249,10 @@ describe('/api/google-tasks route', () => {
       });
 
       const res = await request(app)
-        .get(`/api/google-tasks/callback?code=valid&state=${ctx.user._id}`);
+        .get(`/api/google-tasks/callback?code=valid&state=${encodeURIComponent(gtState(ctx.user._id))}`);
 
       expect(res.status).toBe(302);
-      const updated = await User.findById(ctx.user._id);
+      const updated = await waitForTaskList(ctx.user._id);
       expect(updated.googleTasks.taskListId).toBe('legacy-list');
     });
   });

@@ -13,6 +13,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
+const oauthService = require('../services/oauthService');
 
 const router = express.Router();
 
@@ -232,8 +233,10 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
-    const state = req.user.id.toString();
-    logger.info('[Google Tasks] Generating auth URL', { userId: state });
+    // Podpísaný state (HMAC + nonce + expirácia) namiesto holého userId —
+    // viď googleCalendar.js /auth-url (CSRF: cudzí Google účet na cudzí CRM účet).
+    const state = oauthService.signState({ mode: 'gtasks', userId: req.user.id.toString() });
+    logger.info('[Google Tasks] Generating auth URL', { userId: req.user.id.toString() });
 
     const client = createOAuth2Client();
     const authUrl = client.generateAuthUrl({
@@ -243,7 +246,7 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       prompt: 'consent'
     });
 
-    logger.debug('[Google Tasks] Auth URL generated', { userId: state });
+    logger.debug('[Google Tasks] Auth URL generated', { userId: req.user.id.toString() });
     res.json({ authUrl });
   } catch (error) {
     logger.error('[Google Tasks] Error generating auth URL', { error: error.message, userId: req.user?.id });
@@ -259,17 +262,22 @@ router.get('/callback', async (req, res) => {
   logger.info('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
 
   try {
-    const { code, state: userId } = req.query;
+    const { code, state } = req.query;
 
     // Validate required parameters
-    if (!code || !userId) {
-      logger.warn('[Google Tasks] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
+    if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+      logger.warn('[Google Tasks] Callback missing parameters', { hasCode: !!code, hasState: !!state });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=missing_params`);
     }
 
-    // Validate userId format to prevent injection
-    if (!isValidObjectId(userId)) {
-      logger.warn('[Google Tasks] Invalid userId in callback state', { userId });
+    // Podpis + expirácia state pred akoukoľvek DB operáciou
+    let userId;
+    try {
+      const data = oauthService.verifyState(state);
+      if (data.mode !== 'gtasks' || !isValidObjectId(data.userId)) throw new Error('wrong state kind');
+      userId = data.userId;
+    } catch (stateErr) {
+      logger.warn('[Google Tasks] Invalid OAuth state', { error: stateErr.message });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=invalid_state`);
     }
 
@@ -291,62 +299,23 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=user_not_found`);
     }
 
-    // Set credentials on the per-request client to create task list
-    client.setCredentials(tokens);
-    const tasksApi = google.tasks({ version: 'v1', auth: client });
-
-    // Try to find or create "Prpl CRM" task list
-    let taskListId = null;
-    try {
-      const taskListsResponse = await tasksApi.tasklists.list();
-      const taskLists = taskListsResponse.data.items || [];
-
-      // Find existing task list (check both new and legacy name for backward compat)
-      const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
-
-      if (existingList) {
-        taskListId = existingList.id;
-        logger.info('[Google Tasks] Found existing task list', { userId, taskListId });
-      } else {
-        // Create new task list
-        const newList = await tasksApi.tasklists.insert({
-          resource: { title: 'Prpl CRM' }
-        });
-        taskListId = newList.data.id;
-        logger.info('[Google Tasks] Created new task list', { userId, taskListId });
-      }
-    } catch (e) {
-      logger.error('[Google Tasks] Error with task list', { error: e.message, userId });
-      // Use default task list as fallback
-      try {
-        const defaultList = await tasksApi.tasklists.list();
-        taskListId = defaultList.data.items?.[0]?.id || '@default';
-        logger.info('[Google Tasks] Using default task list', { userId, taskListId });
-      } catch (fallbackError) {
-        taskListId = '@default';
-        logger.warn('[Google Tasks] Using @default as fallback', { userId });
-      }
-    }
-
     // IMPORTANT: Google only sends refresh_token on first authorization
     // or if we use prompt: 'consent'. Make sure we save it!
     if (!tokens.refresh_token) {
       logger.warn('[Google Tasks] No refresh token received! User may need to reconnect later.', { userId });
     }
 
-    // IMPORTANT: Clear old sync data when reconnecting to avoid stale references
-    // Old syncedTaskIds point to tasks in potentially different task list
-    user.googleTasks = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || user.googleTasks?.refreshToken, // Keep old if not provided
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      taskListId: taskListId,
-      enabled: true,
-      connected: true,
-      connectedAt: new Date(),
-      syncedTaskIds: new Map(), // Always start fresh on reconnect
-      syncedTaskHashes: new Map() // Always start fresh on reconnect
-    };
+    // Len tokenové a stavové polia. Predtým priradenie celého objektu pri
+    // opätovnom pripojení zmazalo workspaceTaskLists, syncedTaskLists,
+    // syncDisabledWorkspaces (opt-out prostredí) aj kvótu a vynulovalo
+    // syncedTaskIds, hoci úlohy v Google ostali → každé prepojenie
+    // zdvojilo úlohy. Mapping je bezpečné ponechať: sync pri 404/400
+    // úlohu znova vytvorí a per-workspace listy pred použitím overuje.
+    user.set('googleTasks.accessToken', tokens.access_token);
+    user.set('googleTasks.refreshToken', tokens.refresh_token || user.googleTasks?.refreshToken || null);
+    user.set('googleTasks.tokenExpiry', tokens.expiry_date ? new Date(tokens.expiry_date) : null);
+    user.set('googleTasks.enabled', true);
+    user.set('googleTasks.connectedAt', new Date());
 
     await user.save();
     logger.info('[Google Tasks] User connected successfully', {
@@ -356,10 +325,43 @@ router.get('/callback', async (req, res) => {
       tokenExpiry: user.googleTasks.tokenExpiry
     });
 
+    // Redirect hneď — vyhľadanie/vytvorenie legacy listu „Prpl CRM“ (2–3
+    // Google API volania) beží na pozadí, mobilné WebView by inak callback
+    // pri pomalom Google API vzdali.
     res.redirect(`${baseUrl}/tasks?google_tasks=connected`);
+
+    setImmediate(async () => {
+      try {
+        client.setCredentials(tokens);
+        const tasksApi = google.tasks({ version: 'v1', auth: client });
+        let taskListId = null;
+        try {
+          const taskListsResponse = await tasksApi.tasklists.list();
+          const taskLists = taskListsResponse.data.items || [];
+          // Find existing task list (check both new and legacy name for backward compat)
+          const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
+          if (existingList) {
+            taskListId = existingList.id;
+          } else {
+            const newList = await tasksApi.tasklists.insert({ resource: { title: 'Prpl CRM' } });
+            taskListId = newList.data.id;
+            logger.info('[Google Tasks] Created new task list', { userId, taskListId });
+          }
+        } catch (e) {
+          logger.error('[Google Tasks] Error with task list', { error: e.message, userId });
+          taskListId = '@default';
+        }
+        await User.updateOne({ _id: userId }, { $set: { 'googleTasks.taskListId': taskListId } });
+      } catch (bgErr) {
+        logger.warn('[Google Tasks] Post-connect background task failed', { userId, error: bgErr.message });
+      }
+    });
+    return;
   } catch (error) {
     logger.error('[Google Tasks] Callback error', { error: error.message, stack: error.stack });
-    res.redirect(`${baseUrl}/tasks?google_tasks=error&message=` + encodeURIComponent(error.message));
+    if (res.headersSent) return;
+    // Do URL len kód — text výnimky Google API nepatrí do prehliadača.
+    res.redirect(`${baseUrl}/tasks?google_tasks=error&message=callback_failed`);
   }
 });
 

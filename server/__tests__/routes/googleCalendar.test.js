@@ -3,6 +3,10 @@ const request = require('supertest');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('../../models/User');
+const oauthService = require('../../services/oauthService');
+
+// Callback akceptuje len podpísaný state (oauthService.signState).
+const gcState = (userId) => encodeURIComponent(oauthService.signState({ mode: 'gcal', userId: String(userId) }));
 
 /**
  * /api/google-calendar route testy — OAuth-integrated Google Calendar sync.
@@ -140,7 +144,7 @@ describe('/api/google-calendar route', () => {
         expect.objectContaining({
           access_type: 'offline',
           prompt: 'consent',
-          state: user._id.toString(),
+          state: expect.any(String),
           scope: expect.arrayContaining(['https://www.googleapis.com/auth/calendar.events'])
         })
       );
@@ -150,7 +154,7 @@ describe('/api/google-calendar route', () => {
   describe('GET /callback', () => {
     it('redirect na error ak chýba code', async () => {
       const res = await request(app)
-        .get(`/api/google-calendar/callback?state=${user._id}`);
+        .get(`/api/google-calendar/callback?state=${gcState(user._id)}`);
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('google_calendar=error');
       expect(res.headers.location).toContain('missing_params');
@@ -166,14 +170,14 @@ describe('/api/google-calendar route', () => {
     it('redirect na error ak user neexistuje', async () => {
       const fake = new mongoose.Types.ObjectId().toString();
       const res = await request(app)
-        .get(`/api/google-calendar/callback?code=abc&state=${fake}`);
+        .get(`/api/google-calendar/callback?code=abc&state=${gcState(fake)}`);
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('user_not_found');
     });
 
     it('úspešný callback uloží tokens + redirect na connected', async () => {
       const res = await request(app)
-        .get(`/api/google-calendar/callback?code=valid-code&state=${user._id}`);
+        .get(`/api/google-calendar/callback?code=valid-code&state=${gcState(user._id)}`);
 
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('google_calendar=connected');
@@ -189,11 +193,35 @@ describe('/api/google-calendar route', () => {
       mockGetToken.mockRejectedValueOnce(new Error('Token exchange failed'));
 
       const res = await request(app)
-        .get(`/api/google-calendar/callback?code=bad-code&state=${user._id}`);
+        .get(`/api/google-calendar/callback?code=bad-code&state=${gcState(user._id)}`);
 
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('error');
-      expect(res.headers.location).toContain('Token%20exchange%20failed');
+      // Text výnimky už nejde do URL — len kód
+      expect(res.headers.location).toContain('callback_failed');
+      expect(res.headers.location).not.toContain('Token%20exchange%20failed');
+    });
+
+    it('odmietne nepodpísaný state (holé userId) — CSRF', async () => {
+      const res = await request(app)
+        .get(`/api/google-calendar/callback?code=valid-code&state=${user._id}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('invalid_state');
+    });
+
+    it('opätovné pripojenie zachová per-workspace kalendáre a opt-out', async () => {
+      await User.updateOne({ _id: user._id }, {
+        $set: {
+          'googleCalendar.workspaceCalendars': { ws1: { calendarId: 'cal-ws1' } },
+          'googleCalendar.syncDisabledWorkspaces': ['ws2']
+        }
+      });
+      const res = await request(app)
+        .get(`/api/google-calendar/callback?code=valid-code&state=${gcState(user._id)}`);
+      expect(res.status).toBe(302);
+      const updated = await User.findById(user._id);
+      expect(updated.googleCalendar.workspaceCalendars.get('ws1').calendarId).toBe('cal-ws1');
+      expect(updated.googleCalendar.syncDisabledWorkspaces).toEqual(['ws2']);
     });
   });
 

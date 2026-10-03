@@ -14,6 +14,7 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
+const oauthService = require('../services/oauthService');
 
 const router = express.Router();
 
@@ -227,8 +228,13 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
-    const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
-    logger.info('[Google Calendar] Generating auth URL', { userId: state });
+    // Podpísaný state (HMAC + nonce + 10 min expirácia, oauthService) —
+    // predtým to bolo holé userId a neautentifikovaný /callback by prepojil
+    // Google účet útočníka s ľubovoľným CRM účtom, ktorého ID pozná
+    // (spolučlenovia workspace) → úlohy obete by sa synchronizovali do
+    // útočníkovho kalendára.
+    const state = oauthService.signState({ mode: 'gcal', userId: req.user.id.toString() });
+    logger.info('[Google Calendar] Generating auth URL', { userId: req.user.id.toString() });
 
     const client = createOAuth2Client();
     const authUrl = client.generateAuthUrl({
@@ -256,11 +262,23 @@ router.get('/callback', async (req, res) => {
   });
 
   try {
-    const { code, state: userId } = req.query;
+    const { code, state } = req.query;
 
-    if (!code || !userId) {
-      logger.warn('[Google Calendar] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
+    if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+      logger.warn('[Google Calendar] Callback missing parameters', { hasCode: !!code, hasState: !!state });
       return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=missing_params`);
+    }
+
+    let userId;
+    try {
+      const data = oauthService.verifyState(state);
+      if (data.mode !== 'gcal' || !data.userId || !mongoose.Types.ObjectId.isValid(data.userId)) {
+        throw new Error('wrong state kind');
+      }
+      userId = data.userId;
+    } catch (stateErr) {
+      logger.warn('[Google Calendar] Invalid OAuth state', { error: stateErr.message });
+      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=invalid_state`);
     }
 
     // Exchange code for tokens — use fresh per-request client
@@ -288,20 +306,17 @@ router.get('/callback', async (req, res) => {
     // Save tokens immediately with primary as initial calendar. We intentionally
     // do NOT block the redirect on dedicated-calendar creation — that can be slow
     // and mobile Safari / WebView give up if the callback takes too long.
-    user.googleCalendar = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      calendarId: user.googleCalendar?.calendarId || 'primary',
-      enabled: true,
-      connectedAt: new Date(),
-      lastSyncAt: null,
-      syncedTaskIds: user.googleCalendar?.syncedTaskIds || new Map(),
-      watchChannelId: user.googleCalendar?.watchChannelId || null,
-      watchResourceId: user.googleCalendar?.watchResourceId || null,
-      watchExpiry: user.googleCalendar?.watchExpiry || null,
-      syncToken: user.googleCalendar?.syncToken || null
-    };
+    // Len tokenové a stavové polia — priradenie celého objektu pri
+    // opätovnom pripojení zmazalo workspaceCalendars, syncedTaskCalendars,
+    // syncedEventHashes aj syncDisabledWorkspaces (opt-out workspace-ov) →
+    // duplicitné kalendáre a znovu zapnutý sync vypnutých prostredí.
+    user.set('googleCalendar.accessToken', tokens.access_token);
+    user.set('googleCalendar.refreshToken', tokens.refresh_token || user.googleCalendar?.refreshToken || null);
+    user.set('googleCalendar.tokenExpiry', tokens.expiry_date ? new Date(tokens.expiry_date) : null);
+    if (!user.googleCalendar?.calendarId) user.set('googleCalendar.calendarId', 'primary');
+    user.set('googleCalendar.enabled', true);
+    user.set('googleCalendar.connectedAt', new Date());
+    user.set('googleCalendar.lastSyncAt', null);
 
     await user.save();
     logger.info('[Google Calendar] User connected successfully', {
@@ -344,7 +359,8 @@ router.get('/callback', async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Callback error', { error: error.message });
-    res.redirect(`${baseUrl}/tasks?google_calendar=error&message=` + encodeURIComponent(error.message));
+    // Do URL len kód — text výnimky (Google API) nemá čo hľadať v prehliadači.
+    res.redirect(`${baseUrl}/tasks?google_calendar=error&message=callback_failed`);
   }
 });
 
