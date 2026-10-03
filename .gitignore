@@ -59,3 +59,6 @@ android-native/app/google-services.json
 secrets/
 
 client/dist-server/
+
+# Xcode — osobný stav UI a schém (obsahuje lokálne cesty vývojára)
+**/xcuserdata/
