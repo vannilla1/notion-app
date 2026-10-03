@@ -8769,7 +8769,10 @@ body.ios-app {
 
 .toast-container {
   position: fixed;
-  top: 20px;
+  /* V nainštalovanej iOS PWA (black-translucent status bar) siaha obsah pod
+     status bar — bez env() boli toasty pod hodinami/batériou a × ťažko
+     dostupné. V prehliadači je env() 0. */
+  top: calc(20px + env(safe-area-inset-top, 0px));
   right: 20px;
   z-index: 9999;
   display: flex;
