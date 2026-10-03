@@ -1051,8 +1051,12 @@ function Messages() {
               onSelect={(msg) => {
                 setSelectedMessage(msg);
                 // Fetch full message detail (triggers readBy on backend), then refresh count
-                api.get(`/api/messages/${msg.id || msg._id}`).then(res => {
-                  setSelectedMessage(res.data);
+                const msgId = msg.id || msg._id;
+                api.get(`/api/messages/${msgId}`).then(res => {
+                  // Oneskorená odpoveď nesmie znovu otvoriť zavretý detail (← Späť)
+                  // ani prepísať medzitým otvorenú inú správu — rovnaký guard ako
+                  // refreshSelectedMessage.
+                  setSelectedMessage(cur => (cur && (cur.id || cur._id) === msgId ? res.data : cur));
                   fetchPendingCount();
                 }).catch(() => {});
               }}
