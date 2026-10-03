@@ -5538,6 +5538,14 @@ const PROMO_TYPES = {
   freeMonths: { label: 'Voľné mesiace', unit: 'mes.', icon: '🎁' }
 };
 
+// <input type="date"> pracuje s lokálnym dátumom; toISOString().slice(0, 10)
+// by v noci ukázal UTC deň (o deň skôr/neskôr).
+const toLocalDateInput = (value) => {
+  const d = new Date(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 function PromoCodesTab() {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5657,7 +5665,9 @@ function PromoCodesTab() {
           : null,
         maxUses: form.maxUses ? parseInt(form.maxUses) : 0,
         maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : 1,
-        expiresAt: form.expiresAt || null,
+        // datetime-local nemá zónu — server (UTC) by ho bral ako UTC a kód by
+        // expiroval o 1–2 h neskôr. Prehliadač ho parsuje ako lokálny čas.
+        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
         // Affiliate fields — null/0 keď nie je referrer vybraný
         referrerId: hasReferrer ? form.referrerId : null,
         commissionPercent: hasReferrer ? cp : 0
@@ -5702,7 +5712,7 @@ function PromoCodesTab() {
       isActive: !!code.isActive,
       maxUses: code.maxUses != null ? String(code.maxUses) : '',
       maxUsesPerUser: code.maxUsesPerUser != null ? String(code.maxUsesPerUser) : '1',
-      expiresAt: code.expiresAt ? new Date(code.expiresAt).toISOString().slice(0, 10) : '',
+      expiresAt: code.expiresAt ? toLocalDateInput(code.expiresAt) : '',
       validForPlans: Array.isArray(code.validForPlans) ? [...code.validForPlans] : [],
       validForPeriods: Array.isArray(code.validForPeriods) ? [...code.validForPeriods] : [],
       // referrerId môže byť populated objekt alebo string
@@ -5735,6 +5745,15 @@ function PromoCodesTab() {
       alert('Provízia musí byť 1-100% pri affiliate kódoch');
       return;
     }
+    // Nezmenený dátum = pôvodný presný čas (predtým sa pri každom uložení
+    // posunul na polnoc UTC); zmenený = koniec zvoleného dňa v lokálnom čase.
+    const originalExpiresDate = editingCode.expiresAt ? toLocalDateInput(editingCode.expiresAt) : '';
+    let expiresAt = null;
+    if (editForm.expiresAt) {
+      expiresAt = editForm.expiresAt === originalExpiresDate
+        ? editingCode.expiresAt
+        : new Date(`${editForm.expiresAt}T23:59:59`).toISOString();
+    }
     setEditSaving(true);
     try {
       await adminApi.put(`/api/admin/promo-codes/${editingCode._id}`, {
@@ -5742,7 +5761,7 @@ function PromoCodesTab() {
         isActive: editForm.isActive,
         maxUses: editForm.maxUses ? parseInt(editForm.maxUses) : 0,
         maxUsesPerUser: editForm.maxUsesPerUser ? parseInt(editForm.maxUsesPerUser) : 1,
-        expiresAt: editForm.expiresAt || null,
+        expiresAt,
         validForPlans: editForm.validForPlans,
         validForPeriods: editForm.validForPeriods,
         referrerId: hasReferrer ? editForm.referrerId : null,
