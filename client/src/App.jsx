@@ -371,7 +371,11 @@ function AppContent() {
     let scheduledCheck = null;
 
     const checkAndUpdate = () => {
-      const hasModal = !!document.querySelector('.modal-overlay');
+      // `.workspace-leave-overlay` (potvrdenia opustenia/zmazania prostredia
+      // v UserMenu a WorkspaceMembers) je rovnako celoobrazovkový fixed
+      // overlay, ale nemal triedu modal-overlay → bez zámku sa na iOS
+      // prescrolloval obsah pod ním (scroll bleed).
+      const hasModal = !!document.querySelector('.modal-overlay, .workspace-leave-overlay');
       if (hasModal && !isLocked) {
         isLocked = true;
         savedScrollY = window.scrollY;
