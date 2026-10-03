@@ -540,7 +540,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                 <div
                   key={item.id}
                   className={`calendar-day-allday-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-                  onClick={() => onTaskClick(item.task)}
+                  onClick={() => onTaskClick(item)}
                   style={{ borderLeftColor: wsColor, background: `${wsColor}15` }}
                   title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
                 >
@@ -605,7 +605,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     borderLeftColor: wsColor,
                     background: `${wsColor}22`
                   }}
-                  onClick={() => onTaskClick(item.task)}
+                  onClick={() => onTaskClick(item)}
                   title={`${formatTimeRange(item.dueTime)} — ${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
                 >
                   <div className="calendar-day-event-time">{formatTimeRange(item.dueTime)}</div>
