@@ -706,6 +706,10 @@ function Tasks() {
   // čerstvé dáta.
   const tasksFetchSeqRef = useRef({ started: 0, applied: 0 });
   const contactsFetchSeqRef = useRef({ started: 0, applied: 0 });
+  // In-flight guard pre addSubtask (per inputKey): Enter + klik na „+" alebo
+  // dvojité Enter pred odpoveďou servera by inak poslali dva rovnaké POSTy
+  // a vytvorili duplicitnú podúlohu. Ref, nie state — netreba re-render.
+  const addingSubtaskRef = useRef(new Set());
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -1896,6 +1900,8 @@ function Tasks() {
     const subtaskNote = subtaskNotes[inputKey] || '';
     const subtaskAssigned = subtaskAssignedTo[inputKey] || [];
     if (!subtaskTitle.trim()) return;
+    if (addingSubtaskRef.current.has(inputKey)) return;
+    addingSubtaskRef.current.add(inputKey);
 
     try {
       await api.post(`/api/tasks/${task.id}/subtasks`, {
@@ -1917,6 +1923,8 @@ function Tasks() {
       await fetchTasks();
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri vytvarani ulohy');
+    } finally {
+      addingSubtaskRef.current.delete(inputKey);
     }
   };
 
