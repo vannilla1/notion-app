@@ -443,6 +443,26 @@ io.on('connection', async (socket) => {
     return typeof pageId === 'string' && socket.rooms.has(`page-${pageId}`);
   }
 
+  // Typová + veľkostná kontrola preposielaných polí. REST routa pages
+  // obmedzuje content na 500 000 a title na 500 znakov (routes/pages.js),
+  // socket relay predtým preposielal čokoľvek až po maxHttpBufferSize.
+  // Null/undefined tolerujeme — klient posiela napr. `content: null` pri
+  // zmene samotného titulku (PageView.jsx), takže dnešné payloady prejdú.
+  const isOptStr = (v, max) => v == null || (typeof v === 'string' && v.length <= max);
+
+  // Jednoduchý per-socket limit udalostí za sekundu — cursor-move chodí
+  // ~20×/s, 120/s je 6× rezerva; nad limit sa paket len zahodí (bez
+  // disconnectu), aby nás jeden klient v slučke nenútil broadcastovať
+  // do celej room.
+  socket.data.evtBucket = { sec: 0, n: 0 };
+  const allowEvent = (limit) => {
+    const sec = Math.floor(Date.now() / 1000);
+    const b = socket.data.evtBucket;
+    if (b.sec !== sec) { b.sec = sec; b.n = 0; }
+    return ++b.n <= limit;
+  };
+  const EVENTS_PER_SEC = 120;
+
   // All three handlers below accept the payload as a single param and guard
   // against non-object inputs BEFORE destructuring — otherwise a malicious
   // client emitting `socket.emit('page-update', null)` would throw inside the
@@ -452,6 +472,8 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, content, title } = payload;
     if (!isInPageRoom(pageId)) return;
+    if (!isOptStr(content, 500000) || !isOptStr(title, 500)) return;
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     // Broadcast to all users in the page room except sender
     socket.to(`page-${pageId}`).emit('page-updated', {
       pageId,
@@ -465,6 +487,10 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, blockId, content, type } = payload;
     if (!isInPageRoom(pageId)) return;
+    // blockId: string alebo číslo (klientsky generované id), ostatné stringy.
+    if (!(isOptStr(blockId, 100) || typeof blockId === 'number')) return;
+    if (!isOptStr(content, 500000) || !isOptStr(type, 50)) return;
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     socket.to(`page-${pageId}`).emit('block-updated', {
       pageId,
       blockId,
@@ -478,6 +504,8 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, position } = payload;
     if (!isInPageRoom(pageId)) return;
+    // position nechávame bez typovej kontroly — klient posiela objekt.
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     socket.to(`page-${pageId}`).emit('cursor-moved', {
       userId: socket.user.id,
       username: socket.user.username,
