@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
+import { getStoredToken } from '../utils/authStorage';
+import { consumeOAuthNonce } from '../utils/oauthNonce';
 
 /**
  * AuthCallback — landing page po OAuth redirect zo servera.
@@ -13,7 +16,11 @@ import { useAuth } from '../context/AuthContext';
  * Query stringy nesú meta info (provider, returnUrl, isNew, linked, error).
  *
  * Connect mode (existing user pripojí Google/Apple v Settings):
- *   /auth/callback?mode=connect&provider=google&connected=1&returnUrl=/settings
+ *   /auth/callback?mode=connect&provider=google&returnUrl=/app#pending=...
+ *   → POST /api/auth/connections/complete s JWT dokončí prepojenie.
+ *
+ * Login mode overuje `cnonce` vo fragmente proti nonce uloženému pri štarte
+ * flow (utils/oauthNonce) — cudzí token podstrčený cez URL sa zahodí.
  *
  * Error mode:
  *   /auth/callback?error=EMAIL_EXISTS_UNVERIFIED&message=...
@@ -21,9 +28,18 @@ import { useAuth } from '../context/AuthContext';
 function AuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginWithToken, isAuthenticated } = useAuth();
+  const { loginWithToken, isAuthenticated, loading } = useAuth();
   const [status, setStatus] = useState('processing'); // processing | error
   const [errorMessage, setErrorMessage] = useState('');
+  const [slowServer, setSlowServer] = useState(false);
+  // Prvý effect už nastavil konkrétnu chybu (napr. nesedí nonce) — druhý
+  // ju v tom istom commite nesmie prepísať generickou hláškou.
+  const failedRef = useRef(false);
+  const fail = (message) => {
+    failedRef.current = true;
+    setErrorMessage(message);
+    setStatus('error');
+  };
 
   useEffect(() => {
     const error = searchParams.get('error');
@@ -33,36 +49,58 @@ function AuthCallback() {
 
     // ─── Error path ───────────────────────────────────────────────────
     if (error) {
-      const message = decodeErrorMessage(error, searchParams.get('message'));
-      setErrorMessage(message);
-      setStatus('error');
+      fail(decodeErrorMessage(error));
       // Auto-redirect na login po 4s
       const t = setTimeout(() => navigate('/login', { replace: true }), 4000);
       return () => clearTimeout(t);
     }
 
+    const hash = window.location.hash || '';
+    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+    // Fragment (token / pending) hneď z URL odstránime, nech neostane v histórii.
+    const clearHash = () => {
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch { /* noop */ }
+    };
+
     // ─── Connect mode (Settings link) ────────────────────────────────
-    // Server neposlal token (user už bol prihlásený), len redirect-ol nás
-    // späť na Settings/Connections so success flagom.
+    // Server identitu nepripojil — poslal pending token, ktorý potvrdíme
+    // so svojím JWT. Prepojí sa len ak flow spustil tento prihlásený účet.
     if (mode === 'connect') {
-      // Drobné delay aby sa stačilo zobraziť hlásenie
-      const t = setTimeout(() => {
+      const pending = hashParams.get('pending');
+      clearHash();
+      const finish = () => {
         const target = sanitizeReturn(returnUrl);
         const sep = target.includes('?') ? '&' : '?';
-        navigate(`${target}${sep}connected=${provider}`, { replace: true });
-      }, 600);
-      return () => clearTimeout(t);
+        navigate(`${target}${sep}connected=${encodeURIComponent(provider)}&openConnections=1`, { replace: true });
+      };
+      if (!pending) {
+        // Starší server (prepojenie už prebehlo v callbacku).
+        const t = setTimeout(finish, 600);
+        return () => clearTimeout(t);
+      }
+      if (!getStoredToken()) {
+        fail('Pre pripojenie účtu sa najprv prihlás a skús to znova v Nastaveniach.');
+        return undefined;
+      }
+      let cancelled = false;
+      api.post('/api/auth/connections/complete', { pending })
+        .then(() => { if (!cancelled) finish(); })
+        .catch((err) => {
+          if (cancelled) return;
+          fail(decodeErrorMessage(err?.response?.data?.code || 'CONNECT_FAILED'));
+        });
+      return () => { cancelled = true; };
     }
 
     // ─── Login mode ──────────────────────────────────────────────────
-    // Token je v URL hash. Parse: "#token=xxx"
-    const hash = window.location.hash || '';
-    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+    // Token je v URL hash. Parse: "#token=xxx&cnonce=yyy"
     const token = hashParams.get('token');
+    const cnonce = hashParams.get('cnonce');
 
     if (!token) {
-      setErrorMessage('Chýba prihlasovací token. Skús sa prihlásiť znova.');
-      setStatus('error');
+      fail('Chýba prihlasovací token. Skús sa prihlásiť znova.');
       const t = setTimeout(() => navigate('/login', { replace: true }), 3000);
       return () => clearTimeout(t);
     }
@@ -86,24 +124,31 @@ function AuthCallback() {
       // Cleanup hash z URL pred redirect-om — ak appka neje nainštalovaná,
       // Safari ostane na tejto stránke a user uvidí "Prihlasujem..." spinner.
       // Po 1.5s fallback urobíme normálny web flow (loginWithToken + navigate).
-      try {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      } catch { /* noop */ }
+      clearHash();
+      // Natívna appka si väzbu na flow overí sama (prijme token len keď
+      // OAuth spustila) — nonce z jej WebView tu v Safari nie je.
       window.location.href = customSchemeUrl;
       // Fallback timer — ak Safari nezatvorí stránku za 1.5s, appka pravdepodobne
-      // nie je nainštalovaná → web flow.
+      // nie je nainštalovaná → web flow (flow vtedy spustil tento Safari).
       const fallbackTimer = setTimeout(() => {
+        if (!consumeOAuthNonce(cnonce)) {
+          fail(decodeErrorMessage('STATE_INVALID'));
+          return;
+        }
         loginWithToken(token);
       }, 1500);
       return () => clearTimeout(fallbackTimer);
     }
 
-    loginWithToken(token);
+    clearHash();
 
-    // Cleanup hash z URL aby token nebol viditeľný (replaceState).
-    try {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    } catch { /* noop */ }
+    // Login-CSRF ochrana: token prijmeme len ak flow spustil tento prehliadač.
+    if (!consumeOAuthNonce(cnonce)) {
+      fail(decodeErrorMessage('STATE_INVALID'));
+      return undefined;
+    }
+
+    loginWithToken(token);
 
     // ČAKAME na druhý useEffect dolu, ktorý sa spustí keď isAuthenticated=true
     // (po dokončení fetchUser). Tým zaručíme že Dashboard po navigácii nájde
@@ -119,22 +164,28 @@ function AuthCallback() {
   // Safeguard: po 8 sekundách bez `isAuthenticated=true` zobrazíme error —
   // niečo zlyhalo (napr. fetchUser dostal 401 → token bol invalidovaný).
   useEffect(() => {
-    if (status !== 'processing') return;
+    // Auto-navigácia len v login móde — connect mód naviguje sám po
+    // dokončení prepojenia (inak by ho tento effect predbehol a stratil
+    // ?connected=…), error mód má vlastný redirect.
+    if (searchParams.get('mode') === 'connect' || searchParams.get('error')) return undefined;
+    if (status !== 'processing' || failedRef.current) return undefined;
     if (isAuthenticated) {
       const returnUrl = sanitizeReturn(searchParams.get('returnUrl') || '/app');
       navigate(returnUrl, { replace: true });
-      return;
+      return undefined;
     }
-    // Auth-fail safeguard
-    const timeout = setTimeout(() => {
-      if (status === 'processing') {
-        console.error('[AuthCallback] timeout — user fetch did not complete in 8s');
-        setErrorMessage('Prihlásenie sa nepodarilo dokončiť (timeout). Skús to znova.');
-        setStatus('error');
-      }
-    }, 8000);
+    // AuthContext pri prechodnej chybe (cold start Render 30–50 s, 503,
+    // sieť) /me opakuje a token nemaže — chybu ukážeme až keď overenie
+    // definitívne skončí bez prihlásenia (401 → loading=false, bez usera).
+    if (!loading && !getStoredToken()) {
+      setErrorMessage('Prihlásenie sa nepodarilo dokončiť. Skús to znova.');
+      setStatus('error');
+      return undefined;
+    }
+    // Po 8 s len informujeme, že server sa prebúdza.
+    const timeout = setTimeout(() => setSlowServer(true), 8000);
     return () => clearTimeout(timeout);
-  }, [isAuthenticated, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, status, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{
@@ -168,7 +219,9 @@ function AuthCallback() {
             }} />
             <h2 style={{ margin: '0 0 8px', fontSize: '18px' }}>Prihlasujem...</h2>
             <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
-              Chvíľu strpenia, dokončujem prihlásenie.
+              {slowServer
+                ? 'Server sa prebúdza, môže to trvať až minútu…'
+                : 'Chvíľu strpenia, dokončujem prihlásenie.'}
             </p>
           </>
         ) : (
@@ -224,7 +277,7 @@ function sanitizeReturn(raw) {
 }
 
 // User-friendly preklady error kódov z OAuth flow-u.
-function decodeErrorMessage(code, rawMessage) {
+function decodeErrorMessage(code) {
   const messages = {
     USER_CANCELLED: 'Prihlasovanie zrušené.',
     NOT_CONFIGURED: 'Prihlásenie cez tento spôsob momentálne nie je dostupné.',
@@ -239,9 +292,12 @@ function decodeErrorMessage(code, rawMessage) {
     LOGIN_FAILED: 'Prihlásenie zlyhalo. Skús to znova.',
     CONNECT_FAILED: 'Pripojenie účtu zlyhalo. Skús to znova.',
     CALLBACK_FAILED: 'Niečo sa pokazilo pri prihlasovaní. Skús to znova.',
-    INIT_FAILED: 'Nepodarilo sa spustiť prihlásenie. Skús to znova.'
+    INIT_FAILED: 'Nepodarilo sa spustiť prihlásenie. Skús to znova.',
+    USER_NOT_FOUND: 'Účet neexistuje. Prihlás sa znova.'
   };
-  return messages[code] || rawMessage || 'Prihlásenie zlyhalo. Skús to znova.';
+  // Text z URL (?message=) zámerne nezobrazujeme — útočník by cez odkaz
+  // vedel podstrčiť ľubovoľnú „hlášku Prpl CRM“ (content spoofing).
+  return messages[code] || 'Prihlásenie zlyhalo. Skús to znova.';
 }
 
 export default AuthCallback;
