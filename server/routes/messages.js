@@ -32,6 +32,18 @@ const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
 const router = express.Router();
 
+// Neplatné ObjectId v URL → 400/404 hneď. Bez toho šlo „not-valid" priamo do
+// filtra _id / comments._id, Mongoose hodil CastError, catch vrátil 500 a pri
+// multer routách handleMessageWriteError chybu zapísal do Diagnostiky. Radí
+// sa ZA requireWorkspace, aby poradie 401 → 403 → 400 ostalo ako doteraz
+// (GET /:id a GET /:id/attachment majú rovnakú kontrolu inline).
+const requireMessageId = (req, res, next) => (
+  OBJECT_ID_RE.test(req.params.id) ? next() : res.status(400).json({ message: 'Neplatné ID' })
+);
+const requireCommentId = (req, res, next) => (
+  OBJECT_ID_RE.test(req.params.commentId) ? next() : res.status(404).json({ message: 'Komentár nenájdený' })
+);
+
 // ─── Prílohy správ: limity, filter, chyby ─────────────────────
 //
 // Prílohy správ (files[], legacy attachment, prílohy komentárov) žijú od
@@ -636,7 +648,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
 });
 
 // PUT /api/messages/:id — edit message (only sender can edit)
-router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
+router.put('/:id', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
@@ -708,7 +720,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // PUT /api/messages/:id/approve — approve message (recipient or workspace admin)
-router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/approve', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const query = {
       _id: req.params.id,
@@ -781,7 +793,7 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
 });
 
 // PUT /api/messages/:id/reject — reject message (recipient or workspace admin)
-router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const { reason } = req.body;
 
@@ -856,7 +868,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
 });
 
 // PUT /api/messages/:id/reopen — revert approval/rejection back to pending/commented
-router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/reopen', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const message = await Message.findOne({
       _id: req.params.id,
@@ -940,7 +952,7 @@ router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) 
 });
 
 // POST /api/messages/:id/vote — vote on a poll option
-router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:id/vote', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const { optionId } = req.body;
 
@@ -1011,7 +1023,7 @@ router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) =
 });
 
 // POST /api/messages/:id/comment — add comment (with optional attachment)
-router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:id/comment', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
@@ -1120,7 +1132,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // PUT /api/messages/:id/comment/:commentId — edit comment (only author)
-router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const { text } = req.body;
     if (!text || !text.trim()) {
@@ -1174,7 +1186,7 @@ router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async
 });
 
 // DELETE /api/messages/:id/comment/:commentId — delete comment (only author)
-router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     // R2 kľúč prílohy komentára treba prečítať PRED $pull — po ňom už niet
     // odkiaľ. Rovnaký filter (vrátane autorstva) ako samotný $pull.
@@ -1254,7 +1266,7 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
 //  - nový → pridanie
 // Reakciu môže pridať iba user, ktorý je sender alebo recipient odkazu
 // (workspace guard). Autor komentára nedostane notifikáciu za vlastnú reakciu.
-router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const { type } = req.body;
     if (type !== null && type !== 'like' && type !== 'dislike') {
@@ -1450,7 +1462,7 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
 });
 
 // GET /api/messages/:id/comment/:commentId/attachment — download comment attachment
-router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, async (req, res) => {
+router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const etag = `"cmt-${req.params.commentId}-attach"`;
     if (req.headers['if-none-match'] === etag) {
@@ -1495,7 +1507,7 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
 // ─── FILE ATTACHMENTS (same pattern as Tasks) ─────────────────
 
 // POST /api/messages/:id/files — add file to message
-router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:id/files', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('file')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
     if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
@@ -1530,7 +1542,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // GET /api/messages/:id/files/:fileId/download — download file
-router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
+router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const etag = `"file-${req.params.fileId}"`;
     if (req.headers['if-none-match'] === etag) {
@@ -1564,7 +1576,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
 });
 
 // DELETE /api/messages/:id/files/:fileId — delete file from message
-router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const message = await Message.findOne({
       _id: req.params.id,
@@ -1586,7 +1598,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 });
 
 // DELETE /api/messages/:id — sender or workspace owner/manager can delete
-router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     // Len to, čo treba: odosielateľ/príjemca + R2 kľúče príloh (bez base64
     // a bez textu) — bloby sa mažú po deleteOne.
