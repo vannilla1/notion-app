@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import api from '../api/api';
 
@@ -12,6 +12,11 @@ function ResetPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const redirectTimerRef = useRef(null);
+
+  // Odložené presmerovanie sa pri odchode zo stránky (napr. klik na „Späť na
+  // prihlásenie“) zruší — inak by po 2 s prišla druhá navigácia.
+  useEffect(() => () => clearTimeout(redirectTimerRef.current), []);
 
   // Guard: ak URL neobsahuje token, rovno ukáž chybu — nemá zmysel
   // renderovať form a posielať prázdny token na backend.
@@ -25,8 +30,13 @@ function ResetPassword() {
     e.preventDefault();
     setError('');
 
-    if (newPassword.length < 6) {
-      setError('Heslo musí mať aspoň 6 znakov.');
+    // Rovnaká politika ako server (validatePassword) a zmena hesla v UserMenu
+    if (newPassword.length < 8) {
+      setError('Heslo musí mať aspoň 8 znakov.');
+      return;
+    }
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(newPassword)) {
+      setError('Heslo musí obsahovať písmeno a číslo alebo špeciálny znak.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -39,7 +49,7 @@ function ResetPassword() {
       await api.post('/api/auth/reset-password', { token, newPassword });
       setSuccess(true);
       // Po 2 sekundách presmerovať na /login
-      setTimeout(() => navigate('/login'), 2000);
+      redirectTimerRef.current = setTimeout(() => navigate('/login'), 2000);
     } catch (err) {
       if (err.response?.data?.message) {
         setError(err.response.data.message);
@@ -65,7 +75,7 @@ function ResetPassword() {
         <p className="login-subtitle">
           {success
             ? 'Heslo bolo úspešne zmenené. Presmerujem vás na prihlásenie…'
-            : 'Zvoľte si nové heslo. Musí mať aspoň 6 znakov.'}
+            : 'Zvoľte si nové heslo: aspoň 8 znakov, písmeno a číslo alebo špeciálny znak.'}
         </p>
 
         {error && <div className="error-message">{error}</div>}
@@ -79,11 +89,12 @@ function ResetPassword() {
                 className="form-input"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Aspoň 6 znakov"
+                placeholder="Aspoň 8 znakov, písmeno + číslo"
                 autoComplete="new-password"
+                passwordrules="minlength: 8; maxlength: 128; required: lower; required: digit; allowed: ascii-printable;"
                 required
                 autoFocus
-                minLength={6}
+                minLength={8}
               />
             </div>
 
@@ -97,7 +108,7 @@ function ResetPassword() {
                 placeholder="Zadajte heslo ešte raz"
                 autoComplete="new-password"
                 required
-                minLength={6}
+                minLength={8}
               />
             </div>
 
