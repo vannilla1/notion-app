@@ -13,7 +13,9 @@ const router = express.Router();
  * stays valid forever) — easy for users who archive emails and unsubscribe
  * months later.
  *
- * One-click flow: click → marketingEmails=false + simple HTML confirmation.
+ * Flow: GET (klik v e-maile) → potvrdzovacia stránka s tlačidlom → POST →
+ * marketingEmails=false + HTML potvrdenie. RFC 8058 one-click POST (Gmail/
+ * Yahoo) ide rovno na POST s tokenom v URL.
  * GDPR-friendly: covers Article 21 (right to object to direct marketing).
  */
 // Shared handler — funguje pre GET (user click v emaili) aj POST (Gmail/Yahoo
@@ -75,8 +77,27 @@ const handleUnsubscribe = async (req, res) => {
   }
 };
 
-// GET — user-facing klik v emaili (vráti HTML potvrdenie)
-router.get('/unsubscribe', handleUnsubscribe);
+// GET — klik v e-maile. Stav NEMENÍ: link scannery (Outlook Safe Links,
+// firemné proxy, antivírusy) odkazy v e-mailoch otvárajú automaticky a
+// používateľa by odhlásili bez jeho vedomia. Vráti stránku s tlačidlom,
+// ktoré pošle POST (zmena stavu len v POST).
+router.get('/unsubscribe', (req, res) => {
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  if (!token || !verifyUnsubscribeToken(token)) {
+    return res.status(400).send(renderResult({
+      ok: false,
+      title: 'Neplatný odkaz',
+      message: 'Tento odhlasovací odkaz nie je platný. Skopírujte ho prosím priamo z emailu, alebo si pripomienky vypnite v profile.'
+    }));
+  }
+  return res.send(renderResult({
+    ok: true,
+    icon: '✉️',
+    title: 'Odhlásiť sa z pripomienok?',
+    message: 'Prestanú vám chodiť pripomienky a marketingové e-maily. Transakčné e-maily (zmeny účtu, obnova hesla) budú chodiť ďalej.',
+    formToken: token
+  }));
+});
 
 // POST — RFC 8058 one-click. Gmail/Yahoo vidí `List-Unsubscribe-Post:
 // List-Unsubscribe=One-Click` v hlavičkách a pri kliku na natívny
@@ -89,7 +110,7 @@ const escapeHtml = (value) => String(value ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-const renderResult = ({ ok, title, message }) => `
+const renderResult = ({ ok, title, message, icon, formToken }) => `
 <!DOCTYPE html>
 <html lang="sk"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -110,10 +131,15 @@ const renderResult = ({ ok, title, message }) => `
 <body><div class="wrap"><div class="card">
   <div class="head"><h1>PrplCRM</h1></div>
   <div class="body">
-    <div class="icon">${ok ? '✅' : '⚠️'}</div>
+    <div class="icon">${icon || (ok ? '✅' : '⚠️')}</div>
     <h2 class="title">${title}</h2>
     <p class="msg">${message}</p>
-    <a href="https://prplcrm.eu/app" class="cta">Otvoriť CRM</a>
+    ${formToken
+      ? `<form method="POST" action="/api/email/unsubscribe">
+      <input type="hidden" name="token" value="${escapeHtml(formToken)}">
+      <button type="submit" class="cta" style="border:0;cursor:pointer;width:100%;font-size:15px;">Odhlásiť sa</button>
+    </form>`
+      : '<a href="https://prplcrm.eu/app" class="cta">Otvoriť CRM</a>'}
   </div>
   <div class="foot">PrplCRM · prplcrm.eu</div>
 </div></div></body></html>`;
