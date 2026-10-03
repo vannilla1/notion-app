@@ -517,6 +517,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     res.setHeader('Content-Disposition', 'attachment; filename="kontakty.csv"');
     res.send(csv);
   } catch (error) {
+    logger.error('CSV export error', { error: error.message, stack: error.stack, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
@@ -534,6 +535,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
     res.json({ ...contact, id: contact._id.toString() });
   } catch (error) {
+    logger.error('GET /contacts/:id error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -610,6 +612,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Create contact error', { error: error.message, stack: error.stack, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1027,6 +1030,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Update contact error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1099,6 +1103,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Delete contact error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1157,6 +1162,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
 
     res.status(201).json(task);
   } catch (error) {
+    logger.error('Create contact task error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1223,6 +1229,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
+    logger.error('Update contact task error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1362,6 +1369,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
 
     res.status(201).json(subtask);
   } catch (error) {
+    logger.error('Create contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1435,6 +1443,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
 
     res.json(found.parent[found.index]);
   } catch (error) {
+    logger.error('Update contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1479,6 +1488,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
+    logger.error('Delete contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2371,6 +2381,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 
     res.json({ message: 'Súbor vymazaný' });
   } catch (error) {
+    logger.error('Delete contact file error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2404,6 +2415,7 @@ router.patch('/:id/files/:fileId', authenticateToken, requireWorkspace, async (r
 
     res.json({ message: 'Názov upravený', originalName: newName });
   } catch (error) {
+    logger.error('Rename contact file error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
