@@ -19,6 +19,7 @@ const router = express.Router();
 
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
+const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
 const fileStorage = require('../services/fileStorage');
 const { listWorkspaceAttachments } = require('../utils/attachmentIndex');
@@ -211,6 +212,15 @@ router.get('/export/:jobId', async (req, res) => {
     // zápisom do archívu. Dotiahnu sa lenivo po jednom v cykle nižšie.
     const blobs = await ContactFile.find({ fileId: { $in: ids } }, { fileId: 1, r2Key: 1, contactId: 1 }).lean();
     const byId = new Map(blobs.map(b => [b.fileId, b]));
+    // Druhá vrstva obrany ako blobBelongsToWorkspace pri sťahovaní jedného
+    // súboru (contacts.js): blob s contactId mimo tohto workspace-u do ZIP-u
+    // nejde, aj keby sa jeho fileId dostal do metadát files[] — regresia
+    // v spracovaní metadát by sa inak cez export zmenila na hromadný únik.
+    // contactId null = legacy / globálna úloha, väzbu na workspace nenesie.
+    const ownerIds = [...new Set(blobs.map(b => b.contactId).filter(Boolean).map(String))];
+    const okContacts = new Set(ownerIds.length
+      ? (await Contact.find({ _id: { $in: ownerIds }, workspaceId: job.workspaceId }, { _id: 1 }).lean()).map(c => String(c._id))
+      : []);
     const used = new Set();
     const manifest = ['Kontakt;Projekt;Úloha;Súbor;Veľkosť (B);Nahraté'];
 
@@ -225,6 +235,12 @@ router.get('/export/:jobId', async (req, res) => {
         entry.size || 0,
         csvCell(entry.uploadedAt ? new Date(entry.uploadedAt).toISOString().slice(0, 10) : '')
       ].join(';'));
+
+      if (rec && rec.contactId && !okContacts.has(String(rec.contactId))) {
+        failed++;
+        logger.warn('[Attachments] Blob patrí inému prostrediu — preskočený', { fileId: entry.fileId });
+        continue;
+      }
 
       try {
         if (rec && rec.r2Key && fileStorage.isR2Available()) {
