@@ -12,6 +12,9 @@ const Contact = require('../models/Contact');
 const logger = require('../utils/logger');
 const { escapeRegex } = require('../utils/regexHelpers');
 const Message = require('../models/Message');
+const Page = require('../models/Page');
+const Notification = require('../models/Notification');
+const Invitation = require('../models/Invitation');
 const AuditLog = require('../models/AuditLog');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
@@ -1496,13 +1499,22 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
 
     // Bloby príloh správ (R2) PRED deleteMany — best-effort, nikdy nehádže
     await deleteMessageBlobs({ workspaceId: id });
+    // Kaskáda v parite s DELETE /users (sole-owned workspaces) a so self-delete
+    // v routes/workspaces.js: predtým tu ostávali osirelé Pages, Notifications
+    // a Invitations a používateľom ostal currentWorkspaceId na neexistujúci
+    // workspace (prvý login po zmazaní potom padal na 404 workspace-u).
     await Promise.all([
       Contact.deleteMany({ workspaceId: id }),
       Task.deleteMany({ workspaceId: id }),
       Message.deleteMany({ workspaceId: id }),
+      Page.deleteMany({ workspaceId: id }),
+      Notification.deleteMany({ workspaceId: id }),
+      Invitation.deleteMany({ workspaceId: id }),
       WorkspaceMember.deleteMany({ workspaceId: id }),
+      User.updateMany({ currentWorkspaceId: id }, { $set: { currentWorkspaceId: null } }),
       Workspace.findByIdAndDelete(id)
     ]);
+
 
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
