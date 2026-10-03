@@ -189,6 +189,18 @@ const badContactField = (body) => Object.keys(FIELD_MAX).find(
 // klient (ContactForm, CSV export statusMap) pozná len tieto štyri.
 const ALLOWED_STATUS = new Set(['new', 'active', 'completed', 'cancelled']);
 
+// Vstupy úloh/podúloh kontaktu. priority: len reťazec ≤ 20 znakov alebo
+// null (podúloha má default null); allow-list hodnôt sa zámerne nevynucuje
+// (staršie dáta). Iný typ → undefined = „neposlané" (POST default, PUT
+// ponechá pôvodnú hodnotu). assignedTo: pole reťazcov (max 100); samotný
+// reťazec sa zabalí ako doteraz robil Mongoose cast; objekt → [].
+const cleanTaskPriority = (p) => (p === null || (typeof p === 'string' && p.length <= 20) ? p : undefined);
+const cleanAssignees = (a) => {
+  if (a === undefined) return undefined;
+  const arr = Array.isArray(a) ? a : (typeof a === 'string' && a ? [a] : []);
+  return arr.filter(x => typeof x === 'string').slice(0, 100);
+};
+
 // Helper function to convert contact to plain object with deep copy of nested subtasks
 const contactToPlainObject = (contact) => {
   const obj = contact.toObject ? contact.toObject() : contact;
@@ -1178,7 +1190,8 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
   try {
     const { title, description, dueDate, dueTime, priority, assignedTo } = req.body;
 
-    if (!title || !title.trim()) {
+    // typeof — číslo/objekt v title padalo na .trim() → 500
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
 
@@ -1195,9 +1208,9 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
       description: description || '',
       dueDate: dueDate || null,
       dueTime: dueDate ? (dueTime || '') : '',
-      priority: priority || 'medium',
+      priority: cleanTaskPriority(priority) || 'medium',
       completed: false,
-      assignedTo: assignedTo || [],
+      assignedTo: cleanAssignees(assignedTo) || [],
       subtasks: [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
@@ -1254,6 +1267,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     // (vracia interné _doc/$__ properties). Bez .toObject() by sa stratili
     // files, notes, lastUrgencyLevel pri každom edit-e tasku cez tento route.
     const taskPlain = typeof task.toObject === 'function' ? task.toObject() : task;
+    const nextPriority = cleanTaskPriority(priority); // undefined = ponechať
     contact.tasks[taskIndex] = {
       ...taskPlain,
       id: task.id,
@@ -1261,9 +1275,9 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       description: description !== undefined ? description : task.description,
       dueDate: dueDate !== undefined ? dueDate : task.dueDate,
       dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (task.dueTime || ''),
-      priority: priority !== undefined ? priority : task.priority,
+      priority: nextPriority !== undefined ? nextPriority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
-      assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
+      assignedTo: cleanAssignees(assignedTo) ?? task.assignedTo,
       // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
       subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks,
       createdAt: task.createdAt,
@@ -1338,7 +1352,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
   try {
     const { title, parentSubtaskId, dueDate, dueTime, notes, priority } = req.body;
 
-    if (!title || !title.trim()) {
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
@@ -1381,7 +1395,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       dueDate: dueDate || null,
       dueTime: dueDate ? (dueTime || '') : '',
       notes: notes || '',
-      priority: priority || null,
+      priority: cleanTaskPriority(priority) || null,
       subtasks: [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
