@@ -6,6 +6,7 @@ import {
   removeStoredToken,
   isNativeIOSApp
 } from '../utils/authStorage';
+import { consumeOAuthNonce } from '../utils/oauthNonce';
 
 const AuthContext = createContext(null);
 
@@ -213,12 +214,25 @@ export const AuthProvider = ({ children }) => {
     window.__nativeAuthLogin = (newToken, opts) => {
       try {
         if (!newToken || typeof newToken !== 'string') return false;
+        // Token z `prplcrm://auth` (OAuth dokončený v Safari) nesie cnonce —
+        // prijmeme ho len ak flow spustil tento WebView (login-CSRF: odkaz
+        // prplcrm://auth vie otvoriť ktorákoľvek stránka či appka). Natívne
+        // SDK prihlásenie (OAuthController) volá bez opts.
+        if (opts && Object.prototype.hasOwnProperty.call(opts, 'cnonce')) {
+          if (!consumeOAuthNonce(opts.cnonce)) return false;
+        }
+        const rawReturn = typeof opts?.returnUrl === 'string' ? opts.returnUrl : '';
+        const target = rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : '/app';
         loginWithToken(newToken);
-        // Redirect na /app — používame nastavenie cez timeout aby sa Auth state
+        // Redirect — používame nastavenie cez timeout aby sa Auth state
         // stihol propagate-nuť pred navigation-om.
         setTimeout(() => {
-          if (window.location.pathname !== '/app' && !window.location.pathname.startsWith('/app/')) {
-            window.location.assign('/app');
+          if (target === '/app') {
+            if (window.location.pathname !== '/app' && !window.location.pathname.startsWith('/app/')) {
+              window.location.assign('/app');
+            }
+          } else if (window.location.pathname !== target) {
+            window.location.assign(target);
           }
         }, 50);
         return true;
