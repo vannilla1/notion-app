@@ -1,28 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import api, { API_BASE_URL } from '../api/api';
-import { getStoredToken } from '../utils/authStorage';
+import { useAuth } from '../context/AuthContext';
 import NotificationPreferences from './NotificationPreferences';
 import ConnectedAccounts from './ConnectedAccounts';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { switchWorkspace as switchWorkspaceApi, leaveWorkspace as leaveWorkspaceApi } from '../api/workspaces';
-import { setStoredWorkspaceId, getStoredWorkspaceId } from '../utils/workspaceStorage';
-
-// Auth + per-request workspace intent header. Every backend endpoint that
-// uses `requireWorkspace` middleware picks up X-Workspace-Id; without it the
-// server falls back to user.currentWorkspaceId from DB, which on multi-device
-// accounts is the LAST workspace the user clicked — not necessarily where
-// they are now. Sync buttons in this menu were hitting that fallback and
-// syncing the wrong workspace's tasks.
-const authHeaders = () => {
-  const token = getStoredToken();
-  const wsId = getStoredWorkspaceId();
-  const h = {};
-  if (token) h.Authorization = `Bearer ${token}`;
-  if (wsId) h['X-Workspace-Id'] = wsId;
-  return h;
-};
+import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
 import { downscaleImage } from '../utils/imageResize';
 
@@ -68,6 +52,7 @@ const translateErrorMessage = (message) => {
 
 function UserMenu({ user, onLogout, onUserUpdate }) {
   const navigate = useNavigate();
+  const { loginWithToken } = useAuth();
   const { currentWorkspace, workspaces, createWorkspace, reorderWorkspaces } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [reorderingWs, setReorderingWs] = useState(false); // in-flight reorder guard (mobil)
@@ -156,7 +141,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const menuRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const API_URL = `${API_BASE_URL}/api`;
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -236,9 +220,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setLoading(true);
       setErrors({});
-      const response = await axios.get(`${API_URL}/auth/profile`, {
-        headers: authHeaders()
-      });
+      const response = await api.get('/api/auth/profile');
       setProfile(response.data);
       setFormData({
         username: response.data.username,
@@ -321,9 +303,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchCalendarFeedStatus = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const response = await axios.get(`${API_URL}/tasks/calendar/feed/status`, {
-        headers: authHeaders()
-      });
+      const response = await api.get('/api/tasks/calendar/feed/status');
       setCalendarFeed({
         enabled: response.data.enabled,
         feedUrl: response.data.feedUrl,
@@ -337,9 +317,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleEnableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const response = await axios.post(`${API_URL}/tasks/calendar/feed/generate`, {}, {
-        headers: authHeaders()
-      });
+      const response = await api.post('/api/tasks/calendar/feed/generate', {});
       setCalendarFeed({
         enabled: true,
         feedUrl: response.data.feedUrl,
@@ -355,9 +333,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleDisableCalendarFeed = async () => {
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      await axios.post(`${API_URL}/tasks/calendar/feed/disable`, {}, {
-        headers: authHeaders()
-      });
+      await api.post('/api/tasks/calendar/feed/disable', {});
       setCalendarFeed({
         enabled: false,
         feedUrl: null,
@@ -376,9 +352,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setCalendarFeed(prev => ({ ...prev, loading: true }));
-      const response = await axios.post(`${API_URL}/tasks/calendar/feed/regenerate`, {}, {
-        headers: authHeaders()
-      });
+      const response = await api.post('/api/tasks/calendar/feed/regenerate', {});
       setCalendarFeed({
         enabled: true,
         feedUrl: response.data.feedUrl,
@@ -419,9 +393,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleCalendarStatus = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const response = await axios.get(`${API_URL}/google-calendar/status`, {
-        headers: authHeaders()
-      });
+      const response = await api.get('/api/google-calendar/status');
       setGoogleCalendar({
         connected: response.data.connected,
         connectedAt: response.data.connectedAt,
@@ -441,9 +413,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleCalendar = async () => {
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      const response = await axios.get(`${API_URL}/google-calendar/auth-url`, {
-        headers: authHeaders()
-      });
+      const response = await api.get('/api/google-calendar/auth-url');
       // Belt-and-suspenders flag — if the URL redirect query param doesn't reach
       // us (iOS/Android WebView quirks), this flag still triggers the toast once
       // we detect the integration became connected.
@@ -473,9 +443,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleCalendar(prev => ({ ...prev, loading: true }));
-      await axios.post(`${API_URL}/google-calendar/disconnect`, {}, {
-        headers: authHeaders()
-      });
+      await api.post('/api/google-calendar/disconnect', {});
       setGoogleCalendar({
         connected: false,
         connectedAt: null,
@@ -502,12 +470,8 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   // googleCalendar.syncDisabledWorkspaces / googleTasks.syncDisabledWorkspaces
   // on the server. Toggling off triggers server-side cleanup (deletes the
   // per-workspace calendar or list + any synced tasks pointing to it).
-  const toggleWorkspaceSync = async ({ api, workspaceId, enabled }) => {
-    const token = getStoredToken();
-    return axios.post(`${API_URL}/${api}/workspace-sync-toggle`,
-      { workspaceId, enabled },
-      { headers: { Authorization: token ? `Bearer ${token}` : undefined } }
-    );
+  const toggleWorkspaceSync = async ({ api: apiName, workspaceId, enabled }) => {
+    return api.post(`/api/${apiName}/workspace-sync-toggle`, { workspaceId, enabled });
   };
 
   const handleToggleCalendarWorkspace = async (workspaceId, enabled, workspaceName) => {
@@ -806,7 +770,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   // Results route to per-section message state (calendar vs tasks) — not the
   // shared errors.general, which was leaking Tasks failures into the Calendar
   // card visually.
-  const syncEnabledWorkspaces = async ({ api, kind, statusSetter, state, msgSetter, typeSetter }) => {
+  const syncEnabledWorkspaces = async ({ api: apiName, kind, statusSetter, state, msgSetter, typeSetter }) => {
     const wsList = Array.isArray(workspaces) ? workspaces : [];
     const disabled = (state?.syncDisabledWorkspaces || []).map(String);
     const enabledWs = wsList.filter(w => {
@@ -820,7 +784,6 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     statusSetter(prev => ({ ...prev, syncing: true }));
     msgSetter('');
-    const token = getStoredToken();
     const succeeded = [];
     const failed = []; // { name, reason }
     // Explicit long timeout — a 400-task /sync can legitimately take 3+ min
@@ -834,11 +797,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       const ws = enabledWs[i];
       const wsId = ws.id || ws._id;
       try {
-        await axios.post(`${API_URL}/${api}/sync`, {}, {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : undefined,
-            'X-Workspace-Id': wsId
-          },
+        // Explicitný X-Workspace-Id — request interceptor ho neprepíše.
+        await api.post(`/api/${apiName}/sync`, {}, {
+          headers: { 'X-Workspace-Id': wsId },
           timeout: AXIOS_TIMEOUT
         });
         succeeded.push(ws.name || wsId);
@@ -904,10 +865,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const fetchGoogleTasksStatus = async (retries = 2) => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const response = await axios.get(`${API_URL}/google-tasks/status`, {
-        headers: authHeaders(),
-        timeout: 15000
-      });
+      const response = await api.get('/api/google-tasks/status', { timeout: 15000 });
       setGoogleTasks({
         connected: response.data.connected,
         connectedAt: response.data.connectedAt,
@@ -933,9 +891,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
   const handleConnectGoogleTasks = async () => {
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      const response = await axios.get(`${API_URL}/google-tasks/auth-url`, {
-        headers: authHeaders()
-      });
+      const response = await api.get('/api/google-tasks/auth-url');
       try { sessionStorage.setItem('pending_google_connect', 'tasks'); } catch { /* ignore */ }
       window.location.href = response.data.authUrl;
     } catch {
@@ -961,9 +917,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     try {
       setGoogleTasks(prev => ({ ...prev, loading: true }));
-      await axios.post(`${API_URL}/google-tasks/disconnect`, {}, {
-        headers: authHeaders()
-      });
+      await api.post('/api/google-tasks/disconnect', {});
       setGoogleTasks({
         connected: false,
         connectedAt: null,
@@ -985,15 +939,9 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
 
-      await axios.post(`${API_URL}/google-tasks/reset-sync`, {}, {
-        headers: authHeaders(),
-        timeout: 10000
-      });
+      await api.post('/api/google-tasks/reset-sync', {}, { timeout: 10000 });
 
-      const response = await axios.post(`${API_URL}/google-tasks/sync`, { force: true }, {
-        headers: authHeaders(),
-        timeout: 660000
-      });
+      const response = await api.post('/api/google-tasks/sync', { force: true }, { timeout: 660000 });
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -1015,9 +963,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setGoogleTasks(prev => ({ ...prev, syncing: true }));
       setGoogleTasksMessage('');
-      const response = await axios.post(`${API_URL}/google-tasks/cleanup`, {}, {
-        headers: authHeaders()
-      });
+      const response = await api.post('/api/google-tasks/cleanup', {});
       setGoogleTasksMessage(response.data.message);
       setGoogleTasksMessageType('success');
       setGoogleTasks(prev => ({ ...prev, syncing: false }));
@@ -1050,9 +996,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     try {
       setErrors({});
       setMessage('');
-      const response = await axios.put(`${API_URL}/auth/profile`, formData, {
-        headers: authHeaders()
-      });
+      const response = await api.put('/api/auth/profile', formData);
       setProfile(response.data);
       if (onUserUpdate) {
         onUserUpdate(response.data);
@@ -1074,21 +1018,29 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
       return;
     }
 
-    if (passwordData.newPassword.length < 6) {
-      setErrors({ newPassword: 'Heslo musí mať aspoň 6 znakov' });
+    // Rovnaká politika ako server (utils/passwordPolicy): min 8 znakov,
+    // písmeno + číslo/špeciálny znak — inak používateľ dostal chybu až zo servera.
+    if (passwordData.newPassword.length < 8) {
+      setErrors({ newPassword: 'Heslo musí mať aspoň 8 znakov' });
+      return;
+    }
+    if (!/[A-Za-z]/.test(passwordData.newPassword) || !/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(passwordData.newPassword)) {
+      setErrors({ newPassword: 'Heslo musí obsahovať písmeno a číslo alebo špeciálny znak' });
       return;
     }
 
     if (changingPassword) return;
     setChangingPassword(true);
     try {
-      await axios.put(`${API_URL}/auth/password`, {
+      const { data } = await api.put('/api/auth/password', {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
-      }, {
-        headers: authHeaders()
       });
-      setMessage('Heslo bolo úspešne zmenené');
+      // Server zmenou hesla zneplatnil všetky staré JWT (aj tento) a vrátil
+      // nový token pre aktuálnu reláciu — bez jeho uloženia by ďalší request
+      // skončil 401 a odhlásením.
+      if (data?.token) loginWithToken(data.token);
+      setMessage(data?.message || 'Heslo bolo úspešne zmenené');
       setPasswordData({
         currentPassword: '',
         newPassword: '',
@@ -1121,14 +1073,11 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     const formData = new FormData();
     formData.append('avatar', file);
 
-    // Surový axios (nie `api`) ako zvyšok tohto súboru — nemení 401 semantiku.
-    // Pôvodný XMLHttpRequest nemal timeout ani abort/timeout handler (pri
-    // prerušení prenosu sa nenastavila žiadna chyba) a skladal hlavičku
-    // ručne aj pri chýbajúcom tokene (`Bearer null`). authHeaders() pridá
-    // Authorization len ak token existuje; axios doplní multipart boundary.
+    // Zdieľaná inštancia `api` doplní Authorization + X-Workspace-Id, multipart
+    // boundary doplní axios. Upload (FormData) sa po timeoute neopakuje.
     try {
-      const { data } = await axios.post(`${API_URL}/auth/avatar`, formData, {
-        headers: { ...authHeaders(), 'Content-Type': 'multipart/form-data' },
+      const { data } = await api.post('/api/auth/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 60000
       });
       const newAvatar = data.avatar;
@@ -1158,9 +1107,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
 
   const handleDeleteAvatar = async () => {
     try {
-      await axios.delete(`${API_URL}/auth/avatar`, {
-        headers: authHeaders()
-      });
+      await api.delete('/api/auth/avatar');
       setProfile(prev => ({ ...prev, avatar: null }));
       setMessage('Avatar bol odstránený');
       if (onUserUpdate) {
@@ -1233,8 +1180,7 @@ function UserMenu({ user, onLogout, onUserUpdate }) {
     }
     setDeleting(true);
     try {
-      await axios.delete(`${API_BASE_URL}/api/auth/account`, {
-        headers: authHeaders(),
+      await api.delete('/api/auth/account', {
         data: {
           confirm: 'DELETE',
           password: deletePassword || undefined
