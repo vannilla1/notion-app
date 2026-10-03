@@ -1212,10 +1212,12 @@ const renewCalendarWatches = async () => {
   try {
     // Find users whose watch expires in the next 24 hours
     const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // -avatarData: Base64 avatar (až MB) obnova watch kanála nepotrebuje;
+    // save() v start/stopCalendarWatch ukladá len zmenené cesty.
     const users = await User.find({
       'googleCalendar.enabled': true,
       'googleCalendar.watchExpiry': { $lt: soon, $ne: null }
-    });
+    }).select('-avatarData');
 
     for (const user of users) {
       await stopCalendarWatch(user);
@@ -1239,7 +1241,7 @@ const ensureCalendarWatches = async () => {
         { 'googleCalendar.watchChannelId': null },
         { 'googleCalendar.watchChannelId': { $exists: false } }
       ]
-    });
+    }).select('-avatarData'); // Base64 avatar tu netreba (save() ukladá len zmenené cesty)
 
     for (const user of users) {
       await startCalendarWatch(user);
@@ -2832,9 +2834,11 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
-      users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true });
+      // -avatarData: auto-sync beží pri každej zmene úlohy a Base64 avatar
+      // (až MB na člena) nepotrebuje; user.save() ukladá len zmenené cesty.
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true }).select('-avatarData');
     } else if (action === 'delete') {
-      users = await User.find({ 'googleCalendar.enabled': true });
+      users = await User.find({ 'googleCalendar.enabled': true }).select('-avatarData');
     } else {
       logger.warn('[Auto-sync Calendar] Missing workspaceId — skipping to avoid cross-workspace leak', {
         taskId,
