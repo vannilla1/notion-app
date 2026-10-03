@@ -1465,7 +1465,13 @@ router.get('/health', authenticateToken, requireAdmin, async (req, res) => {
 router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { userIds, action, value } = req.body;
-    if (!userIds?.length || !['plan', 'role'].includes(action)) return res.status(400).json({ message: 'Neplatné parametre' });
+    // `userIds?.length` prešlo aj pre reťazec ('abc'.length = 3) → userIds.filter
+    // TypeError 500; nevalidné ID → CastError 500. Limit 500 chráni updateMany
+    // (UI posiela max. jednu stránku, t.j. ≤ 200 ID).
+    if (!Array.isArray(userIds) || userIds.length === 0 || userIds.length > 500
+        || !userIds.every(isOid) || !['plan', 'role'].includes(action)) {
+      return res.status(400).json({ message: 'Neplatné parametre' });
+    }
 
     const validPlans = ['free', 'team', 'pro'];
     const validRoles = ['admin', 'manager', 'user'];
@@ -1489,7 +1495,9 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 
     res.json({ success: true, modified: result.modifiedCount });
   } catch (error) {
+    logger.error('Admin bulk update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri hromadnej úprave' });
+
   }
 });
 
