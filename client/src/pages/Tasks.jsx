@@ -881,6 +881,9 @@ function Tasks() {
   useAppResume(() => { fetchTasks(); fetchContacts(); });
   useWorkspaceSwitched(() => {
     setExpandedTask(null);
+    // Filter kontaktu z predošlého workspacu nedáva zmysel — skryl by všetky
+    // projekty a banner by ukazoval „Načítavam..." natrvalo.
+    setContactFilter(null);
     fetchTasks();
     fetchContacts();
   });
@@ -3249,7 +3252,7 @@ function Tasks() {
               {contactFilter && (
                 <div className="contact-filter-banner">
                   <span>
-                    Projekty pre kontakt: <strong>{contacts.find(c => c.id === contactFilter)?.name || 'Načítavam...'}</strong>
+                    Projekty pre kontakt: <strong>{contacts.length === 0 ? 'Načítavam...' : (contacts.find(c => c.id === contactFilter)?.name || 'Neznámy kontakt')}</strong>
                   </span>
                   <button
                     className="btn btn-secondary btn-sm"
