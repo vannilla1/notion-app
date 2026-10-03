@@ -1627,7 +1627,9 @@ router.delete('/:id', authenticateToken, requireWorkspace, requireMessageId, asy
       return res.status(404).json({ message: 'Odkaz nenájdený' });
     }
 
-    const isSender = message.fromUserId.toString() === req.user.id;
+    // req.user.id je ObjectId (lean z Monga) alebo string (Redis cache) —
+    // bez toString() by odosielateľ bez roly owner/manager dostal 403.
+    const isSender = message.fromUserId.toString() === req.user.id.toString();
     const isAdmin = req.workspaceMember.canAdmin();
 
     if (!isSender && !isAdmin) {
