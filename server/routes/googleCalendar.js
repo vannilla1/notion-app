@@ -1244,7 +1244,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
   // 409 instead of racing with Google Calendar inserts.
   const workspaceId = req.workspaceId || req.user?.workspaceId;
   const fullSyncLockKey = `fullsync-${req.user.id}-${workspaceId || 'none'}`;
-  if (!acquireCalendarLock(fullSyncLockKey)) {
+  if (!acquireCalendarLock(fullSyncLockKey, FULL_SYNC_LOCK_TIMEOUT)) {
     return res.status(409).json({ message: 'Synchronizácia už prebieha, počkaj pár sekúnd.' });
   }
   try {
@@ -2735,17 +2735,21 @@ async function cleanupDuplicateCalendarEvents(calendarClient, calendarId, taskId
 // the same extendedProperties.private.taskId — it cheerfully creates duplicates.
 // Mirror of Google Tasks lock (googleTasks.js); keep behavior identical so both
 // sync paths converge on the same concurrency model.
-const calendarSyncLocks = new Map();
-const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — matches /sync worst-case wall time
+const calendarSyncLocks = new Map(); // key -> { at, ttl }
+const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — single-task / auto-sync operácie
+// Full /sync beží až SYNC_TIMEOUT (9 min) + save — zámok musí žiť dlhšie,
+// inak by ho druhý request po 30 s považoval za zastaraný a spustil paralelný
+// sync, ktorý vloží duplicitné udalosti (Google events.insert nie je idempotentný).
+const FULL_SYNC_LOCK_TIMEOUT = 10 * 60 * 1000;
 
-const acquireCalendarLock = (key) => {
+const acquireCalendarLock = (key, timeoutMs = CALENDAR_LOCK_TIMEOUT) => {
   const now = Date.now();
   const existing = calendarSyncLocks.get(key);
-  if (existing && now - existing > CALENDAR_LOCK_TIMEOUT) {
+  if (existing && now - existing.at > existing.ttl) {
     calendarSyncLocks.delete(key); // stale — release
   }
   if (calendarSyncLocks.has(key)) return false;
-  calendarSyncLocks.set(key, now);
+  calendarSyncLocks.set(key, { at: now, ttl: timeoutMs });
   return true;
 };
 
