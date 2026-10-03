@@ -159,7 +159,9 @@ async function recordError(err, req, extraContext) {
         path: req?.path,
         statusCode: err?.status || err?.statusCode || 500,
         userId: req?.user?.id || null,
-        workspaceId: req?.user?.workspaceId || null,
+        // req.user workspaceId nemá — správne pole je req.workspaceId
+        // (middleware/workspace.js); inak bol každý záznam workspaceId: null.
+        workspaceId: req?.workspaceId || req?.workspace?._id || null,
         userAgent: req?.get?.('user-agent')?.slice(0, 500),
         ipAddress: req?.ip || req?.connection?.remoteAddress,
         context: {

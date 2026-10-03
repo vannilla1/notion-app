@@ -45,7 +45,10 @@ function logSecurityEvent(action, req, details) {
       category: 'security',
       ipAddress: ip,
       userAgent: req?.get?.('user-agent')?.slice(0, 300),
-      workspaceId: req?.user?.workspaceId || null,
+      // req.user (middleware/auth.js) workspaceId nemá — workspace nastavuje
+      // middleware/workspace.js ako req.workspaceId / req.workspace. Pri
+      // eventoch pred requireWorkspace ostáva null ako doteraz.
+      workspaceId: req?.workspaceId || req?.workspace?._id || null,
       details
     });
   } catch {
