@@ -690,11 +690,15 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
     const subscriptions = await PushSubscription.find({ userId });
     if (subscriptions.length === 0) return result;
 
-    // Filter out iOS subscriptions (Apple push endpoints)
-    const desktopSubs = subscriptions.filter(sub =>
-      !sub.endpoint.includes('web.push.apple.com') &&
-      !sub.endpoint.includes('windows.push.apple.com')
-    );
+    // Filter out iOS subscriptions. Endpoint web.push.apple.com používa aj
+    // Safari na macOS (desktop web push) — filter len podľa domény vypínal
+    // push na Macu každému, kto má aj iOS appku. iOS rozpoznáme podľa
+    // userAgent uloženého pri subscribe; bez userAgent subscription
+    // ponecháme (radšej duplicita s APNs než výpadok na desktope).
+    const isIosWebPush = (sub) =>
+      String(sub.endpoint || '').includes('web.push.apple.com') &&
+      /iPhone|iPad|iPod/i.test(sub.userAgent || '');
+    const desktopSubs = subscriptions.filter(sub => !isIosWebPush(sub));
 
     if (desktopSubs.length === 0) return result;
 
