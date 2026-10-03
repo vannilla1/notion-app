@@ -642,6 +642,9 @@ const sendPushNotification = async (userId, payload) => {
             message: error.message,
             attempts: attempt + 1
           });
+          // Bez break by sa pri NEopakovateľnej chybe (400/401/403/413) cyklus
+          // točil ďalej a push sa poslal ešte 2× a `failed` sa zvýšil 3×.
+          break;
         }
       }
     }
