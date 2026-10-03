@@ -434,7 +434,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     res.json(contactsWithId);
   } catch (error) {
     logger.error('GET /contacts error', { error: error.message, workspaceId: req.workspaceId?.toString() });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
