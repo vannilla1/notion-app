@@ -167,7 +167,9 @@ function Dashboard() {
   useEffect(() => {
     if (!socket || !isConnected) return;
 
-    const events = ['contact-created', 'contact-updated', 'contact-deleted', 'task-updated', 'task-created', 'task-deleted', 'new-message'];
+    // Správy: server emituje 'message-created' / 'message-updated' /
+    // 'message-deleted' (routes/messages.js) — rovnaké názvy ako Messages.jsx.
+    const events = ['contact-created', 'contact-updated', 'contact-deleted', 'task-updated', 'task-created', 'task-deleted', 'message-created', 'message-updated', 'message-deleted'];
     events.forEach(e => socket.on(e, debouncedFetch));
     return () => events.forEach(e => socket.off(e, debouncedFetch));
   }, [socket, isConnected, debouncedFetch]);
