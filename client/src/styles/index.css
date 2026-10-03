@@ -9946,7 +9946,14 @@ body.ios-app {
    ============================================= */
 @media (max-width: 768px) {
   .crm-header {
-    padding: 6px 8px !important;
+    /* Shorthand s !important prebíjal aj neskoršie `.pwa-standalone .crm-header
+       { padding-top: calc(env(safe-area-inset-top) + 12px) }` a `@supports …
+       .crm-header { padding-top: … }`, takže v nainštalovanej iOS PWA
+       (black-translucent status bar) a edge-to-edge Android WebView siahala
+       hlavička pod status bar. env() držíme priamo tu (rovnaký vzor ako
+       tabletové pravidlo nižšie); v bežnom prehliadači je env() 0 → bez zmeny.
+       iOS shell má vlastné neskoršie !important pravidlo, to stále vyhráva. */
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px 6px !important;
     gap: 6px !important;
     flex-wrap: nowrap !important;
     width: 100% !important;
