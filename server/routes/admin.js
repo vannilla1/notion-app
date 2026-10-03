@@ -2700,7 +2700,9 @@ router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req
 router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, parseInt(req.query.limit) || 30);
+    // Aj dolná hranica — záporný limit by šiel do skip()/limit() → MongoServerError 500
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
+
     const skip = (page - 1) * limit;
 
     const filter = {};
