@@ -172,5 +172,11 @@ const messageSchema = new mongoose.Schema({
 messageSchema.index({ workspaceId: 1, toUserId: 1, status: 1, createdAt: -1 });
 messageSchema.index({ workspaceId: 1, fromUserId: 1, createdAt: -1 });
 messageSchema.index({ workspaceId: 1, status: 1 });
+// GET /api/messages/by-linked (správy prepojené s kontaktom/úlohou) —
+// bez indexu sken všetkých správ workspace + sort v pamäti.
+messageSchema.index(
+  { workspaceId: 1, linkedType: 1, linkedId: 1, createdAt: -1 },
+  { partialFilterExpression: { linkedId: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Message', messageSchema);

@@ -204,9 +204,17 @@ const messageFileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MESSAGE_FILE_LIMIT },
+  // files: 1 — routy berú len upload.single('file'); ďalšie súbory v tom
+  // istom requeste by multer inak bufferoval do RAM (každý až 50 MB).
+  // fields/fieldSize: textové polia formulára (predmet, popis ≤ 5000 znakov,
+  // možnosti ankety) s rezervou, nie neobmedzene.
+  limits: { fileSize: MESSAGE_FILE_LIMIT, files: 1, fields: 50, fieldSize: 64 * 1024 },
   fileFilter: messageFileFilter
 });
+
+// Strop príloh na jednu správu — dokument má aj tak limit 16 MB a UI
+// viac nepotrebuje; bez stropu sa dala jedna správa zahltiť súbormi.
+const MAX_FILES_PER_MESSAGE = 20;
 
 // Chyby z multer/busboy → slovenská hláška + kód, ktorý klient vie rozlíšiť.
 // Do 9/2026 sa používateľovi zobrazil surový anglický text („Unexpected end
@@ -323,14 +331,34 @@ const messageStorageQuotaError = async (req, fileSize) => {
 const sendStoredAttachment = async (res, att, extraHeaders) => {
   let buffer;
   if (att.r2Key) {
+    // STREAM z R2 do odpovede (ako kontakty/úlohy) — downloadFile() skladal
+    // celú prílohu (až 50 MB) do RAM a paralelné sťahovania nemali strop.
+    let r2Object;
     try {
-      buffer = await fileStorage.downloadFile(att.r2Key);
+      r2Object = await fileStorage.getFileObject(att.r2Key);
     } catch (err) {
       if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
         return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
       }
       throw err;
     }
+    const { stream, contentLength } = r2Object;
+    setDownloadHeaders(res, att, {
+      ...(Number.isFinite(contentLength) && { 'Content-Length': String(contentLength) }),
+      ...extraHeaders
+    });
+    stream.on('error', (streamErr) => {
+      logger.error('Message file download: R2 stream failed', { r2Key: att.r2Key, error: streamErr.message });
+      if (res.headersSent) return res.destroy();
+      for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+      res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+    });
+    // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+    res.on('close', () => {
+      if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+    });
+    stream.pipe(res);
+    return undefined;
   } else if (att.data) {
     buffer = Buffer.from(att.data, 'base64');
   } else {
@@ -390,9 +418,18 @@ const stripAttachmentData = (msg) => {
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const userId = req.user.id.toString();
-    const { tab = 'received', status } = req.query;
+    const { tab = 'received', status, before } = req.query;
 
     const query = { workspaceId: req.workspaceId };
+    // Stránkovanie: ?before=<ISO createdAt najstaršej načítanej správy>
+    // vráti ďalších 100 starších (predtým natvrdo len posledných 100).
+    if (typeof before === 'string' && before) {
+      const beforeDate = new Date(before);
+      if (Number.isNaN(beforeDate.getTime())) {
+        return res.status(400).json({ message: 'Neplatný parameter before' });
+      }
+      query.createdAt = { $lt: beforeDate };
+    }
 
     if (tab === 'sent') {
       query.fromUserId = req.user.id;
@@ -696,6 +733,11 @@ router.put('/:id', authenticateToken, requireWorkspace, requireMessageId, (req, 
 
       if (subject !== undefined) message.subject = str(subject).trim().substring(0, 200);
       if (description !== undefined) message.description = str(description).trim().substring(0, 5000);
+      // Anketu nejde vytvoriť ani zrušiť úpravou typu — pollOptions/hlasy by
+      // nezodpovedali typu (poll bez možností, resp. „info“ s hlasmi).
+      if (type !== undefined && type !== message.type && (type === 'poll' || message.type === 'poll')) {
+        return res.status(400).json({ message: 'Typ ankety sa nedá zmeniť úpravou správy' });
+      }
       if (type !== undefined && ['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) message.type = type;
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
@@ -1562,6 +1604,9 @@ router.post('/:id/files', authenticateToken, requireWorkspace, requireMessageId,
       });
       if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
+      if ((message.files || []).length >= MAX_FILES_PER_MESSAGE) {
+        return res.status(400).json({ message: `Správa môže mať najviac ${MAX_FILES_PER_MESSAGE} príloh`, code: 'TOO_MANY_FILES' });
+      }
       const quotaError = await messageStorageQuotaError(req, req.file.size);
       if (quotaError) return res.status(403).json(quotaError);
       if (wouldExceedMessageDocLimit(message, req.file.size)) {

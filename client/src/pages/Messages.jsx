@@ -176,6 +176,9 @@ function Messages() {
   const { socket, isConnected } = useSocket();
 
   const [allMessages, setAllMessages] = useState([]);
+  // Server vracia po 100 správ — „Načítať staršie“ pridá ďalšiu stránku.
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('all'); // all | received | sent
   const [statusFilter, setStatusFilter] = useState('all');
@@ -418,6 +421,7 @@ function Messages() {
       const res = await api.get('/api/messages', { params: { tab, status: 'all' } });
       if (seq !== fetchSeqRef.current) return; // zastaraná odpoveď
       setAllMessages(res.data);
+      setHasMoreMessages(Array.isArray(res.data) && res.data.length >= 100);
       // Update selectedMessage if it's in the new list (keeps detail view fresh)
       setSelectedMessage(prev => {
         if (!prev) return null;
@@ -430,6 +434,27 @@ function Messages() {
       // Loading vypíname až pri odpovedi na najnovší request, inak by sa
       // na okamih ukázal starý zoznam ako „načítaný".
       if (seq === fetchSeqRef.current) setLoading(false);
+    }
+  };
+
+  const loadOlderMessages = async () => {
+    if (loadingOlder || allMessages.length === 0) return;
+    const oldest = allMessages[allMessages.length - 1]?.createdAt;
+    if (!oldest) return;
+    const seq = fetchSeqRef.current; // zmena záložky medzitým → zahodiť
+    setLoadingOlder(true);
+    try {
+      const res = await api.get('/api/messages', { params: { tab, status: 'all', before: oldest } });
+      if (seq !== fetchSeqRef.current) return;
+      const older = Array.isArray(res.data) ? res.data : [];
+      setAllMessages(prev => {
+        const seen = new Set(prev.map(m => m.id || m._id));
+        return [...prev, ...older.filter(m => !seen.has(m.id || m._id))];
+      });
+      setHasMoreMessages(older.length >= 100);
+    } catch { /* ignore — tlačidlo ostane, dá sa skúsiť znova */ }
+    finally {
+      setLoadingOlder(false);
     }
   };
 
@@ -1068,6 +1093,9 @@ function Messages() {
               formatDateTime={formatDateTime}
               userId={user.id}
               highlightedMessageIds={highlightedMessageIds}
+              hasMore={hasMoreMessages}
+              loadingOlder={loadingOlder}
+              onLoadOlder={loadOlderMessages}
             />
           )}
         </div>
@@ -1261,7 +1289,7 @@ function Messages() {
 }
 
 // --- Message List ---
-function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId, highlightedMessageIds }) {
+function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId, highlightedMessageIds, hasMore, loadingOlder, onLoadOlder }) {
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Načítavam...</div>;
   if (messages.length === 0) return (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -1317,6 +1345,17 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
           </div>
         );
       })}
+      {hasMore && (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={onLoadOlder}
+          disabled={loadingOlder}
+          style={{ alignSelf: 'center', marginTop: '8px', minHeight: '44px' }}
+        >
+          {loadingOlder ? 'Načítavam…' : 'Načítať staršie'}
+        </button>
+      )}
     </div>
   );
 }

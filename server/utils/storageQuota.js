@@ -19,29 +19,23 @@ const Message = require('../models/Message');
 
 const STORAGE_LIMITS = { team: 1024 * 1024 * 1024, pro: 10 * 1024 * 1024 * 1024 };
 
-// Rovnaká hĺbka vylúčení ako EXCLUDE_FILE_DATA v routes (5 úrovní vnorenia)
-const CONTACT_EXCLUDE = {
-  'files.data': 0,
-  'tasks.files.data': 0,
-  'tasks.subtasks.files.data': 0,
-  'tasks.subtasks.subtasks.files.data': 0,
-  'tasks.subtasks.subtasks.subtasks.files.data': 0,
-  'tasks.subtasks.subtasks.subtasks.subtasks.files.data': 0
+// Inkluzívna projekcia LEN na veľkosti príloh v strome podúloh (do hĺbky
+// MAX_DEPTH). Predtým exclusion projekcia ťahala celé dokumenty (názvy,
+// poznámky, celé stromy, nad 5. úrovňou aj legacy base64) pri KAŽDOM
+// uploade a kópii. Strom podúloh nemá v schéme obmedzenú hĺbku; 10 úrovní
+// je s rezervou nad tým, čo UI dovolí vytvoriť.
+const MAX_DEPTH = 10;
+const sizePaths = (prefix) => {
+  const paths = {};
+  let p = prefix;
+  for (let i = 0; i <= MAX_DEPTH; i++) {
+    paths[`${p}files.size`] = 1;
+    p += 'subtasks.';
+  }
+  return paths;
 };
-const TASK_EXCLUDE = {
-  'files.data': 0,
-  'subtasks.files.data': 0,
-  'subtasks.subtasks.files.data': 0,
-  'subtasks.subtasks.subtasks.files.data': 0,
-  'subtasks.subtasks.subtasks.subtasks.files.data': 0
-};
-// Správy: inkluzívna projekcia len na veľkosti — nikdy base64 ani text
-// správ/komentárov (súkromná komunikácia členov tímu).
-const MESSAGE_SIZES = {
-  'attachment.size': 1,
-  'files.size': 1,
-  'comments.attachment.size': 1
-};
+const CONTACT_SIZES = { 'files.size': 1, ...sizePaths('tasks.') };
+const TASK_SIZES = sizePaths('');
 
 // Rekurzívny súčet files[].size v uzle + celom strome jeho subtaskov
 const sumNodeFileBytes = (node) => {
@@ -61,18 +55,35 @@ const sumMessageFileBytes = (msg) => {
 // Celkové využitie workspace-u v bajtoch (kontakty + ich tasky + globálne
 // Tasky + prílohy správ)
 const computeWorkspaceFileBytes = async (workspaceId) => {
-  const [contacts, tasks, messages] = await Promise.all([
-    Contact.find({ workspaceId }, CONTACT_EXCLUDE).lean(),
-    Task.find({ workspaceId }, TASK_EXCLUDE).lean(),
-    Message.find({ workspaceId }, MESSAGE_SIZES).lean()
+  const mongoose = require('mongoose');
+  const wsId = typeof workspaceId === 'string' ? new mongoose.Types.ObjectId(workspaceId) : workspaceId;
+  const [contacts, tasks, messageAgg] = await Promise.all([
+    Contact.find({ workspaceId }, CONTACT_SIZES).lean(),
+    Task.find({ workspaceId }, TASK_SIZES).lean(),
+    // Správy majú plochú štruktúru → súčet priamo v DB, klientovi nejde
+    // ani jeden dokument (nikdy text správ/komentárov).
+    Message.aggregate([
+      { $match: { workspaceId: wsId } },
+      {
+        $project: {
+          b: {
+            $add: [
+              { $ifNull: ['$attachment.size', 0] },
+              { $sum: { $ifNull: ['$files.size', []] } },
+              { $sum: { $ifNull: ['$comments.attachment.size', []] } }
+            ]
+          }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$b' } } }
+    ])
   ]);
-  let sum = 0;
+  let sum = messageAgg[0]?.total || 0;
   for (const c of contacts) {
     sum += (c.files || []).reduce((s, f) => s + (f.size || 0), 0);
     for (const t of (c.tasks || [])) sum += sumNodeFileBytes(t);
   }
   for (const t of tasks) sum += sumNodeFileBytes(t);
-  for (const m of messages) sum += sumMessageFileBytes(m);
   return sum;
 };
 
