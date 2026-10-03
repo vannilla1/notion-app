@@ -49,8 +49,8 @@ const taskSchema = new mongoose.Schema({
   workspaceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Workspace',
-    required: true,
-    index: true
+    required: true
+    // Samostatný index netreba — compound indexy nižšie začínajú workspaceId.
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,

@@ -6,8 +6,8 @@ const pageSchema = new mongoose.Schema({
   workspaceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Workspace',
-    required: true,
-    index: true
+    required: true
+    // Samostatný index netreba — compound indexy nižšie začínajú workspaceId.
   },
   // Creator / author. Kept for attribution and auditing, but access control
   // is based on workspace membership, not on userId match.

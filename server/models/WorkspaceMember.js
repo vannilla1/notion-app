@@ -45,7 +45,7 @@ const workspaceMemberSchema = new mongoose.Schema({
 // Ensure unique membership per workspace
 workspaceMemberSchema.index({ workspaceId: 1, userId: 1 }, { unique: true });
 workspaceMemberSchema.index({ userId: 1 });
-workspaceMemberSchema.index({ workspaceId: 1 });
+// { workspaceId: 1 } netreba — pokrýva ho prefix unique indexu vyššie.
 
 // Virtual to get user details
 workspaceMemberSchema.virtual('user', {

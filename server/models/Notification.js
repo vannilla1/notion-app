@@ -5,8 +5,9 @@ const notificationSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
-    index: true
+    required: true
+    // Bez samostatného indexu — všetky dotazy pokrývajú compound indexy
+    // nižšie (začínajú userId).
   },
   // Which workspace this notification belongs to — critical for multi-workspace users
   workspaceId: {
@@ -56,8 +57,7 @@ const notificationSchema = new mongoose.Schema({
   category: {
     type: String,
     enum: ['direct', 'general'],
-    default: 'general',
-    index: true
+    default: 'general'
   },
   // Title shown in notification
   title: {
@@ -90,14 +90,12 @@ const notificationSchema = new mongoose.Schema({
   // Read status
   read: {
     type: Boolean,
-    default: false,
-    index: true
+    default: false
   },
   // Timestamps
   createdAt: {
     type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   },
   // Auto-expire after 30 days
   expiresAt: {
@@ -108,7 +106,10 @@ const notificationSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Compound index for efficient queries
+// Compound index for efficient queries. Samostatné indexy userId, read,
+// category a createdAt boli redundantné (prefixy compoundov / boolean) a
+// každý insert notifikácie ich aktualizoval — v DB ich ruší jednorazová
+// migrácia drop_redundant_indexes_v1 (server/index.js).
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, workspaceId: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, workspaceId: 1, createdAt: -1 });

@@ -696,6 +696,42 @@ server.listen(PORT, () => {
         logger.error('Failed to migrate admin roles', { error: err.message });
       }
 
+      // One-shot: redundantné samostatné indexy (prefixy compoundov alebo
+      // boolean/enum s nízkou kardinalitou) — každý insert ich aktualizoval.
+      // Mongoose autoIndex indexy len vytvára; odstránenie zo schémy ich
+      // v existujúcej DB nezruší.
+      try {
+        await runOnceMigration('drop_redundant_indexes_v1', async () => {
+          const redundant = {
+            Notification: ['userId_1', 'read_1', 'category_1', 'createdAt_1'],
+            Contact: ['workspaceId_1'],
+            Task: ['workspaceId_1'],
+            Message: ['workspaceId_1'],
+            Page: ['workspaceId_1'],
+            WorkspaceMember: ['workspaceId_1'],
+            AuditLog: ['userId_1', 'category_1'],
+            EmailLog: ['userId_1', 'type_1']
+          };
+          let dropped = 0;
+          for (const [modelName, names] of Object.entries(redundant)) {
+            const Model = require(`./models/${modelName}`);
+            for (const name of names) {
+              try {
+                await Model.collection.dropIndex(name);
+                dropped++;
+              } catch (err) {
+                // Index už neexistuje (nová DB) / kolekcia ešte nevznikla
+                if (![27, 26].includes(err.code) && !['IndexNotFound', 'NamespaceNotFound'].includes(err.codeName)) throw err;
+              }
+            }
+          }
+          if (dropped > 0) logger.info(`Dropped ${dropped} redundant indexes`);
+          return dropped;
+        });
+      } catch (err) {
+        logger.error('Failed to drop redundant indexes', { error: err.message });
+      }
+
       // One-shot migration (2026-07): push notifikácie opt-in → opt-out.
       // Doterajšie false hodnoty boli schema defaulty (nikto nemal dôvod
       // opt-in klikať), preto ich preklápame na true. NA ROZDIEL od trial
