@@ -2371,6 +2371,17 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
     if (!code || !name || !type || value === undefined) {
       return res.status(400).json({ message: 'Vyplňte všetky povinné polia (kód, názov, typ, hodnota)' });
     }
+    if (typeof code !== 'string' || code.length > 64 || typeof name !== 'string' || name.length > 200) {
+      return res.status(400).json({ message: 'Neplatný kód alebo názov' });
+    }
+    // Typ a hodnotu overíme ešte pred Stripe volaniami (inak by v Stripe
+    // vznikol coupon, ktorý Mongoose validácia potom odmietne → sirota).
+    if (!['percentage', 'fixed', 'freeMonths'].includes(type)) {
+      return res.status(400).json({ message: 'Neplatný typ zľavy' });
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return res.status(400).json({ message: 'Hodnota zľavy musí byť číslo' });
+    }
 
     // Resolve effective duration + duration_in_months.
     //   - freeMonths typ má duration vždy 'repeating' s durationInMonths=value
@@ -2416,7 +2427,27 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
     }
 
-    // Create Stripe Coupon + Promotion Code
+    // Validácia affiliate polí — ak je referrerId set, user musí byť enrolled
+    // v affiliate programe (User.affiliate.enrolled = true). commissionPercent
+    // musí byť 1-100 (0 = "ignore affiliate fields"). Anti-fraud check.
+    let validReferrerId = null;
+    let validCommissionPercent = 0;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné ID referrera' });
+      const refUser = await User.findById(referrerId).select('affiliate.enrolled').lean();
+      if (!refUser) return res.status(400).json({ message: 'Referrer user nenájdený' });
+      if (!refUser.affiliate?.enrolled) {
+        return res.status(400).json({ message: 'Referrer nie je prihlásený v affiliate programe (User.affiliate.enrolled=false)' });
+      }
+      validReferrerId = referrerId;
+      const cp = Number(commissionPercent);
+      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
+        return res.status(400).json({ message: 'commissionPercent musí byť 1-100 pri affiliate kódoch' });
+      }
+      validCommissionPercent = cp;
+    }
+
+    // Create Stripe Coupon + Promotion Code (až po všetkých validáciách)
     let stripeCouponId = null;
     let stripePromotionCodeId = null;
 
@@ -2475,7 +2506,15 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
           promoCodeParams.expires_at = Math.floor(new Date(expiresAt).getTime() / 1000);
         }
 
-        const stripePromoCode = await stripe.promotionCodes.create(promoCodeParams);
+        let stripePromoCode;
+        try {
+          stripePromoCode = await stripe.promotionCodes.create(promoCodeParams);
+        } catch (promoErr) {
+          // Coupon bez promotion code by v Stripe ostal osirelý — zmažeme ho.
+          await stripe.coupons.del(stripeCouponId).catch(() => {});
+          stripeCouponId = null;
+          throw promoErr;
+        }
         stripePromotionCodeId = stripePromoCode.id;
 
         logger.info('[PromoCode] Stripe coupon + promotion code created', {
@@ -2487,25 +2526,6 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
         logger.error('[PromoCode] Stripe creation failed', { error: stripeErr.message });
         // Continue without Stripe — code will work for in-app discount display
       }
-    }
-
-    // Validácia affiliate polí — ak je referrerId set, user musí byť enrolled
-    // v affiliate programe (User.affiliate.enrolled = true). commissionPercent
-    // musí byť 1-100 (0 = "ignore affiliate fields"). Anti-fraud check.
-    let validReferrerId = null;
-    let validCommissionPercent = 0;
-    if (referrerId) {
-      const refUser = await User.findById(referrerId).select('affiliate.enrolled').lean();
-      if (!refUser) return res.status(400).json({ message: 'Referrer user nenájdený' });
-      if (!refUser.affiliate?.enrolled) {
-        return res.status(400).json({ message: 'Referrer nie je prihlásený v affiliate programe (User.affiliate.enrolled=false)' });
-      }
-      validReferrerId = referrerId;
-      const cp = Number(commissionPercent);
-      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
-        return res.status(400).json({ message: 'commissionPercent musí byť 1-100 pri affiliate kódoch' });
-      }
-      validCommissionPercent = cp;
     }
 
     const promoCode = new PromoCode({
