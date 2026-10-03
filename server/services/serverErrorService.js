@@ -110,7 +110,9 @@ function scrubBody(body) {
   const clone = {};
   // customName / originalName = používateľom napísaný názov prílohy (môže
   // niesť meno klienta, číslo faktúry…) — do Diagnostiky nepatrí.
-  const sensitive = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'secret', 'creditCard', 'cardNumber', 'cvv', 'customName', 'originalName'];
+  // code / state = OAuth callback parametre (prichádzajú v query),
+  // signedPayload = Apple App Store Server Notification JWS.
+  const sensitive = ['password', 'currentPassword', 'newPassword', 'token', 'refreshToken', 'accessToken', 'secret', 'creditCard', 'cardNumber', 'cvv', 'customName', 'originalName', 'code', 'state', 'signedPayload'];
   for (const [k, v] of Object.entries(body)) {
     if (sensitive.includes(k)) {
       clone[k] = '[FILTERED]';
@@ -165,9 +167,12 @@ async function recordError(err, req, extraContext) {
       userAgent: req?.get?.('user-agent')?.slice(0, 500),
       ipAddress: req?.ip || req?.connection?.remoteAddress,
       context: {
-        query: req?.query && Object.keys(req.query).length ? req.query : undefined,
+        // Scrub aj query a params, nielen body — napr. emailUnsubscribe berie
+        // token z req.query; pri 5xx by sa inak uložil na 90 dní do Mongo
+        // a zobrazil v admin Diagnostike.
+        query: req?.query && Object.keys(req.query).length ? scrubBody(req.query) : undefined,
         body: scrubBody(req?.body),
-        params: req?.params && Object.keys(req.params).length ? req.params : undefined,
+        params: req?.params && Object.keys(req.params).length ? scrubBody(req.params) : undefined,
         ...(extraContext && typeof extraContext === 'object' ? extraContext : {})
       },
       firstSeen: now,
