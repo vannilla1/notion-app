@@ -3386,8 +3386,12 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
     const { activeWithinDays = null, dryRun = false } = req.body || {};
     const filter = {};
     if (activeWithinDays !== null) {
-      const since = new Date(Date.now() - parseInt(activeWithinDays) * 24 * 60 * 60 * 1000);
-      filter.createdAt = { $gte: since };
+      // parseInt('abc') = NaN → new Date(NaN) = Invalid Date vo filtri → CastError 500
+      const days = parseInt(activeWithinDays, 10);
+      if (!Number.isFinite(days) || days < 1 || days > 3650) {
+        return res.status(400).json({ message: 'Neplatný rozsah dní (1–3650)' });
+      }
+      filter.createdAt = { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
     }
 
     const targetUsers = await User.find(filter)
@@ -3453,8 +3457,9 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
     // Odpoveď už mohla odísť (slučka beží po res.json) — druhý res.json by
     // hodil ERR_HTTP_HEADERS_SENT ako unhandled rejection.
     if (!res.headersSent) {
-      res.status(500).json({ message: 'Chyba broadcast', error: err.message });
+      res.status(500).json({ message: 'Chyba broadcast' });
     }
+
   }
 });
 
