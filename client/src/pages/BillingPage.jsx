@@ -14,10 +14,9 @@ function BillingPage() {
   // Checkout/Portal, promo kódy) pre digital subscriptions v iOS appke. Aj keď je
   // tento komponent normálne nedosiahnuteľný cez App.jsx route guard, túto
   // poistku držíme pre prípad deep-link / direct navigation. Redirect na /app
-  // (defaultný authenticated landing).
-  if (isIosNativeApp()) {
-    return <Navigate to="/app" replace />;
-  }
+  // (defaultný authenticated landing). Samotný return je až pod hookmi
+  // (Rules of Hooks) — počet volaných hookov musí byť pri každom renderi rovnaký.
+  const iosNative = isIosNativeApp();
   const { user, logout, updateUser } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const navigate = useNavigate();
@@ -35,6 +34,7 @@ function BillingPage() {
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoResult, setPromoResult] = useState(null); // validated promo data
   const [promoError, setPromoError] = useState('');
+  const [loadError, setLoadError] = useState(false);
 
   const currentPlan = billingStatus?.plan || user?.subscription?.plan || 'free';
 
@@ -46,19 +46,23 @@ function BillingPage() {
       ]);
       setBillingStatus(statusRes.data);
       setPlans(plansRes.data.plans || []);
+      setLoadError(false);
     } catch {
-      // Silently fail — billing UI shows loading/empty state
+      // UI ukáže hlášku s tlačidlom „Skúsiť znova“ namiesto prázdneho gridu.
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    if (iosNative) return;
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, iosNative]);
 
   // Handle success/cancel redirect from Stripe
   useEffect(() => {
+    const timers = [];
     if (searchParams.get('success') === 'true') {
       const sessionId = searchParams.get('session_id');
       setSuccessMessage('Platba bola úspešná! Váš plán sa aktivuje.');
@@ -71,22 +75,25 @@ function BillingPage() {
       }
 
       // Refresh user data to get updated plan
-      setTimeout(() => {
+      timers.push(setTimeout(() => {
         api.get('/api/auth/me').then(res => {
           if (res.data) updateUser(res.data);
         }).catch(() => {});
-      }, 2000);
+      }, 2000));
 
       // Clear URL params
       setSearchParams({});
-      setTimeout(() => setSuccessMessage(null), 8000);
+      timers.push(setTimeout(() => setSuccessMessage(null), 8000));
     }
     if (searchParams.get('canceled') === 'true') {
       setSearchParams({});
     }
+    // Pri odchode zo stránky do 8 s časovače zrušíme — inak by sa /me
+    // volalo a setState bežal na odmountovanom komponente.
+    return () => timers.forEach(clearTimeout);
   }, [searchParams]); // eslint-disable-line
 
-  // Open URL externally — uses native bridge on iOS, window.open on web
+  // Open URL externally — uses native bridge on iOS, same-tab redirect on web
   const openExternal = (url) => {
     // isIosNativeApp() najprv — 'openExternal' je generický názov, ktorý môže
     // mať aj in-app prehliadač cudzej appky; bez gate-u by sa Stripe checkout
@@ -94,7 +101,12 @@ function BillingPage() {
     if (isIosNativeApp() && window.webkit?.messageHandlers?.openExternal) {
       window.webkit.messageHandlers.openExternal.postMessage(url);
     } else {
-      window.open(url, '_blank');
+      // window.open() až po await už nie je v kontexte kliknutia — Safari
+      // aj Firefox ho blokujú ako popup a tlačidlo by „nič neurobilo“.
+      // Stripe success/cancel/return URL vedú späť na /app/billing, takže
+      // presmerovanie v tej istej karte je plnohodnotné. Android WebView
+      // cudzí host aj tak otvorí v systémovom prehliadači.
+      window.location.assign(url);
     }
   };
 
@@ -132,6 +144,7 @@ function BillingPage() {
         openExternal(res.data.url);
       }
     } catch (error) {
+      if (error.response?.data?.code === 'APPLE_MANAGED') fetchData();
       alert(error.response?.data?.message || 'Chyba pri vytváraní platby');
     } finally {
       setCheckoutLoading(null);
@@ -163,6 +176,13 @@ function BillingPage() {
 
   const planLabels = { free: 'Free', team: 'Tím', pro: 'Pro' };
   const periodLabels = { monthly: 'mesačne', yearly: 'ročne' };
+  // Aktívny plán platený cez App Store — Stripe checkout/portal skryjeme
+  // (server ho aj tak odmietne 409), predplatné sa mení v iOS Nastaveniach.
+  const appleManaged = !!billingStatus?.appleManaged && currentPlan !== 'free';
+
+  if (iosNative) {
+    return <Navigate to="/app" replace />;
+  }
 
   if (loading) {
     return (
@@ -266,7 +286,14 @@ function BillingPage() {
                 </p>
               )}
 
-              {billingStatus?.hasSubscription && (
+              {appleManaged && (
+                <p className="billing-paid-until">
+                  Predplatné je spravované cez App Store. Zmeniť alebo zrušiť ho môžete v iPhone
+                  v Nastaveniach → Apple ID → Predplatné.
+                </p>
+              )}
+
+              {billingStatus?.hasSubscription && !appleManaged && (
                 <button
                   className="billing-manage-btn"
                   onClick={handlePortal}
@@ -276,6 +303,15 @@ function BillingPage() {
                 </button>
               )}
             </div>
+
+            {loadError && plans.length === 0 && (
+              <div className="promo-error" role="alert">
+                Nepodarilo sa načítať plány.{' '}
+                <button className="btn btn-secondary" onClick={() => { setLoading(true); fetchData(); }}>
+                  Skúsiť znova
+                </button>
+              </div>
+            )}
 
             {/* Period toggle */}
             <div className="billing-period-toggle">
@@ -423,6 +459,10 @@ function BillingPage() {
                       ) : plan.id === 'free' ? (
                         <button className="plan-btn free" disabled>
                           Základný plán
+                        </button>
+                      ) : appleManaged ? (
+                        <button className="plan-btn free" disabled title="Predplatné sa mení v App Store">
+                          Spravované cez App Store
                         </button>
                       ) : (
                         <button
