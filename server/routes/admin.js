@@ -1042,13 +1042,19 @@ router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
       workspace: wsMap[m.workspaceId.toString()] || null
     }));
 
-    // Activity counts
-    const [contactCount, taskCount, messagesSent, messagesReceived] = await Promise.all([
-      Contact.countDocuments({ userId: id }),
-      Task.countDocuments({ $or: [{ userId: id }, { createdBy: id }, { assignedTo: id }] }),
-      Message.countDocuments({ fromUserId: id }),
-      Message.countDocuments({ toUserId: id })
-    ]);
+    // Activity counts — obmedzené na workspaces používateľa, aby dopyty šli
+    // cez existujúce compound indexy s prefixom workspaceId (bez neho
+    // každý počet = COLLSCAN celej kolekcie). Obsah v workspaces, z ktorých
+    // medzičasom odišiel, sa nezapočíta — admin detail je informatívny.
+    const wsFilter = { workspaceId: { $in: workspaceIds } };
+    const [contactCount, taskCount, messagesSent, messagesReceived] = workspaceIds.length
+      ? await Promise.all([
+          Contact.countDocuments({ ...wsFilter, userId: id }),
+          Task.countDocuments({ ...wsFilter, $or: [{ userId: id }, { createdBy: id }, { assignedTo: id }] }),
+          Message.countDocuments({ ...wsFilter, fromUserId: id }),
+          Message.countDocuments({ ...wsFilter, toUserId: id })
+        ])
+      : [0, 0, 0, 0];
 
     // Recent audit log
     const recentActivity = await AuditLog.find({ userId: id })
