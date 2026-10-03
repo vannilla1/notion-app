@@ -17,7 +17,7 @@
   "maskableIconUrl": "https://prplcrm.eu/icons/icon-512x512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
-    "path": "/Users/martinkosco/Development/purple crm/notion-app/android/android.keystore",
+    "path": "./android.keystore",
     "alias": "android"
   },
   "appVersionName": "2",
@@ -35,7 +35,7 @@
   "isMetaQuest": false,
   "fullScopeUrl": "https://prplcrm.eu/",
   "minSdkVersion": 21,
-  "orientation": "portrait-primary",
+  "orientation": "default",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],

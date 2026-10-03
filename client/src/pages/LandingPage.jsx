@@ -92,7 +92,7 @@ export default function LandingPage() {
             <li><a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a></li>
           </ul>
 
-          <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-nav-cta desktop-only">Prihlásiť sa</a>
+          <a href="/login" className="lp-nav-cta desktop-only">Prihlásiť sa</a>
 
           <button className="lp-hamburger" onClick={() => setMobileMenuOpen(true)} aria-label="Menu">
             <span /><span /><span />
@@ -112,7 +112,7 @@ export default function LandingPage() {
             <a href="#affiliate" onClick={(e) => { e.preventDefault(); scrollTo('affiliate'); }}>Affiliate</a>
           )}
           <a href="#kontakt" onClick={(e) => { e.preventDefault(); scrollTo('kontakt'); }}>Kontakt</a>
-          <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</a>
+          <a href="/login" className="lp-mobile-cta" onClick={() => setMobileMenuOpen(false)}>Prihlásiť sa</a>
         </div>
       </div>
 
@@ -134,8 +134,8 @@ export default function LandingPage() {
             Moderný CRM systém pre malé tímy: jednoduchý, rýchly a vždy po ruke.
           </p>
           <div className="lp-hero-buttons">
-            <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-white" onClick={() => trackEvent('cta_register', { location: 'hero' })}>Vyskúšajte zadarmo</a>
-            <a href="/login" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-outline" onClick={() => trackEvent('cta_login', { location: 'hero' })}>Prihlásiť sa</a>
+            <a href="/login?register=true" className="lp-btn lp-btn-white" onClick={() => trackEvent('cta_register', { location: 'hero' })}>Vyskúšajte zadarmo</a>
+            <a href="/login" className="lp-btn lp-btn-outline" onClick={() => trackEvent('cta_login', { location: 'hero' })}>Prihlásiť sa</a>
           </div>
         </div>
       </section>
@@ -328,7 +328,7 @@ export default function LandingPage() {
                 <li style={{ color: '#94a3b8' }}><span className="lp-pricing-check" style={{ background: '#f1f5f9', color: '#94a3b8' }}><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>Bez príloh súborov</li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_free' })}>
+              <a href="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_free' })}>
                 Začať zadarmo
               </a>
             </div>
@@ -365,7 +365,7 @@ export default function LandingPage() {
                 <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><strong>Prílohy súborov (1&nbsp;GB)</strong></li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_tim' })}>
+              <a href="/login?register=true" className="lp-btn lp-btn-secondary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_tim' })}>
                 Začať s Tímom
               </a>
             </div>
@@ -401,7 +401,7 @@ export default function LandingPage() {
                 <li><span className="lp-pricing-check"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>Skorý prístup k novým funkciám</li>
               </ul>
 
-              <a href="/login?register=true" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn-primary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_pro' })}>
+              <a href="/login?register=true" className="lp-btn lp-btn-primary lp-pricing-cta" onClick={() => trackEvent('cta_register', { location: 'pricing_pro' })}>
                 Začať s Pro
               </a>
             </div>
