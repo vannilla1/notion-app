@@ -1392,8 +1392,15 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
+    // Podúlohy 1. úrovne sú Mongoose subdokumenty (subtaskSchema) — spread
+    // {...subdoc} skopíruje len interné $__/_doc, nie schémové polia, a
+    // priradenie cez index ich potom zahodí: files, assignedTo, timeReminders,
+    // order, copiedFrom… by sa po každom edit-e vrátili na defaulty. Rovnaký
+    // fix ako pri úlohe vyššie (taskPlain) a v tasks.js. Hlbšie úrovne sú
+    // plain objekty (netypované Array) — toObject nemajú, spread je v poriadku.
+    const subPlain = typeof found.subtask.toObject === 'function' ? found.subtask.toObject() : found.subtask;
     found.parent[found.index] = {
-      ...found.subtask,
+      ...subPlain,
       id: found.subtask.id, // Ensure ID is preserved
       title: title !== undefined ? title : found.subtask.title,
       completed: completed !== undefined ? completed : found.subtask.completed,
@@ -1401,7 +1408,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || ''),
       notes: notes !== undefined ? notes : found.subtask.notes,
       priority: found.subtask.priority, // Preserve priority
-      subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
+      subtasks: subPlain.subtasks || [], // Preserve nested subtasks
       createdAt: found.subtask.createdAt, // Preserve createdAt
       modifiedAt: new Date().toISOString() // Set modification timestamp
     };
