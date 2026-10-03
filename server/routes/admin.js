@@ -1611,26 +1611,37 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
     }
 
     // Validate value based on type
-    if (type === 'percentage' && (value < 1 || value > 100)) {
+    // Porovnania `value < 1 || value > 100` prešli aj pre reťazec '6' alebo
+    // undefined (obe false); pri freeMonths potom `getMonth() + '6'` dalo
+    // reťazec '96' → setMonth(96) posunulo paidUntil o 8 rokov. Preto najprv
+    // prevod na číslo a kontrola, že je konečné.
+    const numValue = type === 'planUpgrade' ? null : Number(value);
+    if (type !== 'planUpgrade' && !Number.isFinite(numValue)) {
+      return res.status(400).json({ message: 'Neplatná hodnota zľavy' });
+    }
+    if (type === 'percentage' && (numValue < 1 || numValue > 100)) {
       return res.status(400).json({ message: 'Percentuálna zľava musí byť medzi 1-100%' });
     }
-    if (type === 'fixed' && (value < 0.01 || value > 100)) {
+    if (type === 'fixed' && (numValue < 0.01 || numValue > 100)) {
       return res.status(400).json({ message: 'Fixná zľava musí byť medzi 0.01-100€' });
     }
-    if (type === 'freeMonths' && (value < 1 || value > 24)) {
+    if (type === 'freeMonths' && (numValue < 1 || numValue > 24)) {
       return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
     }
     if (type === 'planUpgrade' && !['team', 'pro'].includes(targetPlan)) {
       return res.status(400).json({ message: 'Neplatný cieľový plán' });
+    }
+    if (expiresAt && isNaN(new Date(expiresAt))) {
+      return res.status(400).json({ message: 'Neplatný dátum expirácie' });
     }
 
     const oldDiscount = user.subscription?.discount?.type ? { ...user.subscription.discount.toObject() } : null;
 
     user.subscription.discount = {
       type,
-      value: type === 'planUpgrade' ? null : value,
+      value: numValue,
       targetPlan: type === 'planUpgrade' ? targetPlan : null,
-      reason: reason || null,
+      reason: typeof reason === 'string' && reason ? reason.slice(0, 500) : null,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       createdAt: new Date(),
       createdBy: req.adminUser.username
@@ -1647,7 +1658,8 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
     // For freeMonths: extend paidUntil by X months
     if (type === 'freeMonths') {
       const current = user.subscription.paidUntil ? new Date(user.subscription.paidUntil) : new Date();
-      current.setMonth(current.getMonth() + value);
+      current.setMonth(current.getMonth() + numValue);
+
       user.subscription.paidUntil = current;
     }
 
