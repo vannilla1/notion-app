@@ -2,7 +2,8 @@
  * One-time script to create or update the admin account.
  *
  * Usage:
- *   node scripts/seed-admin.js
+ *   SEED_ADMIN_PASSWORD=… node scripts/seed-admin.js
+ *   (voliteľne SEED_ADMIN_EMAIL, SEED_ADMIN_USERNAME)
  *
  * Requires MONGODB_URI in .env or environment.
  * Run this on the server or locally with access to production DB.
@@ -12,9 +13,15 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const ADMIN_EMAIL = 'support@prplcrm.eu';
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'PrplCRM@2026!Secure';
+const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'support@prplcrm.eu';
+const ADMIN_USERNAME = process.env.SEED_ADMIN_USERNAME || 'admin';
+// Heslo NIKDY v kóde (predtým bolo napevno v repozitári) — len z env.
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
+
+if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
+  console.error('SEED_ADMIN_PASSWORD musí byť nastavené (min. 12 znakov).');
+  process.exit(1);
+}
 
 async function seedAdmin() {
   try {
@@ -33,13 +40,15 @@ async function seedAdmin() {
 
       admin.username = ADMIN_USERNAME;
       admin.password = hashedPassword;
+      // Zmena hesla odhlási existujúce relácie (JWT claim tv).
+      admin.tokenVersion = (admin.tokenVersion || 0) + 1;
       admin.role = 'admin';
       await admin.save();
 
       console.log(`Admin account updated:`);
       console.log(`  Email: ${ADMIN_EMAIL}`);
       console.log(`  Username: ${ADMIN_USERNAME}`);
-      console.log(`  Password: ${ADMIN_PASSWORD}`);
+      console.log('  Password: (zo SEED_ADMIN_PASSWORD)');
     } else {
       // Create new admin
       const salt = await bcrypt.genSalt(12);
@@ -59,7 +68,7 @@ async function seedAdmin() {
       console.log(`Admin account created:`);
       console.log(`  Email: ${ADMIN_EMAIL}`);
       console.log(`  Username: ${ADMIN_USERNAME}`);
-      console.log(`  Password: ${ADMIN_PASSWORD}`);
+      console.log('  Password: (zo SEED_ADMIN_PASSWORD)');
     }
 
     console.log('\nDone. Change this password after first login!');
