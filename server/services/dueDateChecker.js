@@ -561,7 +561,10 @@ const runDueDateCheck = async () => {
                   data: {
                     taskId: task._id.toString(),
                     subtaskId: change.type === 'subtask' ? change.subtask.id : null,
-                    contactId: task.contactId || null
+                    contactId: task.contactId || null,
+                    // urgency: podľa nej notificationService rozlíši „po termíne"
+                    // (preferencia pushOverdue) od bežnej pripomienky termínu.
+                    urgency: change.newLevel
                   }
                 });
                 notificationsSent++;
@@ -837,7 +840,8 @@ const checkContactDueDates = async (morningWindow = true) => {
                     data: {
                       contactId: contact._id.toString(),
                       taskId: task.id,
-                      subtaskId: change.type === 'subtask' ? change.subtask.id : null
+                      subtaskId: change.type === 'subtask' ? change.subtask.id : null,
+                      urgency: change.newLevel // viď globálne úlohy vyššie (pushOverdue)
                     }
                   });
                   notificationsSent++;

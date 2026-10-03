@@ -772,8 +772,13 @@ const classifyByType = (type) => (DIRECT_TYPES.has(type) ? 'direct' : 'general')
 
 // Map a notification type to the user-preference key that gates its push.
 // Returns null for types that are always pushed (direct).
-const getPushPrefKey = (type, category) => {
+const getPushPrefKey = (type, category, data = null) => {
   if (category === 'direct') return null; // direct is always pushed
+  // Prechod na „overdue" posiela dueDateChecker ako typ *.dueDate s
+  // data.urgency = 'overdue' (enum typov 'task.overdue' neobsahuje) — bez
+  // tohto bola preferencia „Po termíne" v nastaveniach mŕtva a overdue
+  // pushe riadila preferencia „Pripomienky termínov".
+  if ((type === 'task.dueDate' || type === 'subtask.dueDate') && data?.urgency === 'overdue') return 'pushOverdue';
   if (type === 'task.dueDate' || type === 'subtask.dueDate') return 'pushDeadlines';
   if (type === 'task.overdue' || type === 'subtask.overdue') return 'pushOverdue';
   if (type === 'workspace.memberAdded') return 'pushNewMember';
@@ -908,7 +913,7 @@ const createNotification = async ({
         // POKIAĽ si ho user explicitne nevypol v notificationPreferences
         // ("každá notifikácia sa zobrazí" — 2026-07). Chýbajúca preferencia
         // = zapnuté. Explicitné false (vypnuté v UI) sa rešpektuje.
-        const prefKey = getPushPrefKey(notification.type, notification.category);
+        const prefKey = getPushPrefKey(notification.type, notification.category, notification.data);
         if (prefKey) {
           const recipient = await User.findById(userId, 'notificationPreferences').lean();
           const enabled = recipient?.notificationPreferences?.[prefKey] !== false;
