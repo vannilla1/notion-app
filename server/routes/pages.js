@@ -130,10 +130,30 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         if (!isValidObjectId(parentId)) {
           return res.status(400).json({ message: 'Neplatné ID rodičovskej stránky' });
         }
+        if (String(parentId).toLowerCase() === req.params.id.toLowerCase()) {
+          return res.status(400).json({ message: 'Stránka nemôže byť sama sebe rodičom' });
+        }
         // Reparent must stay inside the same workspace.
-        const parentPage = await Page.findOne({ _id: parentId, workspaceId: req.workspaceId });
+        const parentPage = await Page.findOne(
+          { _id: parentId, workspaceId: req.workspaceId },
+          'parentId'
+        ).lean();
         if (!parentPage) {
           return res.status(404).json({ message: 'Rodičovská stránka nenájdená' });
+        }
+        // Cyklus: nový rodič nesmie byť potomkom presúvanej stránky — inak sa
+        // podstrom odpojí od koreňa a DELETE sa spolieha len na maxDepth brzdu.
+        // Prechádzame reťaz predkov nového rodiča (max 50 krokov ako v DELETE).
+        let ancestorId = parentPage.parentId;
+        for (let depth = 0; depth < 50 && ancestorId; depth++) {
+          if (ancestorId.toString() === req.params.id.toLowerCase()) {
+            return res.status(400).json({ message: 'Stránku nemožno presunúť pod vlastného potomka' });
+          }
+          const ancestor = await Page.findOne(
+            { _id: ancestorId, workspaceId: req.workspaceId },
+            'parentId'
+          ).lean();
+          ancestorId = ancestor?.parentId || null;
         }
         page.parentId = parentId;
       }
