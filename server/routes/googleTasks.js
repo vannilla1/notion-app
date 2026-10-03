@@ -2665,7 +2665,25 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId, allowedWorkspa
   return changed;
 };
 
+// Ochrana proti prekrývaniu cyklov: setInterval (5 min) by pri pomalom
+// Google API / veľa používateľoch spustil ďalší cyklus, kým predošlý beží —
+// dva paralelné cykly by spracovali tie isté zmeny a zdvojnásobili záťaž.
+let pollInProgress = false;
+
 const pollGoogleTasksChanges = async () => {
+  if (pollInProgress) {
+    logger.warn('[Google Tasks Poll] Predošlý cyklus ešte beží — tento sa preskakuje');
+    return;
+  }
+  pollInProgress = true;
+  try {
+    await pollGoogleTasksChangesOnce();
+  } finally {
+    pollInProgress = false;
+  }
+};
+
+const pollGoogleTasksChangesOnce = async () => {
   try {
     // -avatarData: polling každých 5 min by inak ťahal Base64 avatar každého
     // pripojeného používateľa (save() ukladá len zmenené cesty).
