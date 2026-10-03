@@ -134,6 +134,17 @@ const diagnosticReq = (req) => Object.create(req, {
   }
 });
 
+// Neočakávaná chyba: SKUTOČNÁ príčina (so stackom) do logu aj Diagnostiky
+// a príznak pre captureResponseErrors, aby nezapísal už len syntetické
+// „HTTP 500 PUT /api/messages/:id/approve" bez stacku a bez správy chyby.
+const respondServerError = (error, req, res, label) => {
+  logger.error(label, { error: error.message, userId: req.user?.id });
+  recordError(error, diagnosticReq(req)).catch(() => {});
+  if (res.headersSent) return undefined;
+  if (res.locals) res.locals.__errorRecorded = true;
+  return res.status(500).json({ message: 'Chyba servera' });
+};
+
 // Zápis správy/prílohy zlyhal: plný dokument → 413 so slovenskou radou,
 // všetko ostatné → SKUTOČNÁ príčina do Diagnostiky (inak by captureResponseErrors
 // zachytil len syntetické „HTTP 500 POST /api/messages/:id/files" bez stacku).
@@ -160,10 +171,7 @@ const handleMessageWriteError = (error, req, res, label) => {
     logger.warn(`${label}: invalid input`, { error: error.message, userId: req.user?.id });
     return res.status(400).json({ message: 'Neplatné údaje správy', code: 'INVALID_INPUT' });
   }
-  logger.error(label, { error: error.message, userId: req.user?.id });
-  recordError(error, diagnosticReq(req)).catch(() => {});
-  if (res.locals) res.locals.__errorRecorded = true;
-  return res.status(500).json({ message: 'Chyba servera' });
+  return respondServerError(error, req, res, label);
 };
 
 // Videá sú bez R2 zakázané: aj krátke video z telefónu presiahne 10 MB a
@@ -457,7 +465,7 @@ router.get('/pending-count', authenticateToken, requireWorkspace, async (req, re
     });
     res.json({ count });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Pending count error');
   }
 });
 
@@ -495,7 +503,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json(stripAttachmentData(message));
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Get message error');
   }
 });
 
@@ -810,7 +818,7 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, requireMessageId
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Approve message error');
   }
 });
 
@@ -888,7 +896,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId,
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Reject message error');
   }
 });
 
@@ -1673,7 +1681,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, requireMessageId, asy
 
     res.json({ message: 'Odkaz bol vymazaný' });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Delete message error');
   }
 });
 
