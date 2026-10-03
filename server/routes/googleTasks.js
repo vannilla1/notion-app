@@ -1646,7 +1646,9 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
 });
 
 // Clean up completed tasks from Google Tasks
-router.post('/cleanup', authenticateToken, async (req, res) => {
+// requireWorkspace: workspace sa berie z X-Workspace-Id hlavičky (klient ju
+// posiela); bez nej middleware spadne späť na user.currentWorkspaceId.
+router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
@@ -1660,24 +1662,39 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
     const tasksApi = await getTasksClient(user);
 
-    // Get all current task IDs for current workspace
-    const workspaceId = user.currentWorkspaceId;
-    const globalTasks = workspaceId ? await Task.find({ workspaceId }, { _id: 1 }).lean() : [];
-    const contacts = workspaceId ? await Contact.find({ workspaceId }, { 'tasks.id': 1 }).lean() : [];
+    // Get all current task IDs for current workspace — vrátane podúloh
+    // (ľubovoľnej hĺbky), ktoré /sync tiež synchronizuje.
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
+    const globalTasks = workspaceId
+      ? await Task.find({ workspaceId }, { _id: 1, 'subtasks.id': 1, 'subtasks.subtasks': 1 }).lean()
+      : [];
+    const contacts = workspaceId
+      ? await Contact.find({ workspaceId }, { 'tasks.id': 1, 'tasks.subtasks.id': 1, 'tasks.subtasks.subtasks': 1 }).lean()
+      : [];
 
     const currentTaskIds = new Set();
 
     for (const task of globalTasks) {
       currentTaskIds.add(task._id.toString());
+      collectSubtaskIds(task.subtasks, currentTaskIds);
     }
 
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
           currentTaskIds.add(task.id);
+          collectSubtaskIds(task.subtasks, currentTaskIds);
         }
       }
     }
+
+    // Mapa syncedTaskIds je per-user (všetky workspace-y), ale currentTaskIds
+    // pokrýva len tento workspace. Mažeme preto iba úlohy zo zoznamu TOHTO
+    // workspace-u — úlohy iných workspace-ov nie sú siroty. Legacy záznamy bez
+    // mapovania zoznamu (pred per-workspace listami) radšej necháme.
+    const wsTaskListId = workspaceId
+      ? (user.googleTasks.workspaceTaskLists?.get?.(String(workspaceId))?.taskListId || null)
+      : null;
 
     let deleted = 0;
     let errors = 0;
@@ -1687,6 +1704,8 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
       for (const [taskId, googleTaskId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
+          const mappedListId = user.googleTasks.syncedTaskLists?.get?.(taskId);
+          if (!wsTaskListId || mappedListId !== wsTaskListId) continue;
           // PR2: delete from whichever list holds this task (per-workspace).
           // Fall back to legacy single list for pre-PR2 mappings.
           const cleanupListId = getTaskListIdForSyncedTask(user, taskId);
@@ -2106,6 +2125,15 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
 });
 
 // Helper functions
+// Rekurzívne pridá id všetkých podúloh (ľubovoľnej hĺbky) do množiny idSet.
+function collectSubtaskIds(subtasks, idSet) {
+  if (!subtasks) return;
+  for (const subtask of subtasks) {
+    if (subtask?.id) idSet.add(subtask.id);
+    if (subtask?.subtasks) collectSubtaskIds(subtask.subtasks, idSet);
+  }
+}
+
 function findSubtaskById(subtasks, id) {
   if (!subtasks) return null;
   for (const subtask of subtasks) {
