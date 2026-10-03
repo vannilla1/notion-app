@@ -1509,6 +1509,15 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
     const { plan, paidUntil } = req.body;
+    // Mongoose enum/Date validácia by zlyhala až pri save() → 500 bez logu.
+    // Samotná logika zmeny plánu/paidUntil nižšie ostáva nezmenená.
+    if (plan && !['free', 'team', 'pro'].includes(plan)) {
+      return res.status(400).json({ message: 'Neplatný plán' });
+    }
+    if (paidUntil !== undefined && paidUntil !== null && paidUntil !== ''
+        && ((typeof paidUntil !== 'string' && typeof paidUntil !== 'number') || isNaN(new Date(paidUntil)))) {
+      return res.status(400).json({ message: 'Neplatný dátum' });
+    }
     const oldPlan = user.subscription?.plan;
     const oldPaidUntil = user.subscription?.paidUntil;
     if (plan) user.subscription.plan = plan;
@@ -1538,7 +1547,9 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
 
     res.json({ success: true, subscription: user.subscription });
   } catch (error) {
+    logger.error('Admin subscription update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri úprave predplatného' });
+
   }
 });
 
