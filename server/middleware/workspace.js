@@ -73,7 +73,11 @@ const requireWorkspace = async (req, res, next) => {
 
     if (!workspaceObjId) {
       // Backward-compat path: žiadny header → čítame z DB.
-      user = await User.findById(userId);
+      // Z usera čítame len currentWorkspaceId — projekcia + lean(), aby sa
+      // pri každom requeste starších/natívnych klientov bez X-Workspace-Id
+      // nehydratoval celý dokument (avatarData Base64 blob, dešifrovanie
+      // Google tokenov v post('init')).
+      user = await User.findById(userId).select('currentWorkspaceId').lean();
       if (!user) {
         return res.status(401).json({ message: 'Používateľ nenájdený' });
       }
@@ -258,7 +262,10 @@ const enforceWorkspaceLimits = async (req, res, next) => {
     // Only block content creation
     if (req.method !== 'POST') return next();
 
-    const owner = await User.findById(req.workspace.ownerId);
+    // Len subscription.plan — bez projekcie a lean() sa pri KAŽDOM POST
+    // (contacts/tasks/messages/files) prenášal celý dokument vlastníka
+    // vrátane avatarData (Base64, až ~MB) a hydratoval plný Mongoose doc.
+    const owner = await User.findById(req.workspace.ownerId).select('subscription.plan').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
 
     // Pro has no member limits
