@@ -3542,6 +3542,13 @@ body.modal-open {
   .user-menu-dropdown {
     min-width: 200px;
     right: 0;
+    /* Na telefóne je pod menu fixná .bottom-nav (z-index 1000 v koreňovom
+       kontexte, vždy nad dropdownom v .crm-header). Základný clamp
+       100dvh - 90px končil za ňou → posledné položky („Odhlásiť sa") sa po
+       doscrollovaní nedali kliknúť. 150px ≈ 90px hlavička + ~60px bottom-nav;
+       vh riadok je fallback pre staršie WebView bez dvh. */
+    max-height: calc(100vh - 150px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 150px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
 
   .modal-overlay {
