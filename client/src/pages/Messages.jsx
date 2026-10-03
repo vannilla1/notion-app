@@ -219,6 +219,9 @@ function Messages() {
   // Percento nahrávania prílohy (null = nič sa nenahráva / bez prílohy).
   const [uploadProgress, setUploadProgress] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // In-flight guard hlasovania: server POST /vote hlas PREPÍNA (existujúci
+  // odstráni), takže dve rýchle ťuknutia by hlas pridali a hneď zrušili.
+  const [voting, setVoting] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); // { file, downloadUrl } for preview modal
   const msgFileInputRef = useRef(null);
   const [activeFileMessageId, setActiveFileMessageId] = useState(null);
@@ -707,12 +710,16 @@ function Messages() {
   };
 
   const handleVote = async (messageId, optionId) => {
+    if (voting) return; // Guard proti dvojitému ťuknutiu (toggle by hlas zrušil)
+    setVoting(true);
     try {
       const res = await api.post(`/api/messages/${messageId}/vote`, { optionId });
       setSelectedMessage(res.data);
       fetchMessages();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba pri hlasovaní');
+    } finally {
+      setVoting(false);
     }
   };
 
@@ -1013,6 +1020,7 @@ function Messages() {
               userId={user.id}
               onReopen={handleReopen}
               onVote={handleVote}
+              voting={voting}
               canReopen={(selectedMessage.status === 'approved' || selectedMessage.status === 'rejected') && (currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager' || isRecipient(selectedMessage))}
               canManageMessage={currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager'}
               onFileUpload={triggerMsgFileUpload}
@@ -1301,7 +1309,7 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, voting, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1537,9 +1545,10 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                   return (
                     <button key={opt._id} type="button"
                       onClick={() => onVote(msg.id || msg._id, opt._id)}
+                      disabled={voting}
                       style={{
                         position: 'relative', textAlign: 'left', padding: '10px 14px',
-                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)', cursor: voting ? 'wait' : 'pointer',
                         border: isMyVote ? '2px solid var(--accent-color)' : '1px solid var(--border-color)',
                         background: 'var(--bg-card)', overflow: 'hidden', fontSize: '14px',
                         transition: 'all 0.2s ease'
