@@ -521,8 +521,11 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
     const events = [];
     const newExportedIds = [];
 
+    // Pri neplatnom dátume (podúlohy posiela klient verbatim) vráti null —
+    // inak by vzniklo `DUE;VALUE=DATE:NaNNaNNaN`.
     const formatICalDate = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
@@ -608,7 +611,7 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
       ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
+      if (dateStr) ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
       ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
       if (event.description) {
         ical += `DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, '\\$&')}\r\n`;
@@ -807,8 +810,14 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     const events = [];
 
+    // Neplatný dátum → null (volajúci riadok vynechá). `subtask.createdAt` a
+    // `dueDate` prichádzajú od klienta verbatim cez PUT /:id subtasks;
+    // `toISOString()` na Invalid Date hádže RangeError a jedna chybná hodnota
+    // v jednej podúlohe zhodila celý feed používateľa (500) pre všetky
+    // kalendárne klienty, kým sa hodnota neopravila v DB.
     const formatICalDate = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
@@ -817,6 +826,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     const formatICalDateTime = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     };
 
@@ -943,7 +953,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
       ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
+      if (dateStr) ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
       ical += `SUMMARY:${escapeText(event.title)}\r\n`;
       if (description) {
         ical += `DESCRIPTION:${escapeText(description)}\r\n`;
@@ -959,11 +969,13 @@ router.get('/calendar/feed/:token', async (req, res) => {
         ical += 'STATUS:NEEDS-ACTION\r\n';
         ical += 'PERCENT-COMPLETE:0\r\n';
       }
-      if (event.createdAt) {
-        ical += `CREATED:${formatICalDateTime(event.createdAt)}\r\n`;
+      const createdStr = event.createdAt ? formatICalDateTime(event.createdAt) : null;
+      if (createdStr) {
+        ical += `CREATED:${createdStr}\r\n`;
       }
-      if (event.updatedAt) {
-        ical += `LAST-MODIFIED:${formatICalDateTime(event.updatedAt)}\r\n`;
+      const modifiedStr = event.updatedAt ? formatICalDateTime(event.updatedAt) : null;
+      if (modifiedStr) {
+        ical += `LAST-MODIFIED:${modifiedStr}\r\n`;
       }
       ical += 'END:VTODO\r\n';
     }
