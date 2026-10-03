@@ -61,7 +61,9 @@ const handleUnsubscribe = async (req, res) => {
     return res.send(renderResult({
       ok: true,
       title: 'Odhlásenie potvrdené',
-      message: `Pripomienky a marketingové emaily sme vypli pre <strong>${user.email}</strong>. Transakčné emaily (zmeny účtu, obnova hesla) vám budú chodiť ďalej.`
+      // e-mail escapujeme — PUT /api/auth/profile mení e-mail bez validácie
+      // formátu (nahlásené v REPORT.md), takže by mohol obsahovať HTML.
+      message: `Pripomienky a marketingové emaily sme vypli pre <strong>${escapeHtml(user.email)}</strong>. Transakčné emaily (zmeny účtu, obnova hesla) vám budú chodiť ďalej.`
     }));
   } catch (err) {
     logger.error('[Unsubscribe] Failed', { error: err.message });
@@ -82,6 +84,10 @@ router.get('/unsubscribe', handleUnsubscribe);
 // otvárania prehliadača. Bez tejto cesty by Gmail/Yahoo nezobrazili
 // natívny unsubscribe link → mail vyzerá podozrivejšie a chodí do spamu.
 router.post('/unsubscribe', express.urlencoded({ extended: false }), handleUnsubscribe);
+
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 const renderResult = ({ ok, title, message }) => `
 <!DOCTYPE html>
