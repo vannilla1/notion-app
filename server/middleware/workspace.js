@@ -196,16 +196,14 @@ const requireWorkspace = async (req, res, next) => {
  */
 const requireWorkspaceAdmin = async (req, res, next) => {
   try {
-    // First run requireWorkspace
-    await new Promise((resolve, reject) => {
-      requireWorkspace(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Check if already responded (error case)
-    if (res.headersSent) return;
+    // First run requireWorkspace. Pri odmietnutí requireWorkspace odpovie
+    // sám a next() NEzavolá — pôvodný `new Promise` wrapper sa vtedy nikdy
+    // nesettle-ol (funkcia ostala navždy „pending" a kontrola headersSent
+    // bola nedosiahnuteľná). requireWorkspace je async a next() volá
+    // synchrónne vo svojom tele, takže po await je flag spoľahlivo nastavený.
+    let proceeded = false;
+    await requireWorkspace(req, res, () => { proceeded = true; });
+    if (!proceeded) return; // requireWorkspace už odpovedal
 
     // Check admin rights
     if (!req.workspaceMember.canAdmin()) {
@@ -226,16 +224,10 @@ const requireWorkspaceAdmin = async (req, res, next) => {
  */
 const requireWorkspaceOwner = async (req, res, next) => {
   try {
-    // First run requireWorkspace
-    await new Promise((resolve, reject) => {
-      requireWorkspace(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Check if already responded (error case)
-    if (res.headersSent) return;
+    // First run requireWorkspace (rovnaký vzor ako v requireWorkspaceAdmin)
+    let proceeded = false;
+    await requireWorkspace(req, res, () => { proceeded = true; });
+    if (!proceeded) return; // requireWorkspace už odpovedal
 
     // Check owner rights
     if (!req.workspaceMember.isOwner()) {
