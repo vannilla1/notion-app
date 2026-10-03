@@ -27,14 +27,40 @@ const cleanOldData = () => {
 const STARTUP_GRACE_MS = 30_000;
 const SERVER_BOOT_TIME = Date.now();
 
+// Strop počtu sledovaných route kľúčov. Keď request nematchne žiadnu routu
+// (404 skeny, 503 z DB-readiness middleware), kľúčom je surová req.path —
+// každá unikátna cesta by inak vytvorila nový záznam v counters.routes,
+// ktorý sa nikdy nemaže (cleanOldData čistí len hourly). Neautentifikovaný
+// klient by tak riadil rast pamäte procesu.
+const MAX_ROUTES = 1000;
+const OVERFLOW_ROUTE = '__other__';
+
+// Normalizácia nespárovanej cesty — UUID / ObjectId / číselné ID → /:id,
+// bez query stringu (rovnaký vzor ako serverErrorService._normalizePath,
+// lokálna kópia aby apiMetrics ostal bez závislostí na Mongo modeloch).
+const normalizeUnmatchedPath = (path) => {
+  if (typeof path !== 'string' || !path) return '<unknown>';
+  return path
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/|$|\?)/gi, '/:id')
+    .replace(/\/[a-f0-9]{24}/gi, '/:id')
+    .replace(/\/\d+/g, '/:id')
+    .replace(/\?.*$/, '')
+    .slice(0, 200);
+};
+
 const trackRequest = (req, res, next) => {
   const start = Date.now();
 
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const route = req.route?.path
+    let route = req.route?.path
       ? `${req.baseUrl}${req.route.path}`
-      : req.path;
+      : normalizeUnmatchedPath(req.path);
+    // Nový kľúč nad stropom ide do spoločného bucketu namiesto neobmedzeného
+    // rastu; existujúce kľúče sa ďalej počítajú normálne.
+    if (!counters.routes[route] && Object.keys(counters.routes).length >= MAX_ROUTES) {
+      route = OVERFLOW_ROUTE;
+    }
     const method = req.method;
     const status = res.statusCode;
     const hourKey = new Date().toISOString().slice(0, 13);
