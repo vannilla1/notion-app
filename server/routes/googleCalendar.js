@@ -757,9 +757,9 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       });
     }
 
-    // Stop watching for changes (best-effort)
+    // Stop watching for changes (best-effort) — legacy aj per-workspace kanály
     try {
-      await stopCalendarWatch(user);
+      await stopAllCalendarWatches(user);
     } catch (e) {
       logger.debug('[Google Calendar] stopCalendarWatch error', { error: e.message });
     }
@@ -872,18 +872,118 @@ const stopCalendarWatch = async (user) => {
   user.googleCalendar.watchExpiry = null;
 };
 
+// ── Per-workspace kalendáre: vlastné push kanály (googleCalendar.workspaceWatches)
+//
+// Zápisy sú atomické ($pull/$push/$set na jednom prvku poľa), nie user.save()
+// celého poľa — webhook, sync a obnova kanálov bežia súbežne.
+
+const stopWatchChannel = async (calendar, channelId, resourceId) => {
+  if (!channelId || !resourceId) return;
+  try {
+    await calendar.channels.stop({ resource: { id: channelId, resourceId } });
+  } catch (err) {
+    if (err.code !== 404) logger.warn('[Calendar Watch] Error stopping workspace channel', { error: err.message });
+  }
+};
+
+const startWorkspaceCalendarWatch = async (user, calendarId) => {
+  if (!calendarId || calendarId === 'primary' || calendarId === (user.googleCalendar.calendarId || 'primary')) {
+    return false; // legacy kalendár sleduje startCalendarWatch
+  }
+  try {
+    const calendar = await getCalendarClient(user);
+    // Starý kanál pre ten istý kalendár zastavíme a odstránime
+    const previous = (user.googleCalendar.workspaceWatches || []).filter(w => w.calendarId === calendarId);
+    for (const w of previous) await stopWatchChannel(calendar, w.channelId, w.resourceId);
+
+    const channelId = uuidv4();
+    const resp = await calendar.events.watch({
+      calendarId,
+      resource: {
+        id: channelId,
+        type: 'web_hook',
+        address: `${WEBHOOK_BASE_URL}/api/google-calendar/webhook`,
+        token: computeWatchToken(user._id.toString(), channelId),
+        expiration: String(Date.now() + WATCH_EXPIRY_MS)
+      }
+    });
+    const entry = {
+      channelId,
+      calendarId,
+      resourceId: resp.data.resourceId,
+      expiry: new Date(Number(resp.data.expiration)),
+      // syncToken zachováme — kanál sa len obnovuje, história zmien platí
+      syncToken: previous[0]?.syncToken || null
+    };
+    await User.updateOne({ _id: user._id }, { $pull: { 'googleCalendar.workspaceWatches': { calendarId } } });
+    await User.updateOne({ _id: user._id }, { $push: { 'googleCalendar.workspaceWatches': entry } });
+    user.googleCalendar.workspaceWatches = [
+      ...(user.googleCalendar.workspaceWatches || []).filter(w => w.calendarId !== calendarId),
+      entry
+    ];
+    logger.info('[Calendar Watch] Workspace channel created', { userId: user._id, calendarId, channelId });
+    return true;
+  } catch (err) {
+    logger.warn('[Calendar Watch] Failed to create workspace channel', { userId: user._id, calendarId, error: err.message });
+    return false;
+  }
+};
+
+// Doplní chýbajúce / čoskoro expirujúce kanály pre všetky per-workspace kalendáre.
+const ensureWorkspaceCalendarWatches = async (user) => {
+  const soon = Date.now() + 24 * 60 * 60 * 1000;
+  const watches = user.googleCalendar.workspaceWatches || [];
+  for (const [, entry] of (user.googleCalendar.workspaceCalendars?.entries?.() || [])) {
+    const calendarId = entry?.calendarId;
+    if (!calendarId) continue;
+    const w = watches.find(x => x.calendarId === calendarId);
+    if (!w || !w.expiry || new Date(w.expiry).getTime() < soon) {
+      await startWorkspaceCalendarWatch(user, calendarId);
+    }
+  }
+};
+
+// Zastaví legacy aj všetky per-workspace kanály (disconnect, delete-all).
+const stopAllCalendarWatches = async (user) => {
+  await stopCalendarWatch(user);
+  const watches = user.googleCalendar.workspaceWatches || [];
+  if (watches.length === 0) return;
+  try {
+    const calendar = await getCalendarClient(user);
+    for (const w of watches) await stopWatchChannel(calendar, w.channelId, w.resourceId);
+  } catch (err) {
+    logger.warn('[Calendar Watch] Stop workspace channels failed', { error: err.message });
+  }
+  user.googleCalendar.workspaceWatches = [];
+};
+
 /**
  * Process calendar changes for a user using incremental sync (syncToken).
  * Called when Google sends us a push notification.
  */
-const processCalendarChanges = async (user) => {
+// `target` (voliteľný) = per-workspace kanál { channelId, calendarId, syncToken };
+// bez neho legacy kalendár so syncToken v googleCalendar.syncToken.
+const processCalendarChanges = async (user, target = null) => {
   try {
     const calendar = await getCalendarClient(user);
-    const calendarId = user.googleCalendar.calendarId || 'primary';
+    const calendarId = target?.calendarId || user.googleCalendar.calendarId || 'primary';
+    const currentSyncToken = target ? target.syncToken : user.googleCalendar.syncToken;
+    const saveSyncToken = async (token) => {
+      if (target) {
+        target.syncToken = token;
+        await User.updateOne(
+          { _id: user._id, 'googleCalendar.workspaceWatches.channelId': target.channelId },
+          { $set: { 'googleCalendar.workspaceWatches.$.syncToken': token } }
+        );
+      } else {
+        user.googleCalendar.syncToken = token;
+        await user.save();
+      }
+    };
 
     let params = { calendarId, singleEvents: true, maxResults: 250 };
-    if (user.googleCalendar.syncToken) {
-      params.syncToken = user.googleCalendar.syncToken;
+    if (currentSyncToken) {
+      params.syncToken = currentSyncToken;
     } else {
       // First sync: get events from last 30 days to establish token
       params.timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -902,10 +1002,9 @@ const processCalendarChanges = async (user) => {
       } catch (err) {
         // 410 Gone = syncToken expired, do full re-sync
         if (err.code === 410) {
-          logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id });
-          user.googleCalendar.syncToken = null;
-          await user.save();
-          return processCalendarChanges(user); // recursive call without syncToken
+          logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id, calendarId });
+          await saveSyncToken(null);
+          return processCalendarChanges(user, target); // recursive call without syncToken
         }
         throw err;
       }
@@ -921,8 +1020,7 @@ const processCalendarChanges = async (user) => {
     // bezpečné (porovnáva sa s aktuálnym stavom úlohy).
     const persistSyncToken = async () => {
       if (!newSyncToken) return;
-      user.googleCalendar.syncToken = newSyncToken;
-      await user.save();
+      await saveSyncToken(newSyncToken);
     };
 
     if (allEvents.length === 0) {
@@ -1181,8 +1279,15 @@ router.post('/webhook', async (req, res) => {
   if (resourceState !== 'exists') return;
 
   try {
-    // Find user by watch channel ID
-    const user = await User.findOne({ 'googleCalendar.watchChannelId': channelId });
+    // Kanál je buď legacy (watchChannelId) alebo per-workspace
+    // (workspaceWatches[].channelId). UUID formát overíme ešte pred dopytom.
+    if (typeof channelId !== 'string' || !/^[0-9a-f-]{36}$/i.test(channelId)) return;
+    const user = await User.findOne({
+      $or: [
+        { 'googleCalendar.watchChannelId': channelId },
+        { 'googleCalendar.workspaceWatches.channelId': channelId }
+      ]
+    }).select('-avatarData');
     if (!user) {
       logger.warn('[Calendar Webhook] No user found for channel', { channelId });
       return;
@@ -1214,16 +1319,29 @@ router.post('/webhook', async (req, res) => {
     // syncToken). Notifikácia, ktorá príde počas behu, sa nezahodí — označí
     // sa ako „pending" a po dobehnutí sa spracovanie raz zopakuje
     // (processCalendarChanges si drží aktualizovaný syncToken v `user`).
+    // Pending kľúč nesie aj channelId — notifikácia iného kalendára toho
+    // istého používateľa počas behu sa tiež nesmie stratiť.
     const webhookLockKey = `webhook-${user._id}`;
+    const pendingPrefix = `${webhookLockKey}|`;
     if (!acquireCalendarLock(webhookLockKey, WEBHOOK_LOCK_TIMEOUT)) {
-      calendarWebhookPending.add(webhookLockKey);
+      calendarWebhookPending.add(pendingPrefix + channelId);
       return;
     }
     try {
-      do {
-        calendarWebhookPending.delete(webhookLockKey);
-        await processCalendarChanges(user);
-      } while (calendarWebhookPending.has(webhookLockKey));
+      let nextChannel = channelId;
+      while (nextChannel) {
+        calendarWebhookPending.delete(pendingPrefix + nextChannel);
+        if (nextChannel === user.googleCalendar.watchChannelId) {
+          await processCalendarChanges(user);
+        } else {
+          // Čerstvý záznam (syncToken mohla zmeniť predošlá iterácia)
+          const fresh = await User.findById(user._id).select('googleCalendar.workspaceWatches').lean();
+          const target = (fresh?.googleCalendar?.workspaceWatches || []).find(w => w.channelId === nextChannel);
+          if (target) await processCalendarChanges(user, { ...target });
+        }
+        const pendingKey = [...calendarWebhookPending].find(k => k.startsWith(pendingPrefix));
+        nextChannel = pendingKey ? pendingKey.slice(pendingPrefix.length) : null;
+      }
     } finally {
       releaseCalendarLock(webhookLockKey);
     }
@@ -1255,6 +1373,17 @@ const renewCalendarWatches = async () => {
     if (users.length > 0) {
       logger.info('[Calendar Watch] Renewed channels', { count: users.length });
     }
+
+    // Per-workspace kanály expirujúce do 24 h
+    const wsUsers = await User.find({
+      'googleCalendar.enabled': true,
+      'googleCalendar.workspaceWatches.expiry': { $lt: soon }
+    }).select('-avatarData');
+    for (const user of wsUsers) {
+      for (const w of (user.googleCalendar.workspaceWatches || [])) {
+        if (!w.expiry || new Date(w.expiry) < soon) await startWorkspaceCalendarWatch(user, w.calendarId);
+      }
+    }
   } catch (err) {
     logger.error('[Calendar Watch] Renewal error', { error: err.message });
   }
@@ -1277,6 +1406,15 @@ const ensureCalendarWatches = async () => {
 
     if (users.length > 0) {
       logger.info('[Calendar Watch] Set up new watches', { count: users.length });
+    }
+
+    // Per-workspace kalendáre bez kanála (napr. vytvorené pred touto zmenou)
+    const wsUsers = await User.find({
+      'googleCalendar.enabled': true,
+      'googleCalendar.workspaceCalendars': { $exists: true, $ne: {} }
+    }).select('-avatarData');
+    for (const user of wsUsers) {
+      await ensureWorkspaceCalendarWatches(user);
     }
   } catch (err) {
     logger.error('[Calendar Watch] Setup error', { error: err.message });
@@ -2349,7 +2487,7 @@ router.post('/delete-all', authenticateToken, async (req, res) => {
 
     // Push kanál zastavíme (inak by Google ďalej volal webhook pre kanál,
     // ktorý už v DB nepoznáme).
-    await stopCalendarWatch(user).catch(err =>
+    await stopAllCalendarWatches(user).catch(err =>
       logger.warn('[Google Calendar] Stop watch on delete-all failed', { error: err.message })
     );
 
@@ -2723,6 +2861,12 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
     });
     // Non-fatal — the mapping will be re-attempted on next sync.
   }
+
+  // Push kanál pre nový kalendár (Google → CRM zmeny). Na pozadí — sync
+  // nesmie čakať ani padnúť na zlyhaní watch.
+  setImmediate(() => {
+    startWorkspaceCalendarWatch(user, newCalendarId).catch(() => {});
+  });
 
   return newCalendarId;
 }
@@ -3120,19 +3264,33 @@ const autoDeleteTaskFromCalendar = async (taskId) => {
 /**
  * Initialize Calendar webhook system with Socket.IO and start periodic renewal.
  */
+let watchStartTimer = null;
+let watchRenewInterval = null;
+
 const initializeCalendarWebhooks = (io) => {
   calendarIo = io;
 
   // Set up watches for all connected users who don't have one
-  setTimeout(() => ensureCalendarWatches(), 20000);
+  watchStartTimer = setTimeout(() => ensureCalendarWatches(), 20000);
+  watchStartTimer.unref();
 
   // Renew expiring watches every 6 hours
-  setInterval(() => renewCalendarWatches(), 6 * 60 * 60 * 1000);
+  watchRenewInterval = setInterval(() => renewCalendarWatches(), 6 * 60 * 60 * 1000);
+  watchRenewInterval.unref();
 
   logger.info('[Calendar Watch] Webhook system initialized');
+};
+
+// Graceful shutdown — zastaví plánované obnovy kanálov.
+const stopCalendarWebhooks = () => {
+  clearTimeout(watchStartTimer);
+  clearInterval(watchRenewInterval);
+  watchStartTimer = null;
+  watchRenewInterval = null;
 };
 
 module.exports = router;
 module.exports.autoSyncTaskToCalendar = autoSyncTaskToCalendar;
 module.exports.autoDeleteTaskFromCalendar = autoDeleteTaskFromCalendar;
 module.exports.initializeCalendarWebhooks = initializeCalendarWebhooks;
+module.exports.stopCalendarWebhooks = stopCalendarWebhooks;

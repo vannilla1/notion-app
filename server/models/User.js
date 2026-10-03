@@ -319,7 +319,21 @@ const userSchema = new mongoose.Schema({
     watchResourceId: { type: String, default: null },
     watchExpiry: { type: Date, default: null },
     // Sync token for incremental event list (only changed events since last sync)
-    syncToken: { type: String, default: null }
+    syncToken: { type: String, default: null },
+    // Push kanály pre per-workspace kalendáre „Prpl CRM — {workspace}“.
+    // Legacy watch vyššie sleduje len calendarId ('primary'), kým udalosti
+    // sa od PR2 zapisujú do per-workspace kalendárov — zmeny urobené v
+    // Google (presun termínu, zmazanie) by sa do CRM inak nikdy nedostali.
+    workspaceWatches: {
+      type: [new mongoose.Schema({
+        channelId: { type: String, required: true },
+        calendarId: { type: String, required: true },
+        resourceId: { type: String, default: null },
+        expiry: { type: Date, default: null },
+        syncToken: { type: String, default: null }
+      }, { _id: false })],
+      default: []
+    }
   },
   // Google Tasks integration — same per-workspace model as Calendar above.
   googleTasks: {
@@ -413,6 +427,7 @@ userSchema.index({ role: 1 });
 userSchema.index({ 'subscription.stripeSubscriptionId': 1 }, { sparse: true });
 userSchema.index({ 'subscription.stripeCustomerId': 1 }, { sparse: true });
 userSchema.index({ 'googleCalendar.watchChannelId': 1 }, { sparse: true });
+userSchema.index({ 'googleCalendar.workspaceWatches.channelId': 1 }, { sparse: true });
 
 // At-rest encryption pre OAuth tokeny (audit MED-003 v2).
 //
