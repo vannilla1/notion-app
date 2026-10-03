@@ -127,6 +127,13 @@ const handleMessageWriteError = (error, req, res, label) => {
     });
     return rejectTooLarge(res);
   }
+  // Chyba VSTUPU (dueDate=abc, linkedType mimo enumu, prázdny predmet pri
+  // PUT) nie je pád servera: 400 bez záznamu do Diagnostiky — tam by vyzerala
+  // ako 500 „Chyba servera" bez súvisu s klientom.
+  if (error?.name === 'ValidationError' || error?.name === 'CastError') {
+    logger.warn(`${label}: invalid input`, { error: error.message, userId: req.user?.id });
+    return res.status(400).json({ message: 'Neplatné údaje správy', code: 'INVALID_INPUT' });
+  }
   logger.error(label, { error: error.message, userId: req.user?.id });
   recordError(error, diagnosticReq(req)).catch(() => {});
   if (res.locals) res.locals.__errorRecorded = true;
