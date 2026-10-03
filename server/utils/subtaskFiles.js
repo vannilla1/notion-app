@@ -33,6 +33,12 @@ const OID = /^[0-9a-fA-F]{24}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+// Nezmenená uložená hodnota sa NEskracuje — staršie podúlohy môžu mať dlhšiu
+// poznámku/názov (route pre jednu podúlohu limit nemá) a uloženie celého
+// stromu (napr. zaškrtnutie v Dashboarde) by ich inak ticho orezalo.
+const keepOrClip = (v, serverV, max) => (typeof v === 'string' && typeof serverV === 'string' && v === serverV
+  ? v
+  : str(v, max));
 
 // Serverom spravované polia podľa ID uzla (prílohy, stav pripomienok,
 // pôvod kópie, čas vytvorenia) — klient ich nesmie nastaviť.
@@ -50,7 +56,11 @@ const collectServerState = (subtasks, map = new Map()) => {
 const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
   const s = toPlain(raw);
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
-  if (counter.n >= MAX_NODES) return null;
+  if (counter.n >= MAX_NODES) {
+    // Nad strop sa nové uzly nepridajú, ale už uložené sa nezahodia.
+    const known = typeof s.id === 'string' ? serverMap.get(s.id) : null;
+    return known ? toPlain(known) : null;
+  }
   counter.n++;
 
   // ID: klient generuje UUID pre nové podúlohy (optimistické UI na ne
@@ -74,14 +84,17 @@ const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
 
   const node = {
     id,
-    title: str(s.title, MAX_TITLE),
+    title: keepOrClip(s.title, server?.title, MAX_TITLE),
     completed: s.completed === true,
     dueDate,
     dueTime,
-    notes: str(s.notes, MAX_NOTES),
+    notes: keepOrClip(s.notes, server?.notes, MAX_NOTES),
     priority: PRIORITIES.has(s.priority) ? s.priority : null,
+    // Staršie priradenia (legacy username namiesto ObjectId), ktoré už na
+    // serveri sú, ostávajú; nové musia byť ObjectId.
     assignedTo: Array.isArray(s.assignedTo)
-      ? [...new Set(s.assignedTo.map(String).filter(x => OID.test(x)))].slice(0, 50)
+      ? [...new Set(s.assignedTo.map(String).filter(x => OID.test(x) ||
+          (Array.isArray(server?.assignedTo) && server.assignedTo.map(String).includes(x))))].slice(0, 50)
       : [],
     modifiedAt: typeof s.modifiedAt === 'string' && s.modifiedAt.length <= 40 ? s.modifiedAt : null,
     reminder,
@@ -89,11 +102,14 @@ const sanitizeNode = (raw, serverMap, depth, counter, seenIds) => {
     order: Number.isFinite(Number(s.order)) ? Number(s.order) : 0,
     // ── serverové polia ──
     files: server && Array.isArray(server.files) ? server.files : [],
-    reminderSent: server && !reminderChanged ? !!server.reminderSent : false,
+    reminderSent: server && !reminderChanged && !dueChanged ? !!server.reminderSent : false,
     timeRemindersSent: server && !dueChanged && Array.isArray(server.timeRemindersSent) ? server.timeRemindersSent : [],
     lastUrgencyLevel: server && !dueChanged ? (server.lastUrgencyLevel ?? null) : null,
     createdAt: server?.createdAt || new Date().toISOString(),
-    subtasks: depth < MAX_DEPTH ? sanitizeTree(s.subtasks, serverMap, depth + 1, counter, seenIds) : []
+    // Pod stropom hĺbky sa nové úrovne nepridajú, už uložené ostanú.
+    subtasks: depth < MAX_DEPTH
+      ? sanitizeTree(s.subtasks, serverMap, depth + 1, counter, seenIds)
+      : (Array.isArray(server?.subtasks) ? server.subtasks.map(toPlain) : [])
   };
   if (server?.copiedFrom) node.copiedFrom = server.copiedFrom;
   return node;

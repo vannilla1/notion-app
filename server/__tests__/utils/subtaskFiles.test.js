@@ -96,3 +96,29 @@ describe('withServerSubtaskFiles', () => {
     expect(countSubtaskNodes(withServerSubtaskFiles([deep], []))).toBe(10);
   });
 });
+
+describe('withServerSubtaskFiles — staršie dáta sa pri uložení stromu neorežú', () => {
+  const OID_A = '64b7f0c2a1b2c3d4e5f60718';
+  it('nezmenená dlhá poznámka a staré priradenie ostanú; nová dlhá poznámka sa skráti', () => {
+    const longNotes = 'n'.repeat(15000);
+    const existing = [{ id: 's1', title: 'A', notes: longNotes, assignedTo: ['mkm', OID_A] }];
+    const keep = withServerSubtaskFiles([{ id: 's1', title: 'A', notes: longNotes, completed: true, assignedTo: ['mkm', OID_A] }], existing);
+    expect(keep[0].notes).toHaveLength(15000);
+    expect(keep[0].assignedTo).toEqual(['mkm', OID_A]);
+    expect(keep[0].completed).toBe(true);
+
+    const changed = withServerSubtaskFiles([{ id: 's1', title: 'A', notes: longNotes + 'x', assignedTo: ['other-legacy'] }], existing);
+    expect(changed[0].notes).toHaveLength(10000);
+    expect(changed[0].assignedTo).toEqual([]);
+  });
+
+  it('posun termínu vynuluje reminderSent aj lastUrgencyLevel', () => {
+    const existing = [{ id: 's1', title: 'A', dueDate: '2026-09-01', reminder: 1, reminderSent: true, lastUrgencyLevel: 'overdue' }];
+    const moved = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-10-20', reminder: 1 }], existing);
+    expect(moved[0].reminderSent).toBe(false);
+    expect(moved[0].lastUrgencyLevel).toBeNull();
+    const same = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-09-01', reminder: 1 }], existing);
+    expect(same[0].reminderSent).toBe(true);
+    expect(same[0].lastUrgencyLevel).toBe('overdue');
+  });
+});

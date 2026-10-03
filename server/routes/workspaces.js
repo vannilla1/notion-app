@@ -15,6 +15,7 @@ const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalida
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
 const notificationService = require('../services/notificationService');
+const { joinWorkspaceRoom, leaveWorkspaceRoom, closeWorkspaceRoom } = require('../utils/socketRooms');
 
 // Farba prostredia sa na klientovi vkladá priamo do style={{ backgroundColor }}
 // (WorkspaceSwitcher.jsx) — akceptujeme len hex formát (#rgb až #rrggbbaa).
@@ -206,6 +207,7 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     await membership.save();
+    joinWorkspaceRoom(req, req.user.id, workspace._id);
 
     // Set as current workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
@@ -336,6 +338,8 @@ router.post('/join', authenticateToken, joinWorkspaceLimiter, async (req, res) =
         }
       });
     }
+
+    joinWorkspaceRoom(req, req.user.id, workspace._id);
 
     // Set as current workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
@@ -717,6 +721,7 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
     await WorkspaceMember.deleteOne({ _id: memberId });
     // Odstránený člen nesmie ďalších 60 s prechádzať requireWorkspace z cache.
     invalidateCache(String(member.userId));
+    leaveWorkspaceRoom(req, String(member.userId), req.workspace._id);
 
     // Clear removed user's current workspace if needed
     const removedUser = await User.findById(member.userId).select('currentWorkspaceId').lean();
@@ -758,6 +763,7 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
 
     await WorkspaceMember.deleteOne({ _id: req.workspaceMember._id });
     invalidateCache(req.user.id);
+    leaveWorkspaceRoom(req, req.user.id, req.workspace._id);
 
     // Find another workspace to switch to
     const otherMembership = await WorkspaceMember.findOne({
@@ -859,6 +865,7 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
 
     // Delete all memberships
     await WorkspaceMember.deleteMany({ workspaceId });
+    closeWorkspaceRoom(req, workspaceId);
 
     // Clear currentWorkspaceId for all affected users
     await User.updateMany(
@@ -1227,6 +1234,8 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       }
       return res.json({ message: 'Už ste členom tohto prostredia', workspaceId: invitation.workspaceId });
     }
+
+    joinWorkspaceRoom(req, req.user.id, invitation.workspaceId);
 
     // Switch user to the new workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: invitation.workspaceId });

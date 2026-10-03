@@ -1531,6 +1531,10 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
     // fix ako pri úlohe vyššie (taskPlain) a v tasks.js. Hlbšie úrovne sú
     // plain objekty (netypované Array) — toObject nemajú, spread je v poriadku.
     const subPlain = typeof found.subtask.toObject === 'function' ? found.subtask.toObject() : found.subtask;
+    // Posunutý termín → plánovač musí znovu upozorniť (viď tasks.js PUT subtask).
+    const nextDueDate = dueDate !== undefined ? dueDate : found.subtask.dueDate;
+    const nextDueTime = dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || '');
+    const dueMoved = nextDueDate !== found.subtask.dueDate || (nextDueTime || '') !== (found.subtask.dueTime || '');
     found.parent[found.index] = {
       ...subPlain,
       id: found.subtask.id, // Ensure ID is preserved
@@ -1542,7 +1546,8 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       priority: found.subtask.priority, // Preserve priority
       subtasks: subPlain.subtasks || [], // Preserve nested subtasks
       createdAt: found.subtask.createdAt, // Preserve createdAt
-      modifiedAt: new Date().toISOString() // Set modification timestamp
+      modifiedAt: new Date().toISOString(), // Set modification timestamp
+      ...(dueMoved ? { lastUrgencyLevel: null, reminderSent: false, timeRemindersSent: [] } : {})
     };
 
     contact.markModified('tasks');

@@ -2677,10 +2677,11 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
         const newReminders = timeReminders !== undefined
           ? sanitizeTimeReminders(timeReminders)
           : oldReminders;
-        const dueChangedForTimeReminders =
+        const dueMoved =
           (dueDate !== undefined && dueDate !== found.subtask.dueDate) ||
-          newDueTime !== oldDueTime ||
-          JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
+          newDueTime !== oldDueTime;
+        const dueChangedForTimeReminders =
+          dueMoved || JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
 
         // Podúloha 1. úrovne je Mongoose subdokument — spread `{...subdoc}`
         // vráti len interné $__/_doc, NIE schema polia (viď komentár pri
@@ -2705,7 +2706,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           createdAt: found.subtask.createdAt, // Preserve createdAt
           modifiedAt: new Date().toISOString(), // Set modification timestamp
           timeReminders: newReminders,
-          timeRemindersSent: dueChangedForTimeReminders ? [] : (found.subtask.timeRemindersSent || [])
+          timeRemindersSent: dueChangedForTimeReminders ? [] : (found.subtask.timeRemindersSent || []),
+          // Posunutý termín = nová úroveň naliehavosti a nová pripomienka.
+          // Plánovač upozorní len pri RASTE úrovne nad uloženú — bez vynulovania
+          // by podúloha presunutá z „po termíne" na budúci týždeň už nikdy
+          // neupozornila (pred .toObject() fixom sa to nulovalo náhodou).
+          ...(dueMoved ? { lastUrgencyLevel: null, reminderSent: false } : {})
         };
         return { updated: found.parent[found.index], originalAssignedTo };
       }
