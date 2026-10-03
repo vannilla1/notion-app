@@ -2267,98 +2267,114 @@ router.post('/delete-all', authenticateToken, async (req, res) => {
     }
 
     const calendar = await getCalendarClient(user);
-    const calendarId = user.googleCalendar.calendarId || 'primary';
-    const isDedicated = calendarId !== 'primary';
 
-    let deleted = 0;
-    let errors = 0;
-
-    if (isDedicated) {
-      // Path 1: nuke the whole dedicated calendar
-      try {
-        await calendar.calendars.delete({ calendarId });
-        logger.info('[Google Calendar] Dedicated calendar deleted', { userId: user._id, calendarId });
-        deleted = 1; // "1 calendar" — exact event count is unknown after delete
-      } catch (e) {
-        if (e.code === 404) {
-          // Already gone, treat as success
-          logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
-        } else {
-          logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code });
-          return res.status(500).json({ message: 'Nepodarilo sa vymazať kalendár: ' + userFacingError(e) });
-        }
-      }
-    } else {
-      // Path 2: batch-delete events from primary
-      // 2a — events with our source=prplcrm marker (preferred, new events)
-      const markedEventIds = new Set();
-      try {
-        let pageToken;
-        do {
-          const resp = await calendar.events.list({
-            calendarId: 'primary',
-            privateExtendedProperty: 'source=prplcrm',
-            maxResults: 2500,
-            showDeleted: false,
-            singleEvents: true,
-            pageToken
-          });
-          for (const ev of (resp.data.items || [])) {
-            if (ev.id) markedEventIds.add(ev.id);
-          }
-          pageToken = resp.data.nextPageToken;
-        } while (pageToken);
-      } catch (e) {
-        logger.warn('[Google Calendar] Marker query failed, relying on syncedTaskIds only', { error: e.message });
-      }
-
-      // 2b — union with legacy mapping (covers events created before the marker existed)
-      const legacyIds = Array.from(user.googleCalendar.syncedTaskIds?.values() || []);
-      for (const id of legacyIds) markedEventIds.add(id);
-
-      const allIds = Array.from(markedEventIds);
-      logger.info('[Google Calendar] Bulk delete starting', {
-        userId: user._id,
-        totalEvents: allIds.length
-      });
-
-      for (const eventId of allIds) {
-        try {
-          await calendar.events.delete({ calendarId: 'primary', eventId });
-          deleted++;
-        } catch (e) {
-          if (e.code === 404 || e.code === 410) {
-            // Already deleted, not an error
-          } else {
-            errors++;
-            logger.warn('[Google Calendar] Bulk delete event failed', { eventId, error: e.message });
-          }
-        }
-      }
-
-      logger.info('[Google Calendar] Bulk delete finished', { userId: user._id, deleted, errors });
+    // Všetky dedikované kalendáre: legacy calendarId + per-workspace
+    // kalendáre „Prpl CRM — {workspace}“ (PR2). Predtým sa mazal len legacy
+    // calendarId, takže per-workspace kalendáre a ich udalosti ostávali.
+    const dedicatedIds = new Set();
+    const legacyCalendarId = user.googleCalendar.calendarId || 'primary';
+    if (legacyCalendarId !== 'primary') dedicatedIds.add(legacyCalendarId);
+    for (const [, entry] of (user.googleCalendar.workspaceCalendars?.entries?.() || [])) {
+      if (entry?.calendarId && entry.calendarId !== 'primary') dedicatedIds.add(entry.calendarId);
     }
 
-    // Reset sync state regardless of path — fresh slate
+    let deleted = 0;
+    let deletedCalendars = 0;
+    let errors = 0;
+
+    for (const calendarId of dedicatedIds) {
+      try {
+        await calendar.calendars.delete({ calendarId });
+        deletedCalendars++;
+        logger.info('[Google Calendar] Dedicated calendar deleted', { userId: user._id, calendarId });
+      } catch (e) {
+        if (e.code === 404 || e.code === 410) {
+          logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
+        } else {
+          errors++;
+          logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code, calendarId });
+        }
+      }
+    }
+
+    // Udalosti v primárnom kalendári (staršie synchronizácie / fallback):
+    // 1) udalosti s naším markerom source=prplcrm
+    const primaryEventIds = new Set();
+    try {
+      let pageToken;
+      do {
+        const resp = await calendar.events.list({
+          calendarId: 'primary',
+          privateExtendedProperty: 'source=prplcrm',
+          maxResults: 2500,
+          showDeleted: false,
+          singleEvents: true,
+          pageToken
+        });
+        for (const ev of (resp.data.items || [])) {
+          if (ev.id) primaryEventIds.add(ev.id);
+        }
+        pageToken = resp.data.nextPageToken;
+      } while (pageToken);
+    } catch (e) {
+      logger.warn('[Google Calendar] Marker query failed, relying on syncedTaskIds only', { error: e.message });
+    }
+    // 2) legacy mapping (udalosti spred markera) — len tie, čo nie sú v
+    //    dedikovanom kalendári (tie zmizli spolu s kalendárom)
+    for (const [taskId, eventId] of (user.googleCalendar.syncedTaskIds?.entries?.() || [])) {
+      const calId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+      if (eventId && (!calId || calId === 'primary')) primaryEventIds.add(eventId);
+    }
+
+    logger.info('[Google Calendar] Bulk delete starting', {
+      userId: user._id,
+      dedicatedCalendars: dedicatedIds.size,
+      primaryEvents: primaryEventIds.size
+    });
+
+    for (const eventId of primaryEventIds) {
+      try {
+        await calendar.events.delete({ calendarId: 'primary', eventId });
+        deleted++;
+      } catch (e) {
+        if (e.code !== 404 && e.code !== 410) {
+          errors++;
+          logger.warn('[Google Calendar] Bulk delete event failed', { eventId, error: e.message });
+        }
+      }
+    }
+
+    logger.info('[Google Calendar] Bulk delete finished', { userId: user._id, deleted, deletedCalendars, errors });
+
+    // Push kanál zastavíme (inak by Google ďalej volal webhook pre kanál,
+    // ktorý už v DB nepoznáme).
+    await stopCalendarWatch(user).catch(err =>
+      logger.warn('[Google Calendar] Stop watch on delete-all failed', { error: err.message })
+    );
+
+    // Reset sync state — fresh slate, vrátane per-workspace máp (inak by
+    // ďalší sync zapisoval do zmazaných kalendárov a hash fast-path by
+    // udalosti považoval za „nezmenené“).
     user.googleCalendar.syncedTaskIds = new Map();
+    user.googleCalendar.syncedTaskCalendars = new Map();
+    user.googleCalendar.syncedEventHashes = new Map();
+    user.googleCalendar.workspaceCalendars = new Map();
     user.googleCalendar.watchChannelId = null;
     user.googleCalendar.watchResourceId = null;
     user.googleCalendar.watchExpiry = null;
     user.googleCalendar.syncToken = null;
     user.googleCalendar.lastSyncAt = null;
-    // For dedicated-calendar users: flip back to 'primary' so next sync doesn't
-    // try to write into a calendar that no longer exists. User can reconnect to
-    // recreate a dedicated calendar.
-    if (isDedicated) user.googleCalendar.calendarId = 'primary';
+    user.googleCalendar.calendarId = 'primary';
     await user.save();
 
     return res.json({
       success: true,
-      mode: isDedicated ? 'dedicated' : 'primary',
+      mode: dedicatedIds.size > 0 ? 'dedicated' : 'primary',
       deleted,
+      deletedCalendars,
       errors,
-      message: isDedicated
-        ? 'Kalendár "Prpl CRM" bol vymazaný z Google Calendar.'
+      message: dedicatedIds.size > 0
+        ? `Vymazaných ${deletedCalendars} kalendárov Prpl CRM a ${deleted} udalostí z Google Calendar${errors ? ` (${errors} chýb)` : ''}.`
         : `Vymazaných ${deleted} udalostí z Google Calendar${errors ? ` (${errors} chýb)` : ''}.`
     });
   } catch (error) {
