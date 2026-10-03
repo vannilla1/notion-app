@@ -1851,6 +1851,9 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
 
     // Collect matching tasks from ALL task lists
     let allMatchingTasks = []; // { taskListId, task }
+    // Počet prehľadaných úloh rátame už v tomto prechode (predtým sa kvôli
+    // nemu po mazaní stránkovane prechádzali všetky zoznamy druhýkrát).
+    let totalTasksScanned = 0;
     // escapeRegex: výraz z tela requestu sa hľadá ako obyčajný text. Bez neho
     // by pattern typu `(a+)+$` (ReDoS) zablokoval event loop pri teste na
     // každý názov úlohy vo všetkých Google zoznamoch.
@@ -1868,6 +1871,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
         });
 
         if (response.data.items) {
+          totalTasksScanned += response.data.items.length;
           for (const task of response.data.items) {
             if (task.title && searchRegex.test(task.title)) {
               allMatchingTasks.push({ taskListId: taskList.id, task });
@@ -1930,16 +1934,6 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
       errors
     });
 
-    // Count total tasks across all lists for debugging
-    let totalTasksScanned = 0;
-    for (const taskList of taskLists) {
-      let pgToken = null;
-      do {
-        const r = await tasksApi.tasks.list({ tasklist: taskList.id, maxResults: 100, showCompleted: true, showHidden: true, pageToken: pgToken });
-        totalTasksScanned += (r.data.items || []).length;
-        pgToken = r.data.nextPageToken;
-      } while (pgToken);
-    }
 
     res.json({
       success: true,
