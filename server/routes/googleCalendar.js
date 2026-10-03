@@ -887,13 +887,20 @@ const processCalendarChanges = async (user) => {
       newSyncToken = response.data.nextSyncToken;
     } while (nextPageToken);
 
-    // Save new sync token
-    if (newSyncToken) {
+    // Nový syncToken ukladáme až PO spracovaní udalostí — ak by spracovanie
+    // padlo (napr. výpadok DB pred cyklom), Google pri ďalšej notifikácii
+    // pošle tie isté zmeny znova a nestratia sa. Opätovné aplikovanie je
+    // bezpečné (porovnáva sa s aktuálnym stavom úlohy).
+    const persistSyncToken = async () => {
+      if (!newSyncToken) return;
       user.googleCalendar.syncToken = newSyncToken;
       await user.save();
-    }
+    };
 
-    if (allEvents.length === 0) return;
+    if (allEvents.length === 0) {
+      await persistSyncToken();
+      return;
+    }
 
     logger.info('[Calendar Webhook] Processing changes', {
       userId: user._id,
@@ -917,180 +924,198 @@ const processCalendarChanges = async (user) => {
       const crmTaskId = reverseMap.get(event.id);
       if (!crmTaskId) continue; // Not a CRM-synced event
 
-      // Determine what changed
-      const isDeleted = event.status === 'cancelled';
-      const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
-      // Extract HH:MM from dateTime if present (timed event); all-day event has no time
-      let newDueTime = '';
-      if (event.start?.dateTime) {
-        const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
-        if (m) newDueTime = m[1];
-      }
-      // Strip completion prefix "✓ " AND workspace prefix "[Workspace] " that we add
-      // on outbound Google Tasks sync — otherwise the bracket prefix leaks into CRM.
-      let newTitle = (event.summary || '')
-        .replace(/^✓\s*/, '')
-        .replace(/^\[[^\]]{1,40}\]\s*/, '')
-        .trim();
-
-      // Find the CRM task — scoped to user's workspaces
-      let task = await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } });
-      let contact = null;
-      let taskIndex = -1;
-
-      if (!task) {
-        // Search in contacts within user's workspaces
-        contact = await Contact.findOne({ 'tasks.id': crmTaskId, workspaceId: { $in: userWorkspaceIds } });
-        if (contact) {
-          taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
-          if (taskIndex !== -1) task = contact.tasks[taskIndex];
+      // Chyba jednej udalosti (napr. validačná chyba pri save) nesmie zastaviť
+      // spracovanie zvyšku dávky — inak by sa zmeny ostatných udalostí stratili.
+      try {
+        // Determine what changed
+        const isDeleted = event.status === 'cancelled';
+        const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
+        // Extract HH:MM from dateTime if present (timed event); all-day event has no time
+        let newDueTime = '';
+        if (event.start?.dateTime) {
+          const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
+          if (m) newDueTime = m[1];
         }
-      }
+        // Strip completion prefix "✓ " AND workspace prefix "[Workspace] " that we add
+        // on outbound Google Tasks sync — otherwise the bracket prefix leaks into CRM.
+        let newTitle = (event.summary || '')
+          .replace(/^✓\s*/, '')
+          .replace(/^\[[^\]]{1,40}\]\s*/, '')
+          .trim();
 
-      if (!task) continue; // Task no longer exists in CRM or not in user's workspace
+        // Find the CRM task — scoped to user's workspaces.
+        // Kontaktové úlohy a podúlohy majú UUID id (nie ObjectId) — Task.findOne
+        // s UUID v _id by vyhodil CastError, preto top-level Task hľadáme len
+        // pri platnom ObjectId a inak rovno pokračujeme hľadaním v kontaktoch.
+        let task = mongoose.Types.ObjectId.isValid(crmTaskId)
+          ? await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } })
+          : null;
+        let contact = null;
+        let taskIndex = -1;
 
-      if (isDeleted) {
-        // Event was deleted in Google Calendar — remove mapping atomically.
-        // Notifikuj front-end (toast "Udalosť bola zmazaná v Google Kalendári,
-        // úloha v CRM ostala") aby user nezmäteno hľadal kde sa stratila.
-        // POZN: predtým niekedy `cancelled` posielalo CRM samé pri completed,
-        // vďaka B1 fixu (status:'confirmed' vždy) je teraz cancelled už LEN
-        // skutočné delete z Google strany.
-        await User.findByIdAndUpdate(user._id, {
-          $unset: {
-            [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '',
-            [`googleCalendar.syncedTaskCalendars.${crmTaskId}`]: '',
-            [`googleCalendar.syncedEventHashes.${crmTaskId}`]: ''
+        if (!task) {
+          // Search in contacts within user's workspaces
+          contact = await Contact.findOne({ 'tasks.id': crmTaskId, workspaceId: { $in: userWorkspaceIds } });
+          if (contact) {
+            taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+            if (taskIndex !== -1) task = contact.tasks[taskIndex];
           }
-        });
-        const wsId = task.workspaceId || contact?.workspaceId;
-        if (calendarIo && wsId) {
-          calendarIo.to(`workspace-${wsId}`).emit('calendar-event-deleted', {
-            crmTaskId,
-            taskTitle: task.title || (contact && taskIndex !== -1 ? contact.tasks[taskIndex].title : '')
+        }
+
+        if (!task) continue; // Task no longer exists in CRM or not in user's workspace
+
+        if (isDeleted) {
+          // Event was deleted in Google Calendar — remove mapping atomically.
+          // Notifikuj front-end (toast "Udalosť bola zmazaná v Google Kalendári,
+          // úloha v CRM ostala") aby user nezmäteno hľadal kde sa stratila.
+          // POZN: predtým niekedy `cancelled` posielalo CRM samé pri completed,
+          // vďaka B1 fixu (status:'confirmed' vždy) je teraz cancelled už LEN
+          // skutočné delete z Google strany.
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '',
+              [`googleCalendar.syncedTaskCalendars.${crmTaskId}`]: '',
+              [`googleCalendar.syncedEventHashes.${crmTaskId}`]: ''
+            }
           });
-        }
-        continue;
-      }
-
-      // ─── Bidirectional COMPLETED detection ───
-      // Google Calendar nemá natívne completed pole pre VEVENT. Náš protokol:
-      //   - Primárny zdroj pravdy: extendedProperties.private.completed = 'true'|'false'
-      //   - Backward compat: keď event nemá toto private property (staré eventy
-      //     pred B1 fixom), padá späť na "✓ " prefix detection v summary.
-      //
-      // Toto rieši use case: user v Google Calendar manuálne zmení summary
-      // pridaním/odstránením "✓ " (alebo cez ext. apps), úprava sa propaguje
-      // späť do CRM.
-      const privateCompleted = event.extendedProperties?.private?.completed;
-      let isGoogleCompleted;
-      if (privateCompleted === 'true') {
-        isGoogleCompleted = true;
-      } else if (privateCompleted === 'false') {
-        isGoogleCompleted = false;
-      } else {
-        // Backward compat fallback: starý event bez canonical signal.
-        // "✓ " prefix indicates completion; ostatné = uncompleted.
-        isGoogleCompleted = (event.summary || '').startsWith('✓ ') || (event.summary || '').startsWith('✓');
-      }
-      const currentCompleted = (contact && taskIndex !== -1)
-        ? !!contact.tasks[taskIndex].completed
-        : !!task.completed;
-
-      // Check if due date changed
-      let changed = false;
-      const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
-
-      if (newDueDate && newDueDate !== taskDueDate) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].dueDate = new Date(newDueDate);
-          contact.tasks[taskIndex].dueTime = newDueTime;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.dueDate = new Date(newDueDate);
-          task.dueTime = newDueTime;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-      } else if (newDueDate) {
-        // Same date but time may have changed
-        const currentTime = (contact && taskIndex !== -1 ? contact.tasks[taskIndex].dueTime : task.dueTime) || '';
-        if (newDueTime !== currentTime) {
-          if (contact && taskIndex !== -1) {
-            contact.tasks[taskIndex].dueTime = newDueTime;
-            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          } else if (task._id) {
-            task.dueTime = newDueTime;
-            task.modifiedAt = new Date().toISOString();
-          }
-          changed = true;
-        }
-      }
-
-      // Check if title changed
-      if (newTitle && newTitle !== task.title) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].title = newTitle;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.title = newTitle;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-      }
-
-      // Apply completed state change (B1: bidirectional sync).
-      // Loguje cez logger.info aby sme vo SuperAdmin Diagnostics vedeli sledovať
-      // tieto reverse syncy (užitočné pri debug-ovaní "prečo sa task označil sám").
-      if (isGoogleCompleted !== currentCompleted) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].completed = isGoogleCompleted;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.completed = isGoogleCompleted;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-        logger.info('[Calendar Webhook] Completed state synced from Google', {
-          userId: user._id.toString(),
-          crmTaskId,
-          isGoogleCompleted,
-          source: privateCompleted !== undefined ? 'extendedProperties' : 'summary_prefix_fallback'
-        });
-      }
-
-      if (changed) {
-        if (contact) {
-          contact.markModified('tasks');
-          await contact.save();
-          // Invalidate server cache (GET /api/tasks + /api/contacts má 30s cache).
-          // Bez toho frontend dostane stale data 30 s po reverse sync.
-          if (contact.workspaceId) {
-            invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
-            invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
-          }
-          if (calendarIo && contact.workspaceId) {
-            calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
-          }
-        } else {
-          await task.save();
-          if (task.workspaceId) {
-            invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
-          }
-          if (calendarIo && task.workspaceId) {
-            calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
-              ...task.toObject(),
-              id: task._id.toString(),
-              source: 'global'
+          const wsId = task.workspaceId || contact?.workspaceId;
+          if (calendarIo && wsId) {
+            calendarIo.to(`workspace-${wsId}`).emit('calendar-event-deleted', {
+              crmTaskId,
+              taskTitle: task.title || (contact && taskIndex !== -1 ? contact.tasks[taskIndex].title : '')
             });
           }
+          continue;
         }
-        updated++;
+
+        // ─── Bidirectional COMPLETED detection ───
+        // Google Calendar nemá natívne completed pole pre VEVENT. Náš protokol:
+        //   - Primárny zdroj pravdy: extendedProperties.private.completed = 'true'|'false'
+        //   - Backward compat: keď event nemá toto private property (staré eventy
+        //     pred B1 fixom), padá späť na "✓ " prefix detection v summary.
+        //
+        // Toto rieši use case: user v Google Calendar manuálne zmení summary
+        // pridaním/odstránením "✓ " (alebo cez ext. apps), úprava sa propaguje
+        // späť do CRM.
+        const privateCompleted = event.extendedProperties?.private?.completed;
+        let isGoogleCompleted;
+        if (privateCompleted === 'true') {
+          isGoogleCompleted = true;
+        } else if (privateCompleted === 'false') {
+          isGoogleCompleted = false;
+        } else {
+          // Backward compat fallback: starý event bez canonical signal.
+          // "✓ " prefix indicates completion; ostatné = uncompleted.
+          isGoogleCompleted = (event.summary || '').startsWith('✓ ') || (event.summary || '').startsWith('✓');
+        }
+        const currentCompleted = (contact && taskIndex !== -1)
+          ? !!contact.tasks[taskIndex].completed
+          : !!task.completed;
+
+        // Check if due date changed
+        let changed = false;
+        const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
+
+        if (newDueDate && newDueDate !== taskDueDate) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].dueDate = new Date(newDueDate);
+            contact.tasks[taskIndex].dueTime = newDueTime;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.dueDate = new Date(newDueDate);
+            task.dueTime = newDueTime;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+        } else if (newDueDate) {
+          // Same date but time may have changed
+          const currentTime = (contact && taskIndex !== -1 ? contact.tasks[taskIndex].dueTime : task.dueTime) || '';
+          if (newDueTime !== currentTime) {
+            if (contact && taskIndex !== -1) {
+              contact.tasks[taskIndex].dueTime = newDueTime;
+              contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            } else if (task._id) {
+              task.dueTime = newDueTime;
+              task.modifiedAt = new Date().toISOString();
+            }
+            changed = true;
+          }
+        }
+
+        // Check if title changed
+        if (newTitle && newTitle !== task.title) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].title = newTitle;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.title = newTitle;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+        }
+
+        // Apply completed state change (B1: bidirectional sync).
+        // Loguje cez logger.info aby sme vo SuperAdmin Diagnostics vedeli sledovať
+        // tieto reverse syncy (užitočné pri debug-ovaní "prečo sa task označil sám").
+        if (isGoogleCompleted !== currentCompleted) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].completed = isGoogleCompleted;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.completed = isGoogleCompleted;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+          logger.info('[Calendar Webhook] Completed state synced from Google', {
+            userId: user._id.toString(),
+            crmTaskId,
+            isGoogleCompleted,
+            source: privateCompleted !== undefined ? 'extendedProperties' : 'summary_prefix_fallback'
+          });
+        }
+
+        if (changed) {
+          if (contact) {
+            contact.markModified('tasks');
+            await contact.save();
+            // Invalidate server cache (GET /api/tasks + /api/contacts má 30s cache).
+            // Bez toho frontend dostane stale data 30 s po reverse sync.
+            if (contact.workspaceId) {
+              invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
+              invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
+            }
+            if (calendarIo && contact.workspaceId) {
+              calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+            }
+          } else {
+            await task.save();
+            if (task.workspaceId) {
+              invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
+            }
+            if (calendarIo && task.workspaceId) {
+              calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
+                ...task.toObject(),
+                id: task._id.toString(),
+                source: 'global'
+              });
+            }
+          }
+          updated++;
+        }
+      } catch (eventErr) {
+        logger.error('[Calendar Webhook] Error processing event', {
+          userId: user._id,
+          eventId: event.id,
+          crmTaskId,
+          error: eventErr.message
+        });
       }
     }
+
+    await persistSyncToken();
 
     if (updated > 0) {
       logger.info('[Calendar Webhook] Applied changes to CRM', { userId: user._id, updated });
