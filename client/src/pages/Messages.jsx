@@ -1616,9 +1616,23 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                     <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
                     <span className="task-file-name task-file-name-clickable" title={msg.attachment.originalName} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>{msg.attachment.originalName}</span>
                     <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
-                    <button className="btn-icon-sm" onClick={() => {
-                      api.get(legacyDlUrl, { responseType: 'blob' })
-                        .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                    <button className="btn-icon-sm" onClick={async () => {
+                      // Bez catch by 403/404/sieťová chyba skončila ako unhandled
+                      // rejection bez hlášky — rovnaká logika ako handleMsgFileDownload
+                      // (správa zo servera príde v Blob tele).
+                      try {
+                        const res = await api.get(legacyDlUrl, { responseType: 'blob' });
+                        downloadBlob(res.data, msg.attachment.originalName);
+                      } catch (error) {
+                        let m = 'Chyba pri sťahovaní súboru';
+                        try {
+                          if (error.response?.data instanceof Blob) {
+                            const json = JSON.parse(await error.response.data.text());
+                            if (json.message) m = json.message;
+                          }
+                        } catch {}
+                        alert(m);
+                      }
                     }} title="Stiahnuť">⬇️</button>
                   </div>
                 );
