@@ -5,6 +5,7 @@ import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { reportError, installGlobalErrorHandlers } from './utils/reportError';
 import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
+import { initIapBridge } from './utils/iapBridge';
 import './styles/index.css';
 
 // In-house error tracking (nahrada Sentry). Poradie záleží — breadcrumbs
@@ -12,6 +13,9 @@ import './styles/index.css';
 // chybe mali context aspoň pár "app boot" udalostí.
 installBreadcrumbInstrumentation();
 installGlobalErrorHandlers();
+// iOS appka: neukončené Apple IAP transakcie (zlyhaný /verify) sa overia
+// znova hneď po štarte, nie až po otvorení stránky predplatného.
+initIapBridge();
 
 // Po deployi nový service worker hneď prevezme otvorené taby a zmaže starý
 // precache (skipWaiting + clientsClaim + cleanupOutdatedCaches). Tab so starým

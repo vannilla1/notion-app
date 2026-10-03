@@ -37,7 +37,9 @@ function ensureInit() {
     // re-verifikujeme JWS a triggerneme UI refresh event.
     if (requestId === 'external') {
       if (result?.jws) {
-        api.post('/api/billing/apple/verify', { signedTransaction: result.jws }).catch(() => {});
+        api.post('/api/billing/apple/verify', { signedTransaction: result.jws })
+          .then(() => ackTransaction(result.transactionId))
+          .catch((err) => { if (isDefinitiveVerifyError(err)) ackTransaction(result.transactionId); });
       }
       window.dispatchEvent(new CustomEvent('iap-external-update'));
       return;
@@ -49,6 +51,33 @@ function ensureInit() {
 
 function postToNative(payload) {
   window.webkit?.messageHandlers?.iosNative?.postMessage(payload);
+}
+
+// Native transakciu ukončí (StoreKit finish) až po tomto potvrdení — dovtedy
+// ju pri ďalšom štarte / prihlásení pošle na overenie znova. Bez toho by
+// zlyhaný /verify (sieť, cold start, kill appky) znamenal zaplatené, ale
+// neaktivované predplatné.
+function ackTransaction(transactionId) {
+  if (transactionId) postToNative({ type: 'iapFinish', transactionId: String(transactionId) });
+}
+
+// Overenie definitívne zamietnuté (neplatný JWS, transakcia patrí inému účtu…)
+// → opakovanie nepomôže, transakciu ukončíme. Neprihlásený (401), rate limit
+// a výpadky servera/siete sa zopakujú neskôr.
+function isDefinitiveVerifyError(err) {
+  const status = err?.response?.status;
+  return !!status && status >= 400 && status < 500 && ![401, 408, 429].includes(status);
+}
+
+/**
+ * Inicializácia pri štarte iOS appky: zaregistruje window.__iapResult (aj
+ * keď používateľ neotvorí stránku predplatného) a oznámi native, že môže
+ * poslať neukončené transakcie na overenie.
+ */
+export function initIapBridge() {
+  if (!iapAvailable()) return;
+  ensureInit();
+  postToNative({ type: 'iapReady' });
 }
 
 function newRequest(prefix, timeoutMs, label) {
@@ -94,7 +123,14 @@ export async function purchaseIap(productId, timeoutMs = 180000) {
     throw new Error(result.error || 'Nákup zlyhal');
   }
   // Over JWS na backende → aktivuje plán
-  const verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws });
+  let verifyRes;
+  try {
+    verifyRes = await api.post('/api/billing/apple/verify', { signedTransaction: result.jws });
+  } catch (err) {
+    if (isDefinitiveVerifyError(err)) ackTransaction(result.transactionId);
+    throw err;
+  }
+  ackTransaction(result.transactionId);
   return { success: true, subscription: verifyRes.data.subscription };
 }
 
