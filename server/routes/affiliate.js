@@ -1,5 +1,20 @@
 const express = require('express');
 const router = express.Router();
+
+// Affiliate nezdieľa s odporučenými používateľmi workspace — celé
+// prihlasovacie meno cudzieho účtu mu nepatrí. Na rozlíšenie riadkov stačí
+// maskovaná podoba („j***n“); plné meno vidí len admin (AdminPanel).
+const maskUsername = (name) => {
+  if (typeof name !== 'string' || !name) return null;
+  const chars = Array.from(name);
+  if (chars.length <= 2) return `${chars[0]}*`;
+  return `${chars[0]}***${chars[chars.length - 1]}`;
+};
+const maskReferredUsers = (commissions) => commissions.map((c) => (
+  c.referredUserId && typeof c.referredUserId === 'object'
+    ? { ...c, referredUserId: { _id: c.referredUserId._id, username: maskUsername(c.referredUserId.username) } }
+    : c
+));
 const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const Commission = require('../models/Commission');
@@ -59,7 +74,7 @@ router.get('/me', authenticateToken, requireAffiliate, async (req, res) => {
       .limit(20)
       .populate('promoCodeId', 'code')
       .populate('referredUserId', 'username')
-      .select('paymentAmount commissionAmount commissionPercent status paymentDate eligibleAfter paidAt plan period')
+      .select('paymentAmount commissionAmount commissionPercent status paymentDate eligibleAfter paidAt plan period promoCodeId referredUserId')
       .lean();
 
     res.json({
@@ -67,7 +82,7 @@ router.get('/me', authenticateToken, requireAffiliate, async (req, res) => {
       totals,
       counts,
       codes,
-      recentCommissions
+      recentCommissions: maskReferredUsers(recentCommissions)
     });
   } catch (err) {
     logger.error('[Affiliate] /me error', { error: err.message });
@@ -144,7 +159,7 @@ router.get('/commissions', authenticateToken, requireAffiliate, async (req, res)
       Commission.countDocuments(q)
     ]);
 
-    res.json({ commissions, total, page, limit });
+    res.json({ commissions: maskReferredUsers(commissions), total, page, limit });
   } catch (err) {
     logger.error('[Affiliate] commissions list error', { error: err.message });
     res.status(500).json({ message: 'Chyba servera' });
