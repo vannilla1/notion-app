@@ -983,7 +983,16 @@ const checkContactDueDates = async (morningWindow = true) => {
  * Schedule due date checks to run at specific times
  * This should be called once when the server starts
  */
+// Handly časovačov — aby sa plánovač nedal spustiť dvakrát (dvojitý interval
+// = dvojité notifikácie) a aby ho šlo zastaviť (stopDueDateChecks).
+let startTimer = null;
+let intervalTimer = null;
+
 const scheduleDueDateChecks = () => {
+  if (intervalTimer) {
+    logger.warn('[DueDateChecker] Scheduler už beží — druhé volanie ignorujem');
+    return;
+  }
   // Beží každých 5 minút, aby sa stihli zachytiť time-of-day reminders
   // (najmenšia rozumná hodnota timeReminders je 15 min — máme 3-násobnú
   // rezervu). Aut. urgency-level prechody (warning/danger/overdue) sú
@@ -991,24 +1000,35 @@ const scheduleDueDateChecks = () => {
   const INTERVAL_MS = 5 * 60 * 1000; // 5 min
 
   // Run immediately on startup (after a short delay to let DB connect)
-  setTimeout(() => {
+  startTimer = setTimeout(() => {
     checkDueDates().catch(err => {
       logger.error('[DueDateChecker] Initial check failed', { error: err.message });
     });
   }, 10000); // 10 seconds after startup
+  startTimer.unref?.();
 
   // Then run periodically
-  setInterval(() => {
+  intervalTimer = setInterval(() => {
     checkDueDates().catch(err => {
       logger.error('[DueDateChecker] Scheduled check failed', { error: err.message });
     });
   }, INTERVAL_MS);
+  // unref: časovač sám nedrží proces nažive (graceful shutdown, Jest).
+  intervalTimer.unref?.();
 
   logger.info('[DueDateChecker] Scheduled to run every 5 minutes');
+};
+
+const stopDueDateChecks = () => {
+  clearTimeout(startTimer);
+  clearInterval(intervalTimer);
+  startTimer = null;
+  intervalTimer = null;
 };
 
 module.exports = {
   checkDueDates,
   scheduleDueDateChecks,
+  stopDueDateChecks,
   getUrgencyLevel
 };
