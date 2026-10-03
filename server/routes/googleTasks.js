@@ -2571,8 +2571,10 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
 
   // Due date
   if (googleDue && googleDue !== crmDue) {
-    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = new Date(googleDue);
-    else task.dueDate = new Date(googleDue);
+    // dueDate je v schéme String (YYYY-MM-DD); Date objekt by Mongoose uložil
+    // cez toString() ako "Sat Mar 28 2026 …" — priraďujeme priamo reťazec.
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = googleDue;
+    else task.dueDate = googleDue;
     changed = true;
   } else if (!googleDue && crmDue) {
     // Due date removed in Google
