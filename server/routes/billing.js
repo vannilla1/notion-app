@@ -653,6 +653,30 @@ function isTransientWebhookError(error) {
 
 // ===== Webhook handlers =====
 
+// Objekty v event.data.object sa renderujú podľa API verzie webhook
+// endpointu v Stripe Dashboarde, nie podľa apiVersion SDK. Od verzie
+// 2025-03-31.basil sa current_period_end presunul do items.data[] a
+// invoice.subscription do invoice.parent.subscription_details — čítame
+// preto oba tvary a pri chýbajúcej hodnote paidUntil nemeníme.
+const getPeriodEnd = (sub) => {
+  const ts = sub?.current_period_end ?? sub?.items?.data?.[0]?.current_period_end;
+  return Number.isFinite(ts) ? new Date(ts * 1000) : null;
+};
+
+const getInvoiceSubscriptionId = (invoice) => {
+  const ref = invoice?.subscription ?? invoice?.parent?.subscription_details?.subscription;
+  if (!ref) return null;
+  return typeof ref === 'string' ? ref : ref.id || null;
+};
+
+const getSubscriptionDiscount = (sub) => {
+  const d = sub?.discount ?? sub?.discounts?.[0] ?? null;
+  // Pri novších API verziách je discounts[] len zoznam ID (bez expand).
+  return d && typeof d === 'object' ? d : null;
+};
+
+const STRIPE_ACCESS_STATUSES = ['active', 'trialing', 'past_due'];
+
 async function handleCheckoutCompleted(session) {
   const userId = session.metadata?.userId;
   if (!userId) {
@@ -670,20 +694,27 @@ async function handleCheckoutCompleted(session) {
   if (!subscriptionId) return;
 
   const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-  const priceId = stripeSub.items.data[0]?.price?.id;
+  const priceId = stripeSub.items?.data?.[0]?.price?.id;
   const plan = session.metadata?.plan || getPlanByPriceId(priceId);
   const period = session.metadata?.period || getBillingPeriod(priceId);
+  const paidUntil = getPeriodEnd(stripeSub);
 
-  user.subscription = {
-    ...user.subscription.toObject(),
-    plan: plan || user.subscription.plan,
-    stripeCustomerId: session.customer,
-    stripeSubscriptionId: subscriptionId,
-    stripePriceId: priceId,
-    billingPeriod: period,
-    paidUntil: new Date(stripeSub.current_period_end * 1000),
-    cancelAtPeriodEnd: stripeSub.cancel_at_period_end
-  };
+  // Jednotlivé polia namiesto priradenia celého objektu — save() potom
+  // pošle $set len na zmenené cesty a neprepíše paralelné zápisy iných
+  // pod-polí (notifications.*, apple*, discount) starým stavom.
+  const sub = user.subscription;
+  sub.plan = plan || sub.plan;
+  sub.source = 'stripe';
+  sub.stripeCustomerId = session.customer;
+  sub.stripeSubscriptionId = subscriptionId;
+  sub.stripePriceId = priceId || sub.stripePriceId;
+  sub.billingPeriod = period || sub.billingPeriod;
+  if (paidUntil) sub.paidUntil = paidUntil;
+  sub.cancelAtPeriodEnd = !!stripeSub.cancel_at_period_end;
+  // Prípadný predošlý Apple plán už nie je aktívny zdroj (checkout je pri
+  // aktívnom Apple pláne blokovaný) — appleOriginalTransactionId ostáva,
+  // aby sa neskoršie Apple notifikácie vedeli spárovať.
+  sub.appleProductId = null;
 
   await user.save();
   logger.info('[Stripe Webhook] Checkout completed — plan activated', {
@@ -731,38 +762,68 @@ async function handleSubscriptionUpdated(subscription) {
       logger.warn('[Stripe Webhook] No user found for subscription', { subscriptionId: subscription.id });
       return;
     }
+    // Zákazník môže mať v Stripe viac predplatných (staré incomplete/
+    // canceled z nedokončeného 3DS, druhé cez portál) a Stripe negarantuje
+    // poradie eventov. Oneskorený event STARÉHO neaktívneho predplatného
+    // nesmie downgradnuť používateľa s iným aktuálnym predplatným.
+    const currentId = byCustomer.subscription?.stripeSubscriptionId;
+    if (currentId && currentId !== subscription.id && !STRIPE_ACCESS_STATUSES.includes(subscription.status)) {
+      logger.info('[Stripe Webhook] Ignoring event for non-current subscription', {
+        userId: byCustomer._id.toString(),
+        subscriptionId: subscription.id,
+        status: subscription.status
+      });
+      return;
+    }
     return updateUserSubscription(byCustomer, subscription);
   }
   return updateUserSubscription(user, subscription);
 }
 
 async function updateUserSubscription(user, subscription) {
-  const priceId = subscription.items.data[0]?.price?.id;
+  const priceId = subscription.items?.data?.[0]?.price?.id;
   const plan = getPlanByPriceId(priceId);
   const period = getBillingPeriod(priceId);
+  const sub = user.subscription;
+  const prevPlan = sub.plan;
 
-  const isActive = ['active', 'trialing'].includes(subscription.status);
+  // past_due: Stripe ešte opakuje platbu (Smart Retries) — prístup aj
+  // source ponechávame; finálny downgrade príde cez subscription.deleted.
+  const keepsAccess = STRIPE_ACCESS_STATUSES.includes(subscription.status);
 
-  user.subscription = {
-    ...user.subscription.toObject(),
-    stripeSubscriptionId: subscription.id,
-    stripeCustomerId: subscription.customer,
-    stripePriceId: priceId,
-    // source='stripe' keď je plán aktívny cez Stripe. Pri downgrade na free
-    // (isActive=false) nastavíme null. Bráni to konfliktu s 'apple' source.
-    source: isActive ? 'stripe' : null,
-    plan: isActive ? (plan || user.subscription.plan) : 'free',
-    billingPeriod: period || user.subscription.billingPeriod,
-    paidUntil: new Date(subscription.current_period_end * 1000),
-    cancelAtPeriodEnd: subscription.cancel_at_period_end
-  };
+  // Neaktívne Stripe predplatné nesmie zrušiť aktívny Apple plán
+  // (používateľ prešiel zo Stripe na App Store).
+  if (!keepsAccess && sub.source === 'apple' && prevPlan !== 'free') {
+    logger.info('[Stripe Webhook] Inactive Stripe subscription for Apple-managed user — plan untouched', {
+      userId: user._id.toString(),
+      subscriptionId: subscription.id,
+      status: subscription.status
+    });
+    if (sub.stripeSubscriptionId === subscription.id) {
+      sub.stripeSubscriptionId = null;
+      sub.stripePriceId = null;
+      await user.save();
+    }
+    return;
+  }
 
-  // If subscription is past_due, keep the plan but log warning
+  const paidUntil = getPeriodEnd(subscription);
+
+  // Jednotlivé polia (nie celý objekt) — viď handleCheckoutCompleted.
+  sub.stripeSubscriptionId = subscription.id;
+  sub.stripeCustomerId = subscription.customer;
+  sub.stripePriceId = priceId || sub.stripePriceId;
+  sub.source = keepsAccess ? 'stripe' : null;
+  sub.plan = keepsAccess ? (plan || prevPlan) : 'free';
+  sub.billingPeriod = period || sub.billingPeriod;
+  if (paidUntil) sub.paidUntil = paidUntil;
+  sub.cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
+
   if (subscription.status === 'past_due') {
-    user.subscription.plan = plan || user.subscription.plan;
     logger.warn('[Stripe Webhook] Subscription past due', {
       userId: user._id.toString(),
-      subscriptionId: subscription.id
+      subscriptionId: subscription.id,
+      planMapped: !!plan
     });
   }
 
@@ -782,13 +843,28 @@ async function handleSubscriptionDeleted(subscription) {
     return;
   }
 
-  // Downgrade to free
-  user.subscription.plan = 'free';
-  user.subscription.stripeSubscriptionId = null;
-  user.subscription.stripePriceId = null;
-  user.subscription.billingPeriod = null;
-  user.subscription.cancelAtPeriodEnd = false;
+  const sub = user.subscription;
+  sub.stripeSubscriptionId = null;
+  sub.stripePriceId = null;
   // Keep stripeCustomerId for future use
+
+  if (sub.source === 'apple' && sub.plan !== 'free') {
+    // Aktívny plán už spravuje App Store — Stripe zmazanie ho nerušíme.
+    await user.save();
+    logger.info('[Stripe Webhook] Stripe subscription deleted, Apple plan kept', {
+      userId: user._id.toString(),
+      subscriptionId: subscription.id
+    });
+    return;
+  }
+
+  // Downgrade to free — source/paidUntil vyčistíme, inak by /status
+  // hlásil `source: 'stripe'` so starým paidUntil pri free pláne.
+  sub.plan = 'free';
+  sub.source = null;
+  sub.paidUntil = null;
+  sub.billingPeriod = null;
+  sub.cancelAtPeriodEnd = false;
 
   await user.save();
   logger.info('[Stripe Webhook] Subscription deleted — downgraded to free', {
@@ -798,14 +874,21 @@ async function handleSubscriptionDeleted(subscription) {
 }
 
 async function handleInvoicePaid(invoice) {
-  if (!invoice.subscription) return;
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  if (!subscriptionId) return;
 
   const user = await User.findOne({ 'subscription.stripeCustomerId': invoice.customer });
   if (!user) return;
 
-  const stripeSub = await stripe.subscriptions.retrieve(invoice.subscription);
-  user.subscription.paidUntil = new Date(stripeSub.current_period_end * 1000);
-  await user.save();
+  const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
+  const paidUntil = getPeriodEnd(stripeSub);
+  // paidUntil posúvame len pre aktuálne predplatné používateľa (alebo keď
+  // ešte žiadne nemá uložené — checkout event môže prísť neskôr).
+  const currentId = user.subscription.stripeSubscriptionId;
+  if (paidUntil && (!currentId || currentId === subscriptionId)) {
+    user.subscription.paidUntil = paidUntil;
+    await user.save();
+  }
 
   logger.info('[Stripe Webhook] Invoice paid — paidUntil updated', {
     userId: user._id.toString(),
@@ -836,10 +919,11 @@ async function createCommissionIfReferred(invoice, stripeSub, payer) {
   // (formát 'promo_...'), alebo subscription.discount.coupon.id ('coupon_...').
   // Promotion code je high-level wrapper okolo Couponu — preferujeme ho lebo
   // promotion code je customer-facing 'JOHN10' string, coupon je vnútorný.
-  const discount = stripeSub.discount;
+  const discount = getSubscriptionDiscount(stripeSub);
   if (!discount) return; // žiadny kód aplikovaný → žiadna provízia
 
-  const promotionCodeId = discount.promotion_code || discount.coupon?.id;
+  const couponRef = discount.coupon ?? discount.source?.coupon;
+  const promotionCodeId = discount.promotion_code || (typeof couponRef === 'string' ? couponRef : couponRef?.id);
   if (!promotionCodeId) return;
 
   // Lookup nášho PromoCode podľa Stripe promotion code / coupon ID
@@ -890,7 +974,7 @@ async function createCommissionIfReferred(invoice, stripeSub, payer) {
       referrerId: promo.referrerId,
       referredUserId: payer._id,
       stripeInvoiceId: invoice.id,
-      stripeSubscriptionId: invoice.subscription,
+      stripeSubscriptionId: getInvoiceSubscriptionId(invoice),
       paymentAmount,
       commissionAmount,
       commissionPercent: promo.commissionPercent,
