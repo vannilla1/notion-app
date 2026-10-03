@@ -39,6 +39,21 @@ const router = express.Router();
 // (`{"$ne": null}`), ktorý Mongoose pre ObjectId path prepustí ako operátor —
 // preto prijímame iba 24-znakový hex reťazec.
 const isOid = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
+// Dátum z query — len neprázdny reťazec s platným dátumom, inak null.
+// `new Date('abc')` = Invalid Date by v Mongo filtri skončil CastError → 500.
+const parseDate = (v) => {
+  if (typeof v !== 'string' || !v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+};
+// { $gte, $lte } rozsah z ?from/?to, alebo null ak ani jedna hranica nie je
+// platná. `toSuffix` (napr. 'T23:59:59') posunie dátum bez času na koniec dňa.
+const dateRange = (from, to, toSuffix = '') => {
+  const f = parseDate(from);
+  const t = parseDate(typeof to === 'string' && to ? to + toSuffix : null);
+  if (!f && !t) return null;
+  return { ...(f ? { $gte: f } : {}), ...(t ? { $lte: t } : {}) };
+};
 
 // Middleware: require super admin (only support@prplcrm.eu)
 const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
@@ -1234,25 +1249,28 @@ router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
     const skip = (parsedPage - 1) * parsedLimit;
 
     const query = {};
-    if (category) query.category = category;
-    if (action) query.action = action;
-    if (userId) query.userId = userId;
+    // Len primitívne reťazce — `?category[$regex]=(a+)+$` by qs premenil na
+    // objekt, ktorý Mongoose pre String path prepustí ako $regex operátor
+    // (obchádza escapeRegex nižšie); `?userId[$ne]=x` = CastError → 500.
+    if (typeof category === 'string' && category) query.category = category;
+    if (typeof action === 'string' && action) query.action = action;
+    if (userId) {
+      if (!isOid(userId)) return res.status(400).json({ message: 'Neplatné userId' });
+      query.userId = userId;
+    }
     if (includeSuperAdmin !== 'true') {
       const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
       if (superAdmin && !userId) {
         query.userId = { $ne: superAdmin._id };
       }
     }
-    if (from || to) {
-      query.createdAt = {};
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
-    }
-    if (search) {
+    const createdRange = dateRange(from, to);
+    if (createdRange) query.createdAt = createdRange;
+    if (typeof search === 'string' && search) {
       // ReDoS hardening (audit MED-002): escapujeme regex meta-znaky
       // a obmedzujeme dĺžku, aby kompromitovaný admin token nemohol
       // poslať katastrofický pattern typu (a+)+ na DoS Mongo connection pool.
-      const safeSearch = escapeRegex(String(search).slice(0, 100));
+      const safeSearch = escapeRegex(search.slice(0, 100));
       query.$or = [
         { username: { $regex: safeSearch, $options: 'i' } },
         { email: { $regex: safeSearch, $options: 'i' } },
@@ -2695,8 +2713,8 @@ router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
         { path: { $regex: safeSearch, $options: 'i' } }
       ];
     }
-    if (req.query.from) filter.lastSeen = { ...filter.lastSeen, $gte: new Date(req.query.from) };
-    if (req.query.to) filter.lastSeen = { ...filter.lastSeen, $lte: new Date(req.query.to) };
+    const lastSeenRange = dateRange(req.query.from, req.query.to);
+    if (lastSeenRange) filter.lastSeen = lastSeenRange;
 
     const [errors, total] = await Promise.all([
       ServerError.find(filter)
@@ -3149,15 +3167,13 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
     const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
     const q = {};
-    if (type) q.type = type;
-    if (status) q.status = status;
-    if (from || to) {
-      q.sentAt = {};
-      if (from) q.sentAt.$gte = new Date(from);
-      if (to) q.sentAt.$lte = new Date(to);
-    }
-    if (search) {
-      const safe = escapeRegex(String(search).slice(0, 100));
+    // Len reťazce — objekt z qs (`?type[$ne]=x`) by Mongoose prepustil ako operátor.
+    if (typeof type === 'string' && type) q.type = type;
+    if (typeof status === 'string' && status) q.status = status;
+    const sentRange = dateRange(from, to);
+    if (sentRange) q.sentAt = sentRange;
+    if (typeof search === 'string' && search) {
+      const safe = escapeRegex(search.slice(0, 100));
       const matchingUsers = await User.find({
         $or: [
           { email: { $regex: safe, $options: 'i' } },
@@ -4014,13 +4030,14 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
     const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
     const q = {};
-    if (status) q.status = status;
-    if (referrerId) q.referrerId = referrerId;
-    if (from || to) {
-      q.paymentDate = {};
-      if (from) q.paymentDate.$gte = new Date(from);
-      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    if (['pending', 'eligible', 'paid', 'revoked'].includes(status)) q.status = status;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+      q.referrerId = referrerId;
     }
+    // `to` prichádza ako dátum bez času → koniec dňa
+    const paymentRange = dateRange(from, to, 'T23:59:59');
+    if (paymentRange) q.paymentDate = paymentRange;
 
     let commissions = await Commission.find(q)
       .sort({ paymentDate: -1 })
@@ -4143,14 +4160,15 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
     const Commission = require('../models/Commission');
     const { status, referrerId, from, to } = req.query;
     const q = {};
-    if (status) q.status = status;
-    if (referrerId) q.referrerId = referrerId;
-    if (from || to) {
-      q.paymentDate = {};
-      if (from) q.paymentDate.$gte = new Date(from);
-      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    if (['pending', 'eligible', 'paid', 'revoked'].includes(status)) q.status = status;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+      q.referrerId = referrerId;
     }
+    const paymentRange = dateRange(from, to, 'T23:59:59');
+    if (paymentRange) q.paymentDate = paymentRange;
     const rows = await Commission.find(q)
+
       .sort({ paymentDate: -1 })
       .populate('referrerId', 'username email')
       .populate('referredUserId', 'username email')
