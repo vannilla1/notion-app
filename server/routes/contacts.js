@@ -778,7 +778,16 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
       }
       let buffer = null;
       try {
-        const cf = await ContactFile.findOne({ fileId: fileMeta.id }, { r2Key: 1, data: 1 }).lean();
+        // Blob musí patriť do zdrojového workspace-u — rovnaká druhá vrstva
+        // obrany ako pri sťahovaní (blobBelongsToWorkspace, nižšie v súbore);
+        // files[] metadáta boli klientom editovateľné, cudzí fileId sa nesmie
+        // dať cez kópiu kontaktu prečítať. Legacy blob bez contactId prechádza.
+        const cf = await ContactFile.findOne({ fileId: fileMeta.id }, { r2Key: 1, data: 1, contactId: 1 }).lean();
+        if (cf && !(await blobBelongsToWorkspace(cf, source._id, sourceWorkspaceId))) {
+          logger.warn('[Copy] Príloha — blob patrí inému prostrediu (preskakujem)', { fileId: fileMeta.id });
+          copyStats.skippedError++;
+          return null;
+        }
         if (cf?.r2Key && fileStorage.isR2Available()) buffer = await fileStorage.downloadFile(cf.r2Key);
         else if (cf?.data) buffer = Buffer.from(cf.data, 'base64');
         else if (fileMeta.data) buffer = Buffer.from(fileMeta.data, 'base64');
