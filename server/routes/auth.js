@@ -749,11 +749,6 @@ router.put('/profile', authenticateToken, async (req, res) => {
       email = normalizeEmail(rawEmail);
       if (!email) return res.status(400).json({ message: 'Zadajte platný e-mail' });
     }
-    let username = null;
-    if (rawUsername !== undefined && rawUsername !== null && rawUsername !== '') {
-      username = normalizeUsername(rawUsername);
-      if (!username) return res.status(400).json({ message: 'Meno musí mať 2–50 znakov (písmená, číslice, medzera, _ . - \')' });
-    }
     if (color !== undefined && color !== null && color !== '' && !isHexColor(color)) {
       return res.status(400).json({ message: 'Neplatná farba' });
     }
@@ -761,9 +756,21 @@ router.put('/profile', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Email je už registrovaný' });
     }
 
-    const current = await User.findById(userId).select('email').lean();
+    const current = await User.findById(userId).select('email username').lean();
     if (!current) {
       return res.status(404).json({ message: 'Užívateľ nenájdený' });
+    }
+
+    // Formát mena kontrolujeme len pri ZMENE. UserMenu posiela celý formulár
+    // (aj pri zmene farby) a staršie účty môžu mať meno so znakmi mimo novej
+    // povolenej množiny — inak by si nemohli uložiť žiadnu zmenu profilu.
+    let username = null;
+    if (rawUsername !== undefined && rawUsername !== null && rawUsername !== '') {
+      const unchanged = typeof rawUsername === 'string' && rawUsername.trim() === current.username;
+      if (!unchanged) {
+        username = normalizeUsername(rawUsername);
+        if (!username) return res.status(400).json({ message: 'Meno musí mať 2–50 znakov (písmená, číslice, medzera, _ . - \')' });
+      }
     }
     const emailChanged = !!email && email !== current.email;
 

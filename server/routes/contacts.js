@@ -183,8 +183,12 @@ const isValidPhone = (phone) => {
 // dĺžky bol 1 MB JSON limit. Limity sú zámerne štedré a odmietajú 400 —
 // tiché orezanie by stratilo dáta. null/undefined = pole neposlané.
 const FIELD_MAX = { name: 300, email: 254, phone: 50, company: 300, website: 2048, notes: 50000 };
-const badContactField = (body) => Object.keys(FIELD_MAX).find(
-  k => body?.[k] != null && (typeof body[k] !== 'string' || body[k].length > FIELD_MAX[k])
+// `previous` (PUT): nezmenená hodnota zo staršieho kontaktu (napr. poznámka
+// dlhšia než limit z čias pred limitom) ostáva povolená — inak by sa kontakt
+// nedal upraviť vôbec, ani jeho iné pole.
+const badContactField = (body, previous = null) => Object.keys(FIELD_MAX).find(
+  k => body?.[k] != null && !(previous && body[k] === previous[k]) &&
+    (typeof body[k] !== 'string' || body[k].length > FIELD_MAX[k])
 );
 // status nemá v schéme enum a findOneAndUpdate beží bez runValidators —
 // klient (ContactForm, CSV export statusMap) pozná len tieto štyri.
@@ -1023,9 +1027,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
-    const badField = badContactField(req.body);
-    if (badField) {
-      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    // Typ/dĺžka polí: rýchla kontrola typu hneď, dĺžka sa porovná s pôvodným
+    // kontaktom nižšie (nezmenené staršie hodnoty ostávajú povolené).
+    const badType = Object.keys(FIELD_MAX).find(k => req.body?.[k] != null && typeof req.body[k] !== 'string');
+    if (badType) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badType}` });
     }
 
     if (email && !isValidEmail(email)) {
@@ -1049,6 +1055,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     if (!previousContact) {
       return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const badField = badContactField(req.body, previousContact);
+    if (badField) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
     }
 
     const previousStatus = previousContact.status;

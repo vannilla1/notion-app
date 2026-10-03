@@ -267,6 +267,24 @@ describe('/api/auth route', () => {
       expect(res.body.color).toBe('#10B981');
     });
 
+    it('staré meno mimo povolených znakov nebráni uložiť farbu; nové neplatné meno → 400', async () => {
+      // Staršie účty mohli mať meno, ktoré nová validácia formátu neprijme.
+      await User.collection.updateOne({ _id: user._id }, { $set: { username: 'Ján@firma!' } });
+      const res = await request(app)
+        .put('/api/auth/profile')
+        .set(authHeader(token))
+        .send({ username: 'Ján@firma!', email: 'edit@test.com', color: '#10B981' });
+      expect(res.status).toBe(200);
+      expect(res.body.color).toBe('#10B981');
+      expect((await User.findById(user._id).lean()).username).toBe('Ján@firma!');
+
+      const bad = await request(app)
+        .put('/api/auth/profile')
+        .set(authHeader(token))
+        .send({ username: 'Nové@meno!' });
+      expect(bad.status).toBe(400);
+    });
+
     it('400 ak nový email berie iný user', async () => {
       await User.create({ username: 'other', email: 'taken@test.com', password: 'x' });
 

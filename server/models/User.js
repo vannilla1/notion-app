@@ -516,4 +516,16 @@ userSchema.post('init', function (doc) {
   }
 });
 
-module.exports = mongoose.model('User', userSchema);
+const UserModel = mongoose.model('User', userSchema);
+
+// Mongoose pri štarte volá init().catch(noop) — zlyhaný build indexu (napr.
+// unique uniq_apple_original_tx pri duplicitných appleOriginalTransactionId)
+// by inak prebehol úplne potichu. Server beží ďalej, len chýba ochrana.
+UserModel.on('index', (err) => {
+  if (!err) return;
+  try {
+    require('../utils/logger').error('[User] Index build failed', { error: err.message, code: err.code });
+  } catch { /* logger nesmie zhodiť štart */ }
+});
+
+module.exports = UserModel;
