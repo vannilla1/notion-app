@@ -2012,6 +2012,10 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     let errors = 0;
     let orphans = 0; // events whose task no longer exists
 
+    // Členstvá sa počas requestu nemenia — načítame ich raz (lazy) namiesto
+    // dotazu na WorkspaceMember pre každú migrovanú kontaktovú úlohu (N+1).
+    let memberWsIds = null;
+
     for (const [taskId, eventId] of syncedTaskIds) {
       // Already bound to a calendar → skip (post-PR2 or previously migrated).
       const existingCal = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
@@ -2026,8 +2030,11 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
         }
         if (!workspaceId) {
           // Contact subtask — search across contacts (bounded by membership).
-          const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
-          const wsIds = memberships.map(m => m.workspaceId);
+          if (!memberWsIds) {
+            const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+            memberWsIds = memberships.map(m => m.workspaceId);
+          }
+          const wsIds = memberWsIds;
           const contact = await Contact.findOne({ workspaceId: { $in: wsIds }, 'tasks.id': taskId }, 'workspaceId').lean();
           if (contact?.workspaceId) workspaceId = contact.workspaceId.toString();
         }
