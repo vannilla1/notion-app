@@ -79,7 +79,9 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId,
       userId: req.user.id,
       title: title ? String(title).substring(0, 500) : 'Untitled',
-      icon: icon || null,
+      // Ikona je emoji/krátky reťazec — objekt by spadol na CastError → 500,
+      // dĺžka nemá limit v schéme.
+      icon: (typeof icon === 'string' && icon.length <= 64) ? icon : null,
       parentId: parentId || null,
       content: content ? String(content).substring(0, 500000) : ''
     });
@@ -114,7 +116,12 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     const { title, icon, content, parentId } = req.body;
 
     if (title !== undefined) page.title = String(title).substring(0, 500);
-    if (icon !== undefined) page.icon = icon;
+    if (icon !== undefined) {
+      if (icon !== null && (typeof icon !== 'string' || icon.length > 64)) {
+        return res.status(400).json({ message: 'Neplatná ikona' });
+      }
+      page.icon = icon;
+    }
     if (content !== undefined) page.content = String(content).substring(0, 500000);
     if (parentId !== undefined) {
       if (parentId === null) {
