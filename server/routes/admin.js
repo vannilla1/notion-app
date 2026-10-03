@@ -1301,6 +1301,17 @@ router.get('/audit-log/stats', authenticateToken, requireAdmin, async (req, res)
   }
 });
 
+// CSV bunka pre text, ktorý si volí bežný používateľ (username, email, názov
+// workspace-u…). Okrem escapovania úvodzoviek chráni aj proti CSV/formula
+// injection: hodnotu začínajúcu `=`, `+`, `-`, `@`, TAB alebo CR by Excel /
+// LibreOffice po otvorení exportu vyhodnotili ako vzorec (napr. =HYPERLINK /
+// DDE), preto ju prefixujeme apostrofom — rovnako ako export provízií nižšie.
+const csvCell = (v) => {
+  const s = String(v ?? '');
+  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+
 // Export users to CSV
 router.get('/export/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -1314,11 +1325,11 @@ router.get('/export/users', authenticateToken, requireAdmin, async (req, res) =>
     const rows = users.map(u => {
       const userWs = members.filter(m => m.userId.toString() === u._id.toString()).map(m => wsMap[m.workspaceId.toString()] || '').filter(Boolean).join('; ');
       return [
-        `"${(u.username || '').replace(/"/g, '""')}"`,
-        `"${(u.email || '').replace(/"/g, '""')}"`,
+        csvCell(u.username),
+        csvCell(u.email),
         u.role || 'user',
         u.subscription?.plan || 'free',
-        `"${userWs}"`,
+        csvCell(userWs),
         u.createdAt ? new Date(u.createdAt).toLocaleDateString('sk-SK') : '',
         u.googleCalendar?.enabled ? 'Áno' : 'Nie',
         u.googleTasks?.enabled ? 'Áno' : 'Nie'
@@ -1347,11 +1358,12 @@ router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, re
       const owner = userMap[w.ownerId.toString()] || {};
       const memberCount = members.filter(m => m.workspaceId.toString() === w._id.toString()).length;
       return [
-        `"${(w.name || '').replace(/"/g, '""')}"`,
-        `"${(w.slug || '').replace(/"/g, '""')}"`,
-        `"${(owner.username || '').replace(/"/g, '""')}"`,
-        `"${(owner.email || '').replace(/"/g, '""')}"`,
+        csvCell(w.name),
+        csvCell(w.slug),
+        csvCell(owner.username),
+        csvCell(owner.email),
         memberCount,
+
         w.paidSeats || 0,
         w.createdAt ? new Date(w.createdAt).toLocaleDateString('sk-SK') : ''
       ].join(',');
