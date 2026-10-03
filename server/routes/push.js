@@ -415,7 +415,8 @@ router.get('/apns/status', authenticateToken, async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[APNs] Status error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -443,7 +444,8 @@ router.post('/apns/test', authenticateToken, async (req, res) => {
     });
     res.json({ message: 'Test odoslaný', result });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[APNs] Test error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -533,7 +535,8 @@ router.get('/fcm/status', authenticateToken, async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[FCM] Status error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -552,7 +555,8 @@ router.post('/fcm/test', authenticateToken, async (req, res) => {
     }, '/app');
     res.json({ message: 'Test odoslaný', result });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[FCM] Test error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
