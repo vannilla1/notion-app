@@ -340,7 +340,10 @@ const sendAPNsNotification = async (userId, payload) => {
           if (!device.apnsEnvironment) {
             device.apnsEnvironment = primarySandbox ? 'sandbox' : 'production';
           }
-          await device.save();
+          // Push je doručený — zlyhanie zápisu ho nesmie započítať ako failed.
+          try { await device.save(); } catch (saveErr) {
+            logger.debug('[APNs] lastUsed save failed', { error: saveErr.message });
+          }
           continue;
         }
 
@@ -353,7 +356,9 @@ const sendAPNsNotification = async (userId, payload) => {
             result.sent++;
             device.lastUsed = new Date();
             device.apnsEnvironment = !primarySandbox ? 'sandbox' : 'production';
-            await device.save();
+            try { await device.save(); } catch (saveErr) {
+              logger.debug('[APNs] lastUsed save failed', { error: saveErr.message });
+            }
             logger.info('[APNs] Fallback succeeded', { env: device.apnsEnvironment });
             continue;
           }
@@ -553,6 +558,15 @@ const generateNotificationUrl = (type, data = {}) => {
  * @param {Object} payload - Notification payload
  * @returns {Object} Result with sent/failed counts
  */
+// lastUsed web push subscription — mimo try bloku odoslania (viď volajúcich).
+const touchSubscription = async (subId) => {
+  try {
+    await PushSubscription.updateOne({ _id: subId }, { lastUsed: new Date() });
+  } catch (err) {
+    logger.debug('[Push] lastUsed update failed', { error: err.message });
+  }
+};
+
 const sendPushNotification = async (userId, payload) => {
   const result = { sent: 0, failed: 0, removed: 0 };
 
@@ -607,12 +621,13 @@ const sendPushNotification = async (userId, payload) => {
             keys: sub.keys
           }, pushPayload);
 
-          // Update last used timestamp
-          sub.lastUsed = new Date();
-          await sub.save();
+          // Doručené — započítame HNEĎ. Predtým bol sub.save() v tom istom try:
+          // jeho zlyhanie (DB blip) catch vyhodnotil ako sieťovú chybu bez
+          // statusCode → retry → používateľ dostal tú istú notifikáciu znova.
           result.sent++;
           metrics.notifications.pushSent++;
           sent = true;
+          await touchSubscription(sub._id);
         } catch (error) {
           // Remove invalid subscriptions immediately — no retry needed
           if (error.statusCode === 410 || error.statusCode === 404) {
@@ -690,9 +705,8 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
     for (const sub of desktopSubs) {
       try {
         await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload);
-        sub.lastUsed = new Date();
-        await sub.save();
         result.sent++;
+        await touchSubscription(sub._id); // zlyhanie zápisu nemení výsledok doručenia
       } catch (error) {
         if (error.statusCode === 410 || error.statusCode === 404) {
           await PushSubscription.deleteOne({ _id: sub._id });
