@@ -8,7 +8,12 @@ const logger = require('../utils/logger');
 
 // Configuration
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // Run once per day
-const STALE_THRESHOLD_DAYS = 30; // Remove subscriptions not used in 30 days
+// 180 dní: lastUsed sa obnovuje pri odoslaní pushu aj pri štarte klienta
+// (initializePush, max. 1× denne). Pri 30 dňoch sa mazali platné odbery
+// používateľov, ktorým mesiac neprišla žiadna notifikácia — prehliadač ich
+// držal ako aktívne a ďalší push sa už nedoručil. Neplatné odbery (404/410)
+// maže notificationService hneď pri odoslaní.
+const STALE_THRESHOLD_DAYS = 180;
 
 /**
  * Clean up stale subscriptions

@@ -7,8 +7,8 @@ const User = require('../../models/User');
  * subscriptionCleanup testy — denný cron na mazanie stale Web Push subskripcií.
  *
  * Testujeme:
- *   - STALE_THRESHOLD_DAYS = 30
- *   - cleanupStaleSubscriptions() maže iba lastUsed < teraz - 30d
+ *   - STALE_THRESHOLD_DAYS = 180
+ *   - cleanupStaleSubscriptions() maže iba lastUsed < teraz - 180d
  *   - getSubscriptionStats() vracia total, uniqueUsers, activeLastDay/Week, stale
  *   - getSubscriptionStats() zaokrúhľuje avgSubscriptionsPerUser na 2 desatinné miesta
  */
@@ -42,13 +42,13 @@ describe('subscriptionCleanup service', () => {
   });
 
   describe('STALE_THRESHOLD_DAYS', () => {
-    it('should export a 30-day threshold constant', () => {
-      expect(subscriptionCleanup.STALE_THRESHOLD_DAYS).toBe(30);
+    it('should export a 180-day threshold constant', () => {
+      expect(subscriptionCleanup.STALE_THRESHOLD_DAYS).toBe(180);
     });
   });
 
   describe('cleanupStaleSubscriptions', () => {
-    it('should delete subscriptions older than 30 days', async () => {
+    it('should delete subscriptions older than 180 days', async () => {
       // Čerstvá (dnes)
       await PushSubscription.create({
         userId: userA._id,
@@ -56,22 +56,22 @@ describe('subscriptionCleanup service', () => {
         keys: { p256dh: 'a', auth: 'b' }
       });
 
-      // Stará 40 dní
+      // Stará 200 dní
       const stale40 = await PushSubscription.create({
         userId: userA._id,
         endpoint: 'https://push.example.com/stale40',
         keys: { p256dh: 'c', auth: 'd' }
       });
-      stale40.lastUsed = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      stale40.lastUsed = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
       await stale40.save();
 
-      // Stará 31 dní
+      // Stará 181 dní
       const stale31 = await PushSubscription.create({
         userId: userB._id,
         endpoint: 'https://push.example.com/stale31',
         keys: { p256dh: 'e', auth: 'f' }
       });
-      stale31.lastUsed = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+      stale31.lastUsed = new Date(Date.now() - 181 * 24 * 60 * 60 * 1000);
       await stale31.save();
 
       const result = await subscriptionCleanup.cleanupStaleSubscriptions();
@@ -82,13 +82,13 @@ describe('subscriptionCleanup service', () => {
       expect(remaining[0].endpoint).toContain('fresh');
     });
 
-    it('should NOT delete subscriptions exactly 29 days old', async () => {
+    it('should NOT delete subscriptions exactly 179 days old', async () => {
       const sub = await PushSubscription.create({
         userId: userA._id,
         endpoint: 'https://push.example.com/edge',
         keys: { p256dh: 'a', auth: 'b' }
       });
-      sub.lastUsed = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
+      sub.lastUsed = new Date(Date.now() - 179 * 24 * 60 * 60 * 1000);
       await sub.save();
 
       const result = await subscriptionCleanup.cleanupStaleSubscriptions();
@@ -162,7 +162,7 @@ describe('subscriptionCleanup service', () => {
         endpoint: 'stale',
         keys: { p256dh: 'a', auth: 'b' }
       });
-      stale.lastUsed = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      stale.lastUsed = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
       await stale.save();
 
       const stats = await subscriptionCleanup.getSubscriptionStats();

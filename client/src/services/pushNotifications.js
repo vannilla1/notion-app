@@ -153,6 +153,20 @@ export const sendTestPush = async () => {
   return response.data;
 };
 
+const SUB_REFRESH_KEY = 'prpl_push_sub_refreshed_at';
+const SUB_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+const refreshServerSubscription = async () => {
+  let last = 0;
+  try { last = Number(localStorage.getItem(SUB_REFRESH_KEY)) || 0; } catch { /* noop */ }
+  if (Date.now() - last < SUB_REFRESH_INTERVAL_MS) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+  await api.post('/api/push/subscribe', subscription.toJSON());
+  try { localStorage.setItem(SUB_REFRESH_KEY, String(Date.now())); } catch { /* noop */ }
+};
+
 // initializePush volá App.jsx pri každom prihlásení a každom prechode medzi
 // /admin* a bežnou appkou — bez guardu by sa 'message' listener na SW
 // pridával znova a znova (hromadenie, viacnásobný re-subscribe na jeden event).
@@ -199,6 +213,10 @@ export const initializePush = async () => {
   const subscribed = await isSubscribedToPush();
 
   if (subscribed) {
+    // Max. 1× denne potvrdíme serveru existujúci odber (obnoví lastUsed) —
+    // inak by ho server po čase nečinnosti zmazal ako „starý“, kým
+    // prehliadač ho ďalej považuje za aktívny a push by prestal chodiť.
+    refreshServerSubscription().catch(() => {});
     return true;
   }
 
