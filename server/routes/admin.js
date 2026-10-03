@@ -942,7 +942,22 @@ router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     const { id } = req.params;
     if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
 
-    const user = await User.findById(id).select('-password').lean();
+    // Okrem hesla vynechávame aj OAuth/sync tokeny, watch channel, tajný token
+    // verejného ICS feedu, reset hash, IBAN a Base64 avatar. Admin UI z nich
+    // nič nezobrazuje (z googleCalendar/googleTasks používa len `enabled` a
+    // `connectedAt`) a tajomstvá tretích strán nemajú opúšťať server —
+    // kompromitovaná admin session by inak znamenala prístup ku Google účtom
+    // používateľov a k ich kalendárovým feedom.
+    const user = await User.findById(id)
+      .select([
+        '-password', '-avatarData', '-avatarMimetype',
+        '-googleCalendar.accessToken', '-googleCalendar.refreshToken', '-googleCalendar.syncToken',
+        '-googleCalendar.watchChannelId', '-googleCalendar.watchResourceId',
+        '-googleTasks.accessToken', '-googleTasks.refreshToken', '-googleTasks.syncToken',
+        '-calendarFeedToken', '-resetPasswordTokenHash', '-resetPasswordExpires',
+        '-affiliate.payoutIban'
+      ].join(' '))
+      .lean();
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
     // Get workspace memberships
