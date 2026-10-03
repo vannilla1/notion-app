@@ -733,7 +733,10 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, requireMessageId
       query.toUserId = req.user.id;
     }
 
-    const message = await Message.findOne(query);
+    // Bez base64 blobov — mení sa len status/resolvedBy; save() posiela iba
+    // $set zmenených ciest a nevybrané polia nevaliduje (rovnaký vzor ako
+    // tasks.js EXCLUDE_FILE_DATA). Nezmigrovaná správa má inak až ~16 MB.
+    const message = await Message.findOne(query, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });
@@ -807,7 +810,10 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId,
       query.toUserId = req.user.id;
     }
 
-    const message = await Message.findOne(query);
+    // Bez base64 blobov — mení sa len status/resolvedBy; save() posiela iba
+    // $set zmenených ciest a nevybrané polia nevaliduje (rovnaký vzor ako
+    // tasks.js EXCLUDE_FILE_DATA). Nezmigrovaná správa má inak až ~16 MB.
+    const message = await Message.findOne(query, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });
@@ -874,7 +880,7 @@ router.put('/:id/reopen', authenticateToken, requireWorkspace, requireMessageId,
       _id: req.params.id,
       workspaceId: req.workspaceId,
       status: { $in: ['approved', 'rejected'] }
-    });
+    }, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo nie je schválený/zamietnutý' });
@@ -968,7 +974,7 @@ router.post('/:id/vote', authenticateToken, requireWorkspace, requireMessageId, 
         { fromUserId: req.user.id },
         { toUserId: req.user.id }
       ]
-    });
+    }, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Anketa nenájdená' });
