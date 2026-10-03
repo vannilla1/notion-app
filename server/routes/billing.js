@@ -64,10 +64,34 @@ const getOrCreateCustomer = async (user) => {
     metadata: { userId: user._id.toString() }
   });
 
-  user.subscription = user.subscription || {};
-  user.subscription.stripeCustomerId = customer.id;
-  await user.save();
+  // Atomický zápis len ak customer ID ešte nikto nenastavil — dva paralelné
+  // /checkout (dvojklik, dve karty) by inak vytvorili 2 Stripe zákazníkov
+  // a posledný save() by ten prvý osirelo prepísal.
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      $or: [
+        { 'subscription.stripeCustomerId': null },
+        { 'subscription.stripeCustomerId': { $exists: false } }
+      ]
+    },
+    { $set: { 'subscription.stripeCustomerId': customer.id } },
+    { new: true, projection: { 'subscription.stripeCustomerId': 1 } }
+  );
 
+  if (!updated) {
+    // Iný request vyhral — náš práve vytvorený zákazník je zbytočný.
+    const winner = await User.findById(user._id).select('subscription.stripeCustomerId').lean();
+    const winnerId = winner?.subscription?.stripeCustomerId;
+    if (!winnerId) throw new Error('User not found while assigning Stripe customer');
+    stripe.customers.del(customer.id).catch((err) => {
+      logger.warn('[Billing] Failed to delete duplicate Stripe customer', { error: err.message, customerId: customer.id });
+    });
+    if (user.subscription) user.subscription.stripeCustomerId = winnerId;
+    return winnerId;
+  }
+
+  if (user.subscription) user.subscription.stripeCustomerId = customer.id;
   return customer.id;
 };
 
