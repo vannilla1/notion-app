@@ -616,14 +616,40 @@ module.exports.handleWebhook = async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    // Billing-critical — broken subscription/payment sync. Vraciame 200 (aby
-    // Stripe neretryoval donekonečna), ale chybu MUSÍME vidieť v Diagnostike.
+    // Billing-critical — broken subscription/payment sync, chybu MUSÍME
+    // vidieť v Diagnostike.
+    const transient = isTransientWebhookError(error);
     error.name = error.name === 'Error' ? 'StripeWebhookProcessingError' : error.name;
     recordError(error, req).catch(() => {});
-    // Return 200 to prevent Stripe from retrying (we logged the error)
-    res.json({ received: true, error: error.message });
+    if (transient) {
+      // Prechodná chyba (výpadok DB, timeout Stripe API) — 500, aby Stripe
+      // event zopakoval (exponenciálny backoff, max ~3 dni). Handlery sú
+      // idempotentné (paidUntil zo Stripe dát, unique stripeInvoiceId,
+      // redemptions.sessionId), takže retry je bezpečný.
+      return res.status(500).json({ received: false });
+    }
+    // Logická chyba v dátach — retry by dopadol rovnako, preto 200. Telo
+    // bez error.message (vidí ho Stripe Dashboard).
+    res.json({ received: true });
   }
 };
+
+/**
+ * Chyby, pri ktorých má zmysel, aby Stripe webhook zopakoval:
+ * sieť/výpadok MongoDB, Stripe API 5xx/429/sieť, timeouty.
+ */
+function isTransientWebhookError(error) {
+  if (!error) return false;
+  const name = error.name || '';
+  if (/^Mongo(Network|ServerSelection|NotConnected|Pool|WaitQueue)/.test(name)) return true;
+  if (name === 'MongoServerError' && Array.isArray(error.errorLabels) && error.errorLabels.includes('RetryableWriteError')) return true;
+  if (typeof error.hasErrorLabel === 'function' && (error.hasErrorLabel('TransientTransactionError') || error.hasErrorLabel('RetryableWriteError'))) return true;
+  if (['StripeConnectionError', 'StripeAPIError', 'StripeRateLimitError'].includes(error.type)) return true;
+  if (error.statusCode === 429 || (error.statusCode >= 500 && error.statusCode < 600)) return true;
+  if (['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN'].includes(error.code)) return true;
+  if (/buffering timed out|topology.*(closed|destroyed)|connection.*closed/i.test(error.message || '')) return true;
+  return false;
+}
 
 // ===== Webhook handlers =====
 
