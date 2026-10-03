@@ -203,6 +203,23 @@ const populateAssignedUsers = async (assignedToIds) => {
   }));
 };
 
+// assignedTo z tela požiadavky — len platné ObjectId reťazce A LEN členovia
+// daného workspace. Predtým sa pole ukladalo doslovne a nové ID išli rovno do
+// notifyTaskAssignment/notifySubtaskAssignment (kategória 'direct' = vždy
+// push), takže prihlásený používateľ z workspace A vedel poslať push
+// notifikáciu s vlastným textom ľubovoľnému používateľovi systému – stačilo
+// poznať jeho ObjectId. Klient ponúka na priradenie práve členov
+// (GET /api/auth/users = WorkspaceMember), takže legitímne hodnoty prejdú;
+// nečlen (aj bývalý) sa ticho vypustí. Vracia reťazce – Task.assignedTo
+// (ObjectId) aj Contact.tasks.assignedTo (String) ich castujú.
+const sanitizeAssignedTo = async (ids, workspaceId) => {
+  const valid = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(isObjectIdString))];
+  if (valid.length === 0) return [];
+  const members = await WorkspaceMember.find({ workspaceId, userId: { $in: valid } }, 'userId').lean();
+  const memberIds = new Set(members.map(m => String(m.userId)));
+  return valid.filter(id => memberIds.has(id));
+};
+
 // Auto-invalidate tasks cache after any mutation
 router.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
@@ -1102,12 +1119,15 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo, reminder, timeReminders } = req.body;
+    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo: rawAssignedTo, reminder, timeReminders } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
+
+    // Len členovia workspace — viď sanitizeAssignedTo.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Support both old contactId (single) and new contactIds (array)
     let finalContactIds = [];
@@ -1360,8 +1380,12 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName, workspac
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo, reminder } = req.body;
+    const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo: rawAssignedTo, reminder } = req.body;
     const io = req.app.get('io');
+
+    // Len členovia workspace — viď sanitizeAssignedTo. Počíta sa raz, všetky
+    // tri vetvy nižšie (contact / global / fallback) pracujú už s očisteným poľom.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // If source is 'contact', update in contacts
     if (source === 'contact') {
@@ -1486,7 +1510,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
                 originalAssignedTo,
                 newAssignedTo,
                 newlyAssigned,
-                assignedToFromBody: assignedTo
+                assignedToFromBody: rawAssignedTo
               });
             }
 
@@ -1723,7 +1747,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           originalAssignedTo,
           newAssignedTo,
           newlyAssigned,
-          assignedToFromBody: assignedTo
+          assignedToFromBody: rawAssignedTo
         });
       }
 
@@ -1879,7 +1903,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             originalCtaskAssignedTo,
             newAssignedTo,
             newlyAssigned,
-            assignedToFromBody: assignedTo
+            assignedToFromBody: rawAssignedTo
           });
         }
 
@@ -2247,12 +2271,15 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo, timeReminders } = req.body;
+    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
 
     if (!title || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
+
+    // Len členovia workspace — viď sanitizeAssignedTo.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Plan-limit pre podúlohy (subtasks). Limit platí pre celkový počet
     // podúloh v projekte (rekurzívne — vrátane vnorených). Predtým limit
@@ -2465,8 +2492,12 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, completed, source, dueDate, dueTime, notes, assignedTo, timeReminders } = req.body;
+    const { title, completed, source, dueDate, dueTime, notes, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
+
+    // Len členovia workspace — viď sanitizeAssignedTo. Musí byť hotové PRED
+    // volaním synchrónnej updateSubtaskInTask, ktorá pole preberá z closure.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Returns { updated, originalAssignedTo } for assignment notification logic
     const updateSubtaskInTask = (task) => {
