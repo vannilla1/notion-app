@@ -229,24 +229,30 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     if (role && ['admin', 'manager', 'user'].includes(role)) {
       filter.role = role;
     }
+    // Viacero $or podmienok (hasStripe=false + search) kombinujeme cez $and —
+    // druhé priradenie `filter.$or = …` predtým potichu prepísalo prvé, takže
+    // pri hľadaní sa filter „bez Stripe predplatného“ stratil.
+    const andConds = [];
     if (hasStripe === 'true') {
       filter['subscription.stripeSubscriptionId'] = { $exists: true, $ne: null };
     } else if (hasStripe === 'false') {
-      filter.$or = [
+      andConds.push({ $or: [
         { 'subscription.stripeSubscriptionId': { $exists: false } },
         { 'subscription.stripeSubscriptionId': null }
-      ];
+      ] });
     }
     if (hasDiscount === 'true') {
       filter['subscription.discount.type'] = { $exists: true, $ne: null };
     }
-    if (search && search.trim()) {
-      const safe = escapeRegex(String(search).slice(0, 100));
-      filter.$or = [
+    if (typeof search === 'string' && search.trim()) {
+      const safe = escapeRegex(search.slice(0, 100));
+      andConds.push({ $or: [
         { username: { $regex: safe, $options: 'i' } },
         { email: { $regex: safe, $options: 'i' } }
-      ];
+      ] });
     }
+    if (andConds.length) filter.$and = andConds;
+
 
     // Last login lookup z AuditLog. Robíme single aggregation (max createdAt)
     // na všetkých userov v poslednom rezultsete — efektívnejšie ako N+1.
