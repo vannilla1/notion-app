@@ -1,4 +1,4 @@
-const { withServerSubtaskFiles } = require('../../utils/subtaskFiles');
+const { withServerSubtaskFiles, countSubtaskNodes } = require('../../utils/subtaskFiles');
 
 /**
  * PUT úlohy nesmie prevziať files[] podúloh z tela požiadavky — inak sa dá
@@ -57,5 +57,42 @@ describe('withServerSubtaskFiles', () => {
     expect(withServerSubtaskFiles(undefined, existing)).toBe(existing);
     expect(withServerSubtaskFiles([], existing)).toEqual([]);
     expect(withServerSubtaskFiles([{ id: 's1' }], undefined)[0].files).toEqual([]);
+  });
+
+  it('stav pripomienok, copiedFrom a createdAt berie zo servera; pri zmene termínu ich vynuluje', () => {
+    const server = [{
+      id: 'r1', title: 'R', dueDate: '2026-10-10', dueTime: '10:00',
+      reminderSent: true, timeRemindersSent: [15], createdAt: '2026-01-01T00:00:00.000Z',
+      copiedFrom: { contactId: 'c1', taskId: 't1' }
+    }];
+    const same = withServerSubtaskFiles([{ id: 'r1', title: 'R', dueDate: '2026-10-10', dueTime: '10:00', reminderSent: false, timeRemindersSent: [], createdAt: 'x', copiedFrom: { contactId: 'evil' } }], server);
+    expect(same[0].timeRemindersSent).toEqual([15]);
+    expect(same[0].createdAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(same[0].copiedFrom).toEqual({ contactId: 'c1', taskId: 't1' });
+    const moved = withServerSubtaskFiles([{ id: 'r1', title: 'R', dueDate: '2026-10-11', dueTime: '10:00' }], server);
+    expect(moved[0].timeRemindersSent).toEqual([]);
+  });
+
+  it('whitelist polí, typy a limity', () => {
+    const out = withServerSubtaskFiles([{
+      id: 'w1', title: 'x'.repeat(600), completed: 'ano', priority: 'urgent', dueTime: '25:99',
+      assignedTo: ['507f1f77bcf86cd799439011', { $ne: 1 }, 'bad'], hacked: true
+    }], []);
+    expect(out[0].title.length).toBe(500);
+    expect(out[0].completed).toBe(false);
+    expect(out[0].priority).toBeNull();
+    expect(out[0].dueTime).toBe('');
+    expect(out[0].assignedTo).toEqual(['507f1f77bcf86cd799439011']);
+    expect(out[0]).not.toHaveProperty('hacked');
+  });
+
+  it('duplicitné ID dostane nové a hĺbka stromu je obmedzená', () => {
+    const dup = withServerSubtaskFiles([{ id: 'd1' }, { id: 'd1' }], []);
+    expect(dup[0].id).toBe('d1');
+    expect(dup[1].id).not.toBe('d1');
+    let deep = { id: 'n0' };
+    let cur = deep;
+    for (let i = 1; i < 20; i++) { cur.subtasks = [{ id: `n${i}` }]; cur = cur.subtasks[0]; }
+    expect(countSubtaskNodes(withServerSubtaskFiles([deep], []))).toBe(10);
   });
 });

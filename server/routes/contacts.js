@@ -13,7 +13,7 @@ const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan, respondIfSubtaskLimitExceeded } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
@@ -635,6 +635,21 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     });
 
     await contact.save();
+
+    // Súbežné POST prejdú kontrolou počtu naraz (check-then-act) — po
+    // vložení overíme znova a nadbytočný kontakt hneď zmažeme.
+    if (maxContacts !== Infinity) {
+      const firstIds = await Contact.find({ workspaceId: req.workspaceId })
+        .sort({ createdAt: 1, _id: 1 }).limit(maxContacts).select('_id').lean();
+      if (!firstIds.some(c => String(c._id) === String(contact._id))) {
+        await Contact.deleteOne({ _id: contact._id });
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxContacts} kontaktov pre toto prostredie.`
+          : `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.`;
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'contacts', limit: maxContacts });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+      }
+    }
 
     const io = req.app.get('io');
     const contactData = contactToPlainObject(contact);
@@ -1284,6 +1299,11 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     // files, notes, lastUrgencyLevel pri každom edit-e tasku cez tento route.
     const taskPlain = typeof task.toObject === 'function' ? task.toObject() : task;
     const nextPriority = cleanTaskPriority(priority); // undefined = ponechať
+    let nextSubtasks = task.subtasks;
+    if (req.body.subtasks !== undefined) {
+      nextSubtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+      if (await respondIfSubtaskLimitExceeded(req, res, nextSubtasks, task.subtasks)) return;
+    }
     contact.tasks[taskIndex] = {
       ...taskPlain,
       id: task.id,
@@ -1294,8 +1314,8 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       priority: nextPriority !== undefined ? nextPriority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
       assignedTo: cleanAssignees(assignedTo) ?? task.assignedTo,
-      // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
-      subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks,
+      // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
+      subtasks: nextSubtasks,
       createdAt: task.createdAt,
       modifiedAt: new Date().toISOString()
     };

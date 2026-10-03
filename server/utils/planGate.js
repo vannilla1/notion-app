@@ -48,4 +48,28 @@ const logPlanGateHit = (req, { code, feature, limit = null }) => {
   } catch { /* audit je bonus — nikdy nezhodí request */ }
 };
 
-module.exports = { logPlanGateHit, getWorkspacePlan };
+const SUBTASK_LIMITS = { free: 10, team: 25, pro: Infinity };
+
+/**
+ * Plánový limit podúloh aj pre PUT celého stromu (POST ho mal, PUT celý
+ * strom od klienta ho obchádzal). Blokuje len RAST nad limit — úprava už
+ * väčšieho stromu (napr. po downgrade) bez pridávania ostáva možná.
+ * Vráti true, ak odpovedal 403.
+ */
+const respondIfSubtaskLimitExceeded = async (req, res, newTree, oldTree) => {
+  const { countSubtaskNodes } = require('./subtaskFiles');
+  const newCount = countSubtaskNodes(newTree);
+  if (newCount <= countSubtaskNodes(oldTree)) return false;
+  const plan = await getWorkspacePlan(req);
+  const max = SUBTASK_LIMITS[plan] ?? SUBTASK_LIMITS.free;
+  if (max === Infinity || newCount <= max) return false;
+  const { isIosNativeApp } = require('./platform');
+  const message = isIosNativeApp(req)
+    ? `Dosiahli ste limit ${max} podúloh v projekte.`
+    : `Váš plán umožňuje max. ${max} podúloh v projekte. Pre viac prejdite na vyšší plán.`;
+  logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'subtasks', limit: max });
+  res.status(403).json({ message, code: 'PLAN_LIMIT' });
+  return true;
+};
+
+module.exports = { logPlanGateHit, getWorkspacePlan, respondIfSubtaskLimitExceeded };

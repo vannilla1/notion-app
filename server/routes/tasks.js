@@ -12,7 +12,7 @@ const fileStorage = require('../services/fileStorage');
 const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan, respondIfSubtaskLimitExceeded } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
@@ -1517,8 +1517,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               }));
             };
 
-            // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
+            // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
             let updatedSubtasks = req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks;
+            if (req.body.subtasks !== undefined && await respondIfSubtaskLimitExceeded(req, res, updatedSubtasks, task.subtasks)) return;
             if (completed === true) {
               updatedSubtasks = markAllSubtasksCompleted(updatedSubtasks);
             }
@@ -1799,8 +1800,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       }
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
-        // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
-        task.subtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+        // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
+        const nextSubtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+        if (await respondIfSubtaskLimitExceeded(req, res, nextSubtasks, task.subtasks)) return;
+        task.subtasks = nextSubtasks;
       }
 
       // Auto-complete all subtasks when main task is completed
@@ -1957,6 +1960,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         // nepreserve schema fields. Bez .toObject() by sa pri každom PUT
         // stratili files, notes, lastUrgencyLevel, atď.
         const ctaskPlain = typeof ctask.toObject === 'function' ? ctask.toObject() : ctask;
+        let nextCtaskSubtasks = ctask.subtasks;
+        if (req.body.subtasks !== undefined) {
+          nextCtaskSubtasks = withServerSubtaskFiles(req.body.subtasks, ctask.subtasks);
+          if (await respondIfSubtaskLimitExceeded(req, res, nextCtaskSubtasks, ctask.subtasks)) return;
+        }
         contact.tasks[taskIndex] = {
           ...ctaskPlain,
           id: ctask.id,
@@ -1967,7 +1975,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           priority: priority !== undefined ? priority : ctask.priority,
           completed: completed !== undefined ? completed : ctask.completed,
           assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
-          subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, ctask.subtasks) : ctask.subtasks,
+          subtasks: nextCtaskSubtasks,
           createdAt: ctask.createdAt,
           modifiedAt: new Date().toISOString()
         };
