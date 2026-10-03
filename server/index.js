@@ -285,19 +285,40 @@ app.use(serverErrorMirrorMiddleware);
 
 // Global error handler
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error', {
+  // Ak už odpoveď odišla (napr. chyba uprostred streamovania prílohy),
+  // res.status().json() by sám hodil „Cannot set headers after they are
+  // sent" — delegujeme na default Express handler, ktorý spojenie zavrie.
+  if (res.headersSent) return next(err);
+
+  // http-errors nastavuje status aj statusCode, iné knižnice len statusCode
+  // (serverErrorMirror v serverErrorService.js číta obe) — inak by sa 4xx
+  // chyba zmenila na 500.
+  const status = err.status || err.statusCode || 500;
+  const isClientError = status >= 400 && status < 500;
+
+  logger[isClientError ? 'warn' : 'error']('Unhandled error', {
     error: err.message,
     stack: err.stack,
+    status,
     path: req.path,
     method: req.method,
     userId: req.user?.id
   });
 
-  res.status(err.status || 500).json({
-    message: process.env.NODE_ENV === 'production'
-      ? 'Nastala chyba servera'
-      : err.message
-  });
+  // 4xx z body-parsera (413 telo nad limit, 400 nevalidný JSON) NIE JE chyba
+  // servera — generická 5xx hláška klienta mýlila. Stavové kódy sa nemenia.
+  let message;
+  if (process.env.NODE_ENV !== 'production') {
+    message = err.message;
+  } else if (status === 413) {
+    message = 'Požiadavka je príliš veľká';
+  } else if (isClientError) {
+    message = 'Neplatná požiadavka';
+  } else {
+    message = 'Nastala chyba servera';
+  }
+
+  res.status(status).json({ message });
 });
 
 // Socket.io for real-time collaboration
