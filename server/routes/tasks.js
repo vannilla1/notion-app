@@ -3453,9 +3453,24 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
+    // RFC 6266: ASCII fallback vo `filename=` (diakritika odstránená cez NFD,
+    // iné ne-ASCII znaky a úvodzovky/spätné lomky → '_'; res.set by pri
+    // ne-ASCII hodnote hodil ERR_INVALID_CHAR) + plný UTF-8 názov vo
+    // `filename*=`. Predtým bol vo `filename=` percent-enkódovaný názov, ktorý
+    // prehliadač/WebView pri priamom otvorení URL uložil doslova ako
+    // `fakt%C3%BAra%20%C4%8D.%205.pdf`. Webový klient hlavičku nečíta
+    // (sťahuje blob a názov berie z metadát), takže preň sa nič nemení.
+    const safeName = String(fileMeta.originalName || 'subor');
+    const asciiName = safeName
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7e]/g, '_')
+      .replace(/["\\]/g, '_') || 'subor';
+    // RFC 5987 attr-char: encodeURIComponent necháva ' ( ) * — doenkódovať.
+    const utf8Name = encodeURIComponent(safeName)
+      .replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
     res.set({
       'Content-Type': fileMeta.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
+      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
       'Content-Length': fileBuffer.length
     });
     res.send(fileBuffer);
