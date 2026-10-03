@@ -4208,7 +4208,10 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
     const esc = (v) => {
       if (v == null) return '';
       const s = String(v);
-      if (/^[=+\-@\t\r]/.test(s)) return `'${s.replace(/"/g, '""')}"`; // CSV injection protection
+      // CSV injection protection — apostrof VNÚTRI úvodzoviek. Predtým chýbala
+      // otváracia úvodzovka (`'text"`), takže bunka s čiarkou rozbila riadok.
+      if (/^[=+\-@\t\r]/.test(s)) return `"'${s.replace(/"/g, '""')}"`;
+
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
