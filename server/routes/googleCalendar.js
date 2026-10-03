@@ -1017,13 +1017,15 @@ const processCalendarChanges = async (user) => {
         const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
 
         if (newDueDate && newDueDate !== taskDueDate) {
+          // dueDate je v schéme String vo formáte YYYY-MM-DD (ako z <input type=date>);
+          // Date objekt by Mongoose uložil cez toString() ako "Sat Mar 28 2026 …".
           if (contact && taskIndex !== -1) {
-            contact.tasks[taskIndex].dueDate = new Date(newDueDate);
+            contact.tasks[taskIndex].dueDate = newDueDate;
             contact.tasks[taskIndex].dueTime = newDueTime;
             contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
             changed = true;
           } else if (task._id) {
-            task.dueDate = new Date(newDueDate);
+            task.dueDate = newDueDate;
             task.dueTime = newDueTime;
             task.modifiedAt = new Date().toISOString();
             changed = true;
