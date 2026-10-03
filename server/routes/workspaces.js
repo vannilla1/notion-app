@@ -863,20 +863,37 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     // inviterUser already fetched above for capacity check
     const inviteLink = `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/invite/${invitation.token}`;
 
-    // Send invitation email (fire and forget — don't block response)
+    // Odoslanie e-mailu s pozvánkou. SMTP transporter nemá nastavené timeouty
+    // (nodemailer default: 2 min connection / 10 min socket), takže pri
+    // nedostupnom SMTP by tento request visel minúty. Čakáme max. 15 s —
+    // pozvánka aj odkaz sú už vytvorené a klient ich zobrazí; e-mail môže
+    // doraziť neskôr (vtedy sa iba zaloguje).
     let emailSent = false;
-    try {
-      emailSent = await sendInvitationEmail({
-        toEmail: normalizedEmail,
-        inviterName: inviterUser?.username || 'Člen tímu',
-        workspaceName: workspace.name,
-        role: invitation.role,
-        inviteLink,
-        expiresAt: invitation.expiresAt
-      });
-    } catch (emailErr) {
+    let emailTimer = null;
+    const emailPromise = sendInvitationEmail({
+      toEmail: normalizedEmail,
+      inviterName: inviterUser?.username || 'Člen tímu',
+      workspaceName: workspace.name,
+      role: invitation.role,
+      inviteLink,
+      expiresAt: invitation.expiresAt
+    }).catch((emailErr) => {
       logger.warn('Invitation email failed', { error: emailErr.message, email: normalizedEmail });
-    }
+      return false;
+    });
+    emailSent = await Promise.race([
+      emailPromise,
+      new Promise((resolve) => {
+        emailTimer = setTimeout(() => {
+          logger.warn('Invitation email timed out (15 s) — response sent without waiting', { email: normalizedEmail });
+          emailPromise.then((sent) => {
+            if (sent) logger.info('Invitation email eventually sent after timeout', { email: normalizedEmail });
+          });
+          resolve(false);
+        }, 15000);
+      })
+    ]);
+    if (emailTimer) clearTimeout(emailTimer);
 
     logger.info('Invitation sent', {
       workspaceId: req.workspaceId,
