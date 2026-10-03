@@ -177,12 +177,52 @@ const getUrgencyMessage = (oldLevel, newLevel, title, dueDate) => {
 
 const REMINDER_INTERVAL_MS = 5 * 60 * 1000; // matches cron frequency
 
+// dueDate + dueTime sú slovenský "nástenný" čas (klient aj Google Calendar
+// ich berú v Europe/Bratislava). Server na Render beží v UTC, takže
+// `new Date('YYYY-MM-DDTHH:MM:00')` (bez offsetu = lokálny čas servera) by
+// termín posunul o +1 h (zima) / +2 h (leto) a pripomienky by chodili
+// neskoro — v lete aj po termíne. Prepočet robíme cez Intl bez závislostí.
+const DUE_TIME_ZONE = 'Europe/Bratislava';
+
+// Offset zóny voči UTC (ms) v okamihu utcMs.
+const getZoneOffsetMs = (utcMs) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: DUE_TIME_ZONE, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(new Date(utcMs));
+  const get = (type) => parseInt(parts.find(p => p.type === type)?.value, 10);
+  const zonedAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'),
+    get('hour') % 24, get('minute'), get('second'));
+  return zonedAsUtc - Math.floor(utcMs / 1000) * 1000;
+};
+
+// Nástenný čas v Europe/Bratislava → UTC ms. Druhá iterácia rieši deň
+// prechodu letného/zimného času.
+const zonedWallTimeToUtcMs = (y, mo, d, hh, mm) => {
+  const wallAsUtc = Date.UTC(y, mo - 1, d, hh, mm);
+  const firstGuess = wallAsUtc - getZoneOffsetMs(wallAsUtc);
+  return wallAsUtc - getZoneOffsetMs(firstGuess);
+};
+
 const parseDueDateTimeMs = (item) => {
   if (!item.dueDate) return null;
   // dueTime "HH:MM" alebo prázdny — bez času fallback na začiatok dňa.
-  const dt = item.dueTime && /^\d{2}:\d{2}$/.test(item.dueTime)
-    ? `${String(item.dueDate).split('T')[0]}T${item.dueTime}:00`
-    : `${String(item.dueDate).split('T')[0]}T00:00:00`;
+  const hasTime = item.dueTime && /^\d{2}:\d{2}$/.test(item.dueTime);
+  const datePart = String(item.dueDate).split('T')[0];
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
+  if (dm) {
+    try {
+      const [hh, mm] = hasTime ? item.dueTime.split(':').map(Number) : [0, 0];
+      const ms = zonedWallTimeToUtcMs(Number(dm[1]), Number(dm[2]), Number(dm[3]), hh, mm);
+      if (Number.isFinite(ms)) return ms;
+    } catch {
+      // Intl zlyhal (nemalo by) — padneme na pôvodný výpočet nižšie
+    }
+  }
+  const dt = hasTime
+    ? `${datePart}T${item.dueTime}:00`
+    : `${datePart}T00:00:00`;
   const ms = new Date(dt).getTime();
   return Number.isFinite(ms) ? ms : null;
 };
@@ -219,7 +259,10 @@ const checkTimeReminders = (item, nowMs = Date.now()) => {
 };
 
 const formatTimeReminderMessage = (title, dueMs, mins) => {
+  // timeZone: dueMs je skutočný UTC okamih — bez zóny by sa na UTC serveri
+  // zobrazil čas o 1–2 h nižší, než si používateľ nastavil.
   const dueLocal = new Date(dueMs).toLocaleString('sk-SK', {
+    timeZone: DUE_TIME_ZONE,
     day: 'numeric', month: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
