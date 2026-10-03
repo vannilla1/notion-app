@@ -1617,8 +1617,8 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
               || completedChanged || assignedChanged || subtasksChanged || reminderChangedField;
             const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
-            // Diagnostic — kým ladíme; po stabilizácii môžeme znížiť na debug.
-            logger.info('[Task PUT contact] priority-only check', {
+            // Diagnostic — po stabilizácii znížené na debug (šum v produkčných logoch).
+            logger.debug('[Task PUT contact] priority-only check', {
               taskId: req.params.id, priorityChanged, titleChanged, descChanged,
               dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
               subtasksChanged, reminderChangedField, onlyPriorityChanged
@@ -1868,7 +1868,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
         || completedChanged || assignedChanged || subtasksChanged || reminderChangedFlag;
       const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
-      logger.info('[Task PUT global] priority-only check', {
+      logger.debug('[Task PUT global] priority-only check', {
         taskId: req.params.id, priorityChanged, titleChanged, descChanged,
         dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
         subtasksChanged, reminderChangedFlag, onlyPriorityChanged
@@ -2020,7 +2020,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const fbOtherChanged = fbTitleChanged || fbDescChanged || fbDueDateChanged || fbDueTimeChanged
           || fbCompletedChanged || fbAssignedChanged || fbSubtasksChanged;
         const fbOnlyPriorityChanged = fbPriorityChanged && !fbOtherChanged;
-        logger.info('[Task PUT fallback] priority-only check', {
+        logger.debug('[Task PUT fallback] priority-only check', {
           taskId: req.params.id, fbPriorityChanged, fbTitleChanged, fbDescChanged,
           fbDueDateChanged, fbDueTimeChanged, fbCompletedChanged, fbAssignedChanged,
           fbSubtasksChanged, fbOnlyPriorityChanged
@@ -3351,7 +3351,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     // úloha, inak _id kontaktu (ContactFile.contactId pri uploade).
     let ownerContactId = null;
 
-    logger.info('Task file download request', { taskId, fileId, subtaskId });
+    logger.debug('Task file download request', { taskId, fileId, subtaskId });
 
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
@@ -3366,7 +3366,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         } else {
           fileMeta = (task.files || []).find(f => f.id === fileId);
         }
-        if (fileMeta) logger.info('Task file download: found in global Task', { taskId, fileId });
+        if (fileMeta) logger.debug('Task file download: found in global Task', { taskId, fileId });
       }
     }
 
@@ -3387,7 +3387,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         }
         if (fileMeta) {
           ownerContactId = contact._id;
-          logger.info('Task file download: found in contact task', { taskId, fileId });
+          logger.debug('Task file download: found in contact task', { taskId, fileId });
         } else logger.warn('Task file download: contact task found but no file', {
           taskId, fileId, subtaskId,
           taskFiles: (contactTask.files || []).map(f => f.id),
@@ -3430,17 +3430,17 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
       try {
         fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
-        logger.info('Task file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+        logger.debug('Task file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
       } catch (r2Err) {
         logger.error('Task file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
         return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
       }
     } else if (contactFile?.data) {
       fileBuffer = Buffer.from(contactFile.data, 'base64');
-      logger.info('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
+      logger.debug('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
     } else if (fileMeta.data) {
       fileBuffer = Buffer.from(fileMeta.data, 'base64');
-      logger.info('Task file download: very-legacy embedded data, migrating', { fileId });
+      logger.debug('Task file download: very-legacy embedded data, migrating', { fileId });
       // contactId podľa vlastníka — bez neho by blob úlohy v kontakte
       // vyzeral ako globálny a scoped delete by ho nenašiel.
       ContactFile.updateOne(
