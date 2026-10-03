@@ -162,6 +162,20 @@ const getApnJwt = () => {
 };
 
 // Send a single notification to APNs via HTTP/2
+// Orezanie reťazcových hodnôt v notification.data pred vložením do push
+// payloadu. Web push aj APNs majú limit ~4 KB a data obsahujú používateľské
+// texty bez maxlength (názov úlohy, kontaktu, workspace-u…) — dlhá hodnota
+// by zhodila doručenie celej notifikácie (413 / PayloadTooLarge).
+const PUSH_DATA_MAX_LEN = 300;
+const truncatePushData = (data) => {
+  if (!data || typeof data !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    out[k] = typeof v === 'string' ? v.slice(0, PUSH_DATA_MAX_LEN) : v;
+  }
+  return out;
+};
+
 const sendToAPNs = (deviceToken, payload, sandbox = false) => {
   return new Promise((resolve, reject) => {
     const host = sandbox ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
@@ -311,7 +325,7 @@ const sendAPNsNotification = async (userId, payload) => {
       url: url,
       type: payload.type,
       workspaceId: payload.data?.workspaceId ? String(payload.data.workspaceId) : undefined,
-      ...(payload.data || {})
+      ...truncatePushData(payload.data)
     };
 
     for (const device of devices) {
@@ -577,7 +591,7 @@ const sendPushNotification = async (userId, payload) => {
       data: {
         url,
         type: payload.type,
-        ...payload.data
+        ...truncatePushData(payload.data)
       },
       tag: payload.tag || payload.type || 'default'
     });
@@ -666,7 +680,7 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
       body: String(payload.body || payload.message || '').slice(0, 200),
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
-      data: { url, type: payload.type, ...payload.data },
+      data: { url, type: payload.type, ...truncatePushData(payload.data) },
       tag: payload.tag || payload.type || 'default'
     });
 
