@@ -2474,8 +2474,17 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           newDueTime !== oldDueTime ||
           JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
 
+        // Podúloha 1. úrovne je Mongoose subdokument — spread `{...subdoc}`
+        // vráti len interné $__/_doc, NIE schema polia (viď komentár pri
+        // PUT /:id). Bez .toObject() sa pri každej úprave podúlohy stratili
+        // files, reminder, reminderSent, lastUrgencyLevel, copiedFrom a order
+        // (po save() nahradené defaultmi). Vnorené podúlohy sú plain objekty.
+        const subPlain = typeof found.subtask.toObject === 'function'
+          ? found.subtask.toObject()
+          : found.subtask;
+
         found.parent[found.index] = {
-          ...found.subtask,
+          ...subPlain,
           id: found.subtask.id, // Ensure ID is preserved
           title: title !== undefined ? title : found.subtask.title,
           completed: completed !== undefined ? completed : found.subtask.completed,
