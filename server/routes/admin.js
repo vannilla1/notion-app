@@ -861,7 +861,11 @@ router.get('/workspaces/:id', authenticateToken, requireAdmin, async (req, res) 
     // Get members with user details
     const members = await WorkspaceMember.find({ workspaceId: id }).lean();
     const memberUserIds = members.map(m => m.userId);
-    const memberUsers = await User.find({ _id: { $in: memberUserIds } }).select('username email role subscription color avatar avatarData avatarMimetype').lean();
+    // avatarData (Base64 blob, aj niekoľko MB na usera) tu zámerne nenačítavame —
+    // admin UI zobrazuje len username/email a avatar sa servíruje cez
+    // /api/auth/avatar/:userId. Predtým detail workspace-u s 10 členmi
+    // znamenal desiatky MB čítania z Mongo + JSON serializácie.
+    const memberUsers = await User.find({ _id: { $in: memberUserIds } }).select('username email role subscription color avatar').lean();
     const memberMap = {};
     memberUsers.forEach(u => { memberMap[u._id.toString()] = u; });
 
