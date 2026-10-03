@@ -23,8 +23,10 @@ api.interceptors.request.use(
     // má vlastný workspace bez multi-device interferencie. Ak header chýba
     // (prvý request po logine, pred fetchWorkspaces), backend spadne na DB
     // fallback. Viac v client/src/utils/workspaceStorage.js.
+    // Explicitne zadaný header (napr. sync slučka cez všetky workspaces
+    // v UserMenu) má prednosť pred uloženým workspace.
     const wsId = getStoredWorkspaceId();
-    if (wsId) {
+    if (wsId && !config.headers['X-Workspace-Id']) {
       config.headers['X-Workspace-Id'] = wsId;
     }
     return config;
@@ -70,7 +72,15 @@ api.interceptors.response.use(
     // smieme: DB-readiness middleware odmietol request skôr, než sa čokoľvek
     // zapísalo.
     const isUpload = typeof FormData !== 'undefined' && config.data instanceof FormData;
-    const retryable = is503 || (!isUpload && (isTimeout || isNetwork));
+    // Rovnako JSON POST (nový kontakt, správa, komentár, projekt…): timeout
+    // znamená, že request odišiel a server ho mohol spracovať (Render cold
+    // start ho vybaví po 30–50 s) — opakovanie by vytvorilo duplicitu. Po
+    // timeoute/výpadku siete preto opakujeme len idempotentné metódy; 503
+    // (DB-readiness / auth middleware odmietli request pred spracovaním)
+    // opakujeme pri každej metóde.
+    const method = String(config.method || 'get').toLowerCase();
+    const idempotent = ['get', 'head', 'options', 'put', 'delete'].includes(method);
+    const retryable = is503 || (!isUpload && idempotent && (isTimeout || isNetwork));
 
     // `_noRetry` — volajúci má vlastnú slučku opakovania (AuthContext.fetchUser).
     if (!isBlob && !config._noRetry && retryable && config._retryCount < 3) {
