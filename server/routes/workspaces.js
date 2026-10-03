@@ -526,12 +526,21 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
 });
 
 // Update paid seats (admin only)
+// Dokúpené miesta mení LEN super-admin (alebo budúci billing tok po
+// zaplatení seat add-onu). Predtým si ich owner/manager workspace vedel
+// nastaviť ľubovoľne a obísť tak limit členov plánu — paidSeats sa
+// pripočítava vo všetkých plan-gate kontrolách. Klient endpoint nepoužíva.
 router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (req, res) => {
   try {
+    if (String(req.user.email || '').toLowerCase() !== 'support@prplcrm.eu') {
+      logger.warn('Seat change denied — not super admin', { userId: req.user.id, workspaceId: req.workspace?._id });
+      return res.status(403).json({ message: 'Počet miest mení len administrátor Prpl CRM' });
+    }
+
     const { paidSeats } = req.body;
 
-    if (paidSeats === undefined || typeof paidSeats !== 'number' || paidSeats < 0) {
-      return res.status(400).json({ message: 'Počet miest musí byť číslo väčšie alebo rovné 0' });
+    if (paidSeats === undefined || typeof paidSeats !== 'number' || !Number.isFinite(paidSeats) || paidSeats < 0 || paidSeats > 1000) {
+      return res.status(400).json({ message: 'Počet miest musí byť číslo 0 – 1000' });
     }
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { paidSeats: Math.floor(paidSeats) });
