@@ -860,7 +860,11 @@ const createNotification = async ({
     metrics.notifications.created++;
 
     // Trim user's notification history to last 150 (fire-and-forget).
-    setImmediate(() => trimUserHistory(userId));
+    // Len pri ~každom 10. inserte: trim stojí 2 dotazy (countDocuments + find
+    // so sortom), ktoré bežali pri KAŽDEJ notifikácii. História tak môže
+    // dočasne prekročiť limit o pár záznamov; staršie aj tak maže TTL index
+    // po 30 dňoch.
+    if (Math.random() < 0.1) setImmediate(() => trimUserHistory(userId));
 
     // Send real-time notification via Socket.IO
     if (io) {
