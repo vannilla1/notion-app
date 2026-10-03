@@ -2190,7 +2190,10 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       // — v názve by rozbili Stiahnuť v iOS appke (viď sanitizeDisplayName).
       // Vlastný názov so spustiteľnou príponou („foto.exe") sa ignoruje —
       // súbor prešiel blocklistom pod pôvodným názvom a tak sa aj uloží.
-      const customDisplay = sanitizeDisplayName((req.body.customName || '').trim().slice(0, 200));
+      // String() — multer pri opakovanom poli customName vráti pole a .trim
+      // by padol na TypeError → 500 + falošný záznam v Diagnostike (PATCH
+      // rename nižšie to už robí rovnako).
+      const customDisplay = sanitizeDisplayName(String(req.body.customName ?? '').trim().slice(0, 200));
       const displayName = (customDisplay && !hasBlockedExtension(customDisplay) ? customDisplay : null)
         || sanitizeDisplayName(req.file.originalname)
         || 'súbor';
