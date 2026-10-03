@@ -44,7 +44,13 @@ const initializeEmail = () => {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: (process.env.SMTP_PORT === '465'),
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      // Timeouty (ms): nodemailer defaulty sú 2 min connect / 30 s greeting /
+      // 10 min socket. Pri zaseknutom SMTP serveri by request s pozvánkou
+      // alebo reset hesla visel minúty. S funkčným SMTP sa nič nemení.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000
     });
     logger.info('[AdminEmail] Email service initialized');
     return true;
