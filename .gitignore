@@ -2,6 +2,8 @@ node_modules
 .env
 .env.local
 dist
+# Vite PWA dev service worker (devOptions.enabled) — generuje sa pri npm run dev
+dev-dist
 
 # macOS Finder metadata — nič užitočné pre git, zverejňovanie by prezradilo
 # štruktúru priečinkov a custom attributes.
