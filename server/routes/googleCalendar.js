@@ -1323,8 +1323,19 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       contactCount: contacts.length
     });
 
+    // Len úlohy nepriradené alebo priradené tomuto používateľovi — rovnako
+    // ako auto-sync, /status a Google Tasks /sync. Predtým bulk sync pchal
+    // do kalendára aj cudzie priradené úlohy celého workspace.
+    const syncUserId = req.user.id.toString();
+    const isUserTask = (task) => {
+      const assignedTo = task.assignedTo || [];
+      if (assignedTo.length === 0) return true;
+      return assignedTo.some(id => id && id.toString() === syncUserId);
+    };
+
     // Collect global tasks
     for (const task of globalTasks) {
+      if (!isUserTask(task)) continue;
       if (task.dueDate) {
         tasksToSync.push({
           id: task._id.toString(),
@@ -1345,6 +1356,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
+          if (!isUserTask(task)) continue;
           if (task.dueDate) {
             tasksToSync.push({
               id: task.id,
