@@ -255,6 +255,21 @@ router.post('/checkout', authenticateToken, async (req, res) => {
     }
 
     const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
+    }
+
+    // Double-billing guard: aktívny plán platený cez Apple IAP sa mení len
+    // v iOS Nastaveniach. Stripe checkout by vytvoril druhé predplatné a
+    // updateUserSubscription by prepísal source na 'stripe', kým Apple
+    // ďalej obnovuje to pôvodné.
+    if (user.subscription?.source === 'apple' && user.subscription?.plan && user.subscription.plan !== 'free') {
+      return res.status(409).json({
+        message: 'Predplatné je spravované cez App Store. Zmeňte ho v nastaveniach iOS (Apple ID → Predplatné).',
+        code: 'APPLE_MANAGED'
+      });
+    }
+
     const customerId = await getOrCreateCustomer(user);
 
     // If user already has an active subscription, use Stripe billing portal instead
