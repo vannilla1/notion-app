@@ -710,6 +710,19 @@ function Tasks() {
   // dvojité Enter pred odpoveďou servera by inak poslali dva rovnaké POSTy
   // a vytvorili duplicitnú podúlohu. Ref, nie state — netreba re-render.
   const addingSubtaskRef = useRef(new Set());
+  // Časovače zvýraznenia (2,5–4 s) a scroll-retry reťazcov (20–30 × 100 ms)
+  // evidujeme a pri unmounte rušíme — inak by po odchode zo stránky bežali
+  // ďalej (document.querySelector, setState na odpojenom komponente).
+  const timersRef = useRef(new Set());
+  const later = useCallback((fn, ms) => {
+    const id = setTimeout(() => { timersRef.current.delete(id); fn(); }, ms);
+    timersRef.current.add(id);
+    return id;
+  }, []);
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current.clear();
+  }, []);
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -1362,11 +1375,11 @@ function Tasks() {
       return;
     }
     if (attempts < 20) { // 20 × 100ms = 2s
-      setTimeout(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
+      later(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
     } else {
       debug.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
     }
-  }, []);
+  }, [later]);
 
   // Rozbalenie projektu kliknutím. Akordeón (otvorený max jeden) pri
   // rozkliknutí zbalí predtým otvorený projekt — ak bol NAD klikaným a mal
@@ -1394,11 +1407,11 @@ function Tasks() {
       return;
     }
     if (attempts < 30) {
-      setTimeout(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
+      later(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
     } else {
       debug.warn('[DeepLink] Tasks: gave up scrolling to subtask', subtaskId);
     }
-  }, []);
+  }, [later]);
 
   // Find the ancestor subtask IDs leading to a given subtask. Returns array
   // of IDs (NOT including the target itself) from outermost to innermost.
@@ -1489,12 +1502,12 @@ function Tasks() {
             // Expand first highlighted task
             const firstId = [...ids][0];
             setExpandedTask(firstId);
-            setTimeout(() => {
+            later(() => {
               if (taskRefs.current[firstId]) {
                 taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
               }
             }, 200);
-            setTimeout(() => setHighlightedTaskIds(new Set()), 4000);
+            later(() => setHighlightedTaskIds(new Set()), 4000);
           }
         } catch { /* ignore */ }
       };
@@ -1552,7 +1565,7 @@ function Tasks() {
         });
         // Scroll to the subtask itself (not the parent task) once its DOM
         // node renders. Small delay lets expand state propagate first.
-        setTimeout(() => scrollToSubtaskWithRetry(subtaskId), 150);
+        later(() => scrollToSubtaskWithRetry(subtaskId), 150);
       } else {
         debug.warn('[DeepLink] Tasks: subtask not found in tree, scrolling to task', subtaskId);
         scrollToTaskWithRetry(taskId);
@@ -1562,11 +1575,11 @@ function Tasks() {
       scrollToTaskWithRetry(taskId);
     }
 
-    setTimeout(() => {
+    later(() => {
       setHighlightedTaskId(null);
       setHighlightedSubtaskId(null);
     }, 3000);
-  }, [tasks, highlightTrigger, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors]);
+  }, [tasks, highlightTrigger, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors, later]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
@@ -1789,13 +1802,13 @@ function Tasks() {
       setHighlightedTaskId(next.taskId);
       scrollToTaskWithRetry(next.taskId);
       // Auto-clear po 2.5s — krátky vizuálny pulz, nie permanentný highlight.
-      setTimeout(() => setHighlightedTaskId(prev => prev === next.taskId ? null : prev), 2500);
+      later(() => setHighlightedTaskId(prev => prev === next.taskId ? null : prev), 2500);
     } else {
       // Subtask — najprv treba expandnúť parent task aby bol v DOM.
       setExpandedTask(next.taskId);
       setHighlightedSubtaskId(next.subtaskId);
       scrollToSubtaskWithRetry(next.subtaskId);
-      setTimeout(() => setHighlightedSubtaskId(prev => prev === next.subtaskId ? null : prev), 2500);
+      later(() => setHighlightedSubtaskId(prev => prev === next.subtaskId ? null : prev), 2500);
     }
   };
 
