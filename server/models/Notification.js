@@ -40,7 +40,10 @@ const notificationSchema = new mongoose.Schema({
       'message.rejected',
       'message.commented',
       'message.comment.reacted',
-      'workspace.memberAdded'
+      'workspace.memberAdded',
+      // Člen opustil prostredie (workspaces.js POST /current/leave) — predtým
+      // sa posielal typ 'workspace' mimo enumu a notifikácia sa nikdy neuložila.
+      'workspace.memberLeft'
     ],
     required: true
   },
@@ -75,7 +78,7 @@ const notificationSchema = new mongoose.Schema({
   // Related entity
   relatedType: {
     type: String,
-    enum: ['contact', 'task', 'subtask', 'message']
+    enum: ['contact', 'task', 'subtask', 'message', 'workspace']
   },
   relatedId: String,
   relatedName: String,

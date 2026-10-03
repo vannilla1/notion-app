@@ -233,6 +233,7 @@ function NotificationBell() {
     if (type?.startsWith('subtask')) return '📝';
     if (type?.startsWith('message')) return '📨';
     if (type === 'workspace.memberAdded') return '👥';
+    if (type === 'workspace.memberLeft') return '🚪';
     if (type?.startsWith('workspace')) return '🏢';
     return '🔔';
   };

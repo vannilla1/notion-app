@@ -781,7 +781,7 @@ const getPushPrefKey = (type, category, data = null) => {
   if ((type === 'task.dueDate' || type === 'subtask.dueDate') && data?.urgency === 'overdue') return 'pushOverdue';
   if (type === 'task.dueDate' || type === 'subtask.dueDate') return 'pushDeadlines';
   if (type === 'task.overdue' || type === 'subtask.overdue') return 'pushOverdue';
-  if (type === 'workspace.memberAdded') return 'pushNewMember';
+  if (type === 'workspace.memberAdded' || type === 'workspace.memberLeft') return 'pushNewMember';
   return 'pushTeamActivity'; // default bucket for everything else general
 };
 

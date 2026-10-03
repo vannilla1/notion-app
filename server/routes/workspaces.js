@@ -182,6 +182,21 @@ router.post('/', authenticateToken, async (req, res) => {
 
     await workspace.save();
 
+    // Súbežné POST / prejdú kontrolou počtu naraz (check-then-act) — po
+    // vložení overíme znova a nadbytočný workspace hneď zmažeme.
+    if (maxOwnedWorkspaces !== Infinity) {
+      const ownedAfter = await Workspace.find({ ownerId: req.user.id }).sort({ createdAt: 1, _id: 1 }).select('_id').lean();
+      const allowedIds = new Set(ownedAfter.slice(0, maxOwnedWorkspaces).map(w => String(w._id)));
+      if (!allowedIds.has(String(workspace._id))) {
+        await Workspace.deleteOne({ _id: workspace._id });
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxOwnedWorkspaces} pracovných prostredí.`
+          : `Váš plán umožňuje vlastniť max. ${maxOwnedWorkspaces} pracovných prostredí. Pre viac prejdite na vyšší plán.`;
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'workspaces', limit: maxOwnedWorkspaces });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+      }
+    }
+
     // Create owner membership
     const membership = new WorkspaceMember({
       workspaceId: workspace._id,
@@ -765,7 +780,7 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
     await Promise.all(admins.map(admin => notificationService.createNotification({
       userId: admin.userId.toString(),
       workspaceId: req.workspace._id,
-      type: 'workspace',
+      type: 'workspace.memberLeft',
       title: `${leavingName} opustil/a prostredie`,
       message: `Používateľ ${leavingName} opustil/a pracovné prostredie "${workspaceName}".`,
       actorId: req.user.id,
@@ -1131,6 +1146,16 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       return res.status(410).json({ message: 'Pozvánka vypršala' });
     }
 
+    // Pozvánka platí len pre účet s pozvaným e-mailom — preposlaný odkaz
+    // (alebo odkaz z cudzej schránky) inak pridal do tímu kohokoľvek.
+    const userEmail = String(req.user.email || '').toLowerCase().trim();
+    if (invitation.email && invitation.email.toLowerCase() !== userEmail) {
+      return res.status(403).json({
+        message: `Pozvánka bola vystavená na adresu ${invitation.email}. Prihláste sa týmto účtom alebo požiadajte o novú pozvánku.`,
+        code: 'INVITE_EMAIL_MISMATCH'
+      });
+    }
+
     // Check if already a member
     const existingMember = await WorkspaceMember.findOne({
       workspaceId: invitation.workspaceId,
@@ -1171,6 +1196,18 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       }
     }
 
+    // Atomické „zabranie“ pozvánky (pending → accepted) PRED vytvorením
+    // členstva — dva súbežné requesty s tým istým tokenom inak oba prešli
+    // kontrolou pending.
+    const claimed = await Invitation.findOneAndUpdate(
+      { _id: invitation._id, status: 'pending' },
+      { $set: { status: 'accepted' } },
+      { new: true }
+    );
+    if (!claimed) {
+      return res.status(410).json({ message: 'Pozvánka už bola použitá' });
+    }
+
     // Create membership. Unique index { workspaceId, userId } — pri dvojkliku
     // / retry klienta prejde druhý request kontrolou "už člen" ešte pred
     // vznikom membership a create() hodí E11000; členstvo však existuje,
@@ -1183,18 +1220,16 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
         invitedBy: invitation.invitedBy
       });
     } catch (createErr) {
-      if (createErr.code !== 11000) throw createErr;
-      invitation.status = 'accepted';
-      await invitation.save();
+      if (createErr.code !== 11000) {
+        // Členstvo nevzniklo — pozvánku vrátime do pending, nech sa dá zopakovať
+        await Invitation.updateOne({ _id: invitation._id }, { $set: { status: 'pending' } }).catch(() => {});
+        throw createErr;
+      }
       return res.json({ message: 'Už ste členom tohto prostredia', workspaceId: invitation.workspaceId });
     }
 
     // Switch user to the new workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: invitation.workspaceId });
-
-    // Mark invitation as accepted
-    invitation.status = 'accepted';
-    await invitation.save();
 
     logger.info('Invitation accepted', {
       workspaceId: invitation.workspaceId,
