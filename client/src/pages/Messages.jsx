@@ -307,6 +307,13 @@ function Messages() {
 
   // Deep link highlight — fetch message by ID, switch to correct tab, select it
   const lastMsgHighlightRef = useRef(null);
+  // ID časovačov zvýraznenia (polling tryScroll, zhasnutie highlightu) — pri
+  // odchode zo stránky ich zrušíme, aby nebežali nad odpojeným komponentom.
+  const highlightTimersRef = useRef([]);
+  useEffect(() => () => {
+    highlightTimersRef.current.forEach(clearTimeout);
+    highlightTimersRef.current = [];
+  }, []);
   const highlightMessage = async (messageId, commentId = null) => {
     try {
       const res = await api.get(`/api/messages/${messageId}`);
@@ -343,12 +350,12 @@ function Messages() {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
           }
-          if (attempts < 40) setTimeout(tryScroll, 100);
+          if (attempts < 40) highlightTimersRef.current.push(setTimeout(tryScroll, 100));
         };
-        setTimeout(tryScroll, 100);
+        highlightTimersRef.current.push(setTimeout(tryScroll, 100));
         // Clear highlight after giving the user time to see it (measure from
         // when it's shown, not mount; extend to 6s for cold-start cases)
-        setTimeout(() => setHighlightedCommentId(null), 6000);
+        highlightTimersRef.current.push(setTimeout(() => setHighlightedCommentId(null), 6000));
       }
     } catch {
       // Silently fail — message may have been deleted
@@ -395,7 +402,7 @@ function Messages() {
           setHighlightedMessageIds(ids);
           const firstId = [...ids][0];
           setSelectedMessage(allMessages.find(m => (m._id || m.id) === firstId) || null);
-          setTimeout(() => setHighlightedMessageIds(new Set()), 4000);
+          highlightTimersRef.current.push(setTimeout(() => setHighlightedMessageIds(new Set()), 4000));
         }
       }).catch(() => {});
     }
