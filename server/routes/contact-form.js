@@ -29,6 +29,13 @@ router.post('/', contactLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Vyplňte všetky povinné polia.' });
     }
 
+    // Typová kontrola — číslo/objekt/pole by prešli kontrolou dĺžky
+    // (undefined > 200 je false) a `name.replace` nižšie by hodil TypeError
+    // → 500; pole ['a','b'] by sa do e-mailu dostalo ako „a,b".
+    if (typeof name !== 'string' || typeof email !== 'string' || typeof message !== 'string') {
+      return res.status(400).json({ message: 'Neplatný formát údajov.' });
+    }
+
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ message: 'Neplatný formát emailu.' });
     }
