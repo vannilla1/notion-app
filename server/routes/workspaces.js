@@ -599,8 +599,9 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
       return res.status(403).json({ message: 'Nie je možné odstrániť vlastníka' });
     }
 
-    // If removing self (leaving workspace)
-    if (member.userId.toString() === req.user.id) {
+    // If removing self (leaving workspace). req.user.id je ObjectId pri auth
+    // cache miss a string pri Redis hite — porovnávame ako string.
+    if (member.userId.toString() === String(req.user.id)) {
       // Clear current workspace if this is it
       const user = await User.findById(req.user.id).select('currentWorkspaceId').lean();
       if (user?.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
