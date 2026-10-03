@@ -787,15 +787,18 @@ router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requir
       return res.status(400).json({ message: 'Vlastníctvo je možné previesť len na manažéra' });
     }
 
-    // Update roles - old owner becomes member
-    req.workspaceMember.role = 'member';
-    await req.workspaceMember.save();
+    // Poradie zápisov: najprv ownerId a povýšenie nového vlastníka, až
+    // nakoniec degradácia starého. Ak niektorý zápis zlyhá, prechodný stav
+    // "dvaja vlastníci" je bezpečný (starý vlastník operáciu zopakuje);
+    // pôvodné poradie mohlo nechať workspace úplne bez vlastníka.
+    await Workspace.findByIdAndUpdate(req.workspace._id, { ownerId: newOwnerId });
 
     newOwnerMembership.role = 'owner';
     await newOwnerMembership.save();
 
-    // Update workspace owner
-    await Workspace.findByIdAndUpdate(req.workspace._id, { ownerId: newOwnerId });
+    // Old owner becomes member
+    req.workspaceMember.role = 'member';
+    await req.workspaceMember.save();
 
     // Obaja majú v cache staré membership (rola) aj starý Workspace.ownerId.
     invalidateCache(req.user.id);
