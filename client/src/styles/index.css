@@ -13267,3 +13267,12 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
     scroll-behavior: auto !important;
   }
 }
+
+/* Live indikátor v SuperAdmin → Live aktivita používa `animation: pulse 2s
+   infinite` (AdminPanel.jsx), ale @keyframes pulse neexistoval — bodka sa
+   nepulzovala. Jemný opacity pulz; prefers-reduced-motion ho vypne cez
+   globálne pravidlo vyššie. */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
