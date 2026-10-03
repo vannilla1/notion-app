@@ -46,6 +46,23 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Otvorené mobilné menu: zamknúť scroll pozadia (fixed overlay inak
+  // prepúšťa scroll na stránku pod ním) a zavrieť ho klávesou Escape.
+  // Landing sa hydratuje samostatne mimo App stromu, takže sa naň
+  // nevzťahuje scroll-lock z App.jsx pre .modal-overlay. Effect sa v SSR
+  // (renderToString) nespúšťa a nemení markup – hydratácia je bezpečná.
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') setMobileMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mobileMenuOpen]);
+
   const scrollTo = (id) => {
     setMobileMenuOpen(false);
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
