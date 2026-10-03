@@ -1292,16 +1292,13 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
   }
 
   if (recipientIds.size === 0) return [];
-  const out = [];
-  for (const id of Array.from(recipientIds)) {
-    const n = await createNotification({
-      ...notificationData,
-      userId: id,
-      category: categoryForRecipient(id)
-    });
-    if (n) out.push(n);
-  }
-  return out;
+  // Paralelne (createNotificationsFor = Promise.allSettled) — sekvenčný
+  // await na každého príjemcu predlžoval odpoveď tasks/contacts routes.
+  return createNotificationsFor(Array.from(recipientIds).map(id => ({
+    ...notificationData,
+    userId: id,
+    category: categoryForRecipient(id)
+  })));
 };
 
 /**
@@ -1554,16 +1551,13 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
   }
 
   if (recipientIds.size === 0) return [];
-  const out = [];
-  for (const id of Array.from(recipientIds)) {
-    const n = await createNotification({
-      ...notificationData,
-      userId: id,
-      category: categoryForRecipient(id)
-    });
-    if (n) out.push(n);
-  }
-  return out;
+  // Paralelne (createNotificationsFor = Promise.allSettled) — sekvenčný
+  // await na každého príjemcu predlžoval odpoveď tasks/contacts routes.
+  return createNotificationsFor(Array.from(recipientIds).map(id => ({
+    ...notificationData,
+    userId: id,
+    category: categoryForRecipient(id)
+  })));
 };
 
 /**
