@@ -3257,6 +3257,12 @@ router.get('/users/:userId/email-logs', authenticateToken, requireAdmin, async (
  * Mode `dryRun=true` len vráti počet cieľových userov bez reálneho
  * odoslania — pre admin previewujúceho impact.
  */
+// Guard proti súbežnému spusteniu: handler odpovie { started: true } hneď
+// a slučka beží ~200 ms/mail na pozadí. Dedup cez EmailLog sa počíta iba
+// raz na začiatku, takže dva kliky admina (alebo retry klienta po timeoute)
+// by spustili dve paralelné slučky nad tou istou frontou → duplicitné maily
+// celej user base. Migračné endpointy nižšie majú rovnaký `running` guard.
+let broadcastRunning = false;
 router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmin, async (req, res) => {
   try {
     // activeWithinDays=null → všetci registrovaní userovia bez filtra.
@@ -3293,38 +3299,51 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
       });
     }
 
-    // Async background send — nemôžeme blokovať admin response na 5 min.
-    // Vraciame okamžite { started: true } a admin v Email tabe sleduje progress
-    // cez log-y / countdown stats endpoint.
-    res.json({
-      started: true,
-      eligibleUsers: targetUsers.length,
-      alreadySent: targetUsers.length - queue.length,
-      toSend: queue.length
-    });
-
-    // Fire-and-forget loop with rate limiting
-    const subEmail = require('../services/subscriptionEmailService');
-    const triggeredBy = `admin:${req.adminUser?.username || req.user.username}-broadcast`;
-    let sent = 0, failed = 0;
-    for (const u of queue) {
-      try {
-        const result = await subEmail.sendMobileAppLaunch({ user: u, triggeredBy });
-        if (result.ok) sent++;
-        else failed++;
-      } catch (err) {
-        failed++;
-        logger.error('[Broadcast] mobile_app_launch error', { userId: String(u._id), error: err.message });
-      }
-      // 200ms throttle — 5 mails/sec, well under hostcreators SMTP limits
-      await new Promise((r) => setTimeout(r, 200));
+    if (broadcastRunning) {
+      return res.status(409).json({ message: 'Broadcast už beží — počkajte na dokončenie predchádzajúceho.' });
     }
-    logger.info('[Broadcast] mobile_app_launch complete', { sent, failed, total: queue.length });
+    broadcastRunning = true;
+    try {
+      // Async background send — nemôžeme blokovať admin response na 5 min.
+      // Vraciame okamžite { started: true } a admin v Email tabe sleduje progress
+      // cez log-y / countdown stats endpoint.
+      res.json({
+        started: true,
+        eligibleUsers: targetUsers.length,
+        alreadySent: targetUsers.length - queue.length,
+        toSend: queue.length
+      });
+
+      // Fire-and-forget loop with rate limiting
+      const subEmail = require('../services/subscriptionEmailService');
+      const triggeredBy = `admin:${req.adminUser?.username || req.user.username}-broadcast`;
+      let sent = 0, failed = 0;
+      for (const u of queue) {
+        try {
+          const result = await subEmail.sendMobileAppLaunch({ user: u, triggeredBy });
+          if (result.ok) sent++;
+          else failed++;
+        } catch (err) {
+          failed++;
+          logger.error('[Broadcast] mobile_app_launch error', { userId: String(u._id), error: err.message });
+        }
+        // 200ms throttle — 5 mails/sec, well under hostcreators SMTP limits
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      logger.info('[Broadcast] mobile_app_launch complete', { sent, failed, total: queue.length });
+    } finally {
+      broadcastRunning = false;
+    }
   } catch (err) {
     logger.error('Broadcast mobile_app_launch error', { error: err.message });
-    res.status(500).json({ message: 'Chyba broadcast', error: err.message });
+    // Odpoveď už mohla odísť (slučka beží po res.json) — druhý res.json by
+    // hodil ERR_HTTP_HEADERS_SENT ako unhandled rejection.
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Chyba broadcast', error: err.message });
+    }
   }
 });
+
 
 /**
  * MED-003 follow-up — bulk encrypt plaintext OAuth tokens.
