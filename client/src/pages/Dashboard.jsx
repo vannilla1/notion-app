@@ -346,6 +346,18 @@ function Dashboard() {
 
   const { activeContacts, newContacts, completedContacts, cancelledContacts, pendingTasks, completedTasks, totalReceived, pendingMessages, approvedMessages, rejectedMessages, commentedMessages, pollMessages, totalSent, lowPriorityTasks, mediumPriorityTasks, highPriorityTasks, myTasksCount } = stats;
 
+  // Odvodené zoznamy pre render — bez memo sa O(kontakty × projekty) filter
+  // a triedenie počítali pri každom re-renderi (rozbalenie podúlohy, socket
+  // event…). getContactTasks závisí iba od `tasks` a argumentu.
+  const contactsWithTasks = useMemo(
+    () => contacts.filter(c => getContactTasks(c).length > 0),
+    [contacts, tasks]
+  );
+  const pendingTasksSorted = useMemo(() => tasks.filter(t => !t.completed).sort((a, b) => {
+    const pri = { high: 0, medium: 1, low: 2 };
+    return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
+  }), [tasks]);
+
   // Sort functions (stable references)
   const sortTasks = useCallback((list) => [...list].sort((a, b) => {
     const aCompleted = a.completed === true;
@@ -1280,10 +1292,7 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
-                      {[...tasks].filter(t => !t.completed).sort((a, b) => {
-                        const pri = { high: 0, medium: 1, low: 2 };
-                        return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
-                      }).slice(0, 5).map(task => (
+                      {pendingTasksSorted.slice(0, 5).map(task => (
                         <div
                           key={task.id}
                           className="dashboard-task-item clickable-task"
@@ -1321,9 +1330,9 @@ function Dashboard() {
                           )}
                         </div>
                       ))}
-                      {tasks.filter(t => !t.completed).length > 5 && (
+                      {pendingTasksSorted.length > 5 && (
                         <div className="show-more">
-                          + {tasks.filter(t => !t.completed).length - 5} ďalších projektov
+                          + {pendingTasksSorted.length - 5} ďalších projektov
                         </div>
                       )}
 
@@ -1433,8 +1442,7 @@ function Dashboard() {
                   <h3>Kontakty s projektami</h3>
                 </div>
                 <div className="contacts-with-tasks">
-                  {contacts
-                    .filter(c => getContactTasks(c).length > 0)
+                  {contactsWithTasks
                     .slice(0, 5)
                     .map(contact => {
                       const contactTasks = getContactTasks(contact);
@@ -1478,7 +1486,7 @@ function Dashboard() {
                         </div>
                       );
                     })}
-                  {contacts.filter(c => getContactTasks(c).length > 0).length === 0 && (
+                  {contactsWithTasks.length === 0 && (
                     <div className="empty-state-small">
                       <p>Žiadne kontakty s projektami</p>
                     </div>
