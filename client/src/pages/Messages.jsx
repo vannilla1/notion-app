@@ -398,9 +398,15 @@ function Messages() {
     }
   }, [location.search]);
 
+  // Poradové číslo requestu: pri rýchlom prepínaní záložiek (alebo súbehu
+  // so socket/resume refetchom) môže pomalšia odpoveď so starým `tab` prísť
+  // neskôr a prepísať zoznam novšou záložkou. Aplikujeme len najnovšiu.
+  const fetchSeqRef = useRef(0);
   const fetchMessages = async () => {
+    const seq = ++fetchSeqRef.current;
     try {
       const res = await api.get('/api/messages', { params: { tab, status: 'all' } });
+      if (seq !== fetchSeqRef.current) return; // zastaraná odpoveď
       setAllMessages(res.data);
       // Update selectedMessage if it's in the new list (keeps detail view fresh)
       setSelectedMessage(prev => {
@@ -411,7 +417,9 @@ function Messages() {
     } catch (err) {
       // ignore
     } finally {
-      setLoading(false);
+      // Loading vypíname až pri odpovedi na najnovší request, inak by sa
+      // na okamih ukázal starý zoznam ako „načítaný".
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   };
 
