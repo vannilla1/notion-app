@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
@@ -37,6 +37,7 @@ function UserAffiliate() {
   const [payoutNote, setPayoutNote] = useState('');
   const [savingPayout, setSavingPayout] = useState(false);
   const [payoutMessage, setPayoutMessage] = useState('');
+  const payoutTimerRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +55,8 @@ function UserAffiliate() {
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Zrušiť časovač skrytia hlášky pri unmounte (setState po odchode zo stránky).
+  useEffect(() => () => clearTimeout(payoutTimerRef.current), []);
 
   const savePayout = async () => {
     setSavingPayout(true);
@@ -67,7 +70,8 @@ function UserAffiliate() {
       setEditingPayout(false);
       setPayoutMessage('✅ Údaje uložené');
       await load();
-      setTimeout(() => setPayoutMessage(''), 3000);
+      clearTimeout(payoutTimerRef.current);
+      payoutTimerRef.current = setTimeout(() => setPayoutMessage(''), 3000);
     } catch (err) {
       setPayoutMessage(err.response?.data?.message || 'Chyba');
     } finally {
@@ -158,15 +162,19 @@ function UserAffiliate() {
               )}
             </div>
             {editingPayout ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              // auto-fit: na úzkych displejoch (320-375 px) 1 stĺpec, aby sa IBAN
+              // zmestil; fixné '1fr 1fr' pretekalo sekciu. IBAN bez autokorekcie –
+              // mobilné klávesnice inak menia znaky pri citlivom údaji.
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
                 <input type="text" placeholder="IBAN" value={payoutIban}
+                  autoCapitalize="characters" autoCorrect="off" spellCheck={false} autoComplete="off"
                   onChange={(e) => setPayoutIban(e.target.value)} className="form-input" />
                 <input type="text" placeholder="Názov banky" value={payoutBank}
                   onChange={(e) => setPayoutBank(e.target.value)} className="form-input" />
                 <input type="text" placeholder="Poznámka (DIČ, kontakt...)" value={payoutNote}
                   onChange={(e) => setPayoutNote(e.target.value)} className="form-input"
-                  style={{ gridColumn: '1 / 3' }} />
-                <div style={{ gridColumn: '1 / 3', display: 'flex', gap: 8 }}>
+                  style={{ gridColumn: '1 / -1' }} />
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                   <button onClick={savePayout} disabled={savingPayout} className="btn btn-primary">
                     {savingPayout ? 'Ukladám...' : 'Uložiť'}
                   </button>
