@@ -49,10 +49,13 @@ async function checkAndAlert(threshold = NEW_THRESHOLD, spikeThreshold = SPIKE_T
     // ── Podmienka 1: nové fingerprinty za poslednú hodinu ──
     // countDocuments zvlášť — limit(20) na liste by pri väčšom náraze
     // skreslil vykazovaný počet (visel by na "20").
-    const newCount = await ServerError.countDocuments({ firstSeen: { $gte: since } });
+    // createdAt namiesto firstSeen: obe sa nastavujú len pri vzniku záznamu
+    // (serverErrorService, routes/errors.js), ale len createdAt má index
+    // (TTL) — firstSeen dotaz robil každú hodinu scan celej kolekcie.
+    const newCount = await ServerError.countDocuments({ createdAt: { $gte: since } });
     const newErrors = newCount > 0
       ? await ServerError.find(
-          { firstSeen: { $gte: since } },
+          { createdAt: { $gte: since } },
           { name: 1, message: 1, source: 1, path: 1, count: 1, statusCode: 1 }
         ).sort({ count: -1 }).limit(15).lean()
       : [];
