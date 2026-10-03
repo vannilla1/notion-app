@@ -32,6 +32,43 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref?.();
 
+// Strop NOVÝCH klientskych fingerprintov per IP za hodinu. Verejný
+// POST /api/errors/client vie ktokoľvek zaplaviť unikátnymi správami — každá
+// = nový dokument v kolekcii + spustený alert „nové druhy chýb“ (errorAlerter).
+// Existujúce fingerprinty sa ďalej len počítajú (count++), nad strop sa
+// zahadzujú iba nové druhy z tej istej IP.
+const NEW_CLIENT_FP_WINDOW_MS = 60 * 60 * 1000;
+const NEW_CLIENT_FP_PER_IP = parseInt(process.env.CLIENT_ERROR_NEW_FP_PER_IP, 10) || 20;
+const newClientFpBuckets = new Map(); // ip → { count, windowStart, warned }
+
+setInterval(() => {
+  const cutoff = Date.now() - NEW_CLIENT_FP_WINDOW_MS;
+  for (const [ip, bucket] of newClientFpBuckets.entries()) {
+    if (bucket.windowStart < cutoff) newClientFpBuckets.delete(ip);
+  }
+}, 10 * 60 * 1000).unref?.();
+
+function allowNewClientFingerprint(ipAddress) {
+  const key = String(ipAddress || 'unknown');
+  const now = Date.now();
+  let bucket = newClientFpBuckets.get(key);
+  if (!bucket || now - bucket.windowStart > NEW_CLIENT_FP_WINDOW_MS) {
+    bucket = { count: 0, windowStart: now, warned: false };
+    newClientFpBuckets.set(key, bucket);
+  }
+  if (bucket.count >= NEW_CLIENT_FP_PER_IP) {
+    if (!bucket.warned) {
+      bucket.warned = true;
+      logger.warn('serverErrorService: new client error fingerprint cap reached', {
+        ipAddress: key, cap: NEW_CLIENT_FP_PER_IP
+      });
+    }
+    return false;
+  }
+  bucket.count += 1;
+  return true;
+}
+
 function shouldSample(fingerprint) {
   const now = Date.now();
   let bucket = rateBuckets.get(fingerprint);
@@ -311,6 +348,8 @@ async function recordClientError(payload, context = {}) {
       return await bumpExisting(existing);
     }
 
+    if (!allowNewClientFingerprint(context.ipAddress)) return null;
+
     // Z URL urob path pre UI ("Route" stĺpec)
     let urlPath = '';
     try { urlPath = new URL(payload.url || '').pathname; } catch { urlPath = payload.url || ''; }
@@ -383,6 +422,7 @@ module.exports = {
   // Exports pre testy / manual use
   _computeFingerprint: computeFingerprint,
   _computeClientFingerprint: computeClientFingerprint,
+  _allowNewClientFingerprint: allowNewClientFingerprint,
   _normalizeStack: normalizeStack,
   _normalizePath: normalizePath
 };
