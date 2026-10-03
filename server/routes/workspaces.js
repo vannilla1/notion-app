@@ -13,6 +13,11 @@ const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
 const notificationService = require('../services/notificationService');
 
+// Farba prostredia sa na klientovi vkladá priamo do style={{ backgroundColor }}
+// (WorkspaceSwitcher.jsx) — akceptujeme len hex formát (#rgb až #rrggbbaa).
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
+const isValidHexColor = (value) => typeof value === 'string' && HEX_COLOR_RE.test(value);
+
 // Get all workspaces user is member of
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -127,7 +132,9 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const { name, description, color } = req.body;
 
-    if (!name || name.trim().length === 0) {
+    // typeof kontroly — pole/číslo/objekt v JSON by inak spadli na .trim()
+    // s TypeError → 500 namiesto 400.
+    if (typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ message: 'Názov je povinný' });
     }
 
@@ -162,8 +169,8 @@ router.post('/', authenticateToken, async (req, res) => {
     const workspace = new Workspace({
       name: name.trim(),
       slug,
-      description: description?.trim() || '',
-      color: color || '#6366f1',
+      description: typeof description === 'string' ? description.trim().slice(0, 500) : '',
+      color: isValidHexColor(color) ? color : '#6366f1',
       ownerId: req.user.id,
       inviteCode,
       inviteCodeEnabled: true
@@ -207,13 +214,20 @@ router.post('/join', authenticateToken, async (req, res) => {
   try {
     const { inviteCode } = req.body;
 
-    if (!inviteCode) {
+    if (typeof inviteCode !== 'string' || inviteCode.trim().length === 0) {
       return res.status(400).json({ message: 'Kód pozvánky je povinný' });
+    }
+    // Kód je vždy 8 alfanumerických znakov (Workspace.generateInviteCode) —
+    // iný formát v DB existovať nemôže, odpovedáme ako pri neplatnom kóde
+    // bez dotazu. Trim toleruje whitespace pri kopírovaní kódu.
+    const code = inviteCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,32}$/.test(code)) {
+      return res.status(404).json({ message: 'Neplatný alebo neaktívny kód pozvánky' });
     }
 
     // Find workspace by invite code
     const workspace = await Workspace.findOne({
-      inviteCode: inviteCode.toUpperCase(),
+      inviteCode: code,
       inviteCodeEnabled: true
     });
 
@@ -417,7 +431,7 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
 
     const updates = {};
     if (name !== undefined) {
-      if (!name || name.trim().length === 0) {
+      if (typeof name !== 'string' || name.trim().length === 0) {
         return res.status(400).json({ message: 'Názov je povinný' });
       }
       if (name.length > 100) {
@@ -439,14 +453,31 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
       }
       updates.name = name.trim();
     }
-    if (description !== undefined) updates.description = description.trim();
-    if (color !== undefined) updates.color = color;
-    if (inviteCodeEnabled !== undefined) updates.inviteCodeEnabled = inviteCodeEnabled;
+    if (description !== undefined) {
+      if (typeof description !== 'string' || description.length > 500) {
+        return res.status(400).json({ message: 'Popis môže mať maximálne 500 znakov' });
+      }
+      updates.description = description.trim();
+    }
+    if (color !== undefined) {
+      if (!isValidHexColor(color)) {
+        return res.status(400).json({ message: 'Neplatná farba' });
+      }
+      updates.color = color;
+    }
+    if (inviteCodeEnabled !== undefined) {
+      if (typeof inviteCodeEnabled !== 'boolean') {
+        return res.status(400).json({ message: 'Neplatná hodnota inviteCodeEnabled' });
+      }
+      updates.inviteCodeEnabled = inviteCodeEnabled;
+    }
 
+    // runValidators — update dotazy inak obchádzajú schémové validátory
+    // (maxlength description 500 / name 100).
     const workspace = await Workspace.findByIdAndUpdate(
       req.workspace._id,
       updates,
-      { new: true }
+      { new: true, runValidators: true }
     );
     // requireWorkspace kešuje celý Workspace dokument 60 s — bez invalidácie by
     // GET /current žiadateľa vrátil starý názov/farbu/inviteCodeEnabled.
@@ -798,7 +829,14 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
 router.post('/current/invitations', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
   try {
     const { email, role } = req.body;
-    if (!email) return res.status(400).json({ message: 'Email je povinný' });
+    if (typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({ message: 'Email je povinný' });
+    }
+    // Permisívny formát local@domain.tld + limit dĺžky (RFC 5321: 254) —
+    // inak sa ľubovoľný reťazec uložil do Invitation a poslal do SMTP ako adresát.
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ message: 'Neplatný e-mail' });
+    }
 
     const normalizedEmail = email.toLowerCase().trim();
 
