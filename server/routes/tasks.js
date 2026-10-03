@@ -3269,7 +3269,12 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
             '[Task upload]',
             { taskId }
           );
-          if (!saved) return fail(404, { message: 'Úloha nenájdená' });
+          if (!saved) {
+            // Blob už je v R2/ContactFile, ale metadáta sa nedali uložiť (úloha/
+            // podúloha medzitým zmizla) — bez upratania by ostal navždy sirotou.
+            await deleteTaskFileBlob(fileId, null);
+            return fail(404, { message: 'Úloha nenájdená' });
+          }
           emitGlobalTaskFilesChanged(req, saved);
           if (uploadIdemKey) markMutationDone(uploadIdemKey);
           return res.json({ message: 'Súbor nahraný', file: fileMeta });
@@ -3305,7 +3310,11 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         '[Task upload]',
         { taskId }
       );
-      if (!savedContact) return fail(404, { message: 'Projekt nenájdený' });
+      if (!savedContact) {
+        // Rovnaké upratanie ako pri globálnej úlohe — blob v rozsahu vlastníka.
+        await deleteTaskFileBlob(fileId, contact._id);
+        return fail(404, { message: 'Projekt nenájdený' });
+      }
 
       emitContactTaskFilesChanged(req, savedContact, taskId);
       if (uploadIdemKey) markMutationDone(uploadIdemKey);
