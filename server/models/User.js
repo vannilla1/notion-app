@@ -236,6 +236,13 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  // Verzia prihlasovacích JWT (claim `tv`). Inkrementuje sa pri zmene a
+  // resete hesla → všetky staršie JWT prestanú platiť (middleware/auth.js).
+  // Existujúce dokumenty bez poľa = 0 = zhoda so staršími tokenmi bez `tv`.
+  tokenVersion: {
+    type: Number,
+    default: 0
+  },
   lastCalendarExport: {
     type: Date,
     default: null

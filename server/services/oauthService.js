@@ -33,12 +33,11 @@
  *     HMAC s domain-separator stringom, takže state HMAC vždy funguje)
  */
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
 const Workspace = require('../models/Workspace');
-const { JWT_SECRET, invalidateUserCache } = require('../middleware/auth');
+const { JWT_SECRET, invalidateUserCache, signAuthToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 // ─────────────────────────────────────────────────────────────────────
@@ -145,9 +144,9 @@ function isAppleRelayEmail(email) {
          email.toLowerCase().endsWith('@privaterelay.appleid.com');
 }
 
-// JWT pre auth — match s /login pattern (id v payloade, 7d expiry, HS256 implicit)
+// JWT pre auth — rovnaký helper ako /login (id + tokenVersion `tv`, 7d)
 function issueAuthToken(user) {
-  return jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
+  return signAuthToken(user);
 }
 
 // User shape pre HTTP odpoveď — match s /login response (id, username, email,

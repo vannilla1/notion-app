@@ -26,6 +26,25 @@ const KEY = (id) => `user:${id}`;
 // In-memory fallback used only when Redis is unavailable.
 const memCache = new Map();
 
+// Whitelist polí pre auth cache. Do externého Redis (a memCache) sa nesmie
+// dostať bcrypt hash, reset token ani OAuth tokeny — req.user používa len
+// základné polia, isExpired() potrebuje subscription a kontrola relácie
+// tokenVersion. Zároveň to vynechá avatarData (Base64 blob až ~6.7 MB) a
+// veľké Google sync mapy.
+const AUTH_CACHE_FIELDS = '_id username email color avatar role subscription tokenVersion';
+
+// Jediné miesto, kde vzniká prihlasovací JWT. `tv` = User.tokenVersion —
+// zmena/reset hesla ho inkrementuje, a tým zneplatní všetky staršie JWT
+// (stateless 7d tokeny by inak po krádeži platili až do expirácie).
+const signAuthToken = (user, expiresIn = '7d') => jwt.sign(
+  { id: user._id, tv: user.tokenVersion || 0 },
+  JWT_SECRET,
+  { expiresIn }
+);
+
+// Staré tokeny bez `tv` zodpovedajú tokenVersion 0 (spätná kompatibilita).
+const isTokenRevoked = (decoded, user) => (decoded.tv || 0) !== (user.tokenVersion || 0);
+
 const getCachedUser = async (userId) => {
   const redis = getRedis();
   const idStr = String(userId);
@@ -37,13 +56,14 @@ const getCachedUser = async (userId) => {
   //  3) deserializoval pri každom cache GET
   // req.user.avatar (filename pointer) zostáva — UI ho používa na zostavenie
   // <img src="/api/auth/avatar/:userId"> ktorý ide cez samostatný stream endpoint.
+  // Projekcia je whitelist (AUTH_CACHE_FIELDS), nie len -avatarData.
   if (redis) {
     try {
       const cached = await redis.get(KEY(idStr));
       if (cached) {
         try { return JSON.parse(cached); } catch { /* fall through on corrupt cache */ }
       }
-      const user = await User.findById(idStr).select('-avatarData').lean();
+      const user = await User.findById(idStr).select(AUTH_CACHE_FIELDS).lean();
       if (user) {
         // SET with EX in a single call (atomic) — avoids the race between
         // SET + EXPIRE. setex is the ioredis convenience.
@@ -59,14 +79,14 @@ const getCachedUser = async (userId) => {
       // Redis blipped — degrade to DB read (no mem fallback writes to avoid
       // coherence issues once Redis is back).
       logger.warn('[Auth] Redis get failed, bypassing cache', { error: redisErr.message });
-      return User.findById(idStr).select('-avatarData').lean();
+      return User.findById(idStr).select(AUTH_CACHE_FIELDS).lean();
     }
   }
 
   // No Redis configured → in-process fallback (dev single-instance only)
   const entry = memCache.get(idStr);
   if (entry && Date.now() - entry.ts < USER_CACHE_TTL_SEC * 1000) return entry.user;
-  const user = await User.findById(idStr).select('-avatarData').lean();
+  const user = await User.findById(idStr).select(AUTH_CACHE_FIELDS).lean();
   if (user) memCache.set(idStr, { user, ts: Date.now() });
   return user;
 };
@@ -118,6 +138,12 @@ const authenticateToken = async (req, res, next) => {
       // forged s naším secretom. Durable security stopa (throttled per IP).
       logSecurityEvent('security.token_invalid', req, { reason: 'user_not_found' });
       return res.status(401).json({ message: 'Neplatný token' });
+    }
+
+    if (isTokenRevoked(decoded, user)) {
+      // Token vydaný pred zmenou/resetom hesla.
+      logSecurityEvent('security.token_invalid', req, { reason: 'revoked' });
+      return res.status(401).json({ message: 'Relácia bola ukončená. Prihláste sa znova.' });
     }
 
     // Lazy plan expiration — when a user's paidUntil has elapsed and the
@@ -172,6 +198,9 @@ const authenticateSocket = async (socket, next) => {
     if (!user) {
       return next(new Error('User not found'));
     }
+    if (isTokenRevoked(decoded, user)) {
+      return next(new Error('Invalid token'));
+    }
 
     socket.user = {
       id: user._id,
@@ -186,4 +215,4 @@ const authenticateSocket = async (socket, next) => {
   }
 };
 
-module.exports = { authenticateToken, authenticateSocket, invalidateUserCache, JWT_SECRET };
+module.exports = { authenticateToken, authenticateSocket, invalidateUserCache, signAuthToken, JWT_SECRET };

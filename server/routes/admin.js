@@ -1,8 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
-const { authenticateToken, invalidateUserCache } = require('../middleware/auth');
+const { authenticateToken, invalidateUserCache, signAuthToken } = require('../middleware/auth');
 const { adminLoginLimiter } = require('../middleware/rateLimiter');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
@@ -79,7 +78,8 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Nesprávne heslo' });
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '4h' });
+    // signAuthToken pridá `tv` — zmena hesla super-admina zneplatní aj admin reláciu.
+    const token = signAuthToken(user, '4h');
 
     logger.info('Admin login', { userId: user._id });
     res.json({ token, user: { id: user._id, email: user.email, username: user.username } });
