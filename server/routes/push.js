@@ -455,9 +455,21 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
     const { fcmToken, platform, appVersion, packageName } = req.body;
     const userId = req.user.id;
 
-    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20) {
+    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20 || fcmToken.length > 4096) {
       return res.status(400).json({ message: 'Invalid FCM token' });
     }
+
+    // findOneAndUpdate s upsert neaplikuje schémové validátory (enum platform)
+    // a objekt v packageName/appVersion by skončil CastError → 500. Hodnoty
+    // sanitizujeme podľa modelu FcmDevice (enum ['android', 'android-native']);
+    // Android shell (FcmRegistrar.kt) posiela 'android' + krátke stringy.
+    const safePlatform = ['android', 'android-native'].includes(platform) ? platform : 'android';
+    const safePackageName = (typeof packageName === 'string' && packageName)
+      ? packageName.slice(0, 100)
+      : 'eu.prplcrm.app';
+    const safeAppVersion = (typeof appVersion === 'string' && appVersion)
+      ? appVersion.slice(0, 50)
+      : null;
 
     // FCM tokens sú globálne unikátne — findOneAndUpdate by token zabezpečuje
     // že ak rovnaký token bol predtým zaregistrovaný pre iného usera (uninštalovaná
@@ -467,9 +479,9 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
       {
         userId,
         fcmToken,
-        platform: platform || 'android',
-        packageName: packageName || 'eu.prplcrm.app',
-        appVersion: appVersion || null,
+        platform: safePlatform,
+        packageName: safePackageName,
+        appVersion: safeAppVersion,
         lastUsed: new Date()
       },
       { upsert: true, new: true }
