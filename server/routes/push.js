@@ -55,7 +55,8 @@ setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000).unref();
 
 // Validate endpoint URL
 const isValidEndpoint = (endpoint) => {
-  if (!endpoint || typeof endpoint !== 'string') return false;
+  // Horný limit dĺžky — reálne push endpointy (FCM/APNs/Mozilla) majú ~100–300 znakov.
+  if (!endpoint || typeof endpoint !== 'string' || endpoint.length > 2048) return false;
   try {
     const url = new URL(endpoint);
     // Only allow HTTPS endpoints (required for web push)
@@ -91,6 +92,14 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
     if (!keys || !keys.p256dh || !keys.auth) {
       logger.warn('[Push] Missing subscription keys', { userId });
       return res.status(400).json({ message: 'Missing subscription keys' });
+    }
+
+    // Typ + horný limit dĺžky — regex.test() by pole ['abc'] pretypovalo na
+    // 'abc' a pustilo ďalej; p256dh je 65 B → 87 znakov base64url, auth 16 B → 22.
+    if (typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string'
+        || keys.p256dh.length > 200 || keys.auth.length > 100) {
+      logger.warn('[Push] Invalid key type/length', { userId });
+      return res.status(400).json({ message: 'Invalid key format' });
     }
 
     // Validate key formats (base64url)
@@ -334,6 +343,12 @@ router.post('/apns/register', authenticateToken, async (req, res) => {
     }
 
     const normalized = deviceToken.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    // Dĺžka sa musí overiť až PO normalizácii — 32+ ne-hex znakov by inak
+    // prešlo a upsertlo prázdny/skrátený token, na ktorý APNs trvalo zlyháva.
+    // Reálny APNs token má 64 hex znakov; 512 je rezerva.
+    if (normalized.length < 32 || normalized.length > 512) {
+      return res.status(400).json({ message: 'Invalid device token' });
+    }
 
     await APNsDevice.findOneAndUpdate(
       { deviceToken: normalized },
@@ -363,7 +378,11 @@ router.post('/apns/register', authenticateToken, async (req, res) => {
 router.post('/apns/unregister', authenticateToken, async (req, res) => {
   try {
     const { deviceToken } = req.body;
-    const normalized = (deviceToken || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    // Ne-string (objekt/číslo) by spadol na .replace() s TypeError → 500.
+    if (typeof deviceToken !== 'string') {
+      return res.status(400).json({ message: 'Invalid device token' });
+    }
+    const normalized = deviceToken.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
 
     await APNsDevice.deleteOne({ deviceToken: normalized, userId: req.user.id });
 
@@ -468,7 +487,9 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
 router.post('/fcm/unregister', authenticateToken, async (req, res) => {
   try {
     const { fcmToken } = req.body;
-    if (!fcmToken) {
+    // typeof — objekt { "$ne": "" } by prešiel `!fcmToken` a deleteOne by
+    // zmazal ľubovoľné (prvé) zariadenie používateľa (operátorová injekcia).
+    if (typeof fcmToken !== 'string' || fcmToken.length === 0 || fcmToken.length > 4096) {
       return res.status(400).json({ message: 'fcmToken required' });
     }
     await FcmDevice.deleteOne({ fcmToken, userId: req.user.id });
