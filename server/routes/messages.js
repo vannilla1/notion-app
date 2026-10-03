@@ -30,6 +30,12 @@ const NO_BASE64_PROJECTION = {
 
 const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
+// Textové polia tela: klient posiela FormData (stringy), ale express.json je
+// globálne a multer JSON telo prepustí — `{"subject": 123}` alebo
+// `{"text": {}}` by na .trim() spadli s TypeError → 500 (+ pri write routách
+// záznam v Diagnostike). Nestring = prázdny text.
+const str = (v) => (typeof v === 'string' ? v : '');
+
 const router = express.Router();
 
 // Neplatné ObjectId v URL → 400/404 hneď. Bez toho šlo „not-valid" priamo do
@@ -498,7 +504,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       const { toUserId, type, subject, description, linkedType, linkedId, linkedName, dueDate } = req.body;
 
       // Validate required fields
-      if (!toUserId || !type || !subject) {
+      if (!toUserId || !type || !str(subject).trim()) {
         return res.status(400).json({ message: 'Príjemca, typ a predmet sú povinné' });
       }
 
@@ -580,8 +586,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         toUserId: recipient._id,
         toUsername: recipient.username,
         type,
-        subject: subject.trim().substring(0, 200),
-        description: (description || '').trim().substring(0, 5000),
+        subject: str(subject).trim().substring(0, 200),
+        description: str(description).trim().substring(0, 5000),
         attachment,
         linkedType: linkedType || null,
         linkedId: linkedId || null,
@@ -670,8 +676,8 @@ router.put('/:id', authenticateToken, requireWorkspace, requireMessageId, (req, 
       // Update allowed fields
       const { subject, description, type, dueDate, linkedType, linkedId, linkedName, removeAttachment } = req.body;
 
-      if (subject !== undefined) message.subject = subject.trim().substring(0, 200);
-      if (description !== undefined) message.description = description.trim().substring(0, 5000);
+      if (subject !== undefined) message.subject = str(subject).trim().substring(0, 200);
+      if (description !== undefined) message.description = str(description).trim().substring(0, 5000);
       if (type !== undefined && ['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) message.type = type;
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
@@ -823,7 +829,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId,
     }
 
     message.status = 'rejected';
-    message.rejectionReason = (reason || '').trim().substring(0, 1000);
+    message.rejectionReason = str(reason).trim().substring(0, 1000);
     message.resolvedBy = req.user.id;
     message.resolvedAt = new Date();
     await message.save();
@@ -1040,7 +1046,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, requireMessageI
     try {
       const { text } = req.body;
 
-      if (!text || !text.trim()) {
+      if (!str(text).trim()) {
         return res.status(400).json({ message: 'Text komentára je povinný' });
       }
 
@@ -1079,7 +1085,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, requireMessageI
         _id: new mongoose.Types.ObjectId(),
         userId: req.user.id,
         username: req.user.username,
-        text: text.trim().substring(0, 2000),
+        text: str(text).trim().substring(0, 2000),
         createdAt: new Date()
       };
 
@@ -1144,13 +1150,13 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, requireMessageI
 router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !text.trim()) {
+    if (!str(text).trim()) {
       return res.status(400).json({ message: 'Text komentára je povinný' });
     }
 
     // PERF: atomic $set on the matched comment — no full doc save.
     // Authorship + workspace + membership enforced via filter.
-    const newText = text.trim().substring(0, 2000);
+    const newText = str(text).trim().substring(0, 2000);
     const result = await Message.updateOne(
       {
         _id: req.params.id,
