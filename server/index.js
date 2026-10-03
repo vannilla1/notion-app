@@ -552,7 +552,8 @@ process.on('unhandledRejection', (reason) => {
 //  - Mongoose save/update operácie mohli skončiť uprostred (atomic ops sú OK,
 //    multi-step transactions nie sú)
 //  - Socket.io klienty nedostali disconnect signal a vidia "stuck" stav
-// Postup: 1) stop accepting nové requesty (server.close), 2) počkať na
+// Postup: 1) zavrieť Socket.IO (io.close → disconnect klientov, engine a
+// následne sám httpServer.close = stop accepting nové requesty), 2) počkať na
 // existujúce, 3) zavrieť Mongo, 4) exit. Force-exit po 10s aby SIGKILL nemal
 // čo robiť — Render má 15s window, 10s nám necháva 5s rezervu.
 let shutdownInProgress = false;
@@ -561,8 +562,16 @@ const gracefulShutdown = (signal) => {
   shutdownInProgress = true;
   logger.info(`${signal} received — starting graceful shutdown`);
 
-  // Stop accepting new connections; čaká kým in-flight requesty doskončia
-  server.close(async () => {
+  // Idle keep-alive spojenia zavrieme explicitne (Node ≥ 18.2), aby
+  // httpServer.close nečakal na ich timeout.
+  server.closeIdleConnections?.();
+
+  // io.close() zavrie všetky Socket.IO sokety aj engine a potom sám zavolá
+  // httpServer.close(cb), ktorý čaká, kým in-flight requesty doskončia.
+  // Samotný server.close() by pri čo i len jednom pripojenom WebSocket
+  // klientovi callback NIKDY nezavolal → Mongo sa nezavrelo a proces vždy
+  // skončil 10s timeoutom s exit(1).
+  Promise.resolve(io.close(async () => {
     logger.info('[Shutdown] HTTP server closed (no more new connections)');
     try {
       await mongoose.connection.close();
@@ -572,10 +581,13 @@ const gracefulShutdown = (signal) => {
     }
     logger.info('[Shutdown] Exit 0');
     process.exit(0);
+  })).catch((err) => {
+    // Zlyhanie io.close len zalogujeme — force-exit nižšie proces aj tak ukončí.
+    logger.error('[Shutdown] io.close error', { error: err?.message });
   });
 
-  // Force-exit po 10s ak server.close visí na pomalých keep-alive connections
-  // alebo zaseknutom DB query. .unref() aby tento timer nedržal event loop živý
+  // Force-exit po 10s ak close visí na pomalých spojeniach alebo zaseknutom
+  // DB query. .unref() aby tento timer nedržal event loop živý
   // ak by predošlé close-y skončili rýchlejšie.
   setTimeout(() => {
     logger.error('[Shutdown] Graceful shutdown timeout (10s) — forcing exit');
