@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/api/api';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -36,18 +36,26 @@ export default function IapBilling() {
   const [purchasing, setPurchasing] = useState(null); // productId práve prebiehajúceho nákupu
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState(null); // { type: 'success'|'error'|'info', text }
+  const [loadError, setLoadError] = useState(false);
+  const loadedOnceRef = useRef(false);
 
   const productIdFor = (planId, period) => `prplcrm.${planId}.${period}`;
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    // Spinner len pri prvom načítaní — refresh po 'iap-external-update'
+    // (StoreKit Transaction.updates, aj počas nákupu) beží na pozadí a
+    // nezmaže obsah ani správu o nákupe.
+    if (!loadedOnceRef.current) setLoading(true);
+    let failed = false;
     try {
       const [statusRes, plansRes] = await Promise.all([
-        api.get('/api/billing/status').catch(() => ({ data: null })),
-        api.get('/api/billing/plans').catch(() => ({ data: { plans: [] } }))
+        api.get('/api/billing/status').catch(() => { failed = true; return null; }),
+        api.get('/api/billing/plans').catch(() => { failed = true; return null; })
       ]);
-      setStatus(statusRes.data);
-      setPlans(plansRes.data.plans || []);
+      // Pri zlyhaní ponecháme posledné známe dáta namiesto prázdneho gridu
+      if (statusRes) setStatus(statusRes.data);
+      if (plansRes) setPlans(plansRes.data.plans || []);
+      setLoadError(failed);
 
       // StoreKit ceny (lokalizované podľa App Store regiónu)
       if (iapAvailable()) {
@@ -61,6 +69,7 @@ export default function IapBilling() {
         }
       }
     } finally {
+      loadedOnceRef.current = true;
       setLoading(false);
     }
   }, []);
@@ -181,6 +190,16 @@ export default function IapBilling() {
                     </button>
                   </div>
                 </div>
+
+                {loadError && (
+                  <div role="alert" style={{ padding: 12, borderRadius: 10, marginBottom: 16, fontSize: 14, textAlign: 'center', background: '#fee2e2', color: '#991b1b' }}>
+                    Nepodarilo sa načítať predplatné a plány.
+                    <button type="button" className="btn btn-secondary" onClick={loadData}
+                      style={{ marginLeft: 8, minHeight: 44, width: 'auto', padding: '0 14px' }}>
+                      Skúsiť znova
+                    </button>
+                  </div>
+                )}
 
                 {message && (
                   <div style={{
