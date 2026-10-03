@@ -13243,3 +13243,23 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
 .ios-app .invite-card {
   margin: auto;
 }
+
+/* =============================================================================
+ * OBMEDZENÝ POHYB (iOS „Obmedziť pohyb", Android „Odstrániť animácie")
+ * =============================================================================
+ * Nekonečné animácie (bounce v prázdnom stave, lp-float tvary na landingu)
+ * a slideUp/fadeIn/pulse pri každom vykreslení bežali aj pri vypnutých
+ * animáciách v OS — prístupnosť (vestibulárne poruchy) + zbytočná záťaž
+ * batérie. Žiadny JS nečaká na animationend/transitionend, takže skrátenie
+ * na 0.01ms je bezpečné; fill-mode forwards skočí rovno na koncový stav.
+ * index.css importuje main.jsx, takže platí aj pre landing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
