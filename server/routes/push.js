@@ -49,8 +49,9 @@ const rateLimiter = {
   }
 };
 
-// Cleanup rate limiter every 5 minutes
-setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000);
+// Cleanup rate limiter every 5 minutes. .unref() — module-level časovač nesmie
+// držať proces nažive (graceful shutdown, Jest), rovnako ako v jobs/*.
+setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000).unref();
 
 // Validate endpoint URL
 const isValidEndpoint = (endpoint) => {
