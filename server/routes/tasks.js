@@ -482,8 +482,9 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
     const { incremental, reset } = req.query;
     const userId = req.user.id;
 
-    // Get user to check previously exported task IDs
-    const user = await User.findById(userId);
+    // Get user to check previously exported task IDs. Len potrebné pole —
+    // bez projekcie sa ťahal celý dokument vrátane avatarData (Base64, až MB).
+    const user = await User.findById(userId).select('exportedTaskIds').lean();
     let exportedTaskIds = user?.exportedTaskIds || [];
 
     // If reset requested, clear export history
@@ -628,7 +629,7 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
 router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('calendarFeedToken calendarFeedEnabled calendarFeedCreatedAt').lean();
 
     if (!user) {
       return res.status(404).json({ message: 'Používateľ nenájdený' });
@@ -668,7 +669,7 @@ router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
 router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('calendarFeedToken calendarFeedEnabled calendarFeedCreatedAt').lean();
 
     if (!user) {
       return res.status(404).json({ message: 'Používateľ nenájdený' });
@@ -745,8 +746,9 @@ router.get('/calendar/feed/:token', async (req, res) => {
   try {
     const { token } = req.params;
 
-    // Find user by feed token
-    const user = await User.findOne({ calendarFeedToken: token, calendarFeedEnabled: true });
+    // Find user by feed token. Kalendárne klienty pollujú každých 15 min —
+    // bez projekcie sa zakaždým ťahal celý dokument vrátane avatarData.
+    const user = await User.findOne({ calendarFeedToken: token, calendarFeedEnabled: true }).select('_id currentWorkspaceId').lean();
 
     if (!user) {
       return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
@@ -1137,8 +1139,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       finalContactIds = [contactId];
     }
 
-    // Check plan limits
-    const user = await User.findById(req.user.id);
+    // Check plan limits (len subscription — rovnako ako ostatné miesta v súbore)
+    const user = await User.findById(req.user.id).select('subscription').lean();
     const plan = user?.subscription?.plan || 'free';
     // Free: 5 projektov/kontakt (znížené z 10 — overené že žiadny živý Free user
     // 2026-05-07 nemal > 5 projektov na kontakt, takže táto zmena nezablokuje
