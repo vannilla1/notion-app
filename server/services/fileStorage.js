@@ -123,6 +123,23 @@ async function getFileStream(key) {
   return response.Body; // Node Readable
 }
 
+/**
+ * GetObject z R2 ako stream + metadáta odpovede (ContentLength). Pre
+ * sťahovanie JEDNÉHO súboru cez res: stream sa pipe-uje priamo do odpovede
+ * (žiadny Buffer v RAM) a Content-Length sa pošle z hlavičky R2. ZIP export
+ * ostáva na getFileStream() (archiver dĺžku nepotrebuje).
+ */
+async function getFileObject(key) {
+  if (!isConfigured) throw new Error('R2 not configured');
+  const cmd = new GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
+  const response = await s3Client.send(cmd);
+  return {
+    stream: response.Body, // Node Readable
+    contentLength: response.ContentLength,
+    contentType: response.ContentType
+  };
+}
+
 async function deleteFile(key) {
   if (!isConfigured) return;
   try {
@@ -234,6 +251,7 @@ module.exports = {
   uploadFile,
   downloadFile,
   getFileStream,
+  getFileObject,
   deleteFile,
   getPresignedUrl,
   fileExists,

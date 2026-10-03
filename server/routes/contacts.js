@@ -2269,15 +2269,48 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
+    // Download hlavičky — spoločné pre stream z R2 aj legacy Buffer.
+    // RFC 6266: res.attachment() pošle `filename*=UTF-8''…` (+ latin1
+    // fallback vo filename="…"). Ručná hlavička dávala percent-encoded názov
+    // priamo do filename="…" — WKWebView / Android WebView by ponúkli
+    // „Zmluva%20%C4%8D.pdf". Rovnako ako messages.js; + nosniff.
+    const setDownloadHeaders = (contentLength) => {
+      res.attachment(sanitizeDisplayName(fileMeta.originalName) || 'priloha');
+      res.set({
+        'Content-Type': fileMeta.mimetype || 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      if (Number.isFinite(contentLength)) res.set('Content-Length', String(contentLength));
+    };
+
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
-      // Modern path — fetch z R2
+      // Modern path — STREAM z R2 priamo do odpovede. downloadFile() skladal
+      // celý súbor (až 50 MB) do Buffera a paralelné sťahovania nemali na
+      // 512 MB inštancii žiadny strop. Chyba pred prvým bajtom → 500 JSON,
+      // chyba uprostred tela → prerušenie spojenia (prehliadač označí súbor
+      // ako neúplný namiesto tichého orezania).
+      let r2Object;
       try {
-        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
-        logger.info('Contact file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+        r2Object = await fileStorage.getFileObject(contactFile.r2Key);
       } catch (r2Err) {
         logger.error('Contact file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
         return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
       }
+      const { stream, contentLength } = r2Object;
+      logger.info('Contact file download: from R2 (stream)', { fileId, r2Key: contactFile.r2Key, size: contentLength });
+      setDownloadHeaders(contentLength);
+      stream.on('error', (streamErr) => {
+        logger.error('Contact file download: R2 stream failed', { fileId, r2Key: contactFile.r2Key, error: streamErr.message });
+        if (res.headersSent) return res.destroy();
+        for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+        res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      });
+      // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+      res.on('close', () => {
+        if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+      });
+      stream.pipe(res);
+      return;
     } else if (contactFile?.data) {
       // Legacy: base64 v ContactFile collection
       fileBuffer = Buffer.from(contactFile.data, 'base64');
@@ -2296,17 +2329,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
-    // RFC 6266: res.attachment() pošle `filename*=UTF-8''…` (+ latin1
-    // fallback vo filename="…"). Ručná hlavička dávala percent-encoded názov
-    // priamo do filename="…" — WKWebView / Android WebView by ponúkli
-    // „Zmluva%20%C4%8D.pdf". Rovnako ako messages.js; + nosniff.
-    res.attachment(sanitizeDisplayName(fileMeta.originalName) || 'priloha');
-    res.set({
-      'Content-Type': fileMeta.mimetype || 'application/octet-stream',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Length': fileBuffer.length
-    });
-
+    setDownloadHeaders(fileBuffer.length);
     res.send(fileBuffer);
   } catch (error) {
     logger.error('Contact file download error', { error: error.message, stack: error.stack, contactId: req.params.id, fileId: req.params.fileId });
