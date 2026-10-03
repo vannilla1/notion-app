@@ -1361,6 +1361,12 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
 }
 
 // --- Message Detail ---
+// Softvérové klávesnice (iOS/Android) nemajú Shift+Enter — Enter tam musí
+// vložiť nový riadok, inak sa viacriadkový komentár nedá napísať a nedopísaný
+// text sa odošle. Odosiela sa tlačidlom.
+const sendsOnEnter = (e) => e.key === 'Enter' && !e.shiftKey
+  && !(typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches);
+
 function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, voting, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
@@ -1774,7 +1780,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                           value={editingCommentText}
                           onChange={e => { setEditingCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
                           onKeyDown={e => {
-                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
+                            if (sendsOnEnter(e)) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
                             if (e.key === 'Escape') { setEditingCommentId(null); setEditingCommentText(''); }
                           }}
                           ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
@@ -1912,10 +1918,25 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           {/* Add comment */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <textarea value={commentText} onChange={e => { setCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
+              onKeyDown={e => { if (sendsOnEnter(e)) { e.preventDefault(); onComment(msg.id || msg._id); } }}
               style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', resize: 'none', overflow: 'hidden', minHeight: '40px', fontFamily: 'inherit', lineHeight: '1.4' }}
               placeholder="Napíšte komentár..." rows={1} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Príloha ku komentáru — stav aj odoslanie existovali, chýbalo UI */}
+              {commentAttachment && (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>📎 {commentAttachment.name}</span>
+                  <button type="button" className="btn btn-secondary" onClick={() => setCommentAttachment(null)}
+                    disabled={submittingComment} aria-label="Odstrániť prílohu"
+                    style={{ minWidth: '44px', minHeight: '44px', padding: 0, width: 'auto' }}>✕</button>
+                </span>
+              )}
+              <label className="btn btn-secondary" title="Priložiť súbor" aria-label="Priložiť súbor ku komentáru"
+                style={{ fontSize: '16px', minWidth: '44px', minHeight: '44px', padding: '0 10px', width: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: submittingComment ? 'default' : 'pointer', opacity: submittingComment ? 0.6 : 1 }}>
+                📎
+                <input type="file" style={{ display: 'none' }} disabled={submittingComment}
+                  onChange={e => { setCommentAttachment(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </label>
               <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
                 disabled={!commentText.trim() || submittingComment}
                 style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '100px', opacity: submittingComment ? 0.75 : 1 }}>
