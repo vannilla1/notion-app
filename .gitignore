@@ -62,3 +62,7 @@ client/dist-server/
 
 # Xcode — osobný stav UI a schém (obsahuje lokálne cesty vývojára)
 **/xcuserdata/
+
+# Pracovné poznámky Claude (obsahujú poznatky o slabinách projektu)
+SPRAVA.md
+POSTUP.md
