@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Firebase hľadá názov záložného kanála notifikácií cez getIdentifier (podľa
+     mena); optimalizované zmenšovanie zdrojov v AGP 9 by preložený reťazec
+     odstránilo a v nastaveniach by sa zobrazilo anglické „Misc". -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/fcm_fallback_notification_channel_label" />
