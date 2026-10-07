@@ -9,7 +9,6 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
 }
 
@@ -29,8 +28,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 213      // production.14 — audit: bezpečnosť shellu, allow-list hostov, odhlásenie odregistruje FCM
-        versionName = "1.0.12"
+        versionCode = 214      // production.15 — Android Gradle Plugin 9.4 (Play: optimalizácia R8)
+        versionName = "1.0.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -71,10 +70,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // Kotlin je od AGP 9 vstavaný; jvmTarget = compileOptions.targetCompatibility (17).
 
     buildFeatures {
         buildConfig = true
