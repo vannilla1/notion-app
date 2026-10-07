@@ -343,6 +343,34 @@ enum WKKeyboardDisplayFix {
     }
 }
 
+/// WKWebView, ktorý ohlási zmenu systémových odstupov (safe area) okna.
+/// Web dostane --safe-area-top/bottom z natívu; doteraz len raz pri načítaní
+/// stránky. Na iPhone Duo sa po rozložení/zložení appka presunie na iný
+/// displej s inou polohou systémových líšt (Apple: „Re-read the size whenever
+/// it changes") a rovnako pri otočení iPhonu — hlavička by ostala pod
+/// stavovou lištou alebo so zbytočnou medzerou.
+final class SafeAreaAwareWebView: WKWebView {
+    var onSafeAreaChange: ((WKWebView, UIEdgeInsets) -> Void)?
+    private var lastReported: UIEdgeInsets?
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        reportIfChanged()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        reportIfChanged()
+    }
+
+    private func reportIfChanged() {
+        guard let insets = window?.safeAreaInsets else { return }
+        if let last = lastReported, last.top == insets.top, last.bottom == insets.bottom { return }
+        lastReported = insets
+        onSafeAreaChange?(self, insets)
+    }
+}
+
 struct WebView: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -486,7 +514,10 @@ struct WebView: UIViewRepresentable {
             context.coordinator, name: "openExternal"
         )
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = SafeAreaAwareWebView(frame: .zero, configuration: config)
+        webView.onSafeAreaChange = { [weak coordinator = context.coordinator] view, insets in
+            coordinator?.injectSafeArea(into: view, insets: insets)
+        }
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         // Disable iOS edge-swipe back gesture: on iOS the CSS pins body to
@@ -1259,19 +1290,12 @@ struct WebView: UIViewRepresentable {
             recoveryURL = nil
             if parent.loadError { parent.loadError = false } // onChange zruší retryTask
             if hasFinishedInitialLoad && parent.isLoading { parent.isLoading = false }
-            // Inject actual safe area inset values from native
+            // Inject actual safe area inset values from native (nový dokument;
+            // zmeny počas relácie — otočenie, iPhone Duo fold — rieši
+            // SafeAreaAwareWebView.onSafeAreaChange).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let window = webView.window {
-                    let top = window.safeAreaInsets.top
-                    let bottom = window.safeAreaInsets.bottom
-                    let js = """
-                    document.documentElement.style.setProperty('--safe-area-top', '\(Int(top))px');
-                    document.documentElement.style.setProperty('--safe-area-bottom', '\(Int(bottom))px');
-                    var s = document.getElementById('ios-safe-area-style');
-                    if (!s) { s = document.createElement('style'); s.id = 'ios-safe-area-style'; document.head.appendChild(s); }
-                    s.textContent = '.crm-header { padding-top: \(Int(top) + 16)px !important; }';
-                    """
-                    webView.evaluateJavaScript(js, completionHandler: nil)
+                    self.injectSafeArea(into: webView, insets: window.safeAreaInsets)
                 }
             }
 
@@ -1284,6 +1308,20 @@ struct WebView: UIViewRepresentable {
 
             // prplcrm://auth prijatý pred načítaním stránky (studený štart).
             deliverPendingExternalAuth()
+        }
+
+        /// Systémové odstupy (stavová lišta / Dynamic Island, home indikátor) → CSS.
+        func injectSafeArea(into webView: WKWebView, insets: UIEdgeInsets) {
+            let top = Int(insets.top)
+            let bottom = Int(insets.bottom)
+            let js = """
+            document.documentElement.style.setProperty('--safe-area-top', '\(top)px');
+            document.documentElement.style.setProperty('--safe-area-bottom', '\(bottom)px');
+            var s = document.getElementById('ios-safe-area-style');
+            if (!s) { s = document.createElement('style'); s.id = 'ios-safe-area-style'; document.head.appendChild(s); }
+            s.textContent = '.crm-header { padding-top: \(top + 16)px !important; }';
+            """
+            webView.evaluateJavaScript(js, completionHandler: nil)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
