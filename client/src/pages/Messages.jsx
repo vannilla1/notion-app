@@ -176,6 +176,9 @@ function Messages() {
   const { socket, isConnected } = useSocket();
 
   const [allMessages, setAllMessages] = useState([]);
+  // Server vracia po 100 správ — „Načítať staršie“ pridá ďalšiu stránku.
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('all'); // all | received | sent
   const [statusFilter, setStatusFilter] = useState('all');
@@ -219,6 +222,9 @@ function Messages() {
   // Percento nahrávania prílohy (null = nič sa nenahráva / bez prílohy).
   const [uploadProgress, setUploadProgress] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // In-flight guard hlasovania: server POST /vote hlas PREPÍNA (existujúci
+  // odstráni), takže dve rýchle ťuknutia by hlas pridali a hneď zrušili.
+  const [voting, setVoting] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); // { file, downloadUrl } for preview modal
   const msgFileInputRef = useRef(null);
   const [activeFileMessageId, setActiveFileMessageId] = useState(null);
@@ -304,6 +310,13 @@ function Messages() {
 
   // Deep link highlight — fetch message by ID, switch to correct tab, select it
   const lastMsgHighlightRef = useRef(null);
+  // ID časovačov zvýraznenia (polling tryScroll, zhasnutie highlightu) — pri
+  // odchode zo stránky ich zrušíme, aby nebežali nad odpojeným komponentom.
+  const highlightTimersRef = useRef([]);
+  useEffect(() => () => {
+    highlightTimersRef.current.forEach(clearTimeout);
+    highlightTimersRef.current = [];
+  }, []);
   const highlightMessage = async (messageId, commentId = null) => {
     try {
       const res = await api.get(`/api/messages/${messageId}`);
@@ -340,12 +353,12 @@ function Messages() {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
           }
-          if (attempts < 40) setTimeout(tryScroll, 100);
+          if (attempts < 40) highlightTimersRef.current.push(setTimeout(tryScroll, 100));
         };
-        setTimeout(tryScroll, 100);
+        highlightTimersRef.current.push(setTimeout(tryScroll, 100));
         // Clear highlight after giving the user time to see it (measure from
         // when it's shown, not mount; extend to 6s for cold-start cases)
-        setTimeout(() => setHighlightedCommentId(null), 6000);
+        highlightTimersRef.current.push(setTimeout(() => setHighlightedCommentId(null), 6000));
       }
     } catch {
       // Silently fail — message may have been deleted
@@ -392,16 +405,23 @@ function Messages() {
           setHighlightedMessageIds(ids);
           const firstId = [...ids][0];
           setSelectedMessage(allMessages.find(m => (m._id || m.id) === firstId) || null);
-          setTimeout(() => setHighlightedMessageIds(new Set()), 4000);
+          highlightTimersRef.current.push(setTimeout(() => setHighlightedMessageIds(new Set()), 4000));
         }
       }).catch(() => {});
     }
   }, [location.search]);
 
+  // Poradové číslo requestu: pri rýchlom prepínaní záložiek (alebo súbehu
+  // so socket/resume refetchom) môže pomalšia odpoveď so starým `tab` prísť
+  // neskôr a prepísať zoznam novšou záložkou. Aplikujeme len najnovšiu.
+  const fetchSeqRef = useRef(0);
   const fetchMessages = async () => {
+    const seq = ++fetchSeqRef.current;
     try {
       const res = await api.get('/api/messages', { params: { tab, status: 'all' } });
+      if (seq !== fetchSeqRef.current) return; // zastaraná odpoveď
       setAllMessages(res.data);
+      setHasMoreMessages(Array.isArray(res.data) && res.data.length >= 100);
       // Update selectedMessage if it's in the new list (keeps detail view fresh)
       setSelectedMessage(prev => {
         if (!prev) return null;
@@ -411,7 +431,30 @@ function Messages() {
     } catch (err) {
       // ignore
     } finally {
-      setLoading(false);
+      // Loading vypíname až pri odpovedi na najnovší request, inak by sa
+      // na okamih ukázal starý zoznam ako „načítaný".
+      if (seq === fetchSeqRef.current) setLoading(false);
+    }
+  };
+
+  const loadOlderMessages = async () => {
+    if (loadingOlder || allMessages.length === 0) return;
+    const oldest = allMessages[allMessages.length - 1]?.createdAt;
+    if (!oldest) return;
+    const seq = fetchSeqRef.current; // zmena záložky medzitým → zahodiť
+    setLoadingOlder(true);
+    try {
+      const res = await api.get('/api/messages', { params: { tab, status: 'all', before: oldest } });
+      if (seq !== fetchSeqRef.current) return;
+      const older = Array.isArray(res.data) ? res.data : [];
+      setAllMessages(prev => {
+        const seen = new Set(prev.map(m => m.id || m._id));
+        return [...prev, ...older.filter(m => !seen.has(m.id || m._id))];
+      });
+      setHasMoreMessages(older.length >= 100);
+    } catch { /* ignore — tlačidlo ostane, dá sa skúsiť znova */ }
+    finally {
+      setLoadingOlder(false);
     }
   };
 
@@ -506,8 +549,16 @@ function Messages() {
 
       setShowForm(false);
       resetForm();
-      // setTab triggers useEffect which fetches messages — no manual fetch needed
-      setTab('sent');
+      // setTab spustí useEffect([tab]), ktorý správy stiahne. Ak už sme na
+      // záložke Odoslané, React stav nezmení a efekt nebeží — a server emituje
+      // 'message-created' len príjemcovi, takže odosielateľ by novú správu
+      // nevidel až do manuálneho prepnutia. Preto tu refetch voláme priamo.
+      if (tab === 'sent') {
+        fetchMessages();
+        fetchPendingCount();
+      } else {
+        setTab('sent');
+      }
     } catch (err) {
       alert(attachment && isUploadTimeout(err)
         ? uploadFailureText(err)
@@ -691,12 +742,16 @@ function Messages() {
   };
 
   const handleVote = async (messageId, optionId) => {
+    if (voting) return; // Guard proti dvojitému ťuknutiu (toggle by hlas zrušil)
+    setVoting(true);
     try {
       const res = await api.post(`/api/messages/${messageId}/vote`, { optionId });
       setSelectedMessage(res.data);
       fetchMessages();
     } catch (err) {
       alert(err.response?.data?.message || 'Chyba pri hlasovaní');
+    } finally {
+      setVoting(false);
     }
   };
 
@@ -714,11 +769,8 @@ function Messages() {
     return '📎';
   };
 
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
+  // formatFileSize: importovaná z utils/constants (rovnaký formát ako v
+  // Projektoch/Kontaktoch) — lokálna kópia ju tu predtým zatieňovala.
 
   const triggerMsgFileUpload = (messageId) => {
     setActiveFileMessageId(messageId);
@@ -958,7 +1010,8 @@ function Messages() {
                 key={s}
                 onClick={() => setStatusFilter(s)}
                 style={{
-                  padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                  // minHeight: dotykový cieľ (pôvodných ~24 px bolo na mobile ťažké trafiť)
+                  padding: '6px 12px', minHeight: '36px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
                   background: statusFilter === s ? (s === 'poll' ? '#EC4899' : 'var(--accent-color)') : 'var(--bg-card)',
                   color: statusFilter === s ? 'white' : 'var(--text-secondary)',
                   cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
@@ -997,6 +1050,7 @@ function Messages() {
               userId={user.id}
               onReopen={handleReopen}
               onVote={handleVote}
+              voting={voting}
               canReopen={(selectedMessage.status === 'approved' || selectedMessage.status === 'rejected') && (currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager' || isRecipient(selectedMessage))}
               canManageMessage={currentWorkspace?.role === 'owner' || currentWorkspace?.role === 'manager'}
               onFileUpload={triggerMsgFileUpload}
@@ -1026,8 +1080,12 @@ function Messages() {
               onSelect={(msg) => {
                 setSelectedMessage(msg);
                 // Fetch full message detail (triggers readBy on backend), then refresh count
-                api.get(`/api/messages/${msg.id || msg._id}`).then(res => {
-                  setSelectedMessage(res.data);
+                const msgId = msg.id || msg._id;
+                api.get(`/api/messages/${msgId}`).then(res => {
+                  // Oneskorená odpoveď nesmie znovu otvoriť zavretý detail (← Späť)
+                  // ani prepísať medzitým otvorenú inú správu — rovnaký guard ako
+                  // refreshSelectedMessage.
+                  setSelectedMessage(cur => (cur && (cur.id || cur._id) === msgId ? res.data : cur));
                   fetchPendingCount();
                 }).catch(() => {});
               }}
@@ -1035,6 +1093,9 @@ function Messages() {
               formatDateTime={formatDateTime}
               userId={user.id}
               highlightedMessageIds={highlightedMessageIds}
+              hasMore={hasMoreMessages}
+              loadingOlder={loadingOlder}
+              onLoadOlder={loadOlderMessages}
             />
           )}
         </div>
@@ -1042,9 +1103,11 @@ function Messages() {
       </main>
       </div>
 
-      {/* New message modal */}
+      {/* New message modal — trieda modal-overlay aktivuje globálny iOS zámok
+          scrollu tela (MutationObserver v App.jsx hľadá len '.modal-overlay');
+          vizuál ostáva z inline štýlov, ktoré triedu prepíšu. */}
       {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) { setShowForm(false); resetForm(); } }}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflow: 'auto', boxShadow: 'var(--shadow-xl)' }}>
             <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>Nová správa</h3>
@@ -1203,7 +1266,7 @@ function Messages() {
       )}
 
       {showRejectDialog && selectedMessage && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowRejectDialog(false); }}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: 'var(--shadow-xl)' }}>
             <h3 style={{ marginBottom: '12px', fontSize: '16px' }}>❌ Zamietnuť odkaz</h3>
@@ -1226,12 +1289,12 @@ function Messages() {
 }
 
 // --- Message List ---
-function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId, highlightedMessageIds }) {
+function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateTime, userId, highlightedMessageIds, hasMore, loadingOlder, onLoadOlder }) {
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Načítavam...</div>;
   if (messages.length === 0) return (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
       <div style={{ fontSize: '40px', marginBottom: '8px' }}>✉️</div>
-      <p>{tab === 'received' ? 'Žiadne prijaté odkazy' : 'Žiadne odoslané odkazy'}</p>
+      <p>{tab === 'received' ? 'Žiadne prijaté odkazy' : tab === 'sent' ? 'Žiadne odoslané odkazy' : 'Žiadne správy'}</p>
     </div>
   );
 
@@ -1265,7 +1328,9 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              <span>{tab === 'received' ? `Od: ${msg.fromUsername}` : `Pre: ${msg.toUsername}`}</span>
+              {/* Podľa správy, nie podľa záložky — na záložke Všetky sú prijaté aj
+                  odoslané spolu (v Prijaté vyjde vždy „Od", v Odoslané vždy „Pre"). */}
+              <span>{String(msg.fromUserId?._id || msg.fromUserId) === String(userId) ? `Pre: ${msg.toUsername}` : `Od: ${msg.fromUsername}`}</span>
               <span>{formatDateTime(msg.createdAt)}</span>
               {msg.dueDate && (
                 <span style={{ color: isOverdue ? 'var(--danger)' : 'var(--text-muted)' }}>
@@ -1280,12 +1345,29 @@ function MessageList({ messages, loading, tab, onSelect, formatDate, formatDateT
           </div>
         );
       })}
+      {hasMore && (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={onLoadOlder}
+          disabled={loadingOlder}
+          style={{ alignSelf: 'center', marginTop: '8px', minHeight: '44px' }}
+        >
+          {loadingOlder ? 'Načítavam…' : 'Načítať staršie'}
+        </button>
+      )}
     </div>
   );
 }
 
 // --- Message Detail ---
-function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
+// Softvérové klávesnice (iOS/Android) nemajú Shift+Enter — Enter tam musí
+// vložiť nový riadok, inak sa viacriadkový komentár nedá napísať a nedopísaný
+// text sa odošle. Odosiela sa tlačidlom.
+const sendsOnEnter = (e) => e.key === 'Enter' && !e.shiftKey
+  && !(typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches);
+
+function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprove, onReject, onComment, onDelete, onEdit, onReopen, canReopen, canManageMessage, editing, setEditing, commentText, setCommentText, commentAttachment, setCommentAttachment, submittingComment, formatDate, formatDateTime, navigate, contacts, tasks, userId, onVote, voting, onFileUpload, onFileDownload, onFileDelete, onPreviewFile, uploadingFile, uploadProgress, savingEdit, getFileIcon, formatFileSize, isImage, scrollToComments, onEditComment, onDeleteComment, onReactComment, editingCommentId, setEditingCommentId, editingCommentText, setEditingCommentText, highlightedCommentId }) {
   const type = typeConfig[msg.type] || typeConfig.info;
   const status = statusConfig[msg.status] || statusConfig.pending;
   const commentsEndRef = useRef(null);
@@ -1309,8 +1391,18 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
     removeAttachment: false
   });
 
-  // Reset edit form when message changes
+  // Reset edit form when message changes.
+  // fetchMessages (socket event, návrat z pozadia, prepnutie workspacu) nahradí
+  // selectedMessage NOVÝM objektom aj pri nezmenenom obsahu — počas úpravy tej
+  // istej správy formulár nereseteujeme, inak by sa rozpísaný text stratil.
+  // Po uložení/zrušení (editing=false) alebo pri otvorení INEJ správy (iné id,
+  // napr. deep-link z notifikácie) sa formulár naplní aktuálnymi hodnotami.
+  const editMsgId = msg.id || msg._id;
+  const editMsgIdRef = useRef(editMsgId);
   useEffect(() => {
+    const sameMessage = editMsgIdRef.current === editMsgId;
+    editMsgIdRef.current = editMsgId;
+    if (editing && sameMessage) return;
     setEditForm({
       subject: msg.subject || '',
       description: msg.description || '',
@@ -1322,7 +1414,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
       newAttachment: null,
       removeAttachment: false
     });
-  }, [msg]);
+  }, [msg, editing]);
 
   const handleLinkedChangeEdit = (lType, lId) => {
     let name = '';
@@ -1511,9 +1603,10 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                   return (
                     <button key={opt._id} type="button"
                       onClick={() => onVote(msg.id || msg._id, opt._id)}
+                      disabled={voting}
                       style={{
                         position: 'relative', textAlign: 'left', padding: '10px 14px',
-                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)', cursor: voting ? 'wait' : 'pointer',
                         border: isMyVote ? '2px solid var(--accent-color)' : '1px solid var(--border-color)',
                         background: 'var(--bg-card)', overflow: 'hidden', fontSize: '14px',
                         transition: 'all 0.2s ease'
@@ -1572,9 +1665,23 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                     <span className="task-file-icon">{getFileIcon(msg.attachment.mimetype)}</span>
                     <span className="task-file-name task-file-name-clickable" title={msg.attachment.originalName} onClick={() => onPreviewFile({ file: msg.attachment, downloadUrl: legacyDlUrl })}>{msg.attachment.originalName}</span>
                     <span className="task-file-size">{formatFileSize(msg.attachment.size)}</span>
-                    <button className="btn-icon-sm" onClick={() => {
-                      api.get(legacyDlUrl, { responseType: 'blob' })
-                        .then(res => downloadBlob(res.data, msg.attachment.originalName));
+                    <button className="btn-icon-sm" onClick={async () => {
+                      // Bez catch by 403/404/sieťová chyba skončila ako unhandled
+                      // rejection bez hlášky — rovnaká logika ako handleMsgFileDownload
+                      // (správa zo servera príde v Blob tele).
+                      try {
+                        const res = await api.get(legacyDlUrl, { responseType: 'blob' });
+                        downloadBlob(res.data, msg.attachment.originalName);
+                      } catch (error) {
+                        let m = 'Chyba pri sťahovaní súboru';
+                        try {
+                          if (error.response?.data instanceof Blob) {
+                            const json = JSON.parse(await error.response.data.text());
+                            if (json.message) m = json.message;
+                          }
+                        } catch {}
+                        alert(m);
+                      }
                     }} title="Stiahnuť">⬇️</button>
                   </div>
                 );
@@ -1655,12 +1762,12 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                           <div style={{ display: 'flex', gap: '4px' }}>
                             <button
                               onClick={() => { setEditingCommentId(c._id); setEditingCommentText(c.text); }}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', minWidth: '32px', minHeight: '32px', fontSize: '14px', color: 'var(--text-muted)', borderRadius: '4px' }}
                               title="Upraviť komentár"
                             >✏️</button>
                             <button
                               onClick={() => onDeleteComment(msg.id || msg._id, c._id)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '12px', color: 'var(--text-muted)', borderRadius: '4px' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', minWidth: '32px', minHeight: '32px', fontSize: '14px', color: 'var(--text-muted)', borderRadius: '4px' }}
                               title="Vymazať komentár"
                             >🗑️</button>
                           </div>
@@ -1673,7 +1780,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                           value={editingCommentText}
                           onChange={e => { setEditingCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
                           onKeyDown={e => {
-                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
+                            if (sendsOnEnter(e)) { e.preventDefault(); onEditComment(msg.id || msg._id, c._id, editingCommentText); }
                             if (e.key === 'Escape') { setEditingCommentId(null); setEditingCommentText(''); }
                           }}
                           ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
@@ -1732,6 +1839,7 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
                         alignItems: 'center',
                         gap: '5px',
                         padding: '4px 10px',
+                        minHeight: '30px', // dotykový cieľ (lineHeight 1 dával ~22 px)
                         borderRadius: '999px',
                         border: '1px solid rgba(99, 102, 241, 0.18)',
                         background: 'rgba(99, 102, 241, 0.06)',
@@ -1810,10 +1918,25 @@ function MessageDetail({ msg, isRecipient, isSender, canDelete, onBack, onApprov
           {/* Add comment */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <textarea value={commentText} onChange={e => { setCommentText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onComment(msg.id || msg._id); } }}
+              onKeyDown={e => { if (sendsOnEnter(e)) { e.preventDefault(); onComment(msg.id || msg._id); } }}
               style={{ width: '100%', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', fontSize: '13px', resize: 'none', overflow: 'hidden', minHeight: '40px', fontFamily: 'inherit', lineHeight: '1.4' }}
               placeholder="Napíšte komentár..." rows={1} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Príloha ku komentáru — stav aj odoslanie existovali, chýbalo UI */}
+              {commentAttachment && (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>📎 {commentAttachment.name}</span>
+                  <button type="button" className="btn btn-secondary" onClick={() => setCommentAttachment(null)}
+                    disabled={submittingComment} aria-label="Odstrániť prílohu"
+                    style={{ minWidth: '44px', minHeight: '44px', padding: 0, width: 'auto' }}>✕</button>
+                </span>
+              )}
+              <label className="btn btn-secondary" title="Priložiť súbor" aria-label="Priložiť súbor ku komentáru"
+                style={{ fontSize: '16px', minWidth: '44px', minHeight: '44px', padding: '0 10px', width: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: submittingComment ? 'default' : 'pointer', opacity: submittingComment ? 0.6 : 1 }}>
+                📎
+                <input type="file" style={{ display: 'none' }} disabled={submittingComment}
+                  onChange={e => { setCommentAttachment(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </label>
               <button className="btn btn-primary" onClick={() => onComment(msg.id || msg._id)}
                 disabled={!commentText.trim() || submittingComment}
                 style={{ fontSize: '13px', padding: '6px 14px', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0, minWidth: '100px', opacity: submittingComment ? 0.75 : 1 }}>

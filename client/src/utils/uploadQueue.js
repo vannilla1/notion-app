@@ -406,11 +406,19 @@ const sendFile = (item, file, token) => new Promise((resolve) => {
   if (wsId) xhr.setRequestHeader('X-Workspace-Id', wsId);
   xhr.timeout = 0; // celkový limit nahrádza watchdog vyššie
 
+  // Emitujeme len pri zmene zaokrúhleného percenta — progress udalostí sú
+  // desiatky za sekundu a každý emit dekóduje JWT (visibleState) a
+  // re-renderuje UploadQueueIndicator aj bez viditeľnej zmeny.
+  let lastPct = -1;
   xhr.upload.onprogress = (e) => {
     if (e.lengthComputable) {
       loaded = e.loaded;
       total = e.total;
-      emit({ active: item, progress: Math.round((e.loaded / e.total) * 100) });
+      const pct = Math.round((e.loaded / e.total) * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        emit({ active: item, progress: pct });
+      }
       if (e.total > 0 && e.loaded >= e.total) { arm(RESPONSE_TIMEOUT_MS); return; }
     }
     arm(STALL_TIMEOUT_MS);
@@ -745,18 +753,22 @@ const rearmExhausted = async () => {
 };
 
 let started = false;
-export const startUploadQueue = () => {
+export const startUploadQueue = async () => {
+  // Synchrónna časť (registrácia listenerov) beží pred prvým await — druhé
+  // volanie v tom istom ticku už listenery nepridá.
   if (!started) {
     started = true;
-    window.addEventListener('online', () => { rearmExhausted().then(() => processUploadQueue()); });
-    document.addEventListener('visibilitychange', () => {
+    window.addEventListener('online', async () => {
+      await rearmExhausted();
+      await processUploadQueue();
+    });
+    document.addEventListener('visibilitychange', async () => {
       if (document.hidden) return;
-      if (Date.now() - lastRearmAt > REARM_ON_VISIBLE_MS) {
-        rearmExhausted().then(() => processUploadQueue());
-      } else {
-        processUploadQueue();
-      }
+      if (Date.now() - lastRearmAt > REARM_ON_VISIBLE_MS) await rearmExhausted();
+      await processUploadQueue();
     });
   }
-  return rearmExhausted().then(refreshCounts).then(() => processUploadQueue());
+  await rearmExhausted();
+  await refreshCounts();
+  return processUploadQueue();
 };

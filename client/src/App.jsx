@@ -14,6 +14,7 @@ import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
 import { removeStoredToken } from './utils/authStorage';
+import { reportError, maybeAutoReload } from './utils/reportError';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -45,10 +46,25 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 
+// Výška celoobrazovkových loaderov (RouteFallback, LoadingGate). Inline štýl
+// nevie mať CSS fallback (`height: 100vh; height: 100dvh;` ako .login-container
+// v index.css), preto voľba cez CSS.supports. V mobilnom Safari/WKWebView je
+// 100vh výška s ROZBALENÝM adresným riadkom — kontajner vyšší než viditeľná
+// plocha, spinner mimo stredu a stránka sa dá pri načítaní posúvať. 100dvh
+// (iOS ≥ 15.4) sleduje skutočný viewport; staršie WebView ostanú na 100vh.
+// min-height (nie height), aby LoadingGate s únikovými tlačidlami na malom
+// displeji neorezal obsah.
+let FULL_VIEWPORT_HEIGHT = '100vh';
+try {
+  if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('height', '100dvh')) {
+    FULL_VIEWPORT_HEIGHT = '100dvh';
+  }
+} catch { /* ponechaj 100vh */ }
+
 const RouteFallback = () => (
   <div style={{
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+    minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
     color: 'var(--text-secondary, #64748b)'
   }}>
     Načítavam…
@@ -68,6 +84,18 @@ class RouteErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // Lazy chunk failures (Failed to fetch dynamically imported module).
     // Bez ErrorBoundary by React tichom unmount-oval celý strom → biela.
+    //
+    // Stale chunk po deployi (starý index.html → neexistujúci hash) → reload
+    // s 60 s cooldownom (sessionStorage), rovnako ako globálny 'error' handler.
+    // React v produkcii chyby zachytené boundary na window 'error' neposiela,
+    // takže bez tohto by sa auto-reload ani hlásenie do Diagnostiky nespustili.
+    if (maybeAutoReload(error?.message)) return;
+    reportError({
+      name: error?.name,
+      message: error?.message || 'Route render error',
+      stack: error?.stack,
+      componentStack: info?.componentStack
+    });
     console.error('[RouteErrorBoundary] caught:', error?.message);
   }
   render() {
@@ -122,7 +150,7 @@ function LoadingGate() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--bg-secondary, #f8fafc)',
+      minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
       color: 'var(--text-secondary, #64748b)', padding: '24px'
     }}>
       <div style={{ textAlign: 'center', maxWidth: 360 }}>
@@ -343,7 +371,11 @@ function AppContent() {
     let scheduledCheck = null;
 
     const checkAndUpdate = () => {
-      const hasModal = !!document.querySelector('.modal-overlay');
+      // `.workspace-leave-overlay` (potvrdenia opustenia/zmazania prostredia
+      // v UserMenu a WorkspaceMembers) je rovnako celoobrazovkový fixed
+      // overlay, ale nemal triedu modal-overlay → bez zámku sa na iOS
+      // prescrolloval obsah pod ním (scroll bleed).
+      const hasModal = !!document.querySelector('.modal-overlay, .workspace-leave-overlay');
       if (hasModal && !isLocked) {
         isLocked = true;
         savedScrollY = window.scrollY;
@@ -395,7 +427,12 @@ function AppContent() {
       if ((location.pathname === '/crm' && params.get('expandContact')) ||
           (location.pathname === '/tasks' && params.get('highlightTask')) ||
           (location.pathname === '/messages' && params.get('highlight'))) {
-        sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
+        // Safari „Blokovať všetky cookies" / embedded prehliadače: už prístup
+        // k sessionStorage hádže SecurityError — výnimka z effectu by zhodila
+        // celý React strom (AppErrorBoundary). Deep link je nice-to-have.
+        try {
+          sessionStorage.setItem('pendingDeepLink', location.pathname + location.search);
+        } catch { /* storage blokovaný */ }
       }
     }
   }, [location.pathname, location.search, isAuthenticated]);
@@ -405,9 +442,14 @@ function AppContent() {
 
     // Check immediately
     const checkAndNavigate = () => {
-      const pendingLink = sessionStorage.getItem('pendingDeepLink');
+      let pendingLink = null;
+      try {
+        pendingLink = sessionStorage.getItem('pendingDeepLink');
+        if (pendingLink) sessionStorage.removeItem('pendingDeepLink');
+      } catch {
+        return false; // storage blokovaný — viď komentár pri setItem vyššie
+      }
       if (pendingLink) {
-        sessionStorage.removeItem('pendingDeepLink');
         const sep = pendingLink.includes('?') ? '&' : '?';
         // navigateWithWorkspace handles workspace switch if link has ws=
         navigateWithWorkspace(pendingLink + sep + '_t=' + Date.now());
@@ -520,7 +562,11 @@ function AppContent() {
     return <LoadingGate />;
   }
 
-  if (isAuthenticated && needsWorkspace) {
+  // Verejné stránky (/invite/:token, /vop, /ochrana-udajov, /auth/callback, ...)
+  // nesmie WorkspaceSetup prekryť — prihlásený používateľ bez prostredia
+  // (nový účet, opustené/zmazané prostredia) by inak z e-mailového odkazu
+  // nikdy neuvidel AcceptInvite (WorkspaceSetup pozná len ručný kód, nie token).
+  if (isAuthenticated && needsWorkspace && !isPublicPage) {
     return <WorkspaceSetup />;
   }
 
@@ -559,11 +605,11 @@ function AppContent() {
         />
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate to="/app" /> : <Login />}
+          element={isAuthenticated ? <Navigate to="/app" replace /> : <Login />}
         />
         <Route
           path="/forgot-password"
-          element={isAuthenticated ? <Navigate to="/app" /> : <ForgotPassword />}
+          element={isAuthenticated ? <Navigate to="/app" replace /> : <ForgotPassword />}
         />
         <Route
           path="/reset-password"
@@ -571,34 +617,34 @@ function AppContent() {
         />
         <Route
           path="/app"
-          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/crm"
-          element={isAuthenticated ? <CRM /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <CRM /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/tasks"
-          element={isAuthenticated ? <Tasks /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Tasks /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/prilohy"
-          element={isAuthenticated ? <Attachments /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Attachments /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/workspace/members"
-          element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <WorkspaceMembers /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/messages"
-          element={isAuthenticated ? <Messages /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <Messages /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/app/billing"
           element={
             isAuthenticated
               ? (isIosNativeApp() ? <IapBilling /> : <BillingPage />)
-              : <Navigate to="/login" />
+              : <Navigate to="/login" replace />
           }
         />
         {/* Affiliate dashboard — visible iba pre prihlásených CRM userov.
@@ -606,7 +652,7 @@ function AppContent() {
             inak ukáže CTA na kontakt support@. */}
         <Route
           path="/app/affiliate"
-          element={isAuthenticated ? <UserAffiliate /> : <Navigate to="/login" />}
+          element={isAuthenticated ? <UserAffiliate /> : <Navigate to="/login" replace />}
         />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminPanel />} />

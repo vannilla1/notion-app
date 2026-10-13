@@ -34,6 +34,19 @@ function truncate(s) {
   return s.slice(0, MAX_STRING_LEN) + '…';
 }
 
+// Argument console.error/warn → text. Musí byť v try: `String(a)` hodí
+// TypeError pre Object.create(null) alebo objekt s hádžucim toString /
+// Symbol.toPrimitive — a `args.map(...)` sa vyhodnocuje ako argument push()
+// ešte PRED jeho try blokom, takže výnimka by sa šírila z console.error do
+// kódu, ktorý chcel len zalogovať chybu (vrátane volaní z knižníc).
+function safeStr(a) {
+  try {
+    return typeof a === 'string' ? a : (a?.message || String(a));
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 /**
  * Vráť kópiu bufferu (array). Volá sa pri error reporte.
  */
@@ -124,7 +137,7 @@ export function installBreadcrumbInstrumentation() {
       push({
         category: 'console',
         level: 'error',
-        message: truncate(args.map(a => typeof a === 'string' ? a : (a?.message || String(a))).join(' '))
+        message: truncate(args.map(safeStr).join(' '))
       });
       return origError.apply(this, args);
     };
@@ -132,7 +145,7 @@ export function installBreadcrumbInstrumentation() {
       push({
         category: 'console',
         level: 'warning',
-        message: truncate(args.map(a => typeof a === 'string' ? a : (a?.message || String(a))).join(' '))
+        message: truncate(args.map(safeStr).join(' '))
       });
       return origWarn.apply(this, args);
     };
@@ -145,10 +158,20 @@ export function installBreadcrumbInstrumentation() {
       if (!t || !t.closest) return;
       const clickable = t.closest('button, a, [role="button"]');
       if (!clickable) return;
+      // Súkromie: riadky kontaktov, úloh a správ sú často klikateľné
+      // (role=button) a ich innerText nesie mená, telefóny, e-maily, úryvky
+      // správ — posledných 30 kliknutí ide s KAŽDÝM error reportom na server
+      // a ukladá sa do ServerError mimo workspace-u (GDPR: účel/retencia).
+      // Preferujeme explicitné popisky (aria-label, data-breadcrumb, title),
+      // tel:/mailto: odkazy redigujeme, voľný text skracujeme na 40 znakov.
+      const href = clickable.getAttribute('href');
       const label = (clickable.getAttribute('aria-label')
-        || clickable.innerText
+        || clickable.getAttribute('data-breadcrumb')
         || clickable.getAttribute('title')
-        || clickable.tagName).toString().trim().replace(/\s+/g, ' ');
+        || ((href && /^(tel|mailto):/i.test(href))
+          ? href.split(':')[0] + ':[redacted]'
+          : (clickable.innerText || ''))
+        || clickable.tagName).toString().trim().replace(/\s+/g, ' ').slice(0, 40);
       push({
         category: 'ui.click',
         level: 'info',

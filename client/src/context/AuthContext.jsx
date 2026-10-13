@@ -6,6 +6,7 @@ import {
   removeStoredToken,
   isNativeIOSApp
 } from '../utils/authStorage';
+import { consumeOAuthNonce } from '../utils/oauthNonce';
 
 const AuthContext = createContext(null);
 
@@ -29,6 +30,12 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const nativeIOS = isNativeIOSApp();
   const fetchUserRetryRef = useRef(null); // timer opakovania /me pri prechodnej chybe
+  // true kým nový web tab čaká (max 400 ms) na token z iného tabu. Dovtedy
+  // nesmieme vypnúť loading — inak route vyrenderuje <Navigate to="/login">
+  // a pôvodná cieľová URL (/crm, /app/billing…) sa stratí.
+  const tokenBootstrapPendingRef = useRef(
+    !nativeIOS && !token && typeof BroadcastChannel !== 'undefined'
+  );
   const fetchUserRunRef = useRef(0);      // generácia — zahodí odpoveď zastaraného /me (iný token, unmount)
 
   // ── Bootstrap: ak nemáme token, spýtaj sa ostatných tabov ───────────────
@@ -50,6 +57,7 @@ export const AuthProvider = ({ children }) => {
       if (resolved) return;
       if (e.data?.type === 'auth:token_response' && e.data.token) {
         resolved = true;
+        tokenBootstrapPendingRef.current = false;
         setStoredToken(e.data.token);
         setToken(e.data.token); // triggerne fetchUser cez useEffect([token])
         channel.close();
@@ -62,6 +70,7 @@ export const AuthProvider = ({ children }) => {
     const timeout = setTimeout(() => {
       if (resolved) return;
       resolved = true;
+      tokenBootstrapPendingRef.current = false;
       channel.close();
       setLoading(false); // nikto neodpovedal → sme nepriihlásení
     }, 400);
@@ -102,7 +111,8 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       fetchUser();
-    } else {
+    } else if (!tokenBootstrapPendingRef.current) {
+      // Počas BroadcastChannel dopytu loading vypne až timeout/odpoveď.
       setLoading(false);
     }
     // Návrat siete počas čakania na ďalší pokus → skús hneď.
@@ -204,12 +214,25 @@ export const AuthProvider = ({ children }) => {
     window.__nativeAuthLogin = (newToken, opts) => {
       try {
         if (!newToken || typeof newToken !== 'string') return false;
+        // Token z `prplcrm://auth` (OAuth dokončený v Safari) nesie cnonce —
+        // prijmeme ho len ak flow spustil tento WebView (login-CSRF: odkaz
+        // prplcrm://auth vie otvoriť ktorákoľvek stránka či appka). Natívne
+        // SDK prihlásenie (OAuthController) volá bez opts.
+        if (opts && Object.prototype.hasOwnProperty.call(opts, 'cnonce')) {
+          if (!consumeOAuthNonce(opts.cnonce)) return false;
+        }
+        const rawReturn = typeof opts?.returnUrl === 'string' ? opts.returnUrl : '';
+        const target = rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : '/app';
         loginWithToken(newToken);
-        // Redirect na /app — používame nastavenie cez timeout aby sa Auth state
+        // Redirect — používame nastavenie cez timeout aby sa Auth state
         // stihol propagate-nuť pred navigation-om.
         setTimeout(() => {
-          if (window.location.pathname !== '/app' && !window.location.pathname.startsWith('/app/')) {
-            window.location.assign('/app');
+          if (target === '/app') {
+            if (window.location.pathname !== '/app' && !window.location.pathname.startsWith('/app/')) {
+              window.location.assign('/app');
+            }
+          } else if (window.location.pathname !== target) {
+            window.location.assign(target);
           }
         }, 50);
         return true;

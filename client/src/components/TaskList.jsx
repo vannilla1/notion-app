@@ -151,9 +151,14 @@ function TaskList({ contactId, tasks = [], onContactRefresh }) {
     }
   };
 
+  // dueDate je String 'YYYY-MM-DD' — `new Date('YYYY-MM-DD')` je UTC polnoc a
+  // v pásmach západne od UTC by zobrazil predchádzajúci deň. Parsujeme lokálne;
+  // iný formát padá na pôvodné new Date(s). (Rovnaký helper ako v Tasks.jsx.)
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('sk-SK');
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateString));
+    const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(dateString);
+    return d.toLocaleDateString('sk-SK');
   };
 
   const completedCount = tasks.filter(t => t.completed).length;

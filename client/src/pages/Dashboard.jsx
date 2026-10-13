@@ -167,7 +167,9 @@ function Dashboard() {
   useEffect(() => {
     if (!socket || !isConnected) return;
 
-    const events = ['contact-created', 'contact-updated', 'contact-deleted', 'task-updated', 'task-created', 'task-deleted', 'new-message'];
+    // Správy: server emituje 'message-created' / 'message-updated' /
+    // 'message-deleted' (routes/messages.js) — rovnaké názvy ako Messages.jsx.
+    const events = ['contact-created', 'contact-updated', 'contact-deleted', 'task-updated', 'task-created', 'task-deleted', 'message-created', 'message-updated', 'message-deleted'];
     events.forEach(e => socket.on(e, debouncedFetch));
     return () => events.forEach(e => socket.off(e, debouncedFetch));
   }, [socket, isConnected, debouncedFetch]);
@@ -343,6 +345,18 @@ function Dashboard() {
   }, [contacts, tasks, messages, user?.id]);
 
   const { activeContacts, newContacts, completedContacts, cancelledContacts, pendingTasks, completedTasks, totalReceived, pendingMessages, approvedMessages, rejectedMessages, commentedMessages, pollMessages, totalSent, lowPriorityTasks, mediumPriorityTasks, highPriorityTasks, myTasksCount } = stats;
+
+  // Odvodené zoznamy pre render — bez memo sa O(kontakty × projekty) filter
+  // a triedenie počítali pri každom re-renderi (rozbalenie podúlohy, socket
+  // event…). getContactTasks závisí iba od `tasks` a argumentu.
+  const contactsWithTasks = useMemo(
+    () => contacts.filter(c => getContactTasks(c).length > 0),
+    [contacts, tasks]
+  );
+  const pendingTasksSorted = useMemo(() => tasks.filter(t => !t.completed).sort((a, b) => {
+    const pri = { high: 0, medium: 1, low: 2 };
+    return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
+  }), [tasks]);
 
   // Sort functions (stable references)
   const sortTasks = useCallback((list) => [...list].sort((a, b) => {
@@ -965,7 +979,8 @@ function Dashboard() {
                           key={s}
                           onClick={() => setDetailView(`messages-${s}`)}
                           style={{
-                            padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                            // minHeight: dotykový cieľ (pôvodných ~24 px bolo na mobile ťažké trafiť)
+                            padding: '6px 12px', minHeight: '36px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
                             background: isActive ? 'var(--accent-color)' : 'var(--bg-card)',
                             color: isActive ? 'white' : 'var(--text-secondary)',
                             cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0
@@ -1056,9 +1071,10 @@ function Dashboard() {
                           </span>
                           {msg.attachment && <span className="meta-text">📎 Príloha</span>}
                         </div>
-                        {msg.body && (
-                          <div className="detail-item-description" style={{ marginTop: '4px' }}>
-                            {msg.body.length > 100 ? msg.body.substring(0, 100) + '...' : msg.body}
+                        {/* Model správy má pole `description` (nie `body`) — náhľad textu */}
+                        {msg.description && (
+                          <div className="detail-item-description" style={{ marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {msg.description.length > 100 ? msg.description.substring(0, 100) + '...' : msg.description}
                           </div>
                         )}
                       </div>
@@ -1277,10 +1293,7 @@ function Dashboard() {
                     </div>
                   ) : (
                     <div className="dashboard-tasks-list">
-                      {[...tasks].filter(t => !t.completed).sort((a, b) => {
-                        const pri = { high: 0, medium: 1, low: 2 };
-                        return (pri[a.priority] ?? 1) - (pri[b.priority] ?? 1);
-                      }).slice(0, 5).map(task => (
+                      {pendingTasksSorted.slice(0, 5).map(task => (
                         <div
                           key={task.id}
                           className="dashboard-task-item clickable-task"
@@ -1318,9 +1331,9 @@ function Dashboard() {
                           )}
                         </div>
                       ))}
-                      {tasks.filter(t => !t.completed).length > 5 && (
+                      {pendingTasksSorted.length > 5 && (
                         <div className="show-more">
-                          + {tasks.filter(t => !t.completed).length - 5} ďalších projektov
+                          + {pendingTasksSorted.length - 5} ďalších projektov
                         </div>
                       )}
 
@@ -1401,9 +1414,9 @@ function Dashboard() {
                                 </span>
                                 {msg.attachment && <span>📎</span>}
                               </div>
-                              {msg.body && (
+                              {msg.description && (
                                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {msg.body.length > 80 ? msg.body.substring(0, 80) + '...' : msg.body}
+                                  {msg.description.length > 80 ? msg.description.substring(0, 80) + '...' : msg.description}
                                 </div>
                               )}
                             </div>
@@ -1430,8 +1443,7 @@ function Dashboard() {
                   <h3>Kontakty s projektami</h3>
                 </div>
                 <div className="contacts-with-tasks">
-                  {contacts
-                    .filter(c => getContactTasks(c).length > 0)
+                  {contactsWithTasks
                     .slice(0, 5)
                     .map(contact => {
                       const contactTasks = getContactTasks(contact);
@@ -1475,7 +1487,7 @@ function Dashboard() {
                         </div>
                       );
                     })}
-                  {contacts.filter(c => getContactTasks(c).length > 0).length === 0 && (
+                  {contactsWithTasks.length === 0 && (
                     <div className="empty-state-small">
                       <p>Žiadne kontakty s projektami</p>
                     </div>

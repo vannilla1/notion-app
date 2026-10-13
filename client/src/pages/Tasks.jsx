@@ -5,11 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useSocket } from '../hooks/useSocket';
 import { useWorkspaceSwitched, useAppResume, useWorkspaceUsers, isDeepLinkPending } from '../hooks';
-import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS, formatFileSize } from '../utils/constants';
+import { getWorkspaceRoleLabel, FILE_SIZE_LIMITS } from '../utils/constants';
 import { primeMobileKeyboard } from '../utils/keyboardPrimer';
 import { enqueueUpload, onUploadSettled } from '../utils/uploadQueue';
 import { mergeTaskUpdate } from '../utils/mergeTaskUpdate';
-import { alertUnlessPlanGate } from '../utils/planGate';
+import { alertUnlessPlanGate, dispatchPlanGate, PLAN_GATE_CODES } from '../utils/planGate';
 import { debug } from '../utils/debug';
 import { useNavigate, useLocation } from 'react-router-dom';
 import UserMenu from '../components/UserMenu';
@@ -31,6 +31,16 @@ import TaskTransferModal from '../components/TaskTransferModal';
 import { linkifyText } from '../utils/linkify';
 import { getStoredToken } from '../utils/authStorage';
 import { getStoredWorkspaceId } from '../utils/workspaceStorage';
+
+// dueDate je na serveri String 'YYYY-MM-DD'. `new Date('YYYY-MM-DD')` je podľa
+// špecifikácie UTC polnoc — v pásmach západne od UTC (cestujúci používateľ,
+// zahraničný člen tímu) vyjde lokálny PREDCHÁDZAJÚCI deň a termín sa posunie.
+// Parsujeme preto ako lokálnu polnoc; iné formáty (starší full-ISO reťazec)
+// padajú na pôvodné `new Date(s)`.
+const parseLocalDate = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s);
+};
 
 // Help tips for Tasks page
 const tasksHelpTips = [
@@ -294,7 +304,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
   const getItemsForDate = (date) => {
     return allItems.filter(item => {
-      const d = new Date(item.dueDate);
+      const d = parseLocalDate(item.dueDate);
       return isSameDay(d, date);
     });
   };
@@ -360,7 +370,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
 
     const itemsByDay = {};
     for (const item of allItems) {
-      const d = new Date(item.dueDate);
+      const d = parseLocalDate(item.dueDate);
       if (d.getFullYear() === year && d.getMonth() === month) {
         const day = d.getDate();
         if (!itemsByDay[day]) itemsByDay[day] = [];
@@ -540,7 +550,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                 <div
                   key={item.id}
                   className={`calendar-day-allday-item ${getDueDateClass(item.dueDate, item.completed)} ${item.completed ? 'completed' : ''}`}
-                  onClick={() => onTaskClick(item.task)}
+                  onClick={() => onTaskClick(item)}
                   style={{ borderLeftColor: wsColor, background: `${wsColor}15` }}
                   title={item.type === 'subtask' ? `${item.task.title} / ${item.title}` : item.title}
                 >
@@ -605,7 +615,7 @@ function CalendarView({ tasks, calendarMonth, setCalendarMonth, getDueDateClass,
                     borderLeftColor: wsColor,
                     background: `${wsColor}22`
                   }}
-                  onClick={() => onTaskClick(item.task)}
+                  onClick={() => onTaskClick(item)}
                   title={`${formatTimeRange(item.dueTime)} — ${item.type === 'subtask' ? item.task.title + ' / ' : ''}${item.title}`}
                 >
                   <div className="calendar-day-event-time">{formatTimeRange(item.dueTime)}</div>
@@ -670,7 +680,6 @@ function Tasks() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [selectedTask, setSelectedTask] = useState(null);
   const [expandedTask, setExpandedTask] = useState(null);
   const { socket, isConnected } = useSocket();
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
@@ -687,6 +696,32 @@ function Tasks() {
   // je async — closure v setTimeout by čítala stale `tasks` zo svojho času.
   // Ref sa aktualizuje synchrónne v useEffect nižšie a je vždy aktuálny.
   const tasksRef = useRef([]);
+  // Ochrana proti zastaranej odpovedi: fetchTasks/fetchContacts bežia súbežne
+  // z viacerých zdrojov (mount, resume, prepnutie workspacu, socket, deep-link).
+  // Ak starší request dobehne až PO novšom (napr. ešte s X-Workspace-Id
+  // predchádzajúceho workspacu), nesmie prepísať novší stav. Zahadzujeme len
+  // odpoveď, ktorú už predbehla novšia APLIKOVANÁ odpoveď — `await fetchTasks()`
+  // volajúci (focusNextMatch cez tasksRef) tak v bežnom prípade stále dostanú
+  // čerstvé dáta.
+  const tasksFetchSeqRef = useRef({ started: 0, applied: 0 });
+  const contactsFetchSeqRef = useRef({ started: 0, applied: 0 });
+  // In-flight guard pre addSubtask (per inputKey): Enter + klik na „+" alebo
+  // dvojité Enter pred odpoveďou servera by inak poslali dva rovnaké POSTy
+  // a vytvorili duplicitnú podúlohu. Ref, nie state — netreba re-render.
+  const addingSubtaskRef = useRef(new Set());
+  // Časovače zvýraznenia (2,5–4 s) a scroll-retry reťazcov (20–30 × 100 ms)
+  // evidujeme a pri unmounte rušíme — inak by po odchode zo stránky bežali
+  // ďalej (document.querySelector, setState na odpojenom komponente).
+  const timersRef = useRef(new Set());
+  const later = useCallback((fn, ms) => {
+    const id = setTimeout(() => { timersRef.current.delete(id); fn(); }, ms);
+    timersRef.current.add(id);
+    return id;
+  }, []);
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current.clear();
+  }, []);
 
   // Form states
   const [newTaskForm, setNewTaskForm] = useState({
@@ -745,6 +780,7 @@ function Tasks() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicatingTask, setDuplicatingTask] = useState(null);
   const [duplicateContactIds, setDuplicateContactIds] = useState([]);
+  const [duplicating, setDuplicating] = useState(false); // POST /duplicate in-flight
 
   // Transfer modal — kopírovanie/presun projektu alebo úlohy do projektu
   // iného kontaktu. { contactId, taskId, subtaskId?, title } | null
@@ -762,34 +798,46 @@ function Tasks() {
   const [googleCalendarNotification, setGoogleCalendarNotification] = useState(null);
 
   // Define fetch functions early so they can be used in useEffects
-  const exportTasksCsv = () => {
+  const exportTasksCsv = async () => {
     const token = getStoredToken();
     // Surový fetch obchádza axios interceptor — X-Workspace-Id treba pridať
     // ručne, inak server spadne na DB fallback a exportuje INÉ prostredie.
     const wsId = getStoredWorkspaceId();
-    fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        ...(wsId ? { 'X-Workspace-Id': wsId } : {})
+    try {
+      const res = await fetch(`${api.defaults.baseURL}/api/tasks/export/csv`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          ...(wsId ? { 'X-Workspace-Id': wsId } : {})
+        }
+      });
+      if (!res.ok) {
+        // Mimo axios interceptora si plánový limit (403 FEATURE_NOT_IN_PLAN)
+        // aj ostatné chyby (401, 500) musíme spracovať sami — inak by sa
+        // chybový JSON potichu uložil ako „projekty.csv".
+        let data = null;
+        try { data = await res.json(); } catch { /* odpoveď nie je JSON */ }
+        if (data?.code && PLAN_GATE_CODES.has(data.code)) {
+          dispatchPlanGate({ code: data.code, message: data.message });
+        } else {
+          alert(data?.message || 'Chyba pri exporte');
+        }
+        return;
       }
-    })
-      .then(response => response.blob())
-      .then(blob => {
-        const link = document.createElement('a');
-        const objUrl = window.URL.createObjectURL(blob);
-        link.href = objUrl;
-        link.download = 'projekty.csv';
-        link.click();
-        // Uvoľni blob URL — inak leží v pamäti do reloadu (na iOS WKWebView
-        // prispieva k memory jetsam). Malý timeout, nech stihne prebehnúť download.
-        setTimeout(() => window.URL.revokeObjectURL(objUrl), 10000);
-      })
-      .catch(() => alert('Chyba pri exporte'));
+      const blob = await res.blob();
+      // downloadBlob rieši iOS (fileDownload bridge), Android (NativeBridge.saveFile)
+      // aj web — priamy <a download> je v natívnych shelloch tichý no-op.
+      downloadBlob(blob, 'projekty.csv');
+    } catch {
+      alert('Chyba pri exporte');
+    }
   };
 
   const fetchTasks = useCallback(async () => {
+    const seq = ++tasksFetchSeqRef.current.started;
     try {
       const res = await api.get('/api/tasks');
+      if (seq < tasksFetchSeqRef.current.applied) return; // novšia odpoveď už je v stave
+      tasksFetchSeqRef.current.applied = seq;
       setTasks(res.data);
     } catch {
       // Silently fail — task list shows empty/loading state
@@ -799,8 +847,11 @@ function Tasks() {
   }, []);
 
   const fetchContacts = useCallback(async () => {
+    const seq = ++contactsFetchSeqRef.current.started;
     try {
       const res = await api.get('/api/contacts');
+      if (seq < contactsFetchSeqRef.current.applied) return; // novšia odpoveď už je v stave
+      contactsFetchSeqRef.current.applied = seq;
       setContacts(res.data);
     } catch {
       // Silently fail
@@ -813,16 +864,6 @@ function Tasks() {
       setLinkedMessages(prev => ({ ...prev, [taskId]: res.data }));
     } catch (error) { /* ignore */ }
   }, []);
-
-  // Sync completed tasks from Google Tasks to CRM
-  const syncCompletedFromGoogle = useCallback(async () => {
-    try {
-      await api.post('/api/google-tasks/sync-completed');
-      fetchTasks();
-    } catch {
-      // User may not have Google Tasks connected
-    }
-  }, [fetchTasks]);
 
   // Keep tasksRef in sync with tasks state — used by focusNextMatch after
   // toggle-complete, where we need to read fresh tasks AFTER fetchTasks
@@ -843,6 +884,9 @@ function Tasks() {
   useAppResume(() => { fetchTasks(); fetchContacts(); });
   useWorkspaceSwitched(() => {
     setExpandedTask(null);
+    // Filter kontaktu z predošlého workspacu nedáva zmysel — skryl by všetky
+    // projekty a banner by ukazoval „Načítavam..." natrvalo.
+    setContactFilter(null);
     fetchTasks();
     fetchContacts();
   });
@@ -857,12 +901,15 @@ function Tasks() {
   // endpoint is idempotent, so re-firing on the same id is harmless.
   useEffect(() => {
     if (!expandedTask) return;
-    api.put('/api/notifications/read-for-related', {
-      relatedType: 'task',
-      relatedId: expandedTask
-    }).then(() => {
-      window.dispatchEvent(new CustomEvent('notifications-updated'));
-    }).catch(() => {});
+    (async () => {
+      try {
+        await api.put('/api/notifications/read-for-related', {
+          relatedType: 'task',
+          relatedId: expandedTask
+        });
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      } catch { /* ignore */ }
+    })();
   }, [expandedTask]);
 
   // Handle Google Calendar and Google Tasks OAuth callback parameters.
@@ -984,7 +1031,7 @@ function Tasks() {
     for (const it of myItems) {
       if (it.item.completed) { groups.done.push(it); continue; }
       if (!it.item.dueDate) { groups.nodate.push(it); continue; }
-      const due = new Date(it.item.dueDate);
+      const due = parseLocalDate(it.item.dueDate);
       due.setHours(0, 0, 0, 0);
       const diff = Math.round((due - today) / 86400000);
       if (diff < 0) groups.overdue.push(it);
@@ -1057,7 +1104,7 @@ function Tasks() {
         <div className="my-task-meta">
           {item.dueDate && (
             <span className={`due-date ${getDueDateClass(item.dueDate, done)}`}>
-              📅 {new Date(item.dueDate).toLocaleDateString('sk-SK')}{item.dueTime ? ` ${item.dueTime}` : ''}
+              📅 {parseLocalDate(item.dueDate).toLocaleDateString('sk-SK')}{item.dueTime ? ` ${item.dueTime}` : ''}
             </span>
           )}
         </div>
@@ -1070,7 +1117,7 @@ function Tasks() {
     if (!dueDate || completed) return '';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const due = new Date(dueDate);
+    const due = parseLocalDate(dueDate);
     due.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
 
@@ -1097,22 +1144,6 @@ function Tasks() {
     return false;
   };
 
-  // Get IDs of subtasks matching due date class (recursive)
-  const getMatchingSubtaskIds = (subtasks, dueClass) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0) return ids;
-    for (const subtask of subtasks) {
-      if (!subtask.completed && getDueDateClass(subtask.dueDate, subtask.completed) === dueClass) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getMatchingSubtaskIds(subtask.subtasks, dueClass);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
-  };
-
   // Get IDs of parent subtasks that need to be expanded to show matching children
   const getParentSubtaskIds = (subtasks, dueClass, parentIds = new Set()) => {
     if (!subtasks || subtasks.length === 0) return parentIds;
@@ -1127,22 +1158,6 @@ function Tasks() {
       }
     }
     return parentIds;
-  };
-
-  // Get IDs of subtasks assigned to user (recursive)
-  const getAssignedSubtaskIds = (subtasks, userId) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0 || !userId) return ids;
-    for (const subtask of subtasks) {
-      if ((subtask.assignedTo || []).some(id => id?.toString() === userId)) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getAssignedSubtaskIds(subtask.subtasks, userId);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
   };
 
   // Check if any subtask is assigned to user (recursive)
@@ -1215,22 +1230,6 @@ function Tasks() {
       else if (hasNewOrModifiedSubtask(task.subtasks)) count++;
     }
     return count;
-  };
-
-  // Get IDs of subtasks that are new or modified (recursive)
-  const getNewOrModifiedSubtaskIds = (subtasks) => {
-    const ids = new Set();
-    if (!subtasks || subtasks.length === 0) return ids;
-    for (const subtask of subtasks) {
-      if (isSubtaskNewOrModified(subtask)) {
-        ids.add(subtask.id);
-      }
-      if (subtask.subtasks) {
-        const childIds = getNewOrModifiedSubtaskIds(subtask.subtasks);
-        childIds.forEach(id => ids.add(id));
-      }
-    }
-    return ids;
   };
 
   // Get IDs of parent subtasks that need to be expanded to show new/modified children
@@ -1317,11 +1316,11 @@ function Tasks() {
       return;
     }
     if (attempts < 20) { // 20 × 100ms = 2s
-      setTimeout(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
+      later(() => scrollToTaskWithRetry(taskId, attempts + 1), 100);
     } else {
       debug.warn('[DeepLink] Tasks: gave up scrolling to', taskId, '— not in DOM after 2s');
     }
-  }, []);
+  }, [later]);
 
   // Rozbalenie projektu kliknutím. Akordeón (otvorený max jeden) pri
   // rozkliknutí zbalí predtým otvorený projekt — ak bol NAD klikaným a mal
@@ -1349,11 +1348,11 @@ function Tasks() {
       return;
     }
     if (attempts < 30) {
-      setTimeout(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
+      later(() => scrollToSubtaskWithRetry(subtaskId, attempts + 1), 100);
     } else {
       debug.warn('[DeepLink] Tasks: gave up scrolling to subtask', subtaskId);
     }
-  }, []);
+  }, [later]);
 
   // Find the ancestor subtask IDs leading to a given subtask. Returns array
   // of IDs (NOT including the target itself) from outermost to innermost.
@@ -1426,30 +1425,34 @@ function Tasks() {
       lastNavTimestampRef.current = urlTimestamp || 'unread';
       navigate(location.pathname, { replace: true, state: {} });
 
-      api.get('/api/notifications?unreadOnly=true&limit=50').then(res => {
-        const taskNotifs = (res.data.notifications || []).filter(n =>
-          n.type?.startsWith('task.') || n.type?.startsWith('subtask.')
-        );
-        const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
-        if (ids.size > 0) {
-          // Zvýraznenie neprečítaných funguje len v strome projektov — viď
-          // komentár pri spracovaní pending highlightu.
-          setViewMode('list');
-          setContactFilter(null);
-          setFilter('all');
-          setSearchQuery('');
-          setHighlightedTaskIds(ids);
-          // Expand first highlighted task
-          const firstId = [...ids][0];
-          setExpandedTask(firstId);
-          setTimeout(() => {
-            if (taskRefs.current[firstId]) {
-              taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }, 200);
-          setTimeout(() => setHighlightedTaskIds(new Set()), 4000);
-        }
-      }).catch(() => {});
+      const run = async () => {
+        try {
+          const res = await api.get('/api/notifications?unreadOnly=true&limit=50');
+          const taskNotifs = (res.data.notifications || []).filter(n =>
+            n.type?.startsWith('task.') || n.type?.startsWith('subtask.')
+          );
+          const ids = new Set(taskNotifs.map(n => n.relatedId).filter(Boolean));
+          if (ids.size > 0) {
+            // Zvýraznenie neprečítaných funguje len v strome projektov — viď
+            // komentár pri spracovaní pending highlightu.
+            setViewMode('list');
+            setContactFilter(null);
+            setFilter('all');
+            setSearchQuery('');
+            setHighlightedTaskIds(ids);
+            // Expand first highlighted task
+            const firstId = [...ids][0];
+            setExpandedTask(firstId);
+            later(() => {
+              if (taskRefs.current[firstId]) {
+                taskRefs.current[firstId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 200);
+            later(() => setHighlightedTaskIds(new Set()), 4000);
+          }
+        } catch { /* ignore */ }
+      };
+      run();
     }
   }, [location.search]);
 
@@ -1503,7 +1506,7 @@ function Tasks() {
         });
         // Scroll to the subtask itself (not the parent task) once its DOM
         // node renders. Small delay lets expand state propagate first.
-        setTimeout(() => scrollToSubtaskWithRetry(subtaskId), 150);
+        later(() => scrollToSubtaskWithRetry(subtaskId), 150);
       } else {
         debug.warn('[DeepLink] Tasks: subtask not found in tree, scrolling to task', subtaskId);
         scrollToTaskWithRetry(taskId);
@@ -1513,11 +1516,11 @@ function Tasks() {
       scrollToTaskWithRetry(taskId);
     }
 
-    setTimeout(() => {
+    later(() => {
       setHighlightedTaskId(null);
       setHighlightedSubtaskId(null);
     }, 3000);
-  }, [tasks, highlightTrigger, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors]);
+  }, [tasks, highlightTrigger, scrollToTaskWithRetry, scrollToSubtaskWithRetry, findSubtaskAncestors, later]);
 
   useEffect(() => {
     if (!socket || !isConnected) return;
@@ -1536,14 +1539,10 @@ function Tasks() {
       setTasks(prev => prev.map(t =>
         t.id === updatedTask.id ? mergeTaskUpdate(t, updatedTask) : t
       ));
-      setSelectedTask(prev =>
-        prev?.id === updatedTask.id ? mergeTaskUpdate(prev, updatedTask) : prev
-      );
     };
 
     const handleTaskDeleted = ({ id }) => {
       setTasks(prev => prev.filter(t => t.id !== id));
-      setSelectedTask(prev => prev?.id === id ? null : prev);
     };
 
     // When a contact is updated, refresh tasks (debounced to avoid rapid
@@ -1658,18 +1657,6 @@ function Tasks() {
     }
   }, [filter, tasks, user]);
 
-  const refreshTask = async (taskId) => {
-    try {
-      const res = await api.get(`/api/tasks/${taskId}`);
-      setTasks(prev => prev.map(t => t.id === taskId ? res.data : t));
-      if (selectedTask?.id === taskId) {
-        setSelectedTask(res.data);
-      }
-    } catch {
-      // Silently fail
-    }
-  };
-
   const createTask = async (e) => {
     e.preventDefault();
     if (!newTaskForm.title.trim() || submitting) return;
@@ -1740,13 +1727,13 @@ function Tasks() {
       setHighlightedTaskId(next.taskId);
       scrollToTaskWithRetry(next.taskId);
       // Auto-clear po 2.5s — krátky vizuálny pulz, nie permanentný highlight.
-      setTimeout(() => setHighlightedTaskId(prev => prev === next.taskId ? null : prev), 2500);
+      later(() => setHighlightedTaskId(prev => prev === next.taskId ? null : prev), 2500);
     } else {
       // Subtask — najprv treba expandnúť parent task aby bol v DOM.
       setExpandedTask(next.taskId);
       setHighlightedSubtaskId(next.subtaskId);
       scrollToSubtaskWithRetry(next.subtaskId);
-      setTimeout(() => setHighlightedSubtaskId(prev => prev === next.subtaskId ? null : prev), 2500);
+      later(() => setHighlightedSubtaskId(prev => prev === next.subtaskId ? null : prev), 2500);
     }
   };
 
@@ -1802,7 +1789,10 @@ function Tasks() {
   };
 
   const duplicateTask = async () => {
-    if (!duplicatingTask) return;
+    // Busy guard — modál sa zatvára až po odpovedi servera, dvojklik na
+    // „Duplikovať" by inak vytvoril dva duplikáty.
+    if (!duplicatingTask || duplicating) return;
+    setDuplicating(true);
     try {
       await api.post(`/api/tasks/${duplicatingTask.id}/duplicate`, {
         contactIds: duplicateContactIds,
@@ -1811,6 +1801,8 @@ function Tasks() {
       closeDuplicateModal();
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri duplikovaní projektu');
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -1862,6 +1854,8 @@ function Tasks() {
     const subtaskNote = subtaskNotes[inputKey] || '';
     const subtaskAssigned = subtaskAssignedTo[inputKey] || [];
     if (!subtaskTitle.trim()) return;
+    if (addingSubtaskRef.current.has(inputKey)) return;
+    addingSubtaskRef.current.add(inputKey);
 
     try {
       await api.post(`/api/tasks/${task.id}/subtasks`, {
@@ -1883,6 +1877,8 @@ function Tasks() {
       await fetchTasks();
     } catch (error) {
       alertUnlessPlanGate(error, 'Chyba pri vytvarani ulohy');
+    } finally {
+      addingSubtaskRef.current.delete(inputKey);
     }
   };
 
@@ -2241,7 +2237,7 @@ function Tasks() {
                 )}
                 {subtask.dueDate && (
                   <span className={`subtask-due-date ${getDueDateClass(subtask.dueDate, subtask.completed)}`}>
-                    {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {new Date(subtask.dueDate).toLocaleDateString('sk-SK')}
+                    {getDueDateClass(subtask.dueDate, subtask.completed) === 'overdue' ? '⚠️' : '📅'} {parseLocalDate(subtask.dueDate).toLocaleDateString('sk-SK')}
                     {subtask.dueTime && ` ⏰ ${subtask.dueTime}`}
                   </span>
                 )}
@@ -2503,12 +2499,10 @@ function Tasks() {
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('sk-SK');
+    return parseLocalDate(dateString).toLocaleDateString('sk-SK');
   };
 
   // File attachment handlers
-  const isImage = (mimetype) => mimetype?.startsWith('image/');
-
   const getFileIcon = (mimetype) => {
     if (mimetype?.startsWith('image/')) return '🖼️';
     if (mimetype?.includes('pdf')) return '📄';
@@ -2770,9 +2764,11 @@ function Tasks() {
       }));
       await api.put('/api/tasks/reorder', { tasks: reorderData });
     } catch {
-      // Silently fail — optimistic update already applied
+      // Server poradie neuložil — resync, inak by lokálne poradie ostalo
+      // iné než na serveri (a u ostatných členov tímu).
+      fetchTasks();
     }
-  }, [sortedFilteredTasks]);
+  }, [sortedFilteredTasks, fetchTasks]);
 
   // Handle subtask drag end
   const handleSubtaskDragEnd = useCallback(async (task, parentSubtasks, event) => {
@@ -2813,7 +2809,7 @@ function Tasks() {
       return newTasks;
     });
 
-    // Save to server (fire and forget, don't rollback on error to avoid visual glitch)
+    // Save to server
     try {
       const subtaskOrders = reordered.map((s, idx) => ({ id: s.id, order: idx }));
       await api.put('/api/tasks/reorder-subtasks', {
@@ -2823,9 +2819,11 @@ function Tasks() {
         subtasks: subtaskOrders
       });
     } catch {
-      // Silently fail — optimistic update already applied
+      // Server poradie neuložil — resync, inak by lokálne poradie ostalo
+      // iné než na serveri (a u ostatných členov tímu).
+      fetchTasks();
     }
-  }, []);
+  }, [fetchTasks]);
 
   const filterCounts = useMemo(() => {
     const userId = user?.id?.toString();
@@ -3203,7 +3201,7 @@ function Tasks() {
               {contactFilter && (
                 <div className="contact-filter-banner">
                   <span>
-                    Projekty pre kontakt: <strong>{contacts.find(c => c.id === contactFilter)?.name || 'Načítavam...'}</strong>
+                    Projekty pre kontakt: <strong>{contacts.length === 0 ? 'Načítavam...' : (contacts.find(c => c.id === contactFilter)?.name || 'Neznámy kontakt')}</strong>
                   </span>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -3523,13 +3521,17 @@ function Tasks() {
                               >
                                 {getPriorityLabel(task.priority)}
                               </span>
-                              {task.dueDate && (
-                                <span className={`due-date ${getDueDateClass(task.dueDate, task.completed)}`}>
-                                  {getDueDateClass(task.dueDate, task.completed) === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
-                                  {task.dueTime && ` ⏰ ${task.dueTime}`}
-                                  {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
-                                </span>
-                              )}
+                              {task.dueDate && (() => {
+                                // Raz na kartu (predtým 2× pri každom prekreslení)
+                                const dueClass = getDueDateClass(task.dueDate, task.completed);
+                                return (
+                                  <span className={`due-date ${dueClass}`}>
+                                    {dueClass === 'overdue' ? '⚠️' : '📅'} {formatDate(task.dueDate)}
+                                    {task.dueTime && ` ⏰ ${task.dueTime}`}
+                                    {task.reminder != null && <span title={`Pripomienka ${task.reminder === 0 ? 'v deň termínu' : task.reminder + ' dní pred'}`}> 🔔</span>}
+                                  </span>
+                                );
+                              })()}
                               {(task.contactName || task.contactNames?.length > 0) && (
                                 <span
                                   className="contact-badge contact-badge-clickable"
@@ -3543,11 +3545,15 @@ function Tasks() {
                                   🏷️ {task.contactNames?.length > 0 ? task.contactNames.join(', ') : task.contactName}
                                 </span>
                               )}
-                              {task.subtasks?.length > 0 && (
-                                <span className="subtask-count">
-                                  ✓ {countSubtasksRecursive(task.subtasks).completed}/{countSubtasksRecursive(task.subtasks).total}
-                                </span>
-                              )}
+                              {task.subtasks?.length > 0 && (() => {
+                                // Rekurzívny prechod stromu raz, nie 2× na kartu
+                                const counts = countSubtasksRecursive(task.subtasks);
+                                return (
+                                  <span className="subtask-count">
+                                    ✓ {counts.completed}/{counts.total}
+                                  </span>
+                                );
+                              })()}
                               {task.files?.length > 0 && (
                                 <span className="subtask-count" title={`${task.files.length} príloha`}>
                                   📎 {task.files.length}
@@ -3854,7 +3860,7 @@ function Tasks() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={closeDuplicateModal}>Zrušiť</button>
-              <button className="btn btn-primary" onClick={duplicateTask}>Duplikovať</button>
+              <button className="btn btn-primary" onClick={duplicateTask} disabled={duplicating}>{duplicating ? 'Duplikujem...' : 'Duplikovať'}</button>
             </div>
           </div>
         </div>

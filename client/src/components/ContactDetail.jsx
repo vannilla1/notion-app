@@ -260,7 +260,7 @@ function ContactDetail({ contact, onUpdate, onDelete, onUploadFile, onDeleteFile
                 <span className="info-label">Webstránka</span>
                 <span className="info-value">
                   {contact.website ? (
-                    <a href={contact.website} target="_blank" rel="noopener noreferrer" className="website-link">
+                    <a href={/^https?:\/\//i.test(contact.website) ? contact.website : `https://${contact.website}`} target="_blank" rel="noopener noreferrer" className="website-link">
                       {contact.website}
                     </a>
                   ) : '-'}

@@ -77,3 +77,18 @@ export const isMobileDevice = () => {
   }
   return mobileCached;
 };
+
+// iOS/iPadOS WebKit (Safari aj WKWebView v natívnej appke) vykreslí PDF
+// vložené cez <object>/<embed>/<iframe> len ako prvú stranu bez posúvania
+// a fallback obsah <object> sa nespustí. iPadOS sa hlási ako Mac — preto
+// aj kontrola dotykového displeja.
+export const hasLimitedInlinePdf = () => {
+  try {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/.test(ua)) return true;
+    return /Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  } catch {
+    return false;
+  }
+};

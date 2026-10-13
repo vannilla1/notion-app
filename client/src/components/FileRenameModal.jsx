@@ -81,6 +81,8 @@ export default function FileRenameModal({ file, fileName, title, confirmLabel, o
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label>Pomenuj súbor</label>
             <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
+              {/* Server reže celý názov (aj s príponou) na 200 znakov bez
+                  hlášky — limit tu zachová príponu a používateľ vidí doraz. */}
               <input
                 ref={inputRef}
                 type="text"
@@ -88,6 +90,7 @@ export default function FileRenameModal({ file, fileName, title, confirmLabel, o
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Názov súboru"
+                maxLength={Math.max(1, 200 - ext.length)}
                 style={{
                   flex: 1,
                   borderTopRightRadius: ext ? 0 : undefined,

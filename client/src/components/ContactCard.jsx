@@ -33,7 +33,7 @@ const ContactCard = memo(function ContactCard({
           className="contact-avatar"
           style={{ backgroundColor: getStatusColor(contact.status) }}
         >
-          {contact.name.charAt(0).toUpperCase()}
+          {(contact.name || '?').charAt(0).toUpperCase()}
         </div>
 
         {isEditing ? (

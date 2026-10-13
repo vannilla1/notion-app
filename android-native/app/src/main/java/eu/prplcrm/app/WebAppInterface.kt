@@ -22,9 +22,26 @@ import android.webkit.WebView
  */
 class WebAppInterface(private val context: Context, private val webView: WebView) {
 
+    private companion object {
+        // JWT = base64url segmenty oddelené bodkami; workspaceId = Mongo ObjectId
+        val JWT_CHARS = Regex("^[A-Za-z0-9_.-]+$")
+        val OBJECT_ID = Regex("^[a-f0-9]{24}$")
+    }
+
+    /**
+     * Defence-in-depth: bridge smie používať len stránka na našej doméne.
+     * shouldOverrideUrlLoading cudzí host do WebView nepustí a onPageStarted
+     * bridge na cudzom hoste odoberá — toto je tretia vrstva (metódy bežia na
+     * JavaBridge vlákne, webView.url tu čítať nemožno → flag z MainActivity).
+     */
+    private fun trusted(): Boolean = MainActivity.pageOnOurHost
+
     /** Web appka po úspešnom login/register zavolá túto metódu s JWT tokenom. */
     @JavascriptInterface
     fun setAuthToken(token: String?) {
+        if (!trusted()) return
+        // Tvar sa vkladá späť do JS (bootstrap v onPageStarted) — nič iné než JWT.
+        if (!token.isNullOrEmpty() && !JWT_CHARS.matches(token)) return
         val previous = TokenStore.getAuthToken(context)
         TokenStore.setAuthToken(context, token)
         // Po login (alebo user-switch): reset FCM "last synced" cache a zaregistruj
@@ -47,11 +64,13 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
 
     @JavascriptInterface
-    fun getAuthToken(): String? = TokenStore.getAuthToken(context)
+    fun getAuthToken(): String? = if (trusted()) TokenStore.getAuthToken(context) else null
 
     /** Per-device workspace context — synchronizuje sa s X-Workspace-Id hlavičkou. */
     @JavascriptInterface
     fun setCurrentWorkspaceId(workspaceId: String?) {
+        if (!trusted()) return
+        if (!workspaceId.isNullOrEmpty() && !OBJECT_ID.matches(workspaceId)) return
         val previous = TokenStore.getCurrentWorkspaceId(context)
         TokenStore.setCurrentWorkspaceId(context, workspaceId)
         // Block Store drží aj workspace, aby obnova otvorila správne prostredie.
@@ -61,11 +80,12 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
 
     @JavascriptInterface
-    fun getCurrentWorkspaceId(): String? = TokenStore.getCurrentWorkspaceId(context)
+    fun getCurrentWorkspaceId(): String? = if (trusted()) TokenStore.getCurrentWorkspaceId(context) else null
 
     /** Na logout zmažeme všetko — JS zavolá clearAll() pri removeStoredToken(). */
     @JavascriptInterface
     fun clearAll() {
+        if (!trusted()) return
         // Web volá clearAll() aj pri VYNÚTENOM odhlásení po expirácii 7-dňového
         // JWT (401 → prpl:force-logout). Vtedy Block Store token NECHÁVAME —
         // je to jediná cesta, ako sa pri ďalšom štarte prihlásiť bez hesla
@@ -76,6 +96,9 @@ class WebAppInterface(private val context: Context, private val webView: WebView
         } else {
             android.util.Log.i("WebAppInterface", "clearAll: expirovaná session → Block Store ponechaný")
         }
+        // Push predošlého používateľa nesmie chodiť ďalej (FcmDevice by na
+        // serveri ostal priradený k odhlásenému účtu).
+        FcmRegistrar.unregisterOnLogout(context, jwt, TokenStore.getLastSyncedFcmToken(context))
         TokenStore.clearAll(context)
     }
 
@@ -112,19 +135,33 @@ class WebAppInterface(private val context: Context, private val webView: WebView
                 val resolver = context.contentResolver
                 val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: return "error: insert failed"
-                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return "error: stream failed"
-                values.clear()
-                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-            } else {
-                // Android 7–9 — legacy verejný priečinok (permission v manifeste
-                // s maxSdkVersion=28)
+                try {
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: throw java.io.IOException("stream failed")
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                } catch (e: Exception) {
+                    // Inak by v Downloads ostal neviditeľný „pending“ záznam
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    throw e
+                }
+            } else if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                // Android 7–9 s udeleným oprávnením — legacy verejný priečinok
                 @Suppress("DEPRECATION")
                 val dir = android.os.Environment.getExternalStoragePublicDirectory(
                     android.os.Environment.DIRECTORY_DOWNLOADS
                 )
                 if (!dir.exists()) dir.mkdirs()
-                java.io.File(dir, safeName).outputStream().use { it.write(bytes) }
+                // Rovnomenný súbor neprepisujeme — „nazov (1).ext“
+                uniqueFile(dir, safeName).outputStream().use { it.write(bytes) }
+            } else {
+                // Android 7–9 bez oprávnenia (appka ho za behu nežiada): súbor do
+                // vlastného priečinka appky (bez permission) a ponúkneme ho cez
+                // share sheet — predtým zápis vždy zlyhal (Permission denied).
+                return shareFromAppStorage(bytes, safeName, mime)
             }
             webView.post {
                 android.widget.Toast.makeText(context, "Uložené do Stiahnuté: $safeName", android.widget.Toast.LENGTH_LONG).show()
@@ -134,6 +171,47 @@ class WebAppInterface(private val context: Context, private val webView: WebView
             android.util.Log.e("PrplCRM", "saveFile failed", e)
             "error: ${e.message}"
         }
+    }
+
+    private fun uniqueFile(dir: java.io.File, name: String): java.io.File {
+        var candidate = java.io.File(dir, name)
+        if (!candidate.exists()) return candidate
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var i = 1
+        while (candidate.exists() && i < 1000) {
+            candidate = java.io.File(dir, "$base ($i)$ext")
+            i++
+        }
+        return candidate
+    }
+
+    /** Android 7–9 bez WRITE_EXTERNAL_STORAGE: app-specific priečinok + share sheet. */
+    private fun shareFromAppStorage(bytes: ByteArray, name: String, mime: String): String {
+        val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+            ?: return "error: storage unavailable"
+        if (!dir.exists()) dir.mkdirs()
+        val file = uniqueFile(dir, name)
+        file.outputStream().use { it.write(bytes) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${BuildConfig.APPLICATION_ID}.fileprovider", file
+        )
+        webView.post {
+            try {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = mime
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = android.content.Intent.createChooser(send, name)
+                if (context !is android.app.Activity) chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                android.util.Log.e("PrplCRM", "share fallback failed", e)
+            }
+        }
+        return "ok"
     }
 
     /** Názov bez ciest a riadiacich znakov — nikdy nesmie uniknúť z Downloads. */

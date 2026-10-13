@@ -16,6 +16,10 @@ Disallow: /workspace/
 Disallow: /admin
 Disallow: /admin/
 Disallow: /login
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /auth/
+Disallow: /prilohy
 Disallow: /invite/
 Disallow: /api/
 

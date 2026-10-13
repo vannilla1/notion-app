@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -11,6 +11,14 @@ function AcceptInvite() {
   const navigate = useNavigate();
   const { isAuthenticated, user, loading: authLoading } = useAuth();
   const { fetchWorkspaces, switchWorkspace } = useWorkspace();
+  // switchWorkspace (WorkspaceContext) ani `value` providera nie sú
+  // memoizované → identita sa mení pri každom renderi providera (bootstrap
+  // fetchWorkspaces = ~4 rendery). Ako závislosti effectu nižšie by znova
+  // a znova spúšťali getInvitationByToken(token). Držíme ich v ref-och.
+  const switchRef = useRef(switchWorkspace);
+  switchRef.current = switchWorkspace;
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   const [invitation, setInvitation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,22 +42,28 @@ function AcceptInvite() {
     // beží, isAuthenticated je dočasne false) — to bol bug pri otvorení invite
     // linku z emailu v iOS appke: deep-link load → AcceptInvite mount → auth
     // ešte neresolvnutá → zlý screen namiesto presmerovania do workspace.
-    if (authLoading && !authWaitExpired) return;
+    if (authLoading && !authWaitExpired) return undefined;
 
+    // Odpoveď staršieho behu (zmena isAuthenticated počas fetchu) nesmie
+    // prepísať novší stav.
+    let cancelled = false;
     const fetchInvitation = async () => {
       try {
         const data = await getInvitationByToken(token);
+        if (cancelled) return;
         setInvitation(data);
       } catch (err) {
+        if (cancelled) return;
         // Pozvánka už bola prijatá (410 alreadyAccepted).
         if (err.response?.data?.alreadyAccepted) {
           // Prihlásený user (= už člen) → pusti ho rovno do appky. switchWorkspace
           // je best-effort (ak workspaceId chýba alebo zlyhá, aj tak ideme na /app).
           if (isAuthenticated) {
             if (err.response?.data?.workspaceId) {
-              try { await switchWorkspace(err.response.data.workspaceId); } catch { /* ignore */ }
+              try { await switchRef.current(err.response.data.workspaceId); } catch { /* ignore */ }
             }
-            navigate('/app', { replace: true });
+            if (cancelled) return;
+            navigateRef.current('/app', { replace: true });
             return;
           }
           // Neprihlásený → ukáž "už prijatá, prihlás sa".
@@ -59,11 +73,17 @@ function AcceptInvite() {
           setError(err.response?.data?.message || 'Pozvánka nenájdená alebo vypršala');
         }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchInvitation();
-  }, [token, isAuthenticated, authLoading, authWaitExpired, switchWorkspace, navigate]);
+    return () => { cancelled = true; };
+  }, [token, isAuthenticated, authLoading, authWaitExpired]);
+
+  // Timer presmerovania po prijatí — pri unmounte (používateľ odišiel zo
+  // stránky skôr) sa zruší, inak by navigate('/app') dobehol mimo stránky.
+  const redirectRef = useRef(null);
+  useEffect(() => () => clearTimeout(redirectRef.current), []);
 
   const handleAccept = async () => {
     setAccepting(true);
@@ -71,12 +91,20 @@ function AcceptInvite() {
     try {
       const result = await acceptInvitation(token);
       setSuccess(result.message);
-      if (result.workspaceId) {
-        await switchWorkspace(result.workspaceId);
-      } else {
-        await fetchWorkspaces();
+      // Pozvánka je na serveri už prijatá — switch/fetch je best-effort.
+      // V spoločnom try by prechodná chyba switchu ukázala „Chyba pri
+      // prijímaní pozvánky“ a presmerovanie by nenastalo; /app si workspace
+      // načíta sám.
+      try {
+        if (result.workspaceId) {
+          await switchWorkspace(result.workspaceId);
+        } else {
+          await fetchWorkspaces();
+        }
+      } catch {
+        /* best-effort */
       }
-      setTimeout(() => navigate('/app'), 2000);
+      redirectRef.current = setTimeout(() => navigate('/app'), 2000);
     } catch (err) {
       setError(err.response?.data?.message || 'Chyba pri prijímaní pozvánky');
     } finally {
@@ -161,7 +189,12 @@ function AcceptInvite() {
                 <div className="invite-ios-steps">
                   <p className="invite-not-logged">Pre prijatie pozvánky postupujte podľa krokov:</p>
                   <ol style={{ margin: '8px 0 0', paddingLeft: '20px', fontSize: '14px', lineHeight: 1.6, color: 'var(--text-muted, #64748b)' }}>
-                    <li>Otvorte vo Safari adresu <a href="https://prplcrm.eu" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-color, #6366f1)', fontWeight: 600 }}>prplcrm.eu</a> a vytvorte si zdarma účet.</li>
+                    {/* Bez <a href>: v iOS WKWebView shelli createWebViewWith
+                        považuje host prplcrm.eu za interný a načíta ho v tom
+                        istom WebView, kde decidePolicyFor cestu „/“ presmeruje
+                        na /app — odkaz by teda neotvoril Safari, ale skočil
+                        späť do appky. Text aj tak inštruuje otvoriť Safari ručne. */}
+                    <li>Otvorte vo Safari adresu <strong style={{ color: 'var(--accent-color, #6366f1)' }}>prplcrm.eu</strong> a vytvorte si zdarma účet.</li>
                     <li>Vráťte sa do tejto aplikácie a prihláste sa.</li>
                     <li>Pozvánka sa potom automaticky prijme — alebo ju otvorte z emailu znova.</li>
                   </ol>

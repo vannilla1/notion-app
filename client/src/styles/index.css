@@ -303,7 +303,9 @@ body {
   background: white;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  box-shadow: 0 4px 12px var(--shadow);
+  /* --shadow je už kompletný zoznam tieňov — `0 4px 12px var(--shadow)` bola
+     neplatná hodnota a prehliadač celú deklaráciu zahodil (menu bez tieňa). */
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   min-width: 200px;
   z-index: 100;
@@ -417,9 +419,20 @@ body {
   border: 2px solid var(--border-color);
   border-radius: var(--radius);
   font-size: 14px;
+  /* Explicitná výška riadku: pri `normal` berie WebKit na iOS pre pole s heslom
+     metriky iného (vnútorného) písma než pre placeholder — kurzor bol vyšší
+     a posunutý nadol oproti textu (Safari aj appka). 1.15 ≈ doterajšia
+     `normal` výška, rozmery polí sa nemenia. */
+  line-height: 1.15;
   transition: all var(--transition);
   background: var(--bg-card);
   color: var(--text-primary);
+}
+
+/* Polia s heslom mimo .form-input (inline štýly: admin login, odpojenie účtu)
+   — rovnaká oprava kurzora. */
+input[type="password"] {
+  line-height: 1.15;
 }
 
 .form-input:hover {
@@ -3540,6 +3553,13 @@ body.modal-open {
   .user-menu-dropdown {
     min-width: 200px;
     right: 0;
+    /* Na telefóne je pod menu fixná .bottom-nav (z-index 1000 v koreňovom
+       kontexte, vždy nad dropdownom v .crm-header). Základný clamp
+       100dvh - 90px končil za ňou → posledné položky („Odhlásiť sa") sa po
+       doscrollovaní nedali kliknúť. 150px ≈ 90px hlavička + ~60px bottom-nav;
+       vh riadok je fallback pre staršie WebView bez dvh. */
+    max-height: calc(100vh - 150px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 150px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
 
   .modal-overlay {
@@ -7495,7 +7515,7 @@ body.ios-app {
   width: 100%;
   height: calc(90vh - 120px);
   overflow: auto;
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary); /* --bg-tertiary v :root neexistuje */
   border-radius: var(--radius);
 }
 
@@ -8231,6 +8251,31 @@ body.ios-app {
   .contact-meta a {
     padding: 4px 0;
   }
+
+  /* Plošné `button { min-width/min-height: 44px }` vyššie vyhráva nad
+     width/height bez ohľadu na špecificitu (aj nad !important width), takže
+     malé × absolútne umiestnené vnútri inputov vyrástli na 44px sivý kruh cez
+     text a kompaktné zatváracie/rozbaľovacie ikony lámali layout (rovnaký
+     problém ako .workspace-reorder-btn nižšie). Vrátime im pôvodné rozmery;
+     inline × ostávajú s rozumným 32px cieľom. */
+  .search-clear,
+  .dt-clear-btn,
+  .notification-close {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .toast-close,
+  .promo-clear-btn,
+  .announcement-modal-close {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .subtask-expand-btn {
+    min-width: 28px;
+    min-height: 28px;
+  }
 }
 
 /* Landscape mode on phones */
@@ -8321,8 +8366,10 @@ body.ios-app {
 }
 
 .status-indicator.active {
-  background: var(--success-color);
-  box-shadow: 0 0 8px var(--success-color);
+  /* Token sa volá --success (nie --success-color); s neexistujúcou premennou
+     bola zelená bodka „aktívna synchronizácia“ neviditeľná. */
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
 }
 
 .status-indicator.inactive {
@@ -8740,7 +8787,12 @@ body.ios-app {
 
 .toast-container {
   position: fixed;
+  /* V nainštalovanej iOS PWA (black-translucent status bar) siaha obsah pod
+     status bar — bez env() boli toasty pod hodinami/batériou a × ťažko
+     dostupné. V prehliadači je env() 0; prvý riadok je fallback pre WebView
+     bez env(), kde by sa calc() zahodil a toast ostal bez top. */
   top: 20px;
+  top: calc(20px + env(safe-area-inset-top, 0px));
   right: 20px;
   z-index: 9999;
   display: flex;
@@ -9629,6 +9681,21 @@ body.ios-app {
     margin-top: 2px !important;
   }
 
+  /* 24px je pod odporúčaným dotykovým cieľom; netrafený ťuk padol na
+     .subtask-item a rozbalil/zbalil strom namiesto dokončenia. Priehľadný
+     pseudo-element rozšíri dotykovú plochu na 40×40 bez zmeny vizuálu
+     (je mimo flex toku, ✓ ostáva centrované; e.target je stále checkbox,
+     takže guard v onClick riadku podúlohy platí). -8px = gap riadku, bez
+     prekrytia susedov; drag-handle je na mobile skrytý. */
+  .tasks-page .subtask-checkbox-styled::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    bottom: -8px;
+    left: -8px;
+  }
+
   /* Title takes remaining space on first row */
   .tasks-page .subtask-title {
     flex: 1 1 calc(100% - 40px) !important;
@@ -9921,7 +9988,16 @@ body.ios-app {
    ============================================= */
 @media (max-width: 768px) {
   .crm-header {
+    /* Shorthand s !important prebíjal aj neskoršie `.pwa-standalone .crm-header
+       { padding-top: calc(env(safe-area-inset-top) + 12px) }` a `@supports …
+       .crm-header { padding-top: … }`, takže v nainštalovanej iOS PWA
+       (black-translucent status bar) a edge-to-edge Android WebView siahala
+       hlavička pod status bar. env() držíme priamo tu (rovnaký vzor ako
+       tabletové pravidlo nižšie); v bežnom prehliadači je env() 0 → bez zmeny.
+       iOS shell má vlastné neskoršie !important pravidlo, to stále vyhráva.
+       Prvý riadok je fallback pre WebView bez env() (calc by sa zahodil). */
     padding: 6px 8px !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px 6px !important;
     gap: 6px !important;
     flex-wrap: nowrap !important;
     width: 100% !important;
@@ -11211,16 +11287,6 @@ body.ios-app {
   margin-left: 8px;
 }
 
-/* Dark mode úpravy — vyššia opacity aby badge bol viditeľný proti tmavému pozadiu */
-@media (prefers-color-scheme: dark) {
-  .calendar-item-time,
-  .calendar-week-item-time,
-  .calendar-day-item-time {
-    color: #a5b4fc;
-    background: rgba(99, 102, 241, 0.22);
-  }
-}
-
 /* Mobile: čas v month view ešte menší, aby sa vmestil */
 @media (max-width: 768px) {
   .calendar-item-time {
@@ -11456,16 +11522,6 @@ body.ios-app {
   font-style: italic;
   font-size: 14px;
   text-align: center;
-}
-
-/* Dark mode úpravy */
-@media (prefers-color-scheme: dark) {
-  .calendar-day-event {
-    background: rgba(99, 102, 241, 0.25);
-  }
-  .calendar-day-hour-line {
-    border-top-color: rgba(255, 255, 255, 0.08);
-  }
 }
 
 /* Mobile */
@@ -13201,4 +13257,33 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
 .ios-app .workspace-setup-card,
 .ios-app .invite-card {
   margin: auto;
+}
+
+/* =============================================================================
+ * OBMEDZENÝ POHYB (iOS „Obmedziť pohyb", Android „Odstrániť animácie")
+ * =============================================================================
+ * Nekonečné animácie (bounce v prázdnom stave, lp-float tvary na landingu)
+ * a slideUp/fadeIn/pulse pri každom vykreslení bežali aj pri vypnutých
+ * animáciách v OS — prístupnosť (vestibulárne poruchy) + zbytočná záťaž
+ * batérie. Žiadny JS nečaká na animationend/transitionend, takže skrátenie
+ * na 0.01ms je bezpečné; fill-mode forwards skočí rovno na koncový stav.
+ * index.css importuje main.jsx, takže platí aj pre landing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Live indikátor v SuperAdmin → Live aktivita používa `animation: pulse 2s
+   infinite` (AdminPanel.jsx), ale @keyframes pulse neexistoval — bodka sa
+   nepulzovala. Jemný opacity pulz; prefers-reduced-motion ho vypne cez
+   globálne pravidlo vyššie. */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }

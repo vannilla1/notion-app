@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import adminApi, { API_BASE_URL } from '@/api/adminApi';
+import adminApi, { API_BASE_URL, getAdminToken, clearAdminToken } from '@/api/adminApi';
+import { downloadBlob } from '@/utils/fileDownload';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import AdminHelpToggle from '../components/AdminHelpToggle';
@@ -93,19 +94,21 @@ function AdminPanel() {
   }, []);
 
   useEffect(() => {
-    // Admin token v sessionStorage (XSS hardening) — viď adminApi.js
-    const token = sessionStorage.getItem('adminToken');
+    // Admin token v sessionStorage (XSS hardening) — viď adminApi.js.
+    // getAdminToken() má try/catch — blokovaný storage (Safari private mode)
+    // nesmie zhodiť celý AdminPanel na SecurityError.
+    const token = getAdminToken();
     if (!token) {
       navigate('/admin');
     }
   }, [navigate]);
 
   const handleLogout = () => {
-    sessionStorage.removeItem('adminToken');
+    clearAdminToken();
     navigate('/admin');
   };
 
-  if (!sessionStorage.getItem('adminToken')) {
+  if (!getAdminToken()) {
     return null;
   }
 
@@ -534,6 +537,9 @@ function UsersTab() {
   const [deleteCandidate, setDeleteCandidate] = useState(null); // typed-confirmation delete
 
   // Filter + sort state
+  // `searchInput` je hodnota v inpute, `search` je debounced hodnota, ktorá
+  // reálne spúšťa request — inak by každý stlačený kláves = GET /api/admin/users.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [filterPlan, setFilterPlan] = useState('');
   const [filterRole, setFilterRole] = useState('');
@@ -542,8 +548,17 @@ function UsersTab() {
   const [filterDiscount, setFilterDiscount] = useState('');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
+  // Poradové číslo posledného requestu — neskoršia odpoveď staršieho requestu
+  // (napr. page=N vs. page=1 pri zmene filtra) nesmie prepísať novší výsledok.
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const fetchUsers = useCallback(async (silent = false) => {
+    const reqId = ++reqIdRef.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = { page, limit, sort: sortBy, order: sortOrder };
@@ -554,13 +569,16 @@ function UsersTab() {
       if (filterStripe) params.hasStripe = filterStripe;
       if (filterDiscount) params.hasDiscount = filterDiscount;
       const res = await adminApi.get('/api/admin/users', { params });
+      if (reqId !== reqIdRef.current) return; // stale odpoveď — medzitým odišiel novší request
       setUsers(res.data.users || []);
       setTotal(res.data.total || 0);
       setBreakdown(res.data.breakdown || {});
     } catch { /* ignore */ }
     finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [page, limit, sortBy, sortOrder, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount]);
 
@@ -587,13 +605,25 @@ function UsersTab() {
     setPage(1);
   }, [search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
 
+  // Výber (checkedIds) sa viaže len na aktuálne zobrazenú stranu — pri zmene
+  // strany / filtra / sortu ho nulujeme, inak by hromadná akcia zasiahla aj
+  // userov, ktorí už nie sú v tabuľke a counter „N vybraných“ by klamal.
+  useEffect(() => {
+    setCheckedIds(new Set());
+  }, [page, search, filterPlan, filterRole, filterActive, filterStripe, filterDiscount, sortBy, sortOrder]);
+
+  // Poradové číslo detail requestu — pri rýchlom kliknutí na dva riadky
+  // nesmie neskoršia odpoveď pre usera A prepísať modal usera B.
+  const detailReqRef = useRef(0);
   const openUserDetail = (userId) => {
+    const reqId = ++detailReqRef.current;
     setSelectedUser(userId);
+    setUserDetail(null);
     setUserDetailLoading(true);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then(res => setUserDetail(res.data))
+      .then(res => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
       .catch(() => {})
-      .finally(() => setUserDetailLoading(false));
+      .finally(() => { if (reqId === detailReqRef.current) setUserDetailLoading(false); });
   };
 
   const handleSort = (column) => {
@@ -731,8 +761,8 @@ function UsersTab() {
         <input
           type="text"
           placeholder="🔍 Hľadať username / email..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
           className="form-input sa-search"
           style={{ flex: '1 1 200px', minWidth: 180 }}
         />
@@ -762,12 +792,12 @@ function UsersTab() {
           <option value="">Zľava ?</option>
           <option value="true">🏷️ Má zľavu</option>
         </select>
-        {(search || filterPlan || filterRole || filterActive || filterStripe || filterDiscount) && (
+        {(searchInput || search || filterPlan || filterRole || filterActive || filterStripe || filterDiscount) && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: 12, padding: '4px 10px' }}
             onClick={() => {
-              setSearch(''); setFilterPlan(''); setFilterRole('');
+              setSearchInput(''); setSearch(''); setFilterPlan(''); setFilterRole('');
               setFilterActive(''); setFilterStripe(''); setFilterDiscount('');
             }}
           >
@@ -775,10 +805,14 @@ function UsersTab() {
           </button>
         )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
-          onClick={() => adminApi.get('/api/admin/export/users', { responseType: 'blob' }).then(res => {
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a'); a.href = url; a.download = 'users-export.csv'; a.click(); URL.revokeObjectURL(url);
-          })}>
+          onClick={async () => {
+            // downloadBlob (anchor v DOM, revoke až po kliknutí, iOS/Android shell)
+            // + catch: bez neho bol fail tichý a skončil ako „klientská chyba“ v Diagnostike.
+            try {
+              const res = await adminApi.get('/api/admin/export/users', { responseType: 'blob' });
+              downloadBlob(res.data, 'users-export.csv');
+            } catch { alert('Export zlyhal'); }
+          }}>
           📥 Export CSV
         </button>
       </div>
@@ -892,7 +926,7 @@ function UsersTab() {
                   </div>
                 </td>
                 <td className="sa-email-cell">{u.email}</td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   <select
                     value={u.plan}
                     onChange={e => handlePlanChange(u.id, e.target.value)}
@@ -1398,15 +1432,24 @@ function WorkspacesTab() {
   const [wsDetailLoading, setWsDetailLoading] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
 
-  // Filter + sort
+  // Filter + sort (searchInput = hodnota v inpute, search = debounced → request;
+  // rovnaký vzor ako UsersTab)
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterOwnerPlan, setFilterOwnerPlan] = useState('');
   const [filterStripe, setFilterStripe] = useState('');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
+  const reqIdRef = useRef(0); // ochrana pred stale odpoveďou (viď UsersTab)
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const fetchWorkspaces = useCallback(async (silent = false) => {
+    const reqId = ++reqIdRef.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = { page, limit, sort: sortBy, order: sortOrder };
@@ -1415,13 +1458,16 @@ function WorkspacesTab() {
       if (filterOwnerPlan) params.ownerPlan = filterOwnerPlan;
       if (filterStripe) params.hasStripe = filterStripe;
       const res = await adminApi.get('/api/admin/workspaces', { params });
+      if (reqId !== reqIdRef.current) return; // stale odpoveď
       setWorkspaces(res.data.workspaces || []);
       setTotal(res.data.total || 0);
       setBreakdown(res.data.breakdown || {});
     } catch { /* ignore */ }
     finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [page, limit, sortBy, sortOrder, search, filterStatus, filterOwnerPlan, filterStripe]);
 
@@ -1448,13 +1494,16 @@ function WorkspacesTab() {
     else { setSortBy(column); setSortOrder('desc'); }
   };
 
+  const wsDetailReqRef = useRef(0); // stale guard — viď openUserDetail v UsersTab
   const openWsDetail = (wsId) => {
+    const reqId = ++wsDetailReqRef.current;
     setSelectedWs(wsId);
+    setWsDetail(null);
     setWsDetailLoading(true);
     adminApi.get(`/api/admin/workspaces/${wsId}`)
-      .then(res => setWsDetail(res.data))
+      .then(res => { if (reqId === wsDetailReqRef.current) setWsDetail(res.data); })
       .catch(() => {})
-      .finally(() => setWsDetailLoading(false));
+      .finally(() => { if (reqId === wsDetailReqRef.current) setWsDetailLoading(false); });
   };
 
   const handleDeleteWorkspace = () => {
@@ -1505,8 +1554,8 @@ function WorkspacesTab() {
         <input
           type="text"
           placeholder="🔍 Hľadať workspace podľa názvu..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="form-input sa-search"
           style={{ flex: '1 1 220px', minWidth: 200 }}
         />
@@ -1527,20 +1576,22 @@ function WorkspacesTab() {
           <option value="true">💳 Má Stripe</option>
           <option value="false">Bez Stripe</option>
         </select>
-        {(search || filterStatus || filterOwnerPlan || filterStripe) && (
+        {(searchInput || search || filterStatus || filterOwnerPlan || filterStripe) && (
           <button
             className="btn btn-secondary"
             style={{ fontSize: 12, padding: '4px 10px' }}
-            onClick={() => { setSearch(''); setFilterStatus(''); setFilterOwnerPlan(''); setFilterStripe(''); }}
+            onClick={() => { setSearchInput(''); setSearch(''); setFilterStatus(''); setFilterOwnerPlan(''); setFilterStripe(''); }}
           >
             ✕ Vymazať filtre
           </button>
         )}
         <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: 'auto' }}
-          onClick={() => adminApi.get('/api/admin/export/workspaces', { responseType: 'blob' }).then(res => {
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a'); a.href = url; a.download = 'workspaces-export.csv'; a.click(); URL.revokeObjectURL(url);
-          })}>
+          onClick={async () => {
+            try {
+              const res = await adminApi.get('/api/admin/export/workspaces', { responseType: 'blob' });
+              downloadBlob(res.data, 'workspaces-export.csv');
+            } catch { alert('Export zlyhal'); }
+          }}>
           📥 Export CSV
         </button>
       </div>
@@ -2580,6 +2631,16 @@ const CATEGORY_LABELS = {
   task: '📋 Úloha', message: '✉️ Správa', auth: '🔐 Auth', billing: '💳 Fakturácia', system: '⚙️ Systém'
 };
 
+// CSV bunka pre klientské exporty: escapovanie úvodzoviek + ochrana proti
+// CSV/formula injection. Bunky začínajúce na = + - @ TAB CR by Excel /
+// LibreOffice interpretovali ako vzorec (DDE, HYPERLINK) — prefixujeme `'`
+// rovnako ako server pri /api/admin/commissions/export.csv.
+const csvCell = (c) => {
+  let s = String(c ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
 function AuditLogTab() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
@@ -2693,21 +2754,21 @@ function AuditLogTab() {
         JSON.stringify(l.details || {})
       ]);
       const header = ['Date', 'Username', 'Email', 'Action', 'Category', 'TargetType', 'TargetName', 'IP', 'Details'];
-      const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
+      downloadBlob(blob, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
   };
 
+  const detailReqRef = useRef(0); // stale guard pre mini modal (rýchle kliknutie na dvoch userov)
   const openUserDetail = (userId) => {
     if (!userId) return;
+    const reqId = ++detailReqRef.current;
     setUserDetailId(userId);
+    setUserDetail(null);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then((res) => setUserDetail(res.data))
-      .catch(() => setUserDetail(null));
+      .then((res) => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
+      .catch(() => { if (reqId === detailReqRef.current) setUserDetail(null); });
   };
 
   return (
@@ -3315,7 +3376,6 @@ function ActivityFeedTab() {
   const [userDetailId, setUserDetailId] = useState(null);
   const [userDetail, setUserDetail] = useState(null);
   const timerRef = useRef(null);
-  const scrollRef = useRef(null);
 
   const fetchEvents = useCallback((opts = {}) => {
     const params = new URLSearchParams();
@@ -3351,7 +3411,14 @@ function ActivityFeedTab() {
       return;
     }
     timerRef.current = setInterval(async () => {
-      if (events.length === 0) return;
+      if (events.length === 0) {
+        // Prázdny feed (čerstvý deploy, žiadna aktivita) — bez „after“ kurzora
+        // by polling nikdy nič nenačítal, hoci zelená „live“ bodka svieti.
+        // fetchEvents má vlastný .catch(() => []), await nikdy nevyhodí.
+        const initial = await fetchEvents({ limit: 50 });
+        if (initial.length) { setEvents(initial); setHasMore(initial.length === 50); }
+        return;
+      }
       const latest = events[0]?.createdAt;
       if (!latest) return;
       const newEvents = await fetchEvents({ after: latest, limit: 20 });
@@ -3364,13 +3431,10 @@ function ActivityFeedTab() {
 
   // Detect manual scroll — keď je užívateľ ďaleko od top, pauznime auto-refresh
   // aby mu nový event neskočil pod prst pri čítaní starších záznamov.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => setPaused(el.scrollTop > 100);
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+  // Riešené cez React onScroll na scroll containeri (nie useEffect s []):
+  // pri prvom renderi je loading=true a container ešte neexistuje, takže
+  // addEventListener na ref by sa nikdy nepripojil.
+  const handleFeedScroll = (e) => setPaused(e.currentTarget.scrollTop > 100);
 
   const handleLoadMore = async () => {
     if (loadingMore || !hasMore || events.length === 0) return;
@@ -3389,13 +3453,16 @@ function ActivityFeedTab() {
     }
   };
 
+  const detailReqRef = useRef(0); // stale guard pre mini modal (rýchle kliknutie na dvoch userov)
   const handleUsernameClick = (e, userId) => {
     e.stopPropagation();
     if (!userId) return;
+    const reqId = ++detailReqRef.current;
     setUserDetailId(userId);
+    setUserDetail(null);
     adminApi.get(`/api/admin/users/${userId}`)
-      .then((res) => setUserDetail(res.data))
-      .catch(() => setUserDetail(null));
+      .then((res) => { if (reqId === detailReqRef.current) setUserDetail(res.data); })
+      .catch(() => { if (reqId === detailReqRef.current) setUserDetail(null); });
   };
 
   const formatTime = (d) => {
@@ -3520,7 +3587,7 @@ function ActivityFeedTab() {
         )}
       </div>
 
-      <div ref={scrollRef} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '65vh', overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 8, background: 'var(--bg-primary)' }}>
+      <div onScroll={handleFeedScroll} style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '65vh', overflow: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: 8, background: 'var(--bg-primary)' }}>
         {events.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
             {filtersActive ? 'Žiadne výsledky pre tento filter' : 'Žiadna aktivita'}
@@ -3714,7 +3781,13 @@ function ApiMetricsTab() {
   if (!metrics) return <div className="sa-error">Nepodarilo sa načítať metriky</div>;
 
   const hourlyData = {
-    labels: metrics.hourlyData.map(h => h.hour.slice(11) + ':00'),
+    // h.hour je UTC kľúč 'YYYY-MM-DDTHH' (server/services/apiMetrics.js) —
+    // prevádzame na lokálnu hodinu prehliadača, inak os X ukazovala UTC
+    // posunuté o 1–2 h voči SK „pracovným hodinám“ z help textu.
+    labels: metrics.hourlyData.map(h => {
+      const d = new Date(`${h.hour}:00:00Z`);
+      return Number.isNaN(d.getTime()) ? h.hour.slice(11) + ':00' : `${String(d.getHours()).padStart(2, '0')}:00`;
+    }),
     datasets: [{
       label: 'Requesty/hod',
       data: metrics.hourlyData.map(h => h.count),
@@ -4749,12 +4822,9 @@ function WorkspaceComparisonTab() {
       w.lastActivity ? new Date(w.lastActivity).toISOString() : '',
       w.activityScore
     ]);
-    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click(); URL.revokeObjectURL(url);
+    downloadBlob(blob, `workspace-comparison-${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
   // Chart agreguje "real work units" — kontakty, projekty + úlohy v nich,
@@ -5276,13 +5346,18 @@ function CommissionsSubTab() {
     }
   };
 
-  const exportCsv = () => {
-    const params = new URLSearchParams();
-    if (statusFilter) params.append('status', statusFilter);
-    if (referrerFilter) params.append('referrerId', referrerFilter);
-    if (from) params.append('from', from);
-    if (to) params.append('to', to);
-    window.open(`${API_BASE_URL}/api/admin/commissions/export.csv?${params.toString()}`, '_blank');
+  // Export ide cez adminApi (Bearer token v hlavičke) — window.open na API
+  // URL token neposiela a server vrátil len 401 JSON namiesto CSV.
+  const exportCsv = async () => {
+    const params = {};
+    if (statusFilter) params.status = statusFilter;
+    if (referrerFilter) params.referrerId = referrerFilter;
+    if (from) params.from = from;
+    if (to) params.to = to;
+    try {
+      const res = await adminApi.get('/api/admin/commissions/export.csv', { params, responseType: 'blob' });
+      downloadBlob(res.data, `commissions-${new Date().toISOString().slice(0, 10)}.csv`);
+    } catch { alert('Export zlyhal'); }
   };
 
   // Eligible per-referrer (na zobrazenie tlačidiel bulk-pay vedľa každého affiliateho)
@@ -5463,6 +5538,14 @@ const PROMO_TYPES = {
   freeMonths: { label: 'Voľné mesiace', unit: 'mes.', icon: '🎁' }
 };
 
+// <input type="date"> pracuje s lokálnym dátumom; toISOString().slice(0, 10)
+// by v noci ukázal UTC deň (o deň skôr/neskôr).
+const toLocalDateInput = (value) => {
+  const d = new Date(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 function PromoCodesTab() {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5542,7 +5625,17 @@ function PromoCodesTab() {
   const generateCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = 'PRPL-';
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    // Kryptografický zdroj — promo kódy majú finančný dopad (zľavy, Stripe
+    // kupóny). chars.length = 32 delí 256, takže `b % 32` nemá modulo bias.
+    // Math.random ostáva len ako fallback pre prostredie bez WebCrypto.
+    const cryptoObj = window.crypto;
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint8Array(6);
+      cryptoObj.getRandomValues(bytes);
+      for (const b of bytes) code += chars[b % chars.length];
+    } else {
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    }
     setForm(f => ({ ...f, code }));
   };
 
@@ -5572,7 +5665,9 @@ function PromoCodesTab() {
           : null,
         maxUses: form.maxUses ? parseInt(form.maxUses) : 0,
         maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : 1,
-        expiresAt: form.expiresAt || null,
+        // datetime-local nemá zónu — server (UTC) by ho bral ako UTC a kód by
+        // expiroval o 1–2 h neskôr. Prehliadač ho parsuje ako lokálny čas.
+        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
         // Affiliate fields — null/0 keď nie je referrer vybraný
         referrerId: hasReferrer ? form.referrerId : null,
         commissionPercent: hasReferrer ? cp : 0
@@ -5617,7 +5712,7 @@ function PromoCodesTab() {
       isActive: !!code.isActive,
       maxUses: code.maxUses != null ? String(code.maxUses) : '',
       maxUsesPerUser: code.maxUsesPerUser != null ? String(code.maxUsesPerUser) : '1',
-      expiresAt: code.expiresAt ? new Date(code.expiresAt).toISOString().slice(0, 10) : '',
+      expiresAt: code.expiresAt ? toLocalDateInput(code.expiresAt) : '',
       validForPlans: Array.isArray(code.validForPlans) ? [...code.validForPlans] : [],
       validForPeriods: Array.isArray(code.validForPeriods) ? [...code.validForPeriods] : [],
       // referrerId môže byť populated objekt alebo string
@@ -5650,6 +5745,15 @@ function PromoCodesTab() {
       alert('Provízia musí byť 1-100% pri affiliate kódoch');
       return;
     }
+    // Nezmenený dátum = pôvodný presný čas (predtým sa pri každom uložení
+    // posunul na polnoc UTC); zmenený = koniec zvoleného dňa v lokálnom čase.
+    const originalExpiresDate = editingCode.expiresAt ? toLocalDateInput(editingCode.expiresAt) : '';
+    let expiresAt = null;
+    if (editForm.expiresAt) {
+      expiresAt = editForm.expiresAt === originalExpiresDate
+        ? editingCode.expiresAt
+        : new Date(`${editForm.expiresAt}T23:59:59`).toISOString();
+    }
     setEditSaving(true);
     try {
       await adminApi.put(`/api/admin/promo-codes/${editingCode._id}`, {
@@ -5657,7 +5761,7 @@ function PromoCodesTab() {
         isActive: editForm.isActive,
         maxUses: editForm.maxUses ? parseInt(editForm.maxUses) : 0,
         maxUsesPerUser: editForm.maxUsesPerUser ? parseInt(editForm.maxUsesPerUser) : 1,
-        expiresAt: editForm.expiresAt || null,
+        expiresAt,
         validForPlans: editForm.validForPlans,
         validForPeriods: editForm.validForPeriods,
         referrerId: hasReferrer ? editForm.referrerId : null,
@@ -5727,6 +5831,9 @@ function PromoCodesTab() {
 
   const copyQRUrl = () => {
     if (!qrModal) return;
+    // Bez guardu by `navigator.clipboard` undefined (HTTP, starý prehliadač,
+    // iframe bez povolenia) hodil synchronný TypeError, ktorý .catch nechytí.
+    if (!navigator.clipboard?.writeText) { alert('Schránka nie je dostupná v tomto prehliadači.'); return; }
     navigator.clipboard.writeText(qrModal.url).then(
       () => alert('URL skopírovaná do schránky'),
       () => alert('Nepodarilo sa skopírovať')
@@ -6536,6 +6643,7 @@ function DiagErrorsSection() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [filter, setFilter] = useState({ resolved: 'false', search: '', source: 'all' });
+  const [searchInput, setSearchInput] = useState(''); // hodnota v inpute, do filter.search ide až po potvrdení
   const [selected, setSelected] = useState(null);
 
   // `silent` = true pri polling refresh — neukazuje full-page loading overlay,
@@ -6565,6 +6673,16 @@ function DiagErrorsSection() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Hľadanie sa potvrdzuje Enterom / tlačidlom „Hľadať“ (searchInput →
+  // filter.search), nie pri každom znaku — inak išli 2 requesty (errors +
+  // stats) na každý kláves a Enter spúšťal ďalší duplicitný load() k tomu,
+  // čo už odpálil efekt vyššie. Ak sa nič nezmenilo, Enter = explicitný refresh.
+  const applySearch = () => {
+    if (searchInput === filter.search && page === 1) { load(); return; }
+    setFilter((f) => ({ ...f, search: searchInput }));
+    setPage(1);
+  };
+
   // Auto-refresh — pozastaví sa keď:
   //  a) používateľ má otvorený detail modal (selected !== null) — nechceme
   //     mu meniť data pod rukami pokiaľ sa na niečo pozerá
@@ -6579,8 +6697,19 @@ function DiagErrorsSection() {
     return () => clearInterval(id);
   }, [selected, load]);
 
+  // Prompt ide do externého AI nástroja — bez osobných údajov zákazníkov
+  // (GDPR): používateľ len cez ID, URL bez query (tokeny, e-maily), e-maily a
+  // IP adresy kdekoľvek v texte (stack, kontext) sa nahradia.
+  const redactPii = (text) => String(text)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<email>')
+    .replace(/\b(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, '$1.$2.x.x');
+  const urlWithoutQuery = (url) => {
+    if (!url) return '—';
+    try { const u = new URL(url); return `${u.origin}${u.pathname}`; } catch { return String(url).split('?')[0]; }
+  };
+
   const handleSendToClaude = (err) => {
-    const prompt = `Prosím oprav túto chybu v Prpl CRM.
+    const prompt = redactPii(`Prosím oprav túto chybu v Prpl CRM.
 
 Error: ${err.message}
 Status: ${err.statusCode}
@@ -6594,11 +6723,14 @@ ${err.stack || '(bez stacku)'}
 Kontext:
 ${JSON.stringify(err.context || {}, null, 2)}
 
-User: ${err.userId?.email || 'nezalogovaný'}
+User ID: ${err.userId?._id || err.userId || 'nezalogovaný'}
 Workspace: ${err.workspaceId || 'N/A'}
-URL: ${err.url || '—'}
+URL: ${urlWithoutQuery(err.url)}
 User agent: ${err.userAgent || '—'}
-`;
+`);
+    // Feature guard — mimo secure contextu je navigator.clipboard undefined
+    // a volanie by spadlo na synchronnom TypeError bez hlášky.
+    if (!navigator.clipboard?.writeText) { alert('Schránka nie je dostupná v tomto prehliadači.'); return; }
     navigator.clipboard.writeText(prompt).then(() => {
       alert('Skopírované do schránky. Vlož do Claude Code.');
     }).catch(() => alert('Kopírovanie zlyhalo'));
@@ -6662,12 +6794,12 @@ User agent: ${err.userAgent || '—'}
         <input
           type="text"
           placeholder="Hľadať v message / path..."
-          value={filter.search}
-          onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') applySearch(); }}
           style={{ flex: 1, minWidth: '200px', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '13px' }}
         />
-        <button onClick={() => { setPage(1); load(); }} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
+        <button onClick={applySearch} className="btn btn-secondary" style={{ fontSize: '13px' }}>Hľadať</button>
         <button
           onClick={() => load(true)}
           className="btn btn-secondary"
@@ -7083,7 +7215,9 @@ function DiagActiveSection() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000); // auto-refresh každých 15s
+    // Page Visibility pauza ako v ostatných taboch — každý tick sú 2 requesty
+    // (online-users + auth-events s agregáciou audit logu), na pozadí zbytočné.
+    const t = setInterval(() => { if (!document.hidden) load(); }, 15000); // auto-refresh každých 15s
     return () => clearInterval(t);
   }, [load]);
 
@@ -7241,11 +7375,15 @@ function DiagUsageSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Rýchle prepnutie 24h/7d/30d — odpoveď staršieho obdobia nesmie
+    // prepísať novšiu, preto cleanup efektu označí request ako zrušený.
+    let cancelled = false;
     setLoading(true);
     adminApi.get('/api/admin/usage', { params: { period } })
-      .then(res => setData(res.data))
+      .then(res => { if (!cancelled) setData(res.data); })
       .catch(err => console.error('Usage load', err))
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [period]);
 
   if (loading) return <div className="sa-loading">Načítavam...</div>;
@@ -7702,12 +7840,9 @@ function EmailsTab() {
         l.triggeredBy || ''
       ]);
       const header = ['SentAt', 'ToEmail', 'Username', 'Type', 'Subject', 'Status', 'Error', 'TriggeredBy'];
-      const csv = [header, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `email-logs-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
+      downloadBlob(blob, `email-logs-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch { alert('Export zlyhal'); }
   };
 

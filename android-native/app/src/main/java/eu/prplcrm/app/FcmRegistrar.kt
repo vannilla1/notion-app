@@ -106,6 +106,41 @@ object FcmRegistrar {
     }
 
     /**
+     * Odhlásenie: zariadenie prestane dostávať push predošlého používateľa.
+     * S platným JWT zmaže mapping na serveri (`POST /api/push/fcm/unregister`);
+     * FCM token zneplatní VŽDY — aj pri vynútenom odhlásení po expirácii JWT,
+     * keď sa server request nedá autorizovať (server pri ďalšom pushi dostane
+     * UNREGISTERED). Nový token vznikne a zaregistruje sa po ďalšom prihlásení.
+     */
+    fun unregisterOnLogout(context: Context, authToken: String?, fcmToken: String?) {
+        if (!authToken.isNullOrEmpty() && !JwtUtils.isExpired(authToken) && !fcmToken.isNullOrEmpty()) {
+            val url = context.getString(R.string.api_base_url).removeSuffix("/") +
+                "/api/push/fcm/unregister"
+            val body = JSONObject().apply { put("fcmToken", fcmToken) }
+                .toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url(url)
+                .post(body)
+                .addHeader("Authorization", "Bearer $authToken")
+                .build()
+            client.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    Log.w(TAG, "FCM unregister failed", e)
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.close()
+                }
+            })
+        }
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().deleteToken()
+        } catch (e: Exception) {
+            Log.w(TAG, "FCM deleteToken failed", e)
+        }
+    }
+
+    /**
      * Force re-registration — použije sa napr. po logout-login flow keď si chceme
      * byť istí že backend má najnovšie mapping (iný user sa prihlásil na rovnaké
      * zariadenie). Zmaže cached "last synced" a pokúsi sa znova.

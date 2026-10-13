@@ -5,6 +5,7 @@ import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { reportError, installGlobalErrorHandlers } from './utils/reportError';
 import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
+import { initIapBridge } from './utils/iapBridge';
 import './styles/index.css';
 
 // In-house error tracking (nahrada Sentry). Poradie záleží — breadcrumbs
@@ -12,6 +13,25 @@ import './styles/index.css';
 // chybe mali context aspoň pár "app boot" udalostí.
 installBreadcrumbInstrumentation();
 installGlobalErrorHandlers();
+// iOS appka: neukončené Apple IAP transakcie (zlyhaný /verify) sa overia
+// znova hneď po štarte, nie až po otvorení stránky predplatného.
+initIapBridge();
+
+// Po deployi nový service worker hneď prevezme otvorené taby a zmaže starý
+// precache (skipWaiting + clientsClaim + cleanupOutdatedCaches). Tab so starým
+// bundlom potom pri prechode na lazy route žiada chunk so starým hashom →
+// „Failed to fetch dynamically imported module“. Vite to hlási udalosťou
+// vite:preloadError — jedno automatické obnovenie načíta nový bundle.
+// Poistka proti slučke: druhá chyba do 30 s už ide do RouteErrorBoundary.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'prpl_chunk_reload_at';
+  let last = 0;
+  try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch { /* storage nedostupný */ }
+  if (Date.now() - last < 30000) return;
+  try { sessionStorage.setItem(KEY, String(Date.now())); } catch { /* storage nedostupný */ }
+  event.preventDefault();
+  window.location.reload();
+});
 
 // Platformové body classes — CSS cez ne cielene upravuje padding, tap targets,
 // safe-area insets. Analóg k 'ios-app' class ktorú injectuje Swift WKWebView
@@ -53,7 +73,15 @@ class AppErrorBoundary extends React.Component {
       componentStack: errorInfo?.componentStack
     });
   }
-  reset = () => this.setState({ hasError: false });
+  // Tlačidlo sľubuje „Obnoviť stránku" — skutočný reload. Samotné
+  // setState({ hasError: false }) len znova vyrenderovalo ten istý podstrom
+  // s rovnakým stavom (AuthProvider, Router, cache modulov), takže pri
+  // deterministickej chybe (TDZ, chýbajúce pole, stale chunk) spadol hneď
+  // znova a používateľ klikal bez efektu — ide o najvyšší boundary, pod ním
+  // už žiadna cesta von nie je. Manuálna akcia, nie 401 slučka z api.js.
+  reset = () => {
+    try { window.location.reload(); } catch { this.setState({ hasError: false }); }
+  };
   render() {
     if (!this.state.hasError) return this.props.children;
     return (

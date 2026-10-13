@@ -30,7 +30,9 @@ final class StoreKitManager {
     /// finish() transakcie + voliteľný UI refresh. Callback môže byť volaný
     /// z background kontextu — consumer musí dispatchnúť na main pri práci
     /// s WKWebView.
-    var onExternalTransaction: ((String) -> Void)?
+    /// (jws, transactionId) — transakcia sa NEfinishuje; web ju po úspešnom
+    /// /verify potvrdí správou iapFinish (finishTransaction).
+    var onExternalTransaction: ((String, String) -> Void)?
 
     private init() {
         // Listener pre transakcie ktoré prídu mimo priameho purchase().
@@ -69,7 +71,7 @@ final class StoreKitManager {
     }
 
     enum PurchaseOutcome {
-        case success(jws: String)
+        case success(jws: String, transactionId: String)
         case userCancelled
         case pending          // Ask to Buy / SCA — výsledok príde cez listener
         case failed(message: String)
@@ -87,11 +89,13 @@ final class StoreKitManager {
             switch result {
             case .success(let verification):
                 // jwsRepresentation je dostupné aj keď je .unverified —
-                // ale my finish-neme + akceptujeme len .verified.
+                // akceptujeme len .verified. finish() až keď backend nákup
+                // overí (web → iapFinish): finishnutá transakcia sa už nikdy
+                // znova nedoručí, takže pri zlyhanom /verify (sieť, cold start,
+                // kill appky) by zaplatené predplatné ostalo neaktivované.
                 if case .verified(let transaction) = verification {
                     let jws = verification.jwsRepresentation
-                    await transaction.finish()
-                    return .success(jws: jws)
+                    return .success(jws: jws, transactionId: String(transaction.id))
                 } else {
                     NativeErrorReporter.report(name: "iOSStoreKitVerificationFailed", message: "Purchase result .unverified pre \(productId)", url: "https://prplcrm.eu/native/iap")
                     return .failed(message: "Overenie transakcie zlyhalo")
@@ -124,15 +128,36 @@ final class StoreKitManager {
         return nil
     }
 
+    /// Ukončí transakciu, ktorú backend overil (web → iapFinish).
+    func finishTransaction(id: UInt64) async {
+        for await result in Transaction.unfinished {
+            if case .verified(let transaction) = result, transaction.id == id {
+                await transaction.finish()
+                NSLog("[StoreKit] Finished transaction \(id)")
+                return
+            }
+        }
+    }
+
+    /// Overené, zatiaľ neukončené transakcie (zlyhaný /verify, pád appky,
+    /// odhlásený používateľ) — web ich pošle na overenie znova (iapReady).
+    func unfinishedTransactions() async -> [(jws: String, transactionId: String)] {
+        var out: [(jws: String, transactionId: String)] = []
+        for await result in Transaction.unfinished {
+            if case .verified(let transaction) = result {
+                out.append((jws: result.jwsRepresentation, transactionId: String(transaction.id)))
+            }
+        }
+        return out
+    }
+
     /// Listener pre transakcie mimo priameho purchase() (renewals, Ask to Buy
-    /// approval, restore). Finish-ne ich a notifikuje web cez callback.
+    /// approval, restore). Notifikuje web cez callback; finish až po overení.
     private func listenForTransactions() -> Task<Void, Never> {
         return Task { [weak self] in
             for await result in Transaction.updates {
                 if case .verified(let transaction) = result {
-                    let jws = result.jwsRepresentation
-                    await transaction.finish()
-                    self?.onExternalTransaction?(jws)
+                    self?.onExternalTransaction?(result.jwsRepresentation, String(transaction.id))
                 }
             }
         }

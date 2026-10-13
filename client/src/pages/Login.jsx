@@ -258,7 +258,13 @@ function Login() {
           )}
         </form>
 
-        <OAuthButtons mode="login" />
+        {/* Pri prihlásení z pozvánky sa po Google/Apple vrátime na stránku
+            pozvánky — AcceptInvite ju po prihlásení prijme (inak by sa token
+            stratil a pozvánka ostala neprijatá). */}
+        <OAuthButtons
+          mode="login"
+          returnUrl={inviteToken ? `/invite/${encodeURIComponent(inviteToken)}` : undefined}
+        />
 
         {/* Toggle login/register — na iOS native skrytý úplne, lebo App Store
             3.1.1 / 3.1.3(d) zakazuje "account registration features for
@@ -290,14 +296,14 @@ function Login() {
             {isRegister ? (
               <>
                 Už máte účet?{' '}
-                <a href="#" onClick={() => setIsRegister(false)}>
+                <a href="#" onClick={(e) => { e.preventDefault(); setIsRegister(false); }}>
                   Prihláste sa
                 </a>
               </>
             ) : (
               <>
                 Nemáte účet?{' '}
-                <a href="#" onClick={() => setIsRegister(true)}>
+                <a href="#" onClick={(e) => { e.preventDefault(); setIsRegister(true); }}>
                   Zaregistrujte sa
                 </a>
               </>
@@ -306,7 +312,9 @@ function Login() {
         )}
 
         {!isRegister && (
-          <a href="/ochrana-udajov" style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+          // Kanonická URL s lomkou (bez nej PrivacyPolicy robí druhý full reload).
+          // iOS shell otvára práve `/ochrana-udajov` v Safari — tam bez lomky.
+          <a href={iosNative ? '/ochrana-udajov' : '/ochrana-udajov/'} style={{ display: 'block', textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
             Zásady ochrany osobných údajov
           </a>
         )}

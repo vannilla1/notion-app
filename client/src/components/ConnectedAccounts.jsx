@@ -20,6 +20,9 @@ function ConnectedAccounts({ open, onClose, onError }) {
   const [busy, setBusy] = useState(null); // null | 'google' | 'apple' | 'password'
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState(''); // 'success' | 'error'
+  // Odpojenie pri účte s heslom vyžaduje aktuálne heslo (server: REAUTH_REQUIRED)
+  const [confirmProvider, setConfirmProvider] = useState(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -59,10 +62,21 @@ function ConnectedAccounts({ open, onClose, onError }) {
   };
 
   const handleDisconnect = async (provider) => {
-    if (!confirm(`Naozaj chceš odpojiť ${provider === 'google' ? 'Google' : provider === 'apple' ? 'Apple' : 'heslo'}?`)) return;
+    // Účet s heslom: najprv inline formulár na heslo (re-autentifikácia).
+    if (data?.hasPassword && confirmProvider !== provider) {
+      setConfirmProvider(provider);
+      setConfirmPassword('');
+      setMessage('');
+      return;
+    }
+    if (!data?.hasPassword && !confirm(`Naozaj chceš odpojiť ${provider === 'google' ? 'Google' : provider === 'apple' ? 'Apple' : 'heslo'}?`)) return;
     setBusy(provider);
     try {
-      await api.delete(`/api/auth/connections/${provider}`);
+      await api.delete(`/api/auth/connections/${provider}`, {
+        data: data?.hasPassword ? { currentPassword: confirmPassword } : {}
+      });
+      setConfirmProvider(null);
+      setConfirmPassword('');
       setMessage(`${labelFor(provider)} bol odpojený.`);
       setMessageType('success');
       await loadConnections();
@@ -132,6 +146,33 @@ function ConnectedAccounts({ open, onClose, onError }) {
                 busy={busy === 'apple'}
                 allowedToDisconnect={data.providers && data.providers.length > 1}
               />
+
+              {confirmProvider && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleDisconnect(confirmProvider); }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}
+                >
+                  <label style={{ fontSize: '13px', color: '#475569' }}>
+                    Pre odpojenie ({labelFor(confirmProvider)}) zadaj aktuálne heslo:
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoFocus
+                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '16px', minHeight: '44px' }}
+                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="submit" className="btn btn-primary" disabled={!confirmPassword || !!busy} style={{ minHeight: '44px' }}>
+                      {busy ? 'Odpájam...' : 'Odpojiť'}
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={() => { setConfirmProvider(null); setConfirmPassword(''); }} style={{ minHeight: '44px' }}>
+                      Zrušiť
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {/* Tlačítka na pripojenie chýbajúcich — OAuthButtons zariadi
                   init flow. Ukážeme ich len keď nejaký provider nie je pripojený. */}
@@ -208,6 +249,9 @@ function ProviderRow({ icon, label, connected, onDisconnect, busy, allowedToDisc
             : 'Toto je posledná prihlasovacia metóda. Najprv pripoj inú.'}
           style={{
             padding: '6px 12px',
+            // Dotykový cieľ >= 44 px (iOS HIG / WCAG 2.5.5)
+            minHeight: '44px',
+            minWidth: '44px',
             border: '1px solid #e2e8f0',
             background: 'white',
             color: '#dc2626',

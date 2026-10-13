@@ -9,7 +9,6 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
 }
 
@@ -29,8 +28,8 @@ android {
         applicationId = "eu.prplcrm.app"
         minSdk = 24            // Android 7.0 Nougat — 99% zariadení, pokrýva TWA baseline
         targetSdk = 36         // Android 16 — Play Store deadline 31.8.2026
-        versionCode = 212      // production.13 — Diagnostika hlási len nevyriešené výpadky
-        versionName = "1.0.11"
+        versionCode = 214      // production.15 — Android Gradle Plugin 9.4 (Play: optimalizácia R8)
+        versionName = "1.0.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -71,10 +70,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // Kotlin je od AGP 9 vstavaný; jvmTarget = compileOptions.targetCompatibility (17).
 
     buildFeatures {
         buildConfig = true
@@ -102,9 +98,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
 
-    // Biometric — BiometricPrompt API (Face/Fingerprint unlock). Pre teraz len
-    // dependency pripravená; aktivuje sa v druhej iterácii (bio lock na resume).
-    implementation("androidx.biometric:biometric:1.1.0")
+    // androidx.biometric odstránené — nikde sa nepoužívalo (len zväčšovalo AAB).
+    // Pridať späť spolu s BiometricPrompt kódom (viď AndroidManifest.xml).
 
     // OkHttp — HTTP klient pre register FCM token na náš backend (/api/push/fcm/register).
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

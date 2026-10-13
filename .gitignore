@@ -2,6 +2,8 @@ node_modules
 .env
 .env.local
 dist
+# Vite PWA dev service worker (devOptions.enabled) — generuje sa pri npm run dev
+dev-dist
 
 # macOS Finder metadata — nič užitočné pre git, zverejňovanie by prezradilo
 # štruktúru priečinkov a custom attributes.
@@ -57,3 +59,10 @@ android-native/app/google-services.json
 secrets/
 
 client/dist-server/
+
+# Xcode — osobný stav UI a schém (obsahuje lokálne cesty vývojára)
+**/xcuserdata/
+
+# Pracovné poznámky Claude (obsahujú poznatky o slabinách projektu)
+SPRAVA.md
+POSTUP.md

@@ -110,6 +110,13 @@
   display: none;
   flex-direction: column;
   gap: 5px;
+  /* Tri čiary 24×2 + padding 4px dávali ~32×24px cieľ; 44×44 je odporúčané
+     minimum (Apple HIG / Material). Centrovanie drží čiary v strede
+     väčšieho boxu. */
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   background: none;
   border: none;
   cursor: pointer;
@@ -216,8 +223,10 @@
 
 /* ===== Hero ===== */
 .lp-hero {
-  min-height: 100dvh;
+  /* vh je fallback, dvh (dynamický panel prehliadača) ho musí nasledovať —
+     v opačnom poradí vždy vyhralo 100vh a hero bolo vyššie než viewport. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1316,7 +1325,11 @@
    žiadny CLS (obsah sa neposúva). Zobrazuje sa len na landing page. */
 .lp-cookie-banner {
   position: fixed;
+  /* viewport-fit=cover: na iPhone X+ je spodných ~34px home indikátor —
+     bez env() boli tlačidlá Súhlasím/Odmietnuť pod ním. V prehliadačoch
+     bez safe-area je env() 0; prvý riadok je fallback pre WebView bez env(). */
   bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 16px;
   right: 16px;
   max-width: 720px;
@@ -1352,6 +1365,7 @@
 
 .lp-cookie-btn {
   padding: 8px 16px;
+  min-height: 44px; /* ~34px pri 13.5px písme bolo pod dotykovým minimom */
   border-radius: 10px;
   font-size: 13.5px;
   font-weight: 600;
@@ -1385,6 +1399,7 @@
     align-items: stretch;
     text-align: center;
     bottom: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     left: 12px;
     right: 12px;
   }

@@ -4,18 +4,32 @@ import { isIosNativeApp } from '../utils/platform';
 import { useAuth } from '../context/AuthContext';
 import { newsForSection, hasUnseenSectionNews, markSectionNewsSeen, formatNewsDate } from '../utils/changelog';
 
+// localStorage môže vyhodiť SecurityError (Safari „Blokovať všetky cookies",
+// privátny režim niektorých WebView) alebo QuotaExceeded. hasSeenHelp beží
+// v useEffect, takže neošetrená výnimka by zhodila celú stránku do
+// ErrorBoundary — rovnaký try/catch ako WhatsNewModal a utils/changelog.
+// Kľúče help_seen_* nemeniť (číta ich aj WhatsNewModal).
 const hasSeenHelp = (section) => {
-  const seen = localStorage.getItem(`help_seen_${section}`);
-  return seen === 'true';
+  try {
+    return localStorage.getItem(`help_seen_${section}`) === 'true';
+  } catch {
+    // Bez úložiska nápovedu automaticky neotvárame (otvárala by sa pri
+    // každom načítaní).
+    return true;
+  }
 };
 
 const markHelpAsSeen = (section) => {
-  localStorage.setItem(`help_seen_${section}`, 'true');
+  try {
+    localStorage.setItem(`help_seen_${section}`, 'true');
+  } catch { /* noop */ }
 };
 
 export const resetAllHelp = () => {
-  const keys = Object.keys(localStorage).filter(k => k.startsWith('help_seen_'));
-  keys.forEach(k => localStorage.removeItem(k));
+  try {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('help_seen_'));
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch { /* noop */ }
 };
 
 const HelpGuide = ({ section, tips, title, children }) => {

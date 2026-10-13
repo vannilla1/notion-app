@@ -43,12 +43,11 @@ services:
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
-      - path: /*
-        name: Cache-Control
-        value: no-cache
       # Apple Universal Links association file has NO extension — we must force
       # application/json Content-Type so iOS accepts it during app-install
       # association fetch. Also must not be cached longer than 1 day.
+      # Cache-Control pravidlá .well-known MUSIA byť PRED /* (rovnako ako
+      # /assets/*) — predtým boli za ním a pri first-match nikdy neplatili.
       - path: /.well-known/apple-app-site-association
         name: Content-Type
         value: application/json
@@ -60,6 +59,33 @@ services:
       - path: /.well-known/assetlinks.json
         name: Cache-Control
         value: public, max-age=86400
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+      # Bezpečnostné hlavičky dokumentu SPA. helmet na API serveri chráni len
+      # odpovede API — index.html servíruje tento statický host. Názvy hlavičiek
+      # sú jedinečné, takže poradie voči Cache-Control pravidlám nehrá rolu.
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+      # CSP zatiaľ REPORT-ONLY: porušenia chodia do Diagnostiky
+      # (POST /api/errors/csp, názov CSPViolation). Keď tam ~2 týždne nič
+      # legitímne nepribudne, premenovať na Content-Security-Policy.
+      # Zdroje: inline skript v index.html (iOS SW neutralizácia) →
+      # 'unsafe-inline'; Google Fonts; gtag po súhlase (googletagmanager +
+      # google-analytics); API + Socket.IO; náhľady súborov cez blob:.
+      - path: /*
+        name: Content-Security-Policy-Report-Only
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob: https://perun-crm-api.onrender.com; object-src 'self' blob:; frame-src 'self' blob:; connect-src 'self' https://perun-crm-api.onrender.com wss://perun-crm-api.onrender.com https://prplcrm.eu wss://prplcrm.eu https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; report-uri https://perun-crm-api.onrender.com/api/errors/csp"
     routes:
       # Pre-rendered statické stránky pre Google OAuth verification
       # (reviewer + Googlebot vidia plný text policy/VOP bez JS).

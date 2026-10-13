@@ -60,7 +60,10 @@ function isChunkLoadError(message) {
   return CHUNK_LOAD_PATTERNS.some(p => p.test(String(message || '')));
 }
 
-function maybeAutoReload(message) {
+// Exportované aj pre RouteErrorBoundary (App.jsx) — React v produkcii chyby
+// zachytené boundary NEposiela na window 'error', takže zlyhanie lazy chunku
+// po deployi by inak skončilo v červenom okne namiesto auto-reloadu.
+export function maybeAutoReload(message) {
   if (!isChunkLoadError(message)) return false;
   try {
     // Reload-loop guard: nereload-uj ak už sme práve teraz reload-li.
@@ -175,6 +178,30 @@ function shouldSend(payload) {
 }
 
 /**
+ * URL pre report BEZ citlivých tokenov. Plné location.href by do DB chýb
+ * (ServerError, admin Diagnostika, zálohy) ukladalo ako plaintext:
+ *   - session JWT z OAuth callbacku (/auth/callback#token=JWT),
+ *   - jednorazový token resetu hesla (/reset-password?token=),
+ *   - token pozvánky (/invite/:token, /login?invite=).
+ * Hash sa zahodí celý, známe query kľúče sa prepíšu, token v ceste /invite/
+ * sa nahradí. hashKey() aj server (serverErrorService) používajú len pathname,
+ * takže dedup/fingerprint ďalej fungujú (všetky pozvánky sa zlúčia — žiaduce).
+ */
+function safeUrl() {
+  try {
+    const u = new URL(location.href);
+    u.hash = '';
+    for (const k of ['token', 'invite', 'code']) {
+      if (u.searchParams.has(k)) u.searchParams.set(k, '[redacted]');
+    }
+    u.pathname = u.pathname.replace(/^\/invite\/[^/]+/, '/invite/[redacted]');
+    return u.toString();
+  } catch {
+    try { return location.pathname; } catch { return ''; }
+  }
+}
+
+/**
  * @param {object} payload
  * @param {string} payload.message
  * @param {string} [payload.name]
@@ -195,7 +222,7 @@ export function reportError(payload) {
       componentStack: payload.componentStack ? String(payload.componentStack).slice(0, 5000) : undefined,
       line: payload.line,
       column: payload.column,
-      url: location.href,
+      url: safeUrl(),
       userAgent: navigator.userAgent,
       release: resolveRelease(),
       // Snímka posledných ~30 breadcrumbs (navigation, fetch, clicks, console).
@@ -232,6 +259,19 @@ export function reportError(payload) {
   }
 }
 
+// Popis ne-Error dôvodu rejectu. JSON.stringify hádže pre cyklický objekt
+// (axios config, DOM uzol, React fiber) alebo BigInt — a bežal priamo
+// v 'unhandledrejection' listeneri, mimo try bloku reportError. Vznikla tak
+// druhá window 'error' udalosť ("Converting circular structure to JSON")
+// a pôvodná príčina sa do Diagnostiky nedostala.
+function describeReason(r) {
+  try {
+    return JSON.stringify(r).slice(0, 500);
+  } catch {
+    try { return String(r).slice(0, 500); } catch { return 'Unserializable rejection reason'; }
+  }
+}
+
 /**
  * Napojí globálne browser listenery. Volá sa raz z main.jsx.
  */
@@ -260,7 +300,7 @@ export function installGlobalErrorHandlers() {
     if (!reason) return;
     const message = reason instanceof Error
       ? (reason.message || 'Unhandled promise rejection')
-      : (typeof reason === 'string' ? reason : JSON.stringify(reason).slice(0, 500));
+      : (typeof reason === 'string' ? reason : describeReason(reason));
     if (maybeAutoReload(message)) return;
     if (reason instanceof Error) {
       reportError({

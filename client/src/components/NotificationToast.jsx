@@ -1,10 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
 
 const areNotificationsEnabled = () => {
-  const setting = localStorage.getItem('notificationsEnabled');
-  return setting === null ? true : setting === 'true';
+  // Volá sa priamo v renderi (useState init) — pri zablokovanom storage
+  // (Chrome „blokovať cookies“, embed/iframe, SecurityError) by výnimka
+  // zhodila celý authenticated strom. Default = zapnuté.
+  try {
+    const setting = localStorage.getItem('notificationsEnabled');
+    return setting === null ? true : setting === 'true';
+  } catch {
+    return true;
+  }
 };
 
 function NotificationToast() {
@@ -12,6 +19,17 @@ function NotificationToast() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(areNotificationsEnabled());
   const { socket, isConnected } = useSocket();
   const navigate = useNavigate();
+  // Bežiace auto-dismiss timery — pri unmounte (logout, prechod na /admin)
+  // by inak po 5 s volali setToasts na odmontovanom komponente.
+  const timersRef = useRef(new Set());
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -39,9 +57,11 @@ function NotificationToast() {
       return newToasts.slice(-5);
     });
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timersRef.current.delete(timer);
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
+    timersRef.current.add(timer);
   }, []);
 
   const removeToast = useCallback((id) => {
@@ -54,6 +74,12 @@ function NotificationToast() {
     const type = toast.type || '';
     const related = toast.relatedType || '';
     const data = toast.data || {};
+    // Notifikácia môže patriť inému prostrediu než je aktívne. `ws=` v URL
+    // spracuje App.jsx (useLayoutEffect → navigateWithWorkspace): prepne
+    // workspace iba ak sa líši, LoadingGate drží render a `ws=` z URL
+    // strippne. Bez neho by sa highlight otvoril v nesprávnom prostredí.
+    // Rovnaký transport používa web push klik aj iOS deep-link.
+    const wsSuffix = toast.workspaceId ? `&ws=${encodeURIComponent(toast.workspaceId)}` : '';
 
     // Route priority: message > task/subtask > contact.
     // Task ide PRED contact lebo due-date notifikácie pre contact-embedded
@@ -63,14 +89,14 @@ function NotificationToast() {
     // zdroje), takže highlight + scroll funguje bez ohľadu na zdroj úlohy.
     // Viď identickú logiku v NotificationBell.jsx.
     if ((related === 'message' || type.startsWith('message')) && data.messageId) {
-      navigate(`/messages?highlight=${data.messageId}&_t=${ts}`);
+      navigate(`/messages?highlight=${data.messageId}&_t=${ts}${wsSuffix}`);
     } else if ((related === 'task' || related === 'subtask' || type.startsWith('task') || type.startsWith('subtask')) && data.taskId) {
       let url = `/tasks?highlightTask=${data.taskId}&_t=${ts}`;
       if (data.subtaskId) url += `&subtask=${data.subtaskId}`;
       if (data.contactId) url += `&contactId=${data.contactId}`;
-      navigate(url);
+      navigate(url + wsSuffix);
     } else if ((related === 'contact' || type.startsWith('contact')) && data.contactId) {
-      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}`);
+      navigate(`/crm?expandContact=${data.contactId}&_t=${ts}${wsSuffix}`);
     }
   }, [navigate, removeToast]);
 

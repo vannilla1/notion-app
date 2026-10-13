@@ -64,24 +64,28 @@ struct PrplCRMApp: App {
                     // policy), takže FE AuthCallback urobí window.location na
                     // tento scheme a iOS automaticky otvorí appku tu.
                     if url.scheme == "prplcrm" && url.host == "auth" {
-                        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                           let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
-                           !token.isEmpty {
-                            debugLog("[OAuth] Custom URL scheme — received auth token, length=\(token.count)")
-                            // Token do Keychain — pri ďalšom WebView load ContentView
-                            // ho injectne do localStorage cez WKUserScript.
-                            KeychainHelper.saveToken(token)
-                            appDelegate.pushManager.authToken = token
-                            // Reload WebView na /app (defaultný returnUrl). Ak FE poslal
-                            // ?returnUrl=/tasks, použijeme ho — match s web AuthCallback
-                            // sanitize (iba relative paths). Pendingdeeplink pickne
-                            // ContentView v ďalšom render cykle.
-                            let returnPath = components.queryItems?.first(where: { $0.name == "returnUrl" })?.value ?? "/app"
-                            let safePath = returnPath.hasPrefix("/") && !returnPath.hasPrefix("//") ? returnPath : "/app"
-                            appDelegate.pushManager.pendingDeepLink = "https://prplcrm.eu\(safePath)"
-                        } else {
-                            debugLog("[OAuth] Custom URL scheme without valid token — ignoring")
+                        // Odkaz prplcrm://auth vie otvoriť ktorákoľvek stránka či
+                        // appka — token preto NEUKLADÁME rovno do Keychainu. Coordinator
+                        // ho odovzdá webu (window.__nativeAuthLogin) spolu s cnonce a
+                        // web ho prijme len ak OAuth spustil tento WebView (nonce
+                        // z OAuthButtons). Do Keychainu sa dostane až potom bežnou
+                        // cestou (authToken správa). Funguje aj pri bežiacej appke —
+                        // predtým sa nový token do WebView nedostal.
+                        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                        let token = items.first(where: { $0.name == "token" })?.value ?? ""
+                        let cnonce = items.first(where: { $0.name == "cnonce" })?.value ?? ""
+                        let isJwtShape = token.range(of: "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", options: .regularExpression) != nil
+                        let isNonceShape = cnonce.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil
+                        guard isJwtShape, isNonceShape else {
+                            debugLog("[OAuth] Custom URL scheme without valid token/cnonce — ignoring")
+                            return
                         }
+                        // returnUrl — match s web AuthCallback sanitize (iba relative paths)
+                        let returnPath = items.first(where: { $0.name == "returnUrl" })?.value ?? "/app"
+                        let safePath = returnPath.hasPrefix("/") && !returnPath.hasPrefix("//") ? returnPath : "/app"
+                        debugLog("[OAuth] Custom URL scheme — received auth token, length=\(token.count)")
+                        appDelegate.pushManager.pendingExternalAuth = ExternalAuthPayload(token: token, cnonce: cnonce, returnUrl: safePath)
+                        NotificationCenter.default.post(name: Notification.Name("PrplCRMExternalAuthReceived"), object: nil)
                         return
                     }
 
@@ -119,11 +123,24 @@ struct PrplCRMApp: App {
     }
 }
 
+/// Prihlásenie dokončené v Safari (prplcrm://auth) — čaká na odovzdanie webu.
+struct ExternalAuthPayload {
+    let token: String
+    let cnonce: String
+    let returnUrl: String
+}
+
 /// Manages push notification state and deep link URLs
 class PushNotificationManager: ObservableObject {
     @Published var pendingDeepLink: String?
+    // Nie @Published — UI sa podľa toho neprekresľuje; číta ho Coordinator
+    // (hneď, alebo po načítaní stránky pri studenom štarte).
+    var pendingExternalAuth: ExternalAuthPayload?
     var authToken: String? {
         didSet {
+            // Rovnaký token znova (WebView ho posiela pri každom načítaní)
+            // → žiadna nová registrácia (POST /api/push/apns/register).
+            guard authToken != oldValue else { return }
             // Whenever auth token is set/changed, try to register device
             if let token = authToken, !token.isEmpty {
                 debugLog("[Push] Auth token received, attempting device registration")
@@ -315,16 +332,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Clear badge when app is opened. `setBadgeCount` je iOS 16+ API ktoré
-        // nahradzuje deprecated `applicationIconBadgeNumber` z iOS 17+. Deployment
-        // target = 16.0, takže sa na deprecation warning už nebojíme.
-        UNUserNotificationCenter.current().setBadgeCount(0)
-        // Clear delivered notifications from Notification Center too — user is
-        // now in the app and can see their unread state there, so stale APNs
-        // banners in the Center are noise. Matches Slack/Messenger behavior.
-        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-    }
+    // applicationDidBecomeActive odstránené — v scene-based SwiftUI appke sa
+    // nevolá; badge cleanup rieši .onChange(of: scenePhase) v PrplCRMApp.
 
     private func requestPushPermission(_ application: UIApplication) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in

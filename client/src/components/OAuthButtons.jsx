@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api, { API_BASE_URL } from '@/api/api';
+import { createOAuthNonce } from '../utils/oauthNonce';
 import {
   isNativeIOSApp,
   nativeStartGoogleSignIn,
@@ -25,6 +26,9 @@ import {
  */
 function OAuthButtons({ mode = 'login', returnUrl, onError }) {
   const [busy, setBusy] = useState(null); // null | 'google' | 'apple'
+  const busyTimerRef = useRef(null);
+  // Safety timer natívneho flow sa pri odchode zo stránky zruší.
+  useEffect(() => () => clearTimeout(busyTimerRef.current), []);
 
   const handleProvider = async (provider) => {
     setBusy(provider);
@@ -45,7 +49,8 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
       if (dispatched) {
         // Native flow beží mimo JS — busy stav resetneme po 30s safety timeout
         // (ak user zruší v Apple sheet-e, native nepošle žiadnu chybu späť).
-        setTimeout(() => setBusy(null), 30000);
+        clearTimeout(busyTimerRef.current);
+        busyTimerRef.current = setTimeout(() => setBusy(null), 30000);
         return;
       }
     }
@@ -67,6 +72,8 @@ function OAuthButtons({ mode = 'login', returnUrl, onError }) {
         // by skončila 404, lebo Vite serv nemá tieto routes.
         const params = new URLSearchParams();
         if (returnUrl) params.set('returnUrl', returnUrl);
+        // Väzba flow na tento prehliadač (AuthCallback overí zhodu).
+        params.set('cnonce', createOAuthNonce());
         const qs = params.toString();
         window.location.assign(`${API_BASE_URL}/api/auth/${provider}/login${qs ? `?${qs}` : ''}`);
       }

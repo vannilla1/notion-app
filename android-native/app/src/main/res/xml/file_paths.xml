@@ -2,10 +2,15 @@
 <!--
   FileProvider cesty (AndroidManifest.xml → androidx.core.content.FileProvider).
   Zdieľa sa LEN podpriečinok cacheDir/captures, kam fotoaparát zapisuje zábery
-  pre prílohy (MainActivity.launchCapture). Nič iné z appky (tokeny, WebView
+  pre prílohy (MainActivity.launchCapture), a vlastný priečinok sťahovaní
+  appky (Android 7–9, viď nižšie). Nič iné z appky (tokeny, WebView
   dáta) cez provider dostupné nie je. Názov priečinka musí sedieť
   s FileChooserSupport.CAPTURES_DIR.
 -->
 <paths>
     <cache-path name="captures" path="captures/" />
+    <!-- Android 7–9 bez WRITE_EXTERNAL_STORAGE: stiahnuté prílohy z
+         getExternalFilesDir(DIRECTORY_DOWNLOADS) sa ponúknu cez share sheet
+         (WebAppInterface.shareFromAppStorage). -->
+    <external-files-path name="downloads" path="Download/" />
 </paths>

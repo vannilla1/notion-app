@@ -52,7 +52,9 @@ class PrplFcmService : FirebaseMessagingService() {
         // v UI. Duplikovať to ešte aj systémovou notifikáciou v trayi nedáva
         // zmysel — user by videl dve rovnaké notifikácie. Skipneme; keď appka
         // pôjde do pozadia, ďalšie push-e pôjdu systémovo normálne.
-        if (MainActivity.isAppInForeground) {
+        // Len ak je web appka naozaj načítaná (nie login po páde, prekrytie
+        // chyby, prázdny WebView po render crashi) — inak by sa push stratil.
+        if (MainActivity.isAppInForeground && MainActivity.webAppReady) {
             Log.d(TAG, "App is in foreground — skip system notification (in-app toast will handle it)")
             return
         }
