@@ -7,7 +7,6 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-const path = require('path');
 const { connectDB } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const authGoogleRoutes = require('./routes/auth-google');
@@ -20,6 +19,7 @@ const attachmentRoutes = require('./routes/attachments');
 const googleCalendarRoutes = require('./routes/googleCalendar');
 const { initializeCalendarWebhooks } = require('./routes/googleCalendar');
 const googleTasksRoutes = require('./routes/googleTasks');
+const jobsRoutes = require('./routes/jobs');
 const { startGoogleTasksPolling } = require('./routes/googleTasks');
 const notificationRoutes = require('./routes/notifications');
 const pushRoutes = require('./routes/push');
@@ -32,17 +32,17 @@ const billingAppleRoutes = require('./routes/billingApple');
 const contactFormRoutes = require('./routes/contact-form');
 const errorRoutes = require('./routes/errors');
 const notificationService = require('./services/notificationService');
-const { scheduleDueDateChecks } = require('./services/dueDateChecker');
+const { scheduleDueDateChecks, stopDueDateChecks } = require('./services/dueDateChecker');
 const { scheduleCleanup: scheduleSubscriptionCleanup } = require('./services/subscriptionCleanup');
 const { schedulePlanExpiration } = require('./services/planExpiration');
 const { scheduleSubscriptionReminders } = require('./services/subscriptionReminders');
 const emailUnsubscribeRoutes = require('./routes/emailUnsubscribe');
 const announcementsRoutes = require('./routes/announcements');
-const { scheduleErrorAlerter } = require('./jobs/errorAlerter');
+const { scheduleErrorAlerter, stop: stopErrorAlerter } = require('./jobs/errorAlerter');
 const { initializeEmail } = require('./services/adminEmailService');
 const { trackRequest } = require('./services/apiMetrics');
 const { authenticateSocket } = require('./middleware/auth');
-const { apiLimiter } = require('./middleware/rateLimiter');
+const { apiAndFilesLimiter } = require('./middleware/rateLimiter');
 const WorkspaceMember = require('./models/WorkspaceMember');
 const Page = require('./models/Page');
 const logger = require('./utils/logger');
@@ -57,8 +57,19 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // CORS configuration - restrict to frontend origin
+//
+// CORS_ORIGIN môže byť čiarkou oddelený zoznam (viď .env.example). Knižnica
+// `cors` string origin NEporovnáva s Origin requestu, ale vráti ho doslovne
+// v hlavičke — "a,b" by prehliadač odmietol a padol by každý request aj
+// Socket.IO handshake. Pole origin-ov sa porovnáva s Origin requestu; pri
+// jednej hodnote nechávame string, aby produkčné správanie ostalo identické.
+const corsOrigins = (process.env.CORS_ORIGIN || 'https://prplcrm.eu')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (corsOrigins.length === 0) corsOrigins.push('https://prplcrm.eu');
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'https://prplcrm.eu',
+  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   // PATCH je nutné explicitne uviesť — používa ho premenovanie príloh
   // (jediné PATCH endpointy: PATCH /api/tasks|contacts/:id/files/:fileId).
   // Bez neho browser zablokuje CORS preflight a rename padne s network errorom
@@ -77,8 +88,14 @@ const io = new Server(server, {
 // Security headers
 //
 // Audit MED-001 fix: CSP zapnutý ako HTTP response header (predtým bolo
-// {contentSecurityPolicy: false}). Frontend CSP via meta tag NESTAČÍ —
-// browser musí dostať header pre aktivovanie XSS protections.
+// {contentSecurityPolicy: false}).
+//
+// POZOR: táto CSP platí len pre odpovede API servera (JSON, /uploads,
+// HTML stránky odhlásenia z e-mailov). Dokument SPA (index.html) servíruje
+// samostatný Render static site `prpl-crm` — jeho CSP a bezpečnostné
+// hlavičky sú v render.yaml (headers), porušenia chodia na POST
+// /api/errors/csp. Pri zmene zdrojov (nový CDN, analytika…) treba upraviť
+// obe miesta.
 //
 // Directívy kompromis:
 //  - script-src: 'unsafe-inline' je nutné lebo index.html má inline script
@@ -129,6 +146,13 @@ app.post('/api/billing/webhook',
   billingRoutes.handleWebhook
 );
 
+// Apply general API rate limiting — PRED body parsermi: limiter kľúčuje len
+// podľa IP a telo nepotrebuje, takže klient nad limitom dostane 429 skôr,
+// než server prečíta a JSON.parse-ne až 1 MB tela pri každom requeste.
+// Route-level limitery závislé od tela (loginEmailLimiter) sú v auth.js
+// a tejto zmeny sa netýkajú.
+app.use('/api', apiAndFilesLimiter);
+
 // Body parsers with size limits.
 //
 // Audit MED-004 fix: globálny limit znížený z 20MB na 1MB. 20MB na
@@ -140,14 +164,15 @@ app.post('/api/billing/webhook',
 // Override pre routy ktoré reálne potrebujú väčšie JSON payloady (rich
 // content, pages editor, batch operations) idú s 5MB. Tieto sú za auth-om
 // takže útočná plocha je menšia.
+//
+// Override pre Pages (rich-text editor, content limit 500K znakov ×
+// JSON overhead ≈ 2-3MB v krajnom prípade). MUSÍ byť PRED globálnym 1MB
+// parserom: body-parser po úspešnom parse nastaví req._body a ďalší parser
+// sa preskočí; v opačnom poradí by globálny 1MB parser telo nad 1MB zamietol
+// s 413 skôr, než sa 5MB override vôbec dostane k slovu (mŕtvy kód).
+app.use('/api/pages', express.json({ limit: '5mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-// Override pre Pages (rich-text editor, content limit 500K znakov ×
-// JSON overhead ≈ 2-3MB v krajnom prípade)
-app.use('/api/pages', express.json({ limit: '5mb' }));
-
-// Apply general API rate limiting
-app.use('/api', apiLimiter);
 
 // Track API requests for admin metrics
 app.use('/api', trackRequest);
@@ -219,8 +244,11 @@ app.use('/api', (req, res, next) => {
 // Make io accessible to routes
 app.set('io', io);
 
-// Static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// POZN: pôvodný `app.use('/uploads', express.static(...))` bol odstránený.
+// Všetky uploady idú cez multer.memoryStorage() do Mongo/R2 a nič v
+// server/ ani client/ na /uploads neodkazuje — mount len verejne (bez auth,
+// mimo apiLimiter aj DB-readiness guardu) servíroval obsah adresára
+// server/uploads/.
 
 // Routes
 // OAuth routery sú mounted na podadresároch /api/auth/google, /api/auth/apple,
@@ -236,6 +264,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/google-calendar', googleCalendarRoutes);
 app.use('/api/google-tasks', googleTasksRoutes);
+app.use('/api/jobs', jobsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/workspaces', workspaceRoutes);
@@ -264,19 +293,40 @@ app.use(serverErrorMirrorMiddleware);
 
 // Global error handler
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error', {
+  // Ak už odpoveď odišla (napr. chyba uprostred streamovania prílohy),
+  // res.status().json() by sám hodil „Cannot set headers after they are
+  // sent" — delegujeme na default Express handler, ktorý spojenie zavrie.
+  if (res.headersSent) return next(err);
+
+  // http-errors nastavuje status aj statusCode, iné knižnice len statusCode
+  // (serverErrorMirror v serverErrorService.js číta obe) — inak by sa 4xx
+  // chyba zmenila na 500.
+  const status = err.status || err.statusCode || 500;
+  const isClientError = status >= 400 && status < 500;
+
+  logger[isClientError ? 'warn' : 'error']('Unhandled error', {
     error: err.message,
     stack: err.stack,
+    status,
     path: req.path,
     method: req.method,
     userId: req.user?.id
   });
 
-  res.status(err.status || 500).json({
-    message: process.env.NODE_ENV === 'production'
-      ? 'Nastala chyba servera'
-      : err.message
-  });
+  // 4xx z body-parsera (413 telo nad limit, 400 nevalidný JSON) NIE JE chyba
+  // servera — generická 5xx hláška klienta mýlila. Stavové kódy sa nemenia.
+  let message;
+  if (process.env.NODE_ENV !== 'production') {
+    message = err.message;
+  } else if (status === 413) {
+    message = 'Požiadavka je príliš veľká';
+  } else if (isClientError) {
+    message = 'Neplatná požiadavka';
+  } else {
+    message = 'Nastala chyba servera';
+  }
+
+  res.status(status).json({ message });
 });
 
 // Socket.io for real-time collaboration
@@ -305,18 +355,27 @@ io.on('connection', async (socket) => {
   // change takes effect on next reconnect. Acceptable — REST API enforces
   // membership on every request anyway; this only affects real-time deltas.
   const userWorkspaceIds = new Set();
-  try {
-    const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
-    for (const m of memberships) {
-      const wsId = m.workspaceId.toString();
-      socket.join(`workspace-${wsId}`);
-      userWorkspaceIds.add(wsId);
-    }
-    logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
-  } catch (err) {
-    logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
-  }
   socket.data.userWorkspaceIds = userWorkspaceIds;
+  // Načítanie členstva ZÁMERNE bez await na vrchu handlera: Socket.IO
+  // emitne 'connection' hneď po CONNECT acku a klient má 'join-page' často
+  // už v sendBuffer (PageView volá joinPage hneď, ako existuje socket
+  // objekt). Ak by sme tu await-ovali Mongo dotaz, všetky socket.on(...)
+  // nižšie by sa zaregistrovali až po ňom a skorý join-page by sa bez logu
+  // zahodil. Takto sa listenery registrujú synchrónne a canAccessPage na
+  // výsledok počká cez `await membershipReady`.
+  const membershipReady = (async () => {
+    try {
+      const memberships = await WorkspaceMember.find({ userId: socket.user.id }, 'workspaceId').lean();
+      for (const m of memberships) {
+        const wsId = m.workspaceId.toString();
+        socket.join(`workspace-${wsId}`);
+        userWorkspaceIds.add(wsId);
+      }
+      logger.debug('Socket joined workspace rooms', { userId: socket.user.id, count: memberships.length });
+    } catch (err) {
+      logger.error('Failed to join workspace rooms', { error: err.message, userId: socket.user.id });
+    }
+  })();
   // Cache pageId → workspaceId after a successful join-page check, so
   // re-joining or re-checking the same page in this session is a Set lookup,
   // not a Mongo query.
@@ -336,6 +395,8 @@ io.on('connection', async (socket) => {
   async function canAccessPage(pageId) {
     if (typeof pageId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(pageId)) return false;
     if (socket.data.pageAccess.has(pageId)) return true;
+    // Skorý join-page počká na načítanie členstva namiesto odmietnutia.
+    await membershipReady;
     try {
       const page = await Page.findById(pageId, 'workspaceId').lean();
       if (!page) return false;
@@ -390,6 +451,26 @@ io.on('connection', async (socket) => {
     return typeof pageId === 'string' && socket.rooms.has(`page-${pageId}`);
   }
 
+  // Typová + veľkostná kontrola preposielaných polí. REST routa pages
+  // obmedzuje content na 500 000 a title na 500 znakov (routes/pages.js),
+  // socket relay predtým preposielal čokoľvek až po maxHttpBufferSize.
+  // Null/undefined tolerujeme — klient posiela napr. `content: null` pri
+  // zmene samotného titulku (PageView.jsx), takže dnešné payloady prejdú.
+  const isOptStr = (v, max) => v == null || (typeof v === 'string' && v.length <= max);
+
+  // Jednoduchý per-socket limit udalostí za sekundu — cursor-move chodí
+  // ~20×/s, 120/s je 6× rezerva; nad limit sa paket len zahodí (bez
+  // disconnectu), aby nás jeden klient v slučke nenútil broadcastovať
+  // do celej room.
+  socket.data.evtBucket = { sec: 0, n: 0 };
+  const allowEvent = (limit) => {
+    const sec = Math.floor(Date.now() / 1000);
+    const b = socket.data.evtBucket;
+    if (b.sec !== sec) { b.sec = sec; b.n = 0; }
+    return ++b.n <= limit;
+  };
+  const EVENTS_PER_SEC = 120;
+
   // All three handlers below accept the payload as a single param and guard
   // against non-object inputs BEFORE destructuring — otherwise a malicious
   // client emitting `socket.emit('page-update', null)` would throw inside the
@@ -399,6 +480,8 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, content, title } = payload;
     if (!isInPageRoom(pageId)) return;
+    if (!isOptStr(content, 500000) || !isOptStr(title, 500)) return;
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     // Broadcast to all users in the page room except sender
     socket.to(`page-${pageId}`).emit('page-updated', {
       pageId,
@@ -412,6 +495,10 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, blockId, content, type } = payload;
     if (!isInPageRoom(pageId)) return;
+    // blockId: string alebo číslo (klientsky generované id), ostatné stringy.
+    if (!(isOptStr(blockId, 100) || typeof blockId === 'number')) return;
+    if (!isOptStr(content, 500000) || !isOptStr(type, 50)) return;
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     socket.to(`page-${pageId}`).emit('block-updated', {
       pageId,
       blockId,
@@ -425,6 +512,8 @@ io.on('connection', async (socket) => {
     if (!payload || typeof payload !== 'object') return;
     const { pageId, position } = payload;
     if (!isInPageRoom(pageId)) return;
+    // position nechávame bez typovej kontroly — klient posiela objekt.
+    if (!allowEvent(EVENTS_PER_SEC)) return;
     socket.to(`page-${pageId}`).emit('cursor-moved', {
       userId: socket.user.id,
       username: socket.user.username,
@@ -471,7 +560,8 @@ process.on('unhandledRejection', (reason) => {
 //  - Mongoose save/update operácie mohli skončiť uprostred (atomic ops sú OK,
 //    multi-step transactions nie sú)
 //  - Socket.io klienty nedostali disconnect signal a vidia "stuck" stav
-// Postup: 1) stop accepting nové requesty (server.close), 2) počkať na
+// Postup: 1) zavrieť Socket.IO (io.close → disconnect klientov, engine a
+// následne sám httpServer.close = stop accepting nové requesty), 2) počkať na
 // existujúce, 3) zavrieť Mongo, 4) exit. Force-exit po 10s aby SIGKILL nemal
 // čo robiť — Render má 15s window, 10s nám necháva 5s rezervu.
 let shutdownInProgress = false;
@@ -480,8 +570,30 @@ const gracefulShutdown = (signal) => {
   shutdownInProgress = true;
   logger.info(`${signal} received — starting graceful shutdown`);
 
-  // Stop accepting new connections; čaká kým in-flight requesty doskončia
-  server.close(async () => {
+  // Zastav periodické joby, aby počas ~10 s drain okna nespúšťali dotazy
+  // proti práve zatváranému Mongo spojeniu (chyby „Scheduled check failed"
+  // pri každom deployi).
+  try { stopDueDateChecks(); } catch { /* best-effort */ }
+  try { stopErrorAlerter(); } catch { /* best-effort */ }
+  try { require('./jobs/healthMonitor').stop(); } catch { /* best-effort */ }
+  try { require('./jobs/commissionScheduler').stop(); } catch { /* best-effort */ }
+  try { require('./services/planExpiration').stopPlanExpiration(); } catch { /* best-effort */ }
+  try { require('./services/subscriptionCleanup').stopCleanup(); } catch { /* best-effort */ }
+  try { require('./services/subscriptionReminders').stopSubscriptionReminders(); } catch { /* best-effort */ }
+  try { require('./routes/googleTasks').stopGoogleTasksPolling(); } catch { /* best-effort */ }
+  try { require('./routes/googleCalendar').stopCalendarWebhooks(); } catch { /* best-effort */ }
+  try { require('./services/notificationService').closeApnsSessions(); } catch { /* best-effort */ }
+
+  // Idle keep-alive spojenia zavrieme explicitne (Node ≥ 18.2), aby
+  // httpServer.close nečakal na ich timeout.
+  server.closeIdleConnections?.();
+
+  // io.close() zavrie všetky Socket.IO sokety aj engine a potom sám zavolá
+  // httpServer.close(cb), ktorý čaká, kým in-flight requesty doskončia.
+  // Samotný server.close() by pri čo i len jednom pripojenom WebSocket
+  // klientovi callback NIKDY nezavolal → Mongo sa nezavrelo a proces vždy
+  // skončil 10s timeoutom s exit(1).
+  Promise.resolve(io.close(async () => {
     logger.info('[Shutdown] HTTP server closed (no more new connections)');
     try {
       await mongoose.connection.close();
@@ -491,10 +603,13 @@ const gracefulShutdown = (signal) => {
     }
     logger.info('[Shutdown] Exit 0');
     process.exit(0);
+  })).catch((err) => {
+    // Zlyhanie io.close len zalogujeme — force-exit nižšie proces aj tak ukončí.
+    logger.error('[Shutdown] io.close error', { error: err?.message });
   });
 
-  // Force-exit po 10s ak server.close visí na pomalých keep-alive connections
-  // alebo zaseknutom DB query. .unref() aby tento timer nedržal event loop živý
+  // Force-exit po 10s ak close visí na pomalých spojeniach alebo zaseknutom
+  // DB query. .unref() aby tento timer nedržal event loop živý
   // ak by predošlé close-y skončili rýchlejšie.
   setTimeout(() => {
     logger.error('[Shutdown] Graceful shutdown timeout (10s) — forcing exit');
@@ -520,26 +635,37 @@ server.listen(PORT, () => {
       // Set Pro plan for team accounts (skip if user has active Stripe subscription)
       const User = require('./models/User');
       try {
-        const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-        for (const email of proEmails) {
-          const existing = await User.findOne({ email });
-          if (!existing) continue;
-          // Don't override if user has an active Stripe subscription
-          if (existing.subscription?.stripeSubscriptionId) {
-            logger.info(`Skipping pro override for ${email} — has Stripe subscription`);
-            continue;
-          }
-          existing.subscription = {
-            ...existing.subscription?.toObject(),
-            plan: 'pro',
-            paidUntil: new Date('2099-12-31')
-          };
-          await existing.save();
-          logger.info(`Pro plan ensured for ${email} (plan: pro)`);
+        // Zoznam z env PRO_EMAILS (utils/planLimits — dočasný legacy fallback
+        // s varovaním, kým env na Renderi nie je nastavená).
+        const { getProEmails } = require('./utils/planLimits');
+        for (const email of getProEmails()) {
+          // Atomicky a len pole plan/paidUntil — bez Stripe predplatného
+          // (aktívne Stripe predplatné nikdy neprepisujeme). Predtým save()
+          // celého subscription objektu prepisoval paralelné zápisy.
+          const res = await User.updateOne(
+            {
+              email,
+              $or: [
+                { 'subscription.stripeSubscriptionId': null },
+                { 'subscription.stripeSubscriptionId': { $exists: false } }
+              ]
+            },
+            { $set: { 'subscription.plan': 'pro', 'subscription.paidUntil': new Date('2099-12-31') } }
+          );
+          if (res.modifiedCount > 0) logger.info('Pro plan ensured for team account', { emailDomain: email.split('@')[1] });
         }
       } catch (err) {
         logger.error('Failed to set pro plans', { error: err.message });
       }
+
+      // One-shot migrácie guardované markerom v app_migrations — bez neho
+      // bežali pri každom boote ako sken celej kolekcie (bez indexu).
+      const runOnceMigration = async (key, fn) => {
+        const migrations = require('mongoose').connection.db.collection('app_migrations');
+        if (await migrations.findOne({ _id: key })) return;
+        const modified = await fn();
+        await migrations.insertOne({ _id: key, at: new Date(), modified });
+      };
 
       // One-shot migration: 'trial' plán bol odstránený z aplikácie. Užívatelia
       // ktorí v DB stále majú 'trial' (z čias keď to bola validná hodnota)
@@ -547,27 +673,69 @@ server.listen(PORT, () => {
       // nemá 'trial' to môžeme odstrániť. Ponechávame aj tu (defenzívne)
       // aby sa zlé dáta neprekĺzli cez enum validáciu po deployi.
       try {
-        const migrated = await User.updateMany(
-          { 'subscription.plan': 'trial' },
-          { $set: { 'subscription.plan': 'free' }, $unset: { 'subscription.trialEndsAt': '' } }
-        );
-        if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} legacy trial users to free plan`);
+        await runOnceMigration('legacy_trial_to_free', async () => {
+          const migrated = await User.updateMany(
+            { 'subscription.plan': 'trial' },
+            { $set: { 'subscription.plan': 'free' }, $unset: { 'subscription.trialEndsAt': '' } }
+          );
+          if (migrated.modifiedCount > 0) logger.info(`Migrated ${migrated.modifiedCount} legacy trial users to free plan`);
+          return migrated.modifiedCount;
+        });
       } catch (err) {
         logger.error('Failed to migrate legacy trial users', { error: err.message });
       }
 
       // Migrate workspace members with 'admin' role to 'manager'
       try {
-        const WorkspaceMember = require('./models/WorkspaceMember');
-        const migrated = await WorkspaceMember.updateMany(
-          { role: 'admin' },
-          { role: 'manager' }
-        );
-        if (migrated.modifiedCount > 0) {
-          logger.info(`Migrated ${migrated.modifiedCount} workspace members from admin to manager`);
-        }
+        await runOnceMigration('workspace_member_admin_to_manager', async () => {
+          const WorkspaceMember = require('./models/WorkspaceMember');
+          const migrated = await WorkspaceMember.updateMany(
+            { role: 'admin' },
+            { role: 'manager' }
+          );
+          if (migrated.modifiedCount > 0) {
+            logger.info(`Migrated ${migrated.modifiedCount} workspace members from admin to manager`);
+          }
+          return migrated.modifiedCount;
+        });
       } catch (err) {
         logger.error('Failed to migrate admin roles', { error: err.message });
+      }
+
+      // One-shot: redundantné samostatné indexy (prefixy compoundov alebo
+      // boolean/enum s nízkou kardinalitou) — každý insert ich aktualizoval.
+      // Mongoose autoIndex indexy len vytvára; odstránenie zo schémy ich
+      // v existujúcej DB nezruší.
+      try {
+        await runOnceMigration('drop_redundant_indexes_v1', async () => {
+          const redundant = {
+            Notification: ['userId_1', 'read_1', 'category_1', 'createdAt_1'],
+            Contact: ['workspaceId_1'],
+            Task: ['workspaceId_1'],
+            Message: ['workspaceId_1'],
+            Page: ['workspaceId_1'],
+            WorkspaceMember: ['workspaceId_1'],
+            AuditLog: ['userId_1', 'category_1'],
+            EmailLog: ['userId_1', 'type_1']
+          };
+          let dropped = 0;
+          for (const [modelName, names] of Object.entries(redundant)) {
+            const Model = require(`./models/${modelName}`);
+            for (const name of names) {
+              try {
+                await Model.collection.dropIndex(name);
+                dropped++;
+              } catch (err) {
+                // Index už neexistuje (nová DB) / kolekcia ešte nevznikla
+                if (![27, 26].includes(err.code) && !['IndexNotFound', 'NamespaceNotFound'].includes(err.codeName)) throw err;
+              }
+            }
+          }
+          if (dropped > 0) logger.info(`Dropped ${dropped} redundant indexes`);
+          return dropped;
+        });
+      } catch (err) {
+        logger.error('Failed to drop redundant indexes', { error: err.message });
       }
 
       // One-shot migration (2026-07): push notifikácie opt-in → opt-out.

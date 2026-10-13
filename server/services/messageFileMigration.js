@@ -98,6 +98,11 @@ const hasInlineData = (att) => !!att && typeof att.data === 'string' && att.data
  * UI to volá pri otvorení Storage tabu — karta migrácie sa skryje pri 0.
  */
 async function getPendingMigrationCount() {
+  // Počas živej migrácie admin UI pýta stav každé 2 s — namiesto
+  // neindexovaného skenu celej kolekcie vrátime odhad zo stavu behu.
+  if (state.running && state.mode === 'live' && state.total > 0) {
+    return Math.max(0, state.total - state.processed);
+  }
   const rows = await Message.aggregate([
     { $match: INLINE_FILTER },
     {

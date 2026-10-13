@@ -190,9 +190,11 @@ describe('Workspace model', () => {
   });
 
   describe('Statics — generateInviteCode', () => {
-    it('should generate an 8-char uppercase hex code', () => {
+    // 050aada: 6 bajtov (12 hex znakov) namiesto 4 — silnejší kód proti hádaniu.
+    // Staré 8-znakové kódy v DB ostávajú platné (join porovnáva celý reťazec).
+    it('should generate a 12-char uppercase hex code', () => {
       const code = Workspace.generateInviteCode();
-      expect(code).toMatch(/^[0-9A-F]{8}$/);
+      expect(code).toMatch(/^[0-9A-F]{12}$/);
     });
 
     it('should generate different codes on subsequent calls', () => {

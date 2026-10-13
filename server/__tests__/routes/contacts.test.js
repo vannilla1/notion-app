@@ -220,6 +220,41 @@ describe('/api/contacts route', () => {
       expect(res.body.status).toBe('active');
     });
 
+    it('staršia poznámka dlhšia než limit nebráni úprave iného poľa; nová príliš dlhá → 400', async () => {
+      const longNotes = 'x'.repeat(60000);
+      const c = await Contact.create({
+        workspaceId: ownerCtx.workspace._id,
+        userId: ownerCtx.user._id,
+        name: 'Legacy',
+        status: 'new'
+      });
+      await Contact.collection.updateOne({ _id: c._id }, { $set: { notes: longNotes } });
+
+      const ok = await request(app)
+        .put(`/api/contacts/${c._id}`)
+        .set(authHeader(ownerCtx.token))
+        .send({ name: 'Legacy 2', notes: longNotes, status: 'new' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.name).toBe('Legacy 2');
+
+      const bad = await request(app)
+        .put(`/api/contacts/${c._id}`)
+        .set(authHeader(ownerCtx.token))
+        .send({ notes: longNotes + 'y' });
+      expect(bad.status).toBe(400);
+    });
+
+    it('extrémne dlhý e-mail odmietne hneď (regex nedostane neohraničený vstup)', async () => {
+      const c = await Contact.create({ workspaceId: ownerCtx.workspace._id, userId: ownerCtx.user._id, name: 'X', status: 'new' });
+      const started = Date.now();
+      const res = await request(app)
+        .put(`/api/contacts/${c._id}`)
+        .set(authHeader(ownerCtx.token))
+        .send({ email: 'a@' + '.'.repeat(200000) + ' ' });
+      expect(res.status).toBe(400);
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+
     it('P2 isolation: PUT na cudzí kontakt → 404, DB nezmenená', async () => {
       const foreign = await Contact.create({
         workspaceId: otherCtx.workspace._id,

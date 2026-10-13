@@ -76,8 +76,12 @@ async function checkGoogleTokens() {
   try {
     // Spočítaj koľko userov má aktívne Google OAuth tokeny
     const User = require('../models/User');
-    const withCalendar = await User.countDocuments({ 'googleCalendar.refreshToken': { $exists: true, $ne: null, $ne: '' } });
-    const withTasks = await User.countDocuments({ 'googleTasks.refreshToken': { $exists: true, $ne: null, $ne: '' } });
+    // $nin [null, ''] — v objekte `{ $ne: null, $ne: '' }` druhý kľúč prepísal
+    // prvý, filter bol `{ $exists: true, $ne: '' }` a keďže refreshToken má
+    // v schéme default null, počítali sa takmer všetci používatelia.
+    // $nin s null pokrýva aj neexistujúce pole.
+    const withCalendar = await User.countDocuments({ 'googleCalendar.refreshToken': { $nin: [null, ''] } });
+    const withTasks = await User.countDocuments({ 'googleTasks.refreshToken': { $nin: [null, ''] } });
     return {
       status: 'ok',
       message: `${withCalendar} users s Calendar, ${withTasks} users s Tasks`,

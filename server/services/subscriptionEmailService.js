@@ -40,7 +40,12 @@ const initTransporter = () => {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: (process.env.SMTP_PORT === '465'),
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      // Bez timeoutov zaseknutý SMTP server zablokoval celý reminder cron
+      // (nodemailer default socketTimeout je 10 min).
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 30000
     });
     logger.info('[SubscriptionEmail] SMTP transporter initialized');
     return transporter;
@@ -129,7 +134,21 @@ const MARKETING_TYPES = new Set(['reminder_t7', 'reminder_t1', 'winback', 'mobil
 
 const formatDateSk = (d) => {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('sk-SK', { year: 'numeric', month: 'long', day: 'numeric' });
+  // Render beží v UTC — bez zóny by sa dátum blízko polnoci posunul o deň.
+  return new Date(d).toLocaleDateString('sk-SK', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/Bratislava' });
+};
+
+// Používateľské hodnoty (meno, dôvod zľavy) idú do HTML e-mailu escapované.
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+// JWT_SECRET garantuje middleware/auth.js pri štarte (proces bez neho
+// skončí) — žiadny predvídateľný fallback na podpisovanie odkazov.
+const getUnsubscribeSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET missing');
+  return secret;
 };
 
 /**
@@ -138,7 +157,7 @@ const formatDateSk = (d) => {
  * (we don't need a separate secret — token is low-stakes, only toggles a Bool).
  */
 const buildUnsubscribeToken = (userId) => {
-  const secret = process.env.JWT_SECRET || 'dev-secret-change-me';
+  const secret = getUnsubscribeSecret();
   const payload = `${userId}.${Math.floor(Date.now() / 1000)}`;
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex').slice(0, 32);
   return Buffer.from(`${payload}.${sig}`).toString('base64url');
@@ -342,7 +361,7 @@ const sendSubscriptionAssigned = async ({ user, oldPlan, triggeredBy }) => {
   const paidUntil = user.subscription?.paidUntil ? formatDateSk(user.subscription.paidUntil) : null;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">
       administrátor PrplCRM práve aktualizoval váš účet. Aktuálny stav:
     </p>
@@ -416,10 +435,10 @@ const sendDiscountAssigned = async ({ user, triggeredBy }) => {
   }
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">${headline} 🎉</p>
     <p style="font-size:14px;color:#555;margin:0 0 20px;line-height:1.5;">${detailRow}</p>
-    ${d.reason ? `<p style="font-size:13px;color:#666;margin:0 0 20px;padding:10px 14px;background:#f9fafb;border-left:3px solid #8B5CF6;line-height:1.5;"><em>${d.reason}</em></p>` : ''}
+    ${d.reason ? `<p style="font-size:13px;color:#666;margin:0 0 20px;padding:10px 14px;background:#f9fafb;border-left:3px solid #8B5CF6;line-height:1.5;"><em>${escapeHtml(d.reason)}</em></p>` : ''}
     ${ctaButton('Otvoriť CRM', APP_URL())}
     <p style="font-size:12px;color:#999;margin:0;line-height:1.5;">
       Otázky? Píšte na <a href="mailto:support@prplcrm.eu" style="color:#8B5CF6;">support@prplcrm.eu</a>.
@@ -452,7 +471,7 @@ const sendWelcomePaid = async ({ user, triggeredBy }) => {
   const subject = `Vitajte v PrplCRM ${PLAN_LABELS[plan] || plan}`;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       gratulujeme — práve sa vám aktivoval plán <strong>${PLAN_LABELS[plan]}</strong>! Tu je čo máte navyše:
     </p>
@@ -515,7 +534,7 @@ const sendReminderT7 = async ({ user, accountStats, triggeredBy }) => {
     </p>` : '';
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">
       váš plán <strong>${PLAN_LABELS[plan]}</strong> vyprší <strong>${expires}</strong> — to je o <strong>7 dní</strong>.
     </p>
@@ -570,7 +589,7 @@ const sendReminderT1 = async ({ user, triggeredBy }) => {
   const subject = `Pripomienka: váš plán ${PLAN_LABELS[plan]} vyprší zajtra`;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">
       váš plán <strong>${PLAN_LABELS[plan]}</strong> vyprší <strong>zajtra (${expires})</strong>.
       Po expirácii sa účet automaticky vráti na <strong>Free</strong> a tieto funkcie sa obmedzia:
@@ -623,7 +642,7 @@ const sendExpired = async ({ user, previousPlan, triggeredBy }) => {
   const subject = `Váš plán vypršal — účet prešiel na Free`;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       váš plán <strong>${PLAN_LABELS[previousPlan]}</strong> vypršal a účet sme automaticky prepli na <strong>Free</strong>. Vaše dáta zostali nedotknuté — iba sa obmedzili niektoré funkcie.
     </p>
@@ -672,7 +691,7 @@ const sendWinback = async ({ user, triggeredBy }) => {
   const subject = `Stále tu pre vás — ponuka na návrat do PrplCRM`;
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       pred dvoma týždňami vám expiroval plán. Vaše dáta sú stále uložené — kontakty, projekty, úlohy aj synchronizácia s Google. Ak by ste sa chceli vrátiť, pripravili sme pre vás ponuku.
     </p>
@@ -737,9 +756,12 @@ const verifyUnsubscribeToken = (token) => {
     const parts = decoded.split('.');
     if (parts.length !== 3) return null;
     const [userId, ts, sig] = parts;
-    const secret = process.env.JWT_SECRET || 'dev-secret-change-me';
+    const secret = getUnsubscribeSecret();
     const expected = crypto.createHmac('sha256', secret).update(`${userId}.${ts}`).digest('hex').slice(0, 32);
-    if (sig !== expected) return null;
+    // Časovo konštantné porovnanie podpisu
+    const a = Buffer.from(String(sig), 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     return userId;
   } catch (err) {
     return null;
@@ -762,7 +784,7 @@ const sendMobileAppLaunch = async ({ user, triggeredBy }) => {
   const playStoreUrl = 'https://play.google.com/store/apps/details?id=eu.prplcrm.app';
 
   const bodyHtml = `
-    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${user.username}</strong>,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 16px;line-height:1.5;">Ahoj <strong>${escapeHtml(user.username)}</strong>,</p>
     <p style="font-size:15px;color:#333;margin:0 0 20px;line-height:1.5;">
       máme pre vás dobrú správu — Prpl CRM si od dnešného dňa môžete stiahnuť aj ako mobilnú aplikáciu.
     </p>

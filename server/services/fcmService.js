@@ -105,12 +105,14 @@ const getFCMStatus = () => ({
  * `generateNotificationUrl` sa volá z caller-a (notificationService) a URL
  * sa pošle v data.url — appka ju použije ako EXTRA_DEEP_LINK.
  */
-const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
+// preloadedDevices: voliteľne zariadenia, ktoré volajúci (createNotification)
+// už načítal — ušetrí druhý dotaz na FcmDevice pri každej notifikácii.
+const sendFCMNotification = async (userId, payload, urlFromCaller = null, preloadedDevices = null) => {
   const result = { sent: 0, failed: 0, removed: 0 };
   if (!fcmConfigured) return result;
 
   try {
-    const devices = await FcmDevice.find({ userId });
+    const devices = Array.isArray(preloadedDevices) ? preloadedDevices : await FcmDevice.find({ userId });
     if (devices.length === 0) return result;
 
     const title = String(payload.title || '').slice(0, 100);
@@ -128,7 +130,10 @@ const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
       for (const [k, v] of Object.entries(payload.data)) {
         if (v === null || v === undefined) continue;
         if (data[k] !== undefined) continue; // don't overwrite structured fields
-        data[k] = String(v);
+        // Orezanie: FCM data payload má limit 4096 B — dlhý názov úlohy /
+        // kontaktu / workspace-u by inak zhodil celé doručenie
+        // (INVALID_ARGUMENT). title/body sú orezané vyššie.
+        data[k] = String(v).slice(0, 500);
       }
     }
 
@@ -146,14 +151,26 @@ const sendFCMNotification = async (userId, payload, urlFromCaller = null) => {
         };
         await admin.messaging(fcmApp).send(message);
         result.sent++;
-        device.lastUsed = new Date();
-        await device.save();
+        // lastUsed v samostatnom try — zlyhanie zápisu do DB nesmie doručený
+        // push započítať ako „Send failed" (sent + failed by nesedeli).
+        try {
+          await FcmDevice.updateOne({ _id: device._id }, { lastUsed: new Date() });
+        } catch (saveErr) {
+          logger.debug('[FCM] lastUsed update failed', { error: saveErr.message });
+        }
       } catch (err) {
         const code = err?.errorInfo?.code || err?.code || '';
+        // messaging/invalid-argument vracia FCM aj pri chybnom PAYLOADE (napr.
+        // data nad 4 KB) — vtedy je token v poriadku a mazať zariadenie by
+        // znamenalo, že používateľ prestane dostávať VŠETKY push notifikácie,
+        // kým appku znova neotvorí. Pri invalid-argument mažeme len ak chyba
+        // výslovne hovorí o registračnom tokene.
+        const tokenInvalidArg = code === 'messaging/invalid-argument' &&
+          /registration token/i.test(err?.message || '');
         if (
           code === 'messaging/registration-token-not-registered' ||
           code === 'messaging/invalid-registration-token' ||
-          code === 'messaging/invalid-argument'
+          tokenInvalidArg
         ) {
           await FcmDevice.deleteOne({ _id: device._id });
           result.removed++;

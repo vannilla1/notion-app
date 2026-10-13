@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const WorkspaceMember = require('../models/WorkspaceMember');
+const { getMaxMembers } = require('../utils/planLimits');
 const Workspace = require('../models/Workspace');
 const User = require('../models/User');
 const logger = require('../utils/logger');
@@ -73,7 +74,11 @@ const requireWorkspace = async (req, res, next) => {
 
     if (!workspaceObjId) {
       // Backward-compat path: žiadny header → čítame z DB.
-      user = await User.findById(userId);
+      // Z usera čítame len currentWorkspaceId — projekcia + lean(), aby sa
+      // pri každom requeste starších/natívnych klientov bez X-Workspace-Id
+      // nehydratoval celý dokument (avatarData Base64 blob, dešifrovanie
+      // Google tokenov v post('init')).
+      user = await User.findById(userId).select('currentWorkspaceId').lean();
       if (!user) {
         return res.status(401).json({ message: 'Používateľ nenájdený' });
       }
@@ -192,16 +197,14 @@ const requireWorkspace = async (req, res, next) => {
  */
 const requireWorkspaceAdmin = async (req, res, next) => {
   try {
-    // First run requireWorkspace
-    await new Promise((resolve, reject) => {
-      requireWorkspace(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Check if already responded (error case)
-    if (res.headersSent) return;
+    // First run requireWorkspace. Pri odmietnutí requireWorkspace odpovie
+    // sám a next() NEzavolá — pôvodný `new Promise` wrapper sa vtedy nikdy
+    // nesettle-ol (funkcia ostala navždy „pending" a kontrola headersSent
+    // bola nedosiahnuteľná). requireWorkspace je async a next() volá
+    // synchrónne vo svojom tele, takže po await je flag spoľahlivo nastavený.
+    let proceeded = false;
+    await requireWorkspace(req, res, () => { proceeded = true; });
+    if (!proceeded) return; // requireWorkspace už odpovedal
 
     // Check admin rights
     if (!req.workspaceMember.canAdmin()) {
@@ -222,16 +225,10 @@ const requireWorkspaceAdmin = async (req, res, next) => {
  */
 const requireWorkspaceOwner = async (req, res, next) => {
   try {
-    // First run requireWorkspace
-    await new Promise((resolve, reject) => {
-      requireWorkspace(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Check if already responded (error case)
-    if (res.headersSent) return;
+    // First run requireWorkspace (rovnaký vzor ako v requireWorkspaceAdmin)
+    let proceeded = false;
+    await requireWorkspace(req, res, () => { proceeded = true; });
+    if (!proceeded) return; // requireWorkspace už odpovedal
 
     // Check owner rights
     if (!req.workspaceMember.isOwner()) {
@@ -258,15 +255,16 @@ const enforceWorkspaceLimits = async (req, res, next) => {
     // Only block content creation
     if (req.method !== 'POST') return next();
 
-    const owner = await User.findById(req.workspace.ownerId);
+    // Len subscription.plan — bez projekcie a lean() sa pri KAŽDOM POST
+    // (contacts/tasks/messages/files) prenášal celý dokument vlastníka
+    // vrátane avatarData (Base64, až ~MB) a hydratoval plný Mongoose doc.
+    const owner = await User.findById(req.workspace.ownerId).select('subscription.plan').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
 
     // Pro has no member limits
     if (ownerPlan === 'pro') return next();
 
-    const memberLimits = { free: 2, trial: 2, team: 10 };
-    const baseLimit = memberLimits[ownerPlan] || 2;
-    const maxMembers = baseLimit + (req.workspace.paidSeats || 0);
+    const maxMembers = getMaxMembers(ownerPlan, req.workspace.paidSeats || 0);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     if (memberCount > maxMembers) {

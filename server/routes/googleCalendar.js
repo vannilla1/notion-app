@@ -14,6 +14,9 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
+const oauthService = require('../services/oauthService');
+const { userFacingError } = require('../utils/userFacingError');
+const { runInBackground } = require('../utils/backgroundJobs');
 
 const router = express.Router();
 
@@ -227,8 +230,13 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
-    const state = req.user.id.toString(); // Pass user ID in state for callback (must be string)
-    logger.info('[Google Calendar] Generating auth URL', { userId: state });
+    // Podpísaný state (HMAC + nonce + 10 min expirácia, oauthService) —
+    // predtým to bolo holé userId a neautentifikovaný /callback by prepojil
+    // Google účet útočníka s ľubovoľným CRM účtom, ktorého ID pozná
+    // (spolučlenovia workspace) → úlohy obete by sa synchronizovali do
+    // útočníkovho kalendára.
+    const state = oauthService.signState({ mode: 'gcal', userId: req.user.id.toString() });
+    logger.info('[Google Calendar] Generating auth URL', { userId: req.user.id.toString() });
 
     const client = createOAuth2Client();
     const authUrl = client.generateAuthUrl({
@@ -256,11 +264,23 @@ router.get('/callback', async (req, res) => {
   });
 
   try {
-    const { code, state: userId } = req.query;
+    const { code, state } = req.query;
 
-    if (!code || !userId) {
-      logger.warn('[Google Calendar] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
+    if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+      logger.warn('[Google Calendar] Callback missing parameters', { hasCode: !!code, hasState: !!state });
       return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=missing_params`);
+    }
+
+    let userId;
+    try {
+      const data = oauthService.verifyState(state);
+      if (data.mode !== 'gcal' || !data.userId || !mongoose.Types.ObjectId.isValid(data.userId)) {
+        throw new Error('wrong state kind');
+      }
+      userId = data.userId;
+    } catch (stateErr) {
+      logger.warn('[Google Calendar] Invalid OAuth state', { error: stateErr.message });
+      return res.redirect(`${baseUrl}/tasks?google_calendar=error&message=invalid_state`);
     }
 
     // Exchange code for tokens — use fresh per-request client
@@ -288,20 +308,17 @@ router.get('/callback', async (req, res) => {
     // Save tokens immediately with primary as initial calendar. We intentionally
     // do NOT block the redirect on dedicated-calendar creation — that can be slow
     // and mobile Safari / WebView give up if the callback takes too long.
-    user.googleCalendar = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || user.googleCalendar?.refreshToken,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      calendarId: user.googleCalendar?.calendarId || 'primary',
-      enabled: true,
-      connectedAt: new Date(),
-      lastSyncAt: null,
-      syncedTaskIds: user.googleCalendar?.syncedTaskIds || new Map(),
-      watchChannelId: user.googleCalendar?.watchChannelId || null,
-      watchResourceId: user.googleCalendar?.watchResourceId || null,
-      watchExpiry: user.googleCalendar?.watchExpiry || null,
-      syncToken: user.googleCalendar?.syncToken || null
-    };
+    // Len tokenové a stavové polia — priradenie celého objektu pri
+    // opätovnom pripojení zmazalo workspaceCalendars, syncedTaskCalendars,
+    // syncedEventHashes aj syncDisabledWorkspaces (opt-out workspace-ov) →
+    // duplicitné kalendáre a znovu zapnutý sync vypnutých prostredí.
+    user.set('googleCalendar.accessToken', tokens.access_token);
+    user.set('googleCalendar.refreshToken', tokens.refresh_token || user.googleCalendar?.refreshToken || null);
+    user.set('googleCalendar.tokenExpiry', tokens.expiry_date ? new Date(tokens.expiry_date) : null);
+    if (!user.googleCalendar?.calendarId) user.set('googleCalendar.calendarId', 'primary');
+    user.set('googleCalendar.enabled', true);
+    user.set('googleCalendar.connectedAt', new Date());
+    user.set('googleCalendar.lastSyncAt', null);
 
     await user.save();
     logger.info('[Google Calendar] User connected successfully', {
@@ -344,7 +361,8 @@ router.get('/callback', async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Callback error', { error: error.message });
-    res.redirect(`${baseUrl}/tasks?google_calendar=error&message=` + encodeURIComponent(error.message));
+    // Do URL len kód — text výnimky (Google API) nemá čo hľadať v prehliadači.
+    res.redirect(`${baseUrl}/tasks?google_calendar=error&message=callback_failed`);
   }
 });
 
@@ -560,7 +578,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Workspace toggle error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + userFacingError(error) });
   }
 });
 
@@ -568,6 +586,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
 router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     // --- Cleanup BEFORE revoking token (token must still be valid here) ---
     //
@@ -637,9 +656,14 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         // "Prpl CRM"; some testing left behind "Prpl CRM — workspace" calendars
         // we never tracked in workspaceCalendars). Without this pass, users
         // see 2+ copies of Prpl CRM calendars piling up in Google.
+        // Zoznam kalendárov si odložíme aj pre Pass 3 — predtým sa ten istý
+        // calendarList.list volal druhýkrát (zbytočné volanie Google API počas
+        // už aj tak dlhého synchrónneho requestu).
+        let calendarListItems = null;
         try {
           const listResp = await calendar.calendarList.list({ maxResults: 250 });
-          for (const item of (listResp.data.items || [])) {
+          calendarListItems = listResp.data.items || [];
+          for (const item of calendarListItems) {
             const s = item.summary || '';
             if (s === 'Prpl CRM' || s.startsWith('Prpl CRM —') || s.startsWith('Prpl CRM -')) {
               if (item.id) dedicatedIds.add(item.id);
@@ -669,8 +693,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
         // invisible to this list() filter.
         let calendarsToScan = [];
         try {
-          const listResp = await calendar.calendarList.list({ maxResults: 250 });
-          calendarsToScan = (listResp.data.items || [])
+          // Rovnaký zoznam ako v Pass 2 (už zmazané dedikované kalendáre aj
+          // tak odfiltruje dedicatedIds); ak Pass 2 zlyhal, načítame znova.
+          const items = calendarListItems !== null
+            ? calendarListItems
+            : ((await calendar.calendarList.list({ maxResults: 250 })).data.items || []);
+          calendarsToScan = items
             .map(c => c.id)
             .filter(id => id && !dedicatedIds.has(id)); // skip lists we already wholesale-deleted
           // Ensure primary is always scanned even if it didn't appear in calendarList
@@ -729,9 +757,9 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
       });
     }
 
-    // Stop watching for changes (best-effort)
+    // Stop watching for changes (best-effort) — legacy aj per-workspace kanály
     try {
-      await stopCalendarWatch(user);
+      await stopAllCalendarWatches(user);
     } catch (e) {
       logger.debug('[Google Calendar] stopCalendarWatch error', { error: e.message });
     }
@@ -780,6 +808,30 @@ const WATCH_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (Google max)
  * Creates a push notification channel so Google sends us a POST when events change.
  * We include a signed token so incoming webhook POSTs can be verified (HMAC of userId+channelId).
  */
+// Východiskový syncToken kalendára (bez aplikovania udalostí) — berie sa
+// hneď pri vytvorení kanála, aby prvá skutočná zmena z Google (prvá
+// notifikácia) mala s čím porovnať a nezahodila sa. Parametre musia
+// zodpovedať úvodnej synchronizácii v processCalendarChanges.
+const fetchBaselineSyncToken = async (calendar, calendarId) => {
+  try {
+    const params = {
+      calendarId, singleEvents: true, maxResults: 250,
+      timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    };
+    let pageToken = null;
+    for (let page = 0; page < 40; page++) {
+      if (pageToken) params.pageToken = pageToken;
+      const resp = await calendar.events.list(params);
+      if (resp.data.nextSyncToken) return resp.data.nextSyncToken;
+      pageToken = resp.data.nextPageToken;
+      if (!pageToken) return null;
+    }
+  } catch (err) {
+    logger.warn('[Calendar Watch] Baseline sync token failed', { calendarId, error: err.message });
+  }
+  return null;
+};
+
 const startCalendarWatch = async (user) => {
   try {
     const calendar = await getCalendarClient(user);
@@ -800,6 +852,9 @@ const startCalendarWatch = async (user) => {
     user.googleCalendar.watchChannelId = channelId;
     user.googleCalendar.watchResourceId = res.data.resourceId;
     user.googleCalendar.watchExpiry = new Date(Number(res.data.expiration));
+    if (!user.googleCalendar.syncToken) {
+      user.googleCalendar.syncToken = await fetchBaselineSyncToken(calendar, user.googleCalendar.calendarId || 'primary');
+    }
     await user.save();
 
     logger.info('[Calendar Watch] Channel created', {
@@ -844,18 +899,119 @@ const stopCalendarWatch = async (user) => {
   user.googleCalendar.watchExpiry = null;
 };
 
+// ── Per-workspace kalendáre: vlastné push kanály (googleCalendar.workspaceWatches)
+//
+// Zápisy sú atomické ($pull/$push/$set na jednom prvku poľa), nie user.save()
+// celého poľa — webhook, sync a obnova kanálov bežia súbežne.
+
+const stopWatchChannel = async (calendar, channelId, resourceId) => {
+  if (!channelId || !resourceId) return;
+  try {
+    await calendar.channels.stop({ resource: { id: channelId, resourceId } });
+  } catch (err) {
+    if (err.code !== 404) logger.warn('[Calendar Watch] Error stopping workspace channel', { error: err.message });
+  }
+};
+
+const startWorkspaceCalendarWatch = async (user, calendarId) => {
+  if (!calendarId || calendarId === 'primary' || calendarId === (user.googleCalendar.calendarId || 'primary')) {
+    return false; // legacy kalendár sleduje startCalendarWatch
+  }
+  try {
+    const calendar = await getCalendarClient(user);
+    // Starý kanál pre ten istý kalendár zastavíme a odstránime
+    const previous = (user.googleCalendar.workspaceWatches || []).filter(w => w.calendarId === calendarId);
+    for (const w of previous) await stopWatchChannel(calendar, w.channelId, w.resourceId);
+
+    const channelId = uuidv4();
+    const resp = await calendar.events.watch({
+      calendarId,
+      resource: {
+        id: channelId,
+        type: 'web_hook',
+        address: `${WEBHOOK_BASE_URL}/api/google-calendar/webhook`,
+        token: computeWatchToken(user._id.toString(), channelId),
+        expiration: String(Date.now() + WATCH_EXPIRY_MS)
+      }
+    });
+    const entry = {
+      channelId,
+      calendarId,
+      resourceId: resp.data.resourceId,
+      expiry: new Date(Number(resp.data.expiration)),
+      // syncToken zachováme — kanál sa len obnovuje, história zmien platí.
+      // Nový kanál dostane východiskový token hneď (viď fetchBaselineSyncToken).
+      syncToken: previous[0]?.syncToken || await fetchBaselineSyncToken(calendar, calendarId)
+    };
+    await User.updateOne({ _id: user._id }, { $pull: { 'googleCalendar.workspaceWatches': { calendarId } } });
+    await User.updateOne({ _id: user._id }, { $push: { 'googleCalendar.workspaceWatches': entry } });
+    user.googleCalendar.workspaceWatches = [
+      ...(user.googleCalendar.workspaceWatches || []).filter(w => w.calendarId !== calendarId),
+      entry
+    ];
+    logger.info('[Calendar Watch] Workspace channel created', { userId: user._id, calendarId, channelId });
+    return true;
+  } catch (err) {
+    logger.warn('[Calendar Watch] Failed to create workspace channel', { userId: user._id, calendarId, error: err.message });
+    return false;
+  }
+};
+
+// Doplní chýbajúce / čoskoro expirujúce kanály pre všetky per-workspace kalendáre.
+const ensureWorkspaceCalendarWatches = async (user) => {
+  const soon = Date.now() + 24 * 60 * 60 * 1000;
+  const watches = user.googleCalendar.workspaceWatches || [];
+  for (const [, entry] of (user.googleCalendar.workspaceCalendars?.entries?.() || [])) {
+    const calendarId = entry?.calendarId;
+    if (!calendarId) continue;
+    const w = watches.find(x => x.calendarId === calendarId);
+    if (!w || !w.expiry || new Date(w.expiry).getTime() < soon) {
+      await startWorkspaceCalendarWatch(user, calendarId);
+    }
+  }
+};
+
+// Zastaví legacy aj všetky per-workspace kanály (disconnect, delete-all).
+const stopAllCalendarWatches = async (user) => {
+  await stopCalendarWatch(user);
+  const watches = user.googleCalendar.workspaceWatches || [];
+  if (watches.length === 0) return;
+  try {
+    const calendar = await getCalendarClient(user);
+    for (const w of watches) await stopWatchChannel(calendar, w.channelId, w.resourceId);
+  } catch (err) {
+    logger.warn('[Calendar Watch] Stop workspace channels failed', { error: err.message });
+  }
+  user.googleCalendar.workspaceWatches = [];
+};
+
 /**
  * Process calendar changes for a user using incremental sync (syncToken).
  * Called when Google sends us a push notification.
  */
-const processCalendarChanges = async (user) => {
+// `target` (voliteľný) = per-workspace kanál { channelId, calendarId, syncToken };
+// bez neho legacy kalendár so syncToken v googleCalendar.syncToken.
+const processCalendarChanges = async (user, target = null, opts = {}) => {
   try {
     const calendar = await getCalendarClient(user);
-    const calendarId = user.googleCalendar.calendarId || 'primary';
+    const calendarId = target?.calendarId || user.googleCalendar.calendarId || 'primary';
+    const currentSyncToken = target ? target.syncToken : user.googleCalendar.syncToken;
+    const saveSyncToken = async (token) => {
+      if (target) {
+        target.syncToken = token;
+        await User.updateOne(
+          { _id: user._id, 'googleCalendar.workspaceWatches.channelId': target.channelId },
+          { $set: { 'googleCalendar.workspaceWatches.$.syncToken': token } }
+        );
+      } else {
+        user.googleCalendar.syncToken = token;
+        await user.save();
+      }
+    };
 
     let params = { calendarId, singleEvents: true, maxResults: 250 };
-    if (user.googleCalendar.syncToken) {
-      params.syncToken = user.googleCalendar.syncToken;
+    if (currentSyncToken) {
+      params.syncToken = currentSyncToken;
     } else {
       // First sync: get events from last 30 days to establish token
       params.timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -874,10 +1030,12 @@ const processCalendarChanges = async (user) => {
       } catch (err) {
         // 410 Gone = syncToken expired, do full re-sync
         if (err.code === 410) {
-          logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id });
-          user.googleCalendar.syncToken = null;
-          await user.save();
-          return processCalendarChanges(user); // recursive call without syncToken
+          logger.info('[Calendar Webhook] SyncToken expired, doing full re-sync', { userId: user._id, calendarId });
+          await saveSyncToken(null);
+          // Bez syncTokenu, ale zmeny sa APLIKUJÚ (s poistkami nižšie) —
+          // inak by sa zahodila práve zmena, ktorá notifikáciu vyvolala.
+          if (target) target.syncToken = null;
+          return processCalendarChanges(user, target, { resync: true });
         }
         throw err;
       }
@@ -887,13 +1045,33 @@ const processCalendarChanges = async (user) => {
       newSyncToken = response.data.nextSyncToken;
     } while (nextPageToken);
 
-    // Save new sync token
-    if (newSyncToken) {
-      user.googleCalendar.syncToken = newSyncToken;
-      await user.save();
+    // Nový syncToken ukladáme až PO spracovaní udalostí — ak by spracovanie
+    // padlo (napr. výpadok DB pred cyklom), Google pri ďalšej notifikácii
+    // pošle tie isté zmeny znova a nestratia sa. Opätovné aplikovanie je
+    // bezpečné (porovnáva sa s aktuálnym stavom úlohy).
+    const persistSyncToken = async () => {
+      if (!newSyncToken) return;
+      await saveSyncToken(newSyncToken);
+    };
+
+    if (allEvents.length === 0) {
+      await persistSyncToken();
+      return;
     }
 
-    if (allEvents.length === 0) return;
+    // Prvá synchronizácia kanála (alebo po 410) NIČ neaplikuje — len založí
+    // syncToken. Bez syncTokenu Google vráti celý stav kalendára (30 dní dozadu
+    // + budúce udalosti) vrátane udalostí, ktoré CRM už roky neaktualizuje
+    // (napr. kópie úloh kolegov z hromadného /sync pred 10/2026). Ich aplikácia
+    // by v CRM vrátila dokončené projekty do „nedokončené“ a prepísala termíny
+    // aj názvy. Zmeny z Google sa preberajú až od tohto bodu.
+    if (!currentSyncToken && !opts.resync) {
+      await persistSyncToken();
+      logger.info('[Calendar Webhook] Baseline sync — token established, no changes applied', {
+        userId: user._id, calendarId, eventCount: allEvents.length
+      });
+      return;
+    }
 
     logger.info('[Calendar Webhook] Processing changes', {
       userId: user._id,
@@ -917,180 +1095,223 @@ const processCalendarChanges = async (user) => {
       const crmTaskId = reverseMap.get(event.id);
       if (!crmTaskId) continue; // Not a CRM-synced event
 
-      // Determine what changed
-      const isDeleted = event.status === 'cancelled';
-      const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
-      // Extract HH:MM from dateTime if present (timed event); all-day event has no time
-      let newDueTime = '';
-      if (event.start?.dateTime) {
-        const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
-        if (m) newDueTime = m[1];
-      }
-      // Strip completion prefix "✓ " AND workspace prefix "[Workspace] " that we add
-      // on outbound Google Tasks sync — otherwise the bracket prefix leaks into CRM.
-      let newTitle = (event.summary || '')
-        .replace(/^✓\s*/, '')
-        .replace(/^\[[^\]]{1,40}\]\s*/, '')
-        .trim();
-
-      // Find the CRM task — scoped to user's workspaces
-      let task = await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } });
-      let contact = null;
-      let taskIndex = -1;
-
-      if (!task) {
-        // Search in contacts within user's workspaces
-        contact = await Contact.findOne({ 'tasks.id': crmTaskId, workspaceId: { $in: userWorkspaceIds } });
-        if (contact) {
-          taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
-          if (taskIndex !== -1) task = contact.tasks[taskIndex];
+      // Chyba jednej udalosti (napr. validačná chyba pri save) nesmie zastaviť
+      // spracovanie zvyšku dávky — inak by sa zmeny ostatných udalostí stratili.
+      try {
+        // Determine what changed
+        const isDeleted = event.status === 'cancelled';
+        const newDueDate = event.start?.date || (event.start?.dateTime ? event.start.dateTime.split('T')[0] : null);
+        // Extract HH:MM from dateTime if present (timed event); all-day event has no time
+        let newDueTime = '';
+        if (event.start?.dateTime) {
+          const m = event.start.dateTime.match(/T(\d{2}:\d{2})/);
+          if (m) newDueTime = m[1];
         }
-      }
+        // Strip completion prefix "✓ " AND workspace prefix "[Workspace] " that we add
+        // on outbound Google Tasks sync — otherwise the bracket prefix leaks into CRM.
+        let newTitle = (event.summary || '')
+          .replace(/^✓\s*/, '')
+          .replace(/^\[[^\]]{1,40}\]\s*/, '')
+          .trim();
 
-      if (!task) continue; // Task no longer exists in CRM or not in user's workspace
+        // Find the CRM task — scoped to user's workspaces.
+        // Kontaktové úlohy a podúlohy majú UUID id (nie ObjectId) — Task.findOne
+        // s UUID v _id by vyhodil CastError, preto top-level Task hľadáme len
+        // pri platnom ObjectId a inak rovno pokračujeme hľadaním v kontaktoch.
+        let task = mongoose.Types.ObjectId.isValid(crmTaskId)
+          ? await Task.findOne({ _id: crmTaskId, workspaceId: { $in: userWorkspaceIds } })
+          : null;
+        let contact = null;
+        let taskIndex = -1;
 
-      if (isDeleted) {
-        // Event was deleted in Google Calendar — remove mapping atomically.
-        // Notifikuj front-end (toast "Udalosť bola zmazaná v Google Kalendári,
-        // úloha v CRM ostala") aby user nezmäteno hľadal kde sa stratila.
-        // POZN: predtým niekedy `cancelled` posielalo CRM samé pri completed,
-        // vďaka B1 fixu (status:'confirmed' vždy) je teraz cancelled už LEN
-        // skutočné delete z Google strany.
-        await User.findByIdAndUpdate(user._id, {
-          $unset: {
-            [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '',
-            [`googleCalendar.syncedTaskCalendars.${crmTaskId}`]: '',
-            [`googleCalendar.syncedEventHashes.${crmTaskId}`]: ''
+        if (!task) {
+          // Search in contacts within user's workspaces
+          contact = await Contact.findOne({ 'tasks.id': crmTaskId, workspaceId: { $in: userWorkspaceIds } });
+          if (contact) {
+            taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
+            if (taskIndex !== -1) task = contact.tasks[taskIndex];
           }
-        });
-        const wsId = task.workspaceId || contact?.workspaceId;
-        if (calendarIo && wsId) {
-          calendarIo.to(`workspace-${wsId}`).emit('calendar-event-deleted', {
-            crmTaskId,
-            taskTitle: task.title || (contact && taskIndex !== -1 ? contact.tasks[taskIndex].title : '')
+        }
+
+        if (!task) continue; // Task no longer exists in CRM or not in user's workspace
+
+        // Úloha priradená iným (nie tomuto používateľovi) — jeho kalendár môže
+        // mať jej starú kópiu; zmena v ňom nesmie prepisovať úlohu kolegov.
+        const assignees = (task.assignedTo || []).map(a => a && a.toString()).filter(Boolean);
+        if (assignees.length > 0 && !assignees.includes(user._id.toString())) continue;
+
+        // CRM je novšie než udalosť → udalosť je zastaraná (napr. echo našej
+        // staršej zmeny, kým sa v CRM medzitým zmenilo niečo ďalšie) — prebratie
+        // by vrátilo starý stav. Preberáme len zmeny urobené v Google NESKÔR.
+        // Len vlastný čas úlohy — updatedAt kontaktu sa posúva pri každej
+        // zmene ľubovoľnej jeho úlohy či poľa a zahodil by skutočné zmeny
+        // z Google (napr. dve udalosti toho istého kontaktu v jednej dávke).
+        // createdAt má v schéme default (now) — Mongoose ho doplní pri načítaní
+        // aj starej úlohe bez uloženého času; taký „čas" by blokoval každú
+        // zmenu z Google, preto ho berieme len ak je naozaj uložený.
+        const ct = (contact && taskIndex !== -1) ? contact.tasks[taskIndex] : null;
+        const storedCreatedAt = ct && !(typeof ct.$isDefault === 'function' && ct.$isDefault('createdAt')) ? ct.createdAt : null;
+        const crmModifiedRaw = ct
+          ? (ct.modifiedAt || storedCreatedAt)
+          : (task.modifiedAt || task.updatedAt);
+        const crmModified = crmModifiedRaw ? new Date(crmModifiedRaw).getTime() : NaN;
+        const eventUpdated = event.updated ? new Date(event.updated).getTime() : NaN;
+        if (!isDeleted && Number.isFinite(crmModified) && Number.isFinite(eventUpdated) && eventUpdated <= crmModified) continue;
+
+        if (isDeleted) {
+          // Event was deleted in Google Calendar — remove mapping atomically.
+          // Notifikuj front-end (toast "Udalosť bola zmazaná v Google Kalendári,
+          // úloha v CRM ostala") aby user nezmäteno hľadal kde sa stratila.
+          // POZN: predtým niekedy `cancelled` posielalo CRM samé pri completed,
+          // vďaka B1 fixu (status:'confirmed' vždy) je teraz cancelled už LEN
+          // skutočné delete z Google strany.
+          await User.findByIdAndUpdate(user._id, {
+            $unset: {
+              [`googleCalendar.syncedTaskIds.${crmTaskId}`]: '',
+              [`googleCalendar.syncedTaskCalendars.${crmTaskId}`]: '',
+              [`googleCalendar.syncedEventHashes.${crmTaskId}`]: ''
+            }
           });
-        }
-        continue;
-      }
-
-      // ─── Bidirectional COMPLETED detection ───
-      // Google Calendar nemá natívne completed pole pre VEVENT. Náš protokol:
-      //   - Primárny zdroj pravdy: extendedProperties.private.completed = 'true'|'false'
-      //   - Backward compat: keď event nemá toto private property (staré eventy
-      //     pred B1 fixom), padá späť na "✓ " prefix detection v summary.
-      //
-      // Toto rieši use case: user v Google Calendar manuálne zmení summary
-      // pridaním/odstránením "✓ " (alebo cez ext. apps), úprava sa propaguje
-      // späť do CRM.
-      const privateCompleted = event.extendedProperties?.private?.completed;
-      let isGoogleCompleted;
-      if (privateCompleted === 'true') {
-        isGoogleCompleted = true;
-      } else if (privateCompleted === 'false') {
-        isGoogleCompleted = false;
-      } else {
-        // Backward compat fallback: starý event bez canonical signal.
-        // "✓ " prefix indicates completion; ostatné = uncompleted.
-        isGoogleCompleted = (event.summary || '').startsWith('✓ ') || (event.summary || '').startsWith('✓');
-      }
-      const currentCompleted = (contact && taskIndex !== -1)
-        ? !!contact.tasks[taskIndex].completed
-        : !!task.completed;
-
-      // Check if due date changed
-      let changed = false;
-      const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
-
-      if (newDueDate && newDueDate !== taskDueDate) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].dueDate = new Date(newDueDate);
-          contact.tasks[taskIndex].dueTime = newDueTime;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.dueDate = new Date(newDueDate);
-          task.dueTime = newDueTime;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-      } else if (newDueDate) {
-        // Same date but time may have changed
-        const currentTime = (contact && taskIndex !== -1 ? contact.tasks[taskIndex].dueTime : task.dueTime) || '';
-        if (newDueTime !== currentTime) {
-          if (contact && taskIndex !== -1) {
-            contact.tasks[taskIndex].dueTime = newDueTime;
-            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          } else if (task._id) {
-            task.dueTime = newDueTime;
-            task.modifiedAt = new Date().toISOString();
-          }
-          changed = true;
-        }
-      }
-
-      // Check if title changed
-      if (newTitle && newTitle !== task.title) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].title = newTitle;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.title = newTitle;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-      }
-
-      // Apply completed state change (B1: bidirectional sync).
-      // Loguje cez logger.info aby sme vo SuperAdmin Diagnostics vedeli sledovať
-      // tieto reverse syncy (užitočné pri debug-ovaní "prečo sa task označil sám").
-      if (isGoogleCompleted !== currentCompleted) {
-        if (contact && taskIndex !== -1) {
-          contact.tasks[taskIndex].completed = isGoogleCompleted;
-          contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
-          changed = true;
-        } else if (task._id) {
-          task.completed = isGoogleCompleted;
-          task.modifiedAt = new Date().toISOString();
-          changed = true;
-        }
-        logger.info('[Calendar Webhook] Completed state synced from Google', {
-          userId: user._id.toString(),
-          crmTaskId,
-          isGoogleCompleted,
-          source: privateCompleted !== undefined ? 'extendedProperties' : 'summary_prefix_fallback'
-        });
-      }
-
-      if (changed) {
-        if (contact) {
-          contact.markModified('tasks');
-          await contact.save();
-          // Invalidate server cache (GET /api/tasks + /api/contacts má 30s cache).
-          // Bez toho frontend dostane stale data 30 s po reverse sync.
-          if (contact.workspaceId) {
-            invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
-            invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
-          }
-          if (calendarIo && contact.workspaceId) {
-            calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
-          }
-        } else {
-          await task.save();
-          if (task.workspaceId) {
-            invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
-          }
-          if (calendarIo && task.workspaceId) {
-            calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
-              ...task.toObject(),
-              id: task._id.toString(),
-              source: 'global'
+          const wsId = task.workspaceId || contact?.workspaceId;
+          if (calendarIo && wsId) {
+            calendarIo.to(`workspace-${wsId}`).emit('calendar-event-deleted', {
+              crmTaskId,
+              taskTitle: task.title || (contact && taskIndex !== -1 ? contact.tasks[taskIndex].title : '')
             });
           }
+          continue;
         }
-        updated++;
+
+        // ─── Bidirectional COMPLETED detection ───
+        // Google Calendar nemá natívne completed pole pre VEVENT. Náš protokol:
+        //   - Primárny zdroj pravdy: extendedProperties.private.completed = 'true'|'false'
+        //   - Backward compat: keď event nemá toto private property (staré eventy
+        //     pred B1 fixom), padá späť na "✓ " prefix detection v summary.
+        //
+        // Toto rieši use case: user v Google Calendar manuálne zmení summary
+        // pridaním/odstránením "✓ " (alebo cez ext. apps), úprava sa propaguje
+        // späť do CRM.
+        const privateCompleted = event.extendedProperties?.private?.completed;
+        let isGoogleCompleted;
+        if (privateCompleted === 'true') {
+          isGoogleCompleted = true;
+        } else if (privateCompleted === 'false') {
+          isGoogleCompleted = false;
+        } else {
+          // Backward compat fallback: starý event bez canonical signal.
+          // "✓ " prefix indicates completion; ostatné = uncompleted.
+          isGoogleCompleted = (event.summary || '').startsWith('✓ ') || (event.summary || '').startsWith('✓');
+        }
+        const currentCompleted = (contact && taskIndex !== -1)
+          ? !!contact.tasks[taskIndex].completed
+          : !!task.completed;
+
+        // Check if due date changed
+        let changed = false;
+        const taskDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
+
+        if (newDueDate && newDueDate !== taskDueDate) {
+          // dueDate je v schéme String vo formáte YYYY-MM-DD (ako z <input type=date>);
+          // Date objekt by Mongoose uložil cez toString() ako "Sat Mar 28 2026 …".
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].dueDate = newDueDate;
+            contact.tasks[taskIndex].dueTime = newDueTime;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.dueDate = newDueDate;
+            task.dueTime = newDueTime;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+        } else if (newDueDate) {
+          // Same date but time may have changed
+          const currentTime = (contact && taskIndex !== -1 ? contact.tasks[taskIndex].dueTime : task.dueTime) || '';
+          if (newDueTime !== currentTime) {
+            if (contact && taskIndex !== -1) {
+              contact.tasks[taskIndex].dueTime = newDueTime;
+              contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            } else if (task._id) {
+              task.dueTime = newDueTime;
+              task.modifiedAt = new Date().toISOString();
+            }
+            changed = true;
+          }
+        }
+
+        // Check if title changed
+        if (newTitle && newTitle !== task.title) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].title = newTitle;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.title = newTitle;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+        }
+
+        // Apply completed state change (B1: bidirectional sync).
+        // Loguje cez logger.info aby sme vo SuperAdmin Diagnostics vedeli sledovať
+        // tieto reverse syncy (užitočné pri debug-ovaní "prečo sa task označil sám").
+        if (isGoogleCompleted !== currentCompleted) {
+          if (contact && taskIndex !== -1) {
+            contact.tasks[taskIndex].completed = isGoogleCompleted;
+            contact.tasks[taskIndex].modifiedAt = new Date().toISOString();
+            changed = true;
+          } else if (task._id) {
+            task.completed = isGoogleCompleted;
+            task.modifiedAt = new Date().toISOString();
+            changed = true;
+          }
+          logger.info('[Calendar Webhook] Completed state synced from Google', {
+            userId: user._id.toString(),
+            crmTaskId,
+            isGoogleCompleted,
+            source: privateCompleted !== undefined ? 'extendedProperties' : 'summary_prefix_fallback'
+          });
+        }
+
+        if (changed) {
+          if (contact) {
+            contact.markModified('tasks');
+            await contact.save();
+            // Invalidate server cache (GET /api/tasks + /api/contacts má 30s cache).
+            // Bez toho frontend dostane stale data 30 s po reverse sync.
+            if (contact.workspaceId) {
+              invalidateWorkspaceData(contact.workspaceId.toString(), 'tasks');
+              invalidateWorkspaceData(contact.workspaceId.toString(), 'contacts');
+            }
+            if (calendarIo && contact.workspaceId) {
+              calendarIo.to(`workspace-${contact.workspaceId}`).emit('contact-updated', contact.toObject());
+            }
+          } else {
+            await task.save();
+            if (task.workspaceId) {
+              invalidateWorkspaceData(task.workspaceId.toString(), 'tasks');
+            }
+            if (calendarIo && task.workspaceId) {
+              calendarIo.to(`workspace-${task.workspaceId}`).emit('task-updated', {
+                ...task.toObject(),
+                id: task._id.toString(),
+                source: 'global'
+              });
+            }
+          }
+          updated++;
+        }
+      } catch (eventErr) {
+        logger.error('[Calendar Webhook] Error processing event', {
+          userId: user._id,
+          eventId: event.id,
+          crmTaskId,
+          error: eventErr.message
+        });
       }
     }
+
+    await persistSyncToken();
 
     if (updated > 0) {
       logger.info('[Calendar Webhook] Applied changes to CRM', { userId: user._id, updated });
@@ -1126,8 +1347,15 @@ router.post('/webhook', async (req, res) => {
   if (resourceState !== 'exists') return;
 
   try {
-    // Find user by watch channel ID
-    const user = await User.findOne({ 'googleCalendar.watchChannelId': channelId });
+    // Kanál je buď legacy (watchChannelId) alebo per-workspace
+    // (workspaceWatches[].channelId). UUID formát overíme ešte pred dopytom.
+    if (typeof channelId !== 'string' || !/^[0-9a-f-]{36}$/i.test(channelId)) return;
+    const user = await User.findOne({
+      $or: [
+        { 'googleCalendar.watchChannelId': channelId },
+        { 'googleCalendar.workspaceWatches.channelId': channelId }
+      ]
+    }).select('-avatarData');
     if (!user) {
       logger.warn('[Calendar Webhook] No user found for channel', { channelId });
       return;
@@ -1153,7 +1381,38 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
-    await processCalendarChanges(user);
+    // Per-user zámok: Google posiela viac notifikácií rýchlo po sebe a bez
+    // zámku každá paralelne volala events.list s tým istým syncToken a
+    // aplikovala tie isté zmeny (duplicitné socket eventy, prepisovanie
+    // syncToken). Notifikácia, ktorá príde počas behu, sa nezahodí — označí
+    // sa ako „pending" a po dobehnutí sa spracovanie raz zopakuje
+    // (processCalendarChanges si drží aktualizovaný syncToken v `user`).
+    // Pending kľúč nesie aj channelId — notifikácia iného kalendára toho
+    // istého používateľa počas behu sa tiež nesmie stratiť.
+    const webhookLockKey = `webhook-${user._id}`;
+    const pendingPrefix = `${webhookLockKey}|`;
+    if (!acquireCalendarLock(webhookLockKey, WEBHOOK_LOCK_TIMEOUT)) {
+      calendarWebhookPending.add(pendingPrefix + channelId);
+      return;
+    }
+    try {
+      let nextChannel = channelId;
+      while (nextChannel) {
+        calendarWebhookPending.delete(pendingPrefix + nextChannel);
+        if (nextChannel === user.googleCalendar.watchChannelId) {
+          await processCalendarChanges(user);
+        } else {
+          // Čerstvý záznam (syncToken mohla zmeniť predošlá iterácia)
+          const fresh = await User.findById(user._id).select('googleCalendar.workspaceWatches').lean();
+          const target = (fresh?.googleCalendar?.workspaceWatches || []).find(w => w.channelId === nextChannel);
+          if (target) await processCalendarChanges(user, { ...target });
+        }
+        const pendingKey = [...calendarWebhookPending].find(k => k.startsWith(pendingPrefix));
+        nextChannel = pendingKey ? pendingKey.slice(pendingPrefix.length) : null;
+      }
+    } finally {
+      releaseCalendarLock(webhookLockKey);
+    }
   } catch (err) {
     logger.error('[Calendar Webhook] Error', { error: err.message, channelId });
   }
@@ -1167,10 +1426,12 @@ const renewCalendarWatches = async () => {
   try {
     // Find users whose watch expires in the next 24 hours
     const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // -avatarData: Base64 avatar (až MB) obnova watch kanála nepotrebuje;
+    // save() v start/stopCalendarWatch ukladá len zmenené cesty.
     const users = await User.find({
       'googleCalendar.enabled': true,
       'googleCalendar.watchExpiry': { $lt: soon, $ne: null }
-    });
+    }).select('-avatarData');
 
     for (const user of users) {
       await stopCalendarWatch(user);
@@ -1179,6 +1440,17 @@ const renewCalendarWatches = async () => {
 
     if (users.length > 0) {
       logger.info('[Calendar Watch] Renewed channels', { count: users.length });
+    }
+
+    // Per-workspace kanály expirujúce do 24 h
+    const wsUsers = await User.find({
+      'googleCalendar.enabled': true,
+      'googleCalendar.workspaceWatches.expiry': { $lt: soon }
+    }).select('-avatarData');
+    for (const user of wsUsers) {
+      for (const w of (user.googleCalendar.workspaceWatches || [])) {
+        if (!w.expiry || new Date(w.expiry) < soon) await startWorkspaceCalendarWatch(user, w.calendarId);
+      }
     }
   } catch (err) {
     logger.error('[Calendar Watch] Renewal error', { error: err.message });
@@ -1194,7 +1466,7 @@ const ensureCalendarWatches = async () => {
         { 'googleCalendar.watchChannelId': null },
         { 'googleCalendar.watchChannelId': { $exists: false } }
       ]
-    });
+    }).select('-avatarData'); // Base64 avatar tu netreba (save() ukladá len zmenené cesty)
 
     for (const user of users) {
       await startCalendarWatch(user);
@@ -1202,6 +1474,15 @@ const ensureCalendarWatches = async () => {
 
     if (users.length > 0) {
       logger.info('[Calendar Watch] Set up new watches', { count: users.length });
+    }
+
+    // Per-workspace kalendáre bez kanála (napr. vytvorené pred touto zmenou)
+    const wsUsers = await User.find({
+      'googleCalendar.enabled': true,
+      'googleCalendar.workspaceCalendars': { $exists: true, $ne: {} }
+    }).select('-avatarData');
+    for (const user of wsUsers) {
+      await ensureWorkspaceCalendarWatches(user);
     }
   } catch (err) {
     logger.error('[Calendar Watch] Setup error', { error: err.message });
@@ -1211,17 +1492,18 @@ const ensureCalendarWatches = async () => {
 // ==================== SYNC ROUTES ====================
 
 // Sync all tasks to Google Calendar
-router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, runInBackground('calendar-sync', async (req, res) => {
   // Per-(user, workspace) lock prevents double-click duplicates and overlapping
   // manual syncs. If a sync is already running for this scope, short-circuit with
   // 409 instead of racing with Google Calendar inserts.
   const workspaceId = req.workspaceId || req.user?.workspaceId;
   const fullSyncLockKey = `fullsync-${req.user.id}-${workspaceId || 'none'}`;
-  if (!acquireCalendarLock(fullSyncLockKey)) {
+  if (!acquireCalendarLock(fullSyncLockKey, FULL_SYNC_LOCK_TIMEOUT)) {
     return res.status(409).json({ message: 'Synchronizácia už prebieha, počkaj pár sekúnd.' });
   }
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
@@ -1229,9 +1511,16 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
 
     const calendar = await getCalendarClient(user);
 
-    // Get tasks for the workspace from which the sync was triggered
-    const globalTasks = workspaceId ? await Task.find({ workspaceId }) : [];
-    const contacts = workspaceId ? await Contact.find({ workspaceId }) : [];
+    // Get tasks for the workspace from which the sync was triggered.
+    // Úlohy sa tu len čítajú (skladá sa tasksToSync) — lean() + bez legacy
+    // base64 príloh (files[].data), oba dotazy paralelne. Exclusion projekcia
+    // (MongoDB nedovolí miešať inclusion a exclusion).
+    const [globalTasks, contacts] = workspaceId
+      ? await Promise.all([
+          Task.find({ workspaceId }, { files: 0, 'subtasks.files': 0 }).lean(),
+          Contact.find({ workspaceId }, { files: 0, 'tasks.files': 0, 'tasks.subtasks.files': 0 }).lean()
+        ])
+      : [[], []];
 
     const tasksToSync = [];
 
@@ -1241,8 +1530,19 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       contactCount: contacts.length
     });
 
+    // Len úlohy nepriradené alebo priradené tomuto používateľovi — rovnako
+    // ako auto-sync, /status a Google Tasks /sync. Predtým bulk sync pchal
+    // do kalendára aj cudzie priradené úlohy celého workspace.
+    const syncUserId = req.user.id.toString();
+    const isUserTask = (task) => {
+      const assignedTo = task.assignedTo || [];
+      if (assignedTo.length === 0) return true;
+      return assignedTo.some(id => id && id.toString() === syncUserId);
+    };
+
     // Collect global tasks
     for (const task of globalTasks) {
+      if (!isUserTask(task)) continue;
       if (task.dueDate) {
         tasksToSync.push({
           id: task._id.toString(),
@@ -1263,6 +1563,7 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
+          if (!isUserTask(task)) continue;
           if (task.dueDate) {
             tasksToSync.push({
               id: task.id,
@@ -1503,11 +1804,11 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Calendar] Sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   } finally {
     releaseCalendarLock(fullSyncLockKey);
   }
-});
+}));
 
 // Sync single task to Google Calendar
 router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (req, res) => {
@@ -1521,6 +1822,9 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
   }
   try {
     const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nebol nájdený' });
+    }
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
@@ -1529,13 +1833,23 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
 
     const calendar = await getCalendarClient(user);
 
-    // Find task (could be global or contact task) — scoped to workspace
-    let task = await Task.findOne({ _id: taskId, workspaceId });
+    // Find task (could be global or contact task) — scoped to workspace.
+    // Kontaktové úlohy a podúlohy majú UUID id — Task.findOne s UUID v _id by
+    // hodil CastError (→ 500), preto top-level Task len pri platnom ObjectId.
+    let task = mongoose.Types.ObjectId.isValid(taskId)
+      ? await Task.findOne({ _id: taskId, workspaceId })
+      : null;
     let contactName = null;
 
     if (!task) {
-      // Search in contacts within workspace only
-      const contacts = await Contact.find({ workspaceId });
+      // Search in contacts within workspace only. Úlohy sa tu len čítajú —
+      // lean() + bez legacy base64 príloh (files[].data), inak sa kvôli jednej
+      // úlohe hydratovali plné dokumenty všetkých kontaktov workspace-u.
+      const contacts = await Contact.find(
+        { workspaceId },
+        // Len exclusion projekcia — MongoDB nedovolí miešať inclusion a exclusion.
+        { files: 0, 'tasks.files': 0, 'tasks.subtasks.files': 0 }
+      ).lean();
       for (const contact of contacts) {
         const found = contact.tasks?.find(t => t.id === taskId);
         if (found) {
@@ -1651,7 +1965,7 @@ router.post('/sync-task/:taskId', authenticateToken, requireWorkspace, async (re
     res.json({ success: true, message: 'Úloha bola synchronizovaná' });
   } catch (error) {
     logger.error('[Google Calendar] Single task sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   } finally {
     releaseCalendarLock(singleSyncLockKey);
   }
@@ -1662,6 +1976,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
   try {
     const { taskId } = req.params;
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
 
     if (!user.googleCalendar?.enabled) {
       return res.json({ success: true, message: 'Google Calendar nie je pripojený' });
@@ -1699,7 +2014,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
     res.json({ success: true, message: 'Udalosť bola odstránená z kalendára' });
   } catch (error) {
     logger.error('[Google Calendar] Event delete error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri odstraňovaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri odstraňovaní: ' + userFacingError(error) });
   }
 });
 
@@ -1708,6 +2023,7 @@ router.delete('/event/:taskId', authenticateToken, async (req, res) => {
 router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
     const workspaceId = req.workspaceId || user.currentWorkspaceId;
 
     if (!user.googleCalendar?.enabled) {
@@ -1716,24 +2032,37 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
     const calendar = await getCalendarClient(user);
 
-    // Get all current task IDs — scoped to workspace
-    const globalTasks = await Task.find({ workspaceId });
-    const contacts = await Contact.find({ workspaceId });
+    // Get all current task IDs — scoped to workspace. Treba len id úloh
+    // a podúloh (aj vnorených) — projekcia + lean() namiesto plných dokumentov
+    // s base64 prílohami.
+    const [globalTasks, contacts] = await Promise.all([
+      Task.find({ workspaceId }, { _id: 1, 'subtasks.id': 1, 'subtasks.subtasks': 1 }).lean(),
+      Contact.find({ workspaceId }, { 'tasks.id': 1, 'tasks.subtasks.id': 1, 'tasks.subtasks.subtasks': 1 }).lean()
+    ]);
 
     const currentTaskIds = new Set();
 
-    // Collect all current task IDs
+    // Collect all current task IDs — vrátane podúloh (ľubovoľnej hĺbky), ktoré
+    // /sync tiež synchronizuje; inak by ich udalosti vyzerali ako siroty.
     for (const task of globalTasks) {
       currentTaskIds.add(task._id.toString());
+      collectSubtaskIds(task.subtasks, currentTaskIds);
     }
 
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
           currentTaskIds.add(task.id);
+          collectSubtaskIds(task.subtasks, currentTaskIds);
         }
       }
     }
+
+    // Mapa syncedTaskIds je per-user (všetky workspace-y), ale currentTaskIds
+    // pokrýva len tento workspace. Mažeme preto iba udalosti z kalendára TOHTO
+    // workspace-u — úlohy iných workspace-ov nie sú siroty. Legacy záznamy bez
+    // mapovania kalendára (pred per-workspace kalendármi) radšej necháme.
+    const wsCalendarId = user.googleCalendar.workspaceCalendars?.get?.(String(workspaceId))?.calendarId || null;
 
     let deleted = 0;
     let errors = 0;
@@ -1748,6 +2077,8 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 
       for (const [taskId, eventId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
+          const mappedCalendarId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+          if (!wsCalendarId || mappedCalendarId !== wsCalendarId) continue;
           // Task no longer exists, delete the calendar event from whichever
           // calendar it was synced to (PR2 per-workspace) — with fallback to
           // legacy single calendar.
@@ -1783,7 +2114,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
     });
   } catch (error) {
     logger.error('[Google Calendar] Cleanup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri čistení: ' + userFacingError(error) });
   }
 });
 
@@ -1809,6 +2140,7 @@ router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) =>
 router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'Používateľ nebol nájdený' }); // zmazaný účet s tokenom v 30 s auth cache
     if (!user.googleCalendar?.enabled) {
       return res.status(400).json({ message: 'Google Calendar nie je pripojený' });
     }
@@ -1926,7 +2258,7 @@ router.post('/deduplicate', authenticateToken, requireWorkspace, async (req, res
     });
   } catch (error) {
     logger.error('[Google Calendar] Dedup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri deduplikácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri deduplikácii: ' + userFacingError(error) });
   }
 });
 
@@ -1974,6 +2306,10 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     let errors = 0;
     let orphans = 0; // events whose task no longer exists
 
+    // Členstvá sa počas requestu nemenia — načítame ich raz (lazy) namiesto
+    // dotazu na WorkspaceMember pre každú migrovanú kontaktovú úlohu (N+1).
+    let memberWsIds = null;
+
     for (const [taskId, eventId] of syncedTaskIds) {
       // Already bound to a calendar → skip (post-PR2 or previously migrated).
       const existingCal = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
@@ -1988,8 +2324,11 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
         }
         if (!workspaceId) {
           // Contact subtask — search across contacts (bounded by membership).
-          const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
-          const wsIds = memberships.map(m => m.workspaceId);
+          if (!memberWsIds) {
+            const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+            memberWsIds = memberships.map(m => m.workspaceId);
+          }
+          const wsIds = memberWsIds;
           const contact = await Contact.findOne({ workspaceId: { $in: wsIds }, 'tasks.id': taskId }, 'workspaceId').lean();
           if (contact?.workspaceId) workspaceId = contact.workspaceId.toString();
         }
@@ -2106,7 +2445,7 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     });
   } catch (error) {
     logger.error('[Google Calendar] Migration error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + userFacingError(error) });
   }
 });
 
@@ -2135,103 +2474,119 @@ router.post('/delete-all', authenticateToken, async (req, res) => {
     }
 
     const calendar = await getCalendarClient(user);
-    const calendarId = user.googleCalendar.calendarId || 'primary';
-    const isDedicated = calendarId !== 'primary';
 
-    let deleted = 0;
-    let errors = 0;
-
-    if (isDedicated) {
-      // Path 1: nuke the whole dedicated calendar
-      try {
-        await calendar.calendars.delete({ calendarId });
-        logger.info('[Google Calendar] Dedicated calendar deleted', { userId: user._id, calendarId });
-        deleted = 1; // "1 calendar" — exact event count is unknown after delete
-      } catch (e) {
-        if (e.code === 404) {
-          // Already gone, treat as success
-          logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
-        } else {
-          logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code });
-          return res.status(500).json({ message: 'Nepodarilo sa vymazať kalendár: ' + e.message });
-        }
-      }
-    } else {
-      // Path 2: batch-delete events from primary
-      // 2a — events with our source=prplcrm marker (preferred, new events)
-      const markedEventIds = new Set();
-      try {
-        let pageToken;
-        do {
-          const resp = await calendar.events.list({
-            calendarId: 'primary',
-            privateExtendedProperty: 'source=prplcrm',
-            maxResults: 2500,
-            showDeleted: false,
-            singleEvents: true,
-            pageToken
-          });
-          for (const ev of (resp.data.items || [])) {
-            if (ev.id) markedEventIds.add(ev.id);
-          }
-          pageToken = resp.data.nextPageToken;
-        } while (pageToken);
-      } catch (e) {
-        logger.warn('[Google Calendar] Marker query failed, relying on syncedTaskIds only', { error: e.message });
-      }
-
-      // 2b — union with legacy mapping (covers events created before the marker existed)
-      const legacyIds = Array.from(user.googleCalendar.syncedTaskIds?.values() || []);
-      for (const id of legacyIds) markedEventIds.add(id);
-
-      const allIds = Array.from(markedEventIds);
-      logger.info('[Google Calendar] Bulk delete starting', {
-        userId: user._id,
-        totalEvents: allIds.length
-      });
-
-      for (const eventId of allIds) {
-        try {
-          await calendar.events.delete({ calendarId: 'primary', eventId });
-          deleted++;
-        } catch (e) {
-          if (e.code === 404 || e.code === 410) {
-            // Already deleted, not an error
-          } else {
-            errors++;
-            logger.warn('[Google Calendar] Bulk delete event failed', { eventId, error: e.message });
-          }
-        }
-      }
-
-      logger.info('[Google Calendar] Bulk delete finished', { userId: user._id, deleted, errors });
+    // Všetky dedikované kalendáre: legacy calendarId + per-workspace
+    // kalendáre „Prpl CRM — {workspace}“ (PR2). Predtým sa mazal len legacy
+    // calendarId, takže per-workspace kalendáre a ich udalosti ostávali.
+    const dedicatedIds = new Set();
+    const legacyCalendarId = user.googleCalendar.calendarId || 'primary';
+    if (legacyCalendarId !== 'primary') dedicatedIds.add(legacyCalendarId);
+    for (const [, entry] of (user.googleCalendar.workspaceCalendars?.entries?.() || [])) {
+      if (entry?.calendarId && entry.calendarId !== 'primary') dedicatedIds.add(entry.calendarId);
     }
 
-    // Reset sync state regardless of path — fresh slate
+    let deleted = 0;
+    let deletedCalendars = 0;
+    let errors = 0;
+
+    for (const calendarId of dedicatedIds) {
+      try {
+        await calendar.calendars.delete({ calendarId });
+        deletedCalendars++;
+        logger.info('[Google Calendar] Dedicated calendar deleted', { userId: user._id, calendarId });
+      } catch (e) {
+        if (e.code === 404 || e.code === 410) {
+          logger.info('[Google Calendar] Dedicated calendar already gone', { userId: user._id, calendarId });
+        } else {
+          errors++;
+          logger.error('[Google Calendar] Failed to delete dedicated calendar', { error: e.message, code: e.code, calendarId });
+        }
+      }
+    }
+
+    // Udalosti v primárnom kalendári (staršie synchronizácie / fallback):
+    // 1) udalosti s naším markerom source=prplcrm
+    const primaryEventIds = new Set();
+    try {
+      let pageToken;
+      do {
+        const resp = await calendar.events.list({
+          calendarId: 'primary',
+          privateExtendedProperty: 'source=prplcrm',
+          maxResults: 2500,
+          showDeleted: false,
+          singleEvents: true,
+          pageToken
+        });
+        for (const ev of (resp.data.items || [])) {
+          if (ev.id) primaryEventIds.add(ev.id);
+        }
+        pageToken = resp.data.nextPageToken;
+      } while (pageToken);
+    } catch (e) {
+      logger.warn('[Google Calendar] Marker query failed, relying on syncedTaskIds only', { error: e.message });
+    }
+    // 2) legacy mapping (udalosti spred markera) — len tie, čo nie sú v
+    //    dedikovanom kalendári (tie zmizli spolu s kalendárom)
+    for (const [taskId, eventId] of (user.googleCalendar.syncedTaskIds?.entries?.() || [])) {
+      const calId = user.googleCalendar.syncedTaskCalendars?.get?.(taskId);
+      if (eventId && (!calId || calId === 'primary')) primaryEventIds.add(eventId);
+    }
+
+    logger.info('[Google Calendar] Bulk delete starting', {
+      userId: user._id,
+      dedicatedCalendars: dedicatedIds.size,
+      primaryEvents: primaryEventIds.size
+    });
+
+    for (const eventId of primaryEventIds) {
+      try {
+        await calendar.events.delete({ calendarId: 'primary', eventId });
+        deleted++;
+      } catch (e) {
+        if (e.code !== 404 && e.code !== 410) {
+          errors++;
+          logger.warn('[Google Calendar] Bulk delete event failed', { eventId, error: e.message });
+        }
+      }
+    }
+
+    logger.info('[Google Calendar] Bulk delete finished', { userId: user._id, deleted, deletedCalendars, errors });
+
+    // Push kanál zastavíme (inak by Google ďalej volal webhook pre kanál,
+    // ktorý už v DB nepoznáme).
+    await stopAllCalendarWatches(user).catch(err =>
+      logger.warn('[Google Calendar] Stop watch on delete-all failed', { error: err.message })
+    );
+
+    // Reset sync state — fresh slate, vrátane per-workspace máp (inak by
+    // ďalší sync zapisoval do zmazaných kalendárov a hash fast-path by
+    // udalosti považoval za „nezmenené“).
     user.googleCalendar.syncedTaskIds = new Map();
+    user.googleCalendar.syncedTaskCalendars = new Map();
+    user.googleCalendar.syncedEventHashes = new Map();
+    user.googleCalendar.workspaceCalendars = new Map();
     user.googleCalendar.watchChannelId = null;
     user.googleCalendar.watchResourceId = null;
     user.googleCalendar.watchExpiry = null;
     user.googleCalendar.syncToken = null;
     user.googleCalendar.lastSyncAt = null;
-    // For dedicated-calendar users: flip back to 'primary' so next sync doesn't
-    // try to write into a calendar that no longer exists. User can reconnect to
-    // recreate a dedicated calendar.
-    if (isDedicated) user.googleCalendar.calendarId = 'primary';
+    user.googleCalendar.calendarId = 'primary';
     await user.save();
 
     return res.json({
       success: true,
-      mode: isDedicated ? 'dedicated' : 'primary',
+      mode: dedicatedIds.size > 0 ? 'dedicated' : 'primary',
       deleted,
+      deletedCalendars,
       errors,
-      message: isDedicated
-        ? 'Kalendár "Prpl CRM" bol vymazaný z Google Calendar.'
+      message: dedicatedIds.size > 0
+        ? `Vymazaných ${deletedCalendars} kalendárov Prpl CRM a ${deleted} udalostí z Google Calendar${errors ? ` (${errors} chýb)` : ''}.`
         : `Vymazaných ${deleted} udalostí z Google Calendar${errors ? ` (${errors} chýb)` : ''}.`
     });
   } catch (error) {
     logger.error('[Google Calendar] Delete-all error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + userFacingError(error) });
   }
 });
 
@@ -2254,6 +2609,15 @@ function collectSubtasksForSync(subtasks, parentTitle, contactName, tasksToSync)
     if (subtask.subtasks) {
       collectSubtasksForSync(subtask.subtasks, parentTitle, contactName, tasksToSync);
     }
+  }
+}
+
+// Rekurzívne pridá id všetkých podúloh (ľubovoľnej hĺbky) do množiny idSet.
+function collectSubtaskIds(subtasks, idSet) {
+  if (!subtasks) return;
+  for (const subtask of subtasks) {
+    if (subtask?.id) idSet.add(subtask.id);
+    if (subtask?.subtasks) collectSubtaskIds(subtask.subtasks, idSet);
   }
 }
 
@@ -2498,6 +2862,7 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
       );
       e.cause = insertErr;
       e.status = insertErr.code || 500;
+      e.userFacing = true;
       throw e;
     }
 
@@ -2564,6 +2929,12 @@ async function getOrCreateWorkspaceCalendar(user, workspaceId, calendarClient) {
     });
     // Non-fatal — the mapping will be re-attempted on next sync.
   }
+
+  // Push kanál pre nový kalendár (Google → CRM zmeny). Na pozadí — sync
+  // nesmie čakať ani padnúť na zlyhaní watch.
+  setImmediate(() => {
+    startWorkspaceCalendarWatch(user, newCalendarId).catch(() => {});
+  });
 
   return newCalendarId;
 }
@@ -2657,17 +3028,25 @@ async function cleanupDuplicateCalendarEvents(calendarClient, calendarId, taskId
 // the same extendedProperties.private.taskId — it cheerfully creates duplicates.
 // Mirror of Google Tasks lock (googleTasks.js); keep behavior identical so both
 // sync paths converge on the same concurrency model.
-const calendarSyncLocks = new Map();
-const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — matches /sync worst-case wall time
+const calendarSyncLocks = new Map(); // key -> { at, ttl }
+const CALENDAR_LOCK_TIMEOUT = 30000; // 30s — single-task / auto-sync operácie
+// Full /sync beží až SYNC_TIMEOUT (9 min) + save — zámok musí žiť dlhšie,
+// inak by ho druhý request po 30 s považoval za zastaraný a spustil paralelný
+// sync, ktorý vloží duplicitné udalosti (Google events.insert nie je idempotentný).
+const FULL_SYNC_LOCK_TIMEOUT = 10 * 60 * 1000;
+// Spracovanie webhook notifikácie (events.list + zápisy do úloh) — 5 min strop
+// pre prípad pádu bez finally; bežne sa zámok uvoľní hneď po spracovaní.
+const WEBHOOK_LOCK_TIMEOUT = 5 * 60 * 1000;
+const calendarWebhookPending = new Set();
 
-const acquireCalendarLock = (key) => {
+const acquireCalendarLock = (key, timeoutMs = CALENDAR_LOCK_TIMEOUT) => {
   const now = Date.now();
   const existing = calendarSyncLocks.get(key);
-  if (existing && now - existing > CALENDAR_LOCK_TIMEOUT) {
+  if (existing && now - existing.at > existing.ttl) {
     calendarSyncLocks.delete(key); // stale — release
   }
   if (calendarSyncLocks.has(key)) return false;
-  calendarSyncLocks.set(key, now);
+  calendarSyncLocks.set(key, { at: now, ttl: timeoutMs });
   return true;
 };
 
@@ -2728,9 +3107,11 @@ const autoSyncTaskToCalendar = async (taskData, action) => {
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
-      users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true });
+      // -avatarData: auto-sync beží pri každej zmene úlohy a Base64 avatar
+      // (až MB na člena) nepotrebuje; user.save() ukladá len zmenené cesty.
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleCalendar.enabled': true }).select('-avatarData');
     } else if (action === 'delete') {
-      users = await User.find({ 'googleCalendar.enabled': true });
+      users = await User.find({ 'googleCalendar.enabled': true }).select('-avatarData');
     } else {
       logger.warn('[Auto-sync Calendar] Missing workspaceId — skipping to avoid cross-workspace leak', {
         taskId,
@@ -2951,19 +3332,35 @@ const autoDeleteTaskFromCalendar = async (taskId) => {
 /**
  * Initialize Calendar webhook system with Socket.IO and start periodic renewal.
  */
+let watchStartTimer = null;
+let watchRenewInterval = null;
+
 const initializeCalendarWebhooks = (io) => {
   calendarIo = io;
 
   // Set up watches for all connected users who don't have one
-  setTimeout(() => ensureCalendarWatches(), 20000);
+  watchStartTimer = setTimeout(() => ensureCalendarWatches(), 20000);
+  watchStartTimer.unref();
 
   // Renew expiring watches every 6 hours
-  setInterval(() => renewCalendarWatches(), 6 * 60 * 60 * 1000);
+  watchRenewInterval = setInterval(() => renewCalendarWatches(), 6 * 60 * 60 * 1000);
+  watchRenewInterval.unref();
 
   logger.info('[Calendar Watch] Webhook system initialized');
+};
+
+// Graceful shutdown — zastaví plánované obnovy kanálov.
+const stopCalendarWebhooks = () => {
+  clearTimeout(watchStartTimer);
+  clearInterval(watchRenewInterval);
+  watchStartTimer = null;
+  watchRenewInterval = null;
 };
 
 module.exports = router;
 module.exports.autoSyncTaskToCalendar = autoSyncTaskToCalendar;
 module.exports.autoDeleteTaskFromCalendar = autoDeleteTaskFromCalendar;
+// Len pre testy (poistky spätnej synchronizácie).
+module.exports._processCalendarChanges = processCalendarChanges;
 module.exports.initializeCalendarWebhooks = initializeCalendarWebhooks;
+module.exports.stopCalendarWebhooks = stopCalendarWebhooks;

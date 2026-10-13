@@ -3,6 +3,7 @@ const { google } = require('googleapis');
 const mongoose = require('mongoose');
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
+const { escapeRegex } = require('../utils/regexHelpers');
 const User = require('../models/User');
 const { isIosNativeApp } = require('../utils/platform');
 const { logPlanGateHit } = require('../utils/planGate');
@@ -12,6 +13,9 @@ const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const logger = require('../utils/logger');
 const { invalidateWorkspaceData } = require('../middleware/dataCache');
+const oauthService = require('../services/oauthService');
+const { userFacingError } = require('../utils/userFacingError');
+const { runInBackground } = require('../utils/backgroundJobs');
 
 const router = express.Router();
 
@@ -231,8 +235,10 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
 
-    const state = req.user.id.toString();
-    logger.info('[Google Tasks] Generating auth URL', { userId: state });
+    // Podpísaný state (HMAC + nonce + expirácia) namiesto holého userId —
+    // viď googleCalendar.js /auth-url (CSRF: cudzí Google účet na cudzí CRM účet).
+    const state = oauthService.signState({ mode: 'gtasks', userId: req.user.id.toString() });
+    logger.info('[Google Tasks] Generating auth URL', { userId: req.user.id.toString() });
 
     const client = createOAuth2Client();
     const authUrl = client.generateAuthUrl({
@@ -242,7 +248,7 @@ router.get('/auth-url', authenticateToken, async (req, res) => {
       prompt: 'consent'
     });
 
-    logger.debug('[Google Tasks] Auth URL generated', { userId: state });
+    logger.debug('[Google Tasks] Auth URL generated', { userId: req.user.id.toString() });
     res.json({ authUrl });
   } catch (error) {
     logger.error('[Google Tasks] Error generating auth URL', { error: error.message, userId: req.user?.id });
@@ -258,17 +264,22 @@ router.get('/callback', async (req, res) => {
   logger.info('[Google Tasks] Callback received', { hasCode: !!req.query.code, hasState: !!req.query.state });
 
   try {
-    const { code, state: userId } = req.query;
+    const { code, state } = req.query;
 
     // Validate required parameters
-    if (!code || !userId) {
-      logger.warn('[Google Tasks] Callback missing parameters', { hasCode: !!code, hasUserId: !!userId });
+    if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+      logger.warn('[Google Tasks] Callback missing parameters', { hasCode: !!code, hasState: !!state });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=missing_params`);
     }
 
-    // Validate userId format to prevent injection
-    if (!isValidObjectId(userId)) {
-      logger.warn('[Google Tasks] Invalid userId in callback state', { userId });
+    // Podpis + expirácia state pred akoukoľvek DB operáciou
+    let userId;
+    try {
+      const data = oauthService.verifyState(state);
+      if (data.mode !== 'gtasks' || !isValidObjectId(data.userId)) throw new Error('wrong state kind');
+      userId = data.userId;
+    } catch (stateErr) {
+      logger.warn('[Google Tasks] Invalid OAuth state', { error: stateErr.message });
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=invalid_state`);
     }
 
@@ -290,62 +301,23 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${baseUrl}/tasks?google_tasks=error&message=user_not_found`);
     }
 
-    // Set credentials on the per-request client to create task list
-    client.setCredentials(tokens);
-    const tasksApi = google.tasks({ version: 'v1', auth: client });
-
-    // Try to find or create "Prpl CRM" task list
-    let taskListId = null;
-    try {
-      const taskListsResponse = await tasksApi.tasklists.list();
-      const taskLists = taskListsResponse.data.items || [];
-
-      // Find existing task list (check both new and legacy name for backward compat)
-      const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
-
-      if (existingList) {
-        taskListId = existingList.id;
-        logger.info('[Google Tasks] Found existing task list', { userId, taskListId });
-      } else {
-        // Create new task list
-        const newList = await tasksApi.tasklists.insert({
-          resource: { title: 'Prpl CRM' }
-        });
-        taskListId = newList.data.id;
-        logger.info('[Google Tasks] Created new task list', { userId, taskListId });
-      }
-    } catch (e) {
-      logger.error('[Google Tasks] Error with task list', { error: e.message, userId });
-      // Use default task list as fallback
-      try {
-        const defaultList = await tasksApi.tasklists.list();
-        taskListId = defaultList.data.items?.[0]?.id || '@default';
-        logger.info('[Google Tasks] Using default task list', { userId, taskListId });
-      } catch (fallbackError) {
-        taskListId = '@default';
-        logger.warn('[Google Tasks] Using @default as fallback', { userId });
-      }
-    }
-
     // IMPORTANT: Google only sends refresh_token on first authorization
     // or if we use prompt: 'consent'. Make sure we save it!
     if (!tokens.refresh_token) {
       logger.warn('[Google Tasks] No refresh token received! User may need to reconnect later.', { userId });
     }
 
-    // IMPORTANT: Clear old sync data when reconnecting to avoid stale references
-    // Old syncedTaskIds point to tasks in potentially different task list
-    user.googleTasks = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || user.googleTasks?.refreshToken, // Keep old if not provided
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      taskListId: taskListId,
-      enabled: true,
-      connected: true,
-      connectedAt: new Date(),
-      syncedTaskIds: new Map(), // Always start fresh on reconnect
-      syncedTaskHashes: new Map() // Always start fresh on reconnect
-    };
+    // Len tokenové a stavové polia. Predtým priradenie celého objektu pri
+    // opätovnom pripojení zmazalo workspaceTaskLists, syncedTaskLists,
+    // syncDisabledWorkspaces (opt-out prostredí) aj kvótu a vynulovalo
+    // syncedTaskIds, hoci úlohy v Google ostali → každé prepojenie
+    // zdvojilo úlohy. Mapping je bezpečné ponechať: sync pri 404/400
+    // úlohu znova vytvorí a per-workspace listy pred použitím overuje.
+    user.set('googleTasks.accessToken', tokens.access_token);
+    user.set('googleTasks.refreshToken', tokens.refresh_token || user.googleTasks?.refreshToken || null);
+    user.set('googleTasks.tokenExpiry', tokens.expiry_date ? new Date(tokens.expiry_date) : null);
+    user.set('googleTasks.enabled', true);
+    user.set('googleTasks.connectedAt', new Date());
 
     await user.save();
     logger.info('[Google Tasks] User connected successfully', {
@@ -355,10 +327,43 @@ router.get('/callback', async (req, res) => {
       tokenExpiry: user.googleTasks.tokenExpiry
     });
 
+    // Redirect hneď — vyhľadanie/vytvorenie legacy listu „Prpl CRM“ (2–3
+    // Google API volania) beží na pozadí, mobilné WebView by inak callback
+    // pri pomalom Google API vzdali.
     res.redirect(`${baseUrl}/tasks?google_tasks=connected`);
+
+    setImmediate(async () => {
+      try {
+        client.setCredentials(tokens);
+        const tasksApi = google.tasks({ version: 'v1', auth: client });
+        let taskListId = null;
+        try {
+          const taskListsResponse = await tasksApi.tasklists.list();
+          const taskLists = taskListsResponse.data.items || [];
+          // Find existing task list (check both new and legacy name for backward compat)
+          const existingList = taskLists.find(list => list.title === 'Prpl CRM' || list.title === 'Perun CRM');
+          if (existingList) {
+            taskListId = existingList.id;
+          } else {
+            const newList = await tasksApi.tasklists.insert({ resource: { title: 'Prpl CRM' } });
+            taskListId = newList.data.id;
+            logger.info('[Google Tasks] Created new task list', { userId, taskListId });
+          }
+        } catch (e) {
+          logger.error('[Google Tasks] Error with task list', { error: e.message, userId });
+          taskListId = '@default';
+        }
+        await User.updateOne({ _id: userId }, { $set: { 'googleTasks.taskListId': taskListId } });
+      } catch (bgErr) {
+        logger.warn('[Google Tasks] Post-connect background task failed', { userId, error: bgErr.message });
+      }
+    });
+    return;
   } catch (error) {
     logger.error('[Google Tasks] Callback error', { error: error.message, stack: error.stack });
-    res.redirect(`${baseUrl}/tasks?google_tasks=error&message=` + encodeURIComponent(error.message));
+    if (res.headersSent) return;
+    // Do URL len kód — text výnimky Google API nepatrí do prehliadača.
+    res.redirect(`${baseUrl}/tasks?google_tasks=error&message=callback_failed`);
   }
 });
 
@@ -433,6 +438,7 @@ async function getOrCreateWorkspaceTaskList(user, workspaceId, tasksApi) {
       );
       e.cause = insertErr;
       e.status = insertErr.code || 500;
+      e.userFacing = true;
       throw e;
     }
   }
@@ -483,9 +489,9 @@ router.get('/status', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
-    // Check and reset quota if needed
-    checkAndResetQuota(user);
-    await user.save();
+    // Check and reset quota if needed — ukladáme len keď sa kvóta reálne
+    // resetovala (nový deň), nie pri každom GET /status.
+    if (checkAndResetQuota(user)) await user.save();
 
     const remainingQuota = getRemainingQuota(user);
     const quotaPercentUsed = Math.round(((DAILY_QUOTA_LIMIT - remainingQuota) / DAILY_QUOTA_LIMIT) * 100);
@@ -668,7 +674,7 @@ router.post('/workspace-sync-toggle', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Workspace toggle error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri prepínaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri prepínaní: ' + userFacingError(error) });
   }
 });
 
@@ -913,10 +919,12 @@ router.post('/disconnect', authenticateToken, async (req, res) => {
 });
 
 // Sync all tasks to Google Tasks (with incremental sync and quota checking)
-// Maximum sync time: 10 minutes to allow large syncs to complete
-const SYNC_TIMEOUT = 600000;
+// Maximum sync time: 9 minutes — Render ukončí HTTP request po 10 min, a po
+// dosiahnutí timeoutu ešte beží reverse sync + user.save(); pri presne 10 min
+// by odpoveď k klientovi nedorazila (rovnako ako googleCalendar.js).
+const SYNC_TIMEOUT = 9 * 60 * 1000;
 
-router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/sync', authenticateToken, requireWorkspace, runInBackground('tasks-sync', async (req, res) => {
   const forceSync = req.body.force === true;
   const syncStartTime = Date.now();
   logger.info('[Google Tasks] Sync started', { userId: req.user.id, forceSync });
@@ -928,10 +936,13 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Používateľ nebol nájdený' });
     }
 
-    // If force sync, reset all tracking maps
+    // Force sync: vynulujeme len hashe → každá namapovaná úloha sa v Google
+    // aktualizuje (update), nová sa vloží. Mapping syncedTaskIds ponechávame
+    // — jeho vynulovanie bez zmazania úloh v Google spôsobilo, že každý
+    // „Resync“ vložil všetky úlohy znova (duplicity). Neexistujúcu úlohu
+    // (404/400) sync znova vytvorí sám.
     if (forceSync) {
-      logger.info('[Google Tasks] Force sync - resetting tracking maps', { userId: req.user.id });
-      user.googleTasks.syncedTaskIds = new Map();
+      logger.info('[Google Tasks] Force sync - resetting content hashes', { userId: req.user.id });
       user.googleTasks.syncedTaskHashes = new Map();
     }
 
@@ -1482,9 +1493,9 @@ router.post('/sync', authenticateToken, requireWorkspace, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Sync error', { error: error.message, stack: error.stack, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   }
-});
+}));
 
 /**
  * MIGRATE — move existing tasks from the legacy single list into new
@@ -1514,6 +1525,10 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     let errors = 0;
     let orphans = 0;
 
+    // Členstvá sa počas requestu nemenia — načítame ich raz (lazy) namiesto
+    // dotazu na WorkspaceMember pre každú migrovanú kontaktovú úlohu (N+1).
+    let memberWsIds = null;
+
     for (const [taskId, googleTaskId] of syncedTaskIds) {
       const existingList = user.googleTasks.syncedTaskLists?.get?.(taskId);
       if (existingList) { skipped++; continue; }
@@ -1526,8 +1541,11 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
           if (t?.workspaceId) workspaceId = t.workspaceId.toString();
         }
         if (!workspaceId) {
-          const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
-          const wsIds = memberships.map(m => m.workspaceId);
+          if (!memberWsIds) {
+            const memberships = await WorkspaceMember.find({ userId: user._id }, 'workspaceId').lean();
+            memberWsIds = memberships.map(m => m.workspaceId);
+          }
+          const wsIds = memberWsIds;
           const contact = await Contact.findOne({ workspaceId: { $in: wsIds }, 'tasks.id': taskId }, 'workspaceId').lean();
           if (contact?.workspaceId) workspaceId = contact.workspaceId.toString();
         }
@@ -1611,7 +1629,7 @@ router.post('/migrate-to-per-workspace', authenticateToken, async (req, res) => 
     });
   } catch (error) {
     logger.error('[Google Tasks] Migration error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri migrácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri migrácii: ' + userFacingError(error) });
   }
 });
 
@@ -1628,7 +1646,8 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Google Tasks nie je pripojený' });
     }
 
-    user.googleTasks.syncedTaskIds = new Map();
+    // Len hashe (viď force sync v /sync) — mapping na existujúce Google úlohy
+    // ostáva, takže ďalší sync ich aktualizuje namiesto duplikovania.
     user.googleTasks.syncedTaskHashes = new Map();
     user.googleTasks.quotaUsedToday = 0;
     await user.save();
@@ -1641,12 +1660,14 @@ router.post('/reset-sync', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Reset sync error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri resetovaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri resetovaní: ' + userFacingError(error) });
   }
 });
 
 // Clean up completed tasks from Google Tasks
-router.post('/cleanup', authenticateToken, async (req, res) => {
+// requireWorkspace: workspace sa berie z X-Workspace-Id hlavičky (klient ju
+// posiela); bez nej middleware spadne späť na user.currentWorkspaceId.
+router.post('/cleanup', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
@@ -1660,24 +1681,39 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
     const tasksApi = await getTasksClient(user);
 
-    // Get all current task IDs for current workspace
-    const workspaceId = user.currentWorkspaceId;
-    const globalTasks = workspaceId ? await Task.find({ workspaceId }, { _id: 1 }).lean() : [];
-    const contacts = workspaceId ? await Contact.find({ workspaceId }, { 'tasks.id': 1 }).lean() : [];
+    // Get all current task IDs for current workspace — vrátane podúloh
+    // (ľubovoľnej hĺbky), ktoré /sync tiež synchronizuje.
+    const workspaceId = req.workspaceId || user.currentWorkspaceId;
+    const globalTasks = workspaceId
+      ? await Task.find({ workspaceId }, { _id: 1, 'subtasks.id': 1, 'subtasks.subtasks': 1 }).lean()
+      : [];
+    const contacts = workspaceId
+      ? await Contact.find({ workspaceId }, { 'tasks.id': 1, 'tasks.subtasks.id': 1, 'tasks.subtasks.subtasks': 1 }).lean()
+      : [];
 
     const currentTaskIds = new Set();
 
     for (const task of globalTasks) {
       currentTaskIds.add(task._id.toString());
+      collectSubtaskIds(task.subtasks, currentTaskIds);
     }
 
     for (const contact of contacts) {
       if (contact.tasks) {
         for (const task of contact.tasks) {
           currentTaskIds.add(task.id);
+          collectSubtaskIds(task.subtasks, currentTaskIds);
         }
       }
     }
+
+    // Mapa syncedTaskIds je per-user (všetky workspace-y), ale currentTaskIds
+    // pokrýva len tento workspace. Mažeme preto iba úlohy zo zoznamu TOHTO
+    // workspace-u — úlohy iných workspace-ov nie sú siroty. Legacy záznamy bez
+    // mapovania zoznamu (pred per-workspace listami) radšej necháme.
+    const wsTaskListId = workspaceId
+      ? (user.googleTasks.workspaceTaskLists?.get?.(String(workspaceId))?.taskListId || null)
+      : null;
 
     let deleted = 0;
     let errors = 0;
@@ -1687,6 +1723,8 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
 
       for (const [taskId, googleTaskId] of syncedTaskIds) {
         if (!currentTaskIds.has(taskId)) {
+          const mappedListId = user.googleTasks.syncedTaskLists?.get?.(taskId);
+          if (!wsTaskListId || mappedListId !== wsTaskListId) continue;
           // PR2: delete from whichever list holds this task (per-workspace).
           // Fall back to legacy single list for pre-PR2 mappings.
           const cleanupListId = getTaskListIdForSyncedTask(user, taskId);
@@ -1724,7 +1762,7 @@ router.post('/cleanup', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Cleanup error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri čistení: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri čistení: ' + userFacingError(error) });
   }
 });
 
@@ -1791,7 +1829,7 @@ router.post('/remove-duplicates', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Nuke & recreate error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní úloh: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní úloh: ' + userFacingError(error) });
   }
 });
 
@@ -1800,8 +1838,10 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
   try {
     const { searchTerm } = req.body;
 
-    if (!searchTerm || searchTerm.length < 2) {
-      return res.status(400).json({ message: 'Vyhľadávací výraz musí mať aspoň 2 znaky' });
+    // Len reťazec rozumnej dĺžky — pole/objekt by prešli `length` kontrolou
+    // a z ľubovoľného textu sa nižšie skladá regex.
+    if (typeof searchTerm !== 'string' || searchTerm.length < 2 || searchTerm.length > 100) {
+      return res.status(400).json({ message: 'Vyhľadávací výraz musí mať 2 až 100 znakov' });
     }
 
     const user = await User.findById(req.user.id);
@@ -1829,7 +1869,13 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
 
     // Collect matching tasks from ALL task lists
     let allMatchingTasks = []; // { taskListId, task }
-    const searchRegex = new RegExp(searchTerm, 'i');
+    // Počet prehľadaných úloh rátame už v tomto prechode (predtým sa kvôli
+    // nemu po mazaní stránkovane prechádzali všetky zoznamy druhýkrát).
+    let totalTasksScanned = 0;
+    // escapeRegex: výraz z tela requestu sa hľadá ako obyčajný text. Bez neho
+    // by pattern typu `(a+)+$` (ReDoS) zablokoval event loop pri teste na
+    // každý názov úlohy vo všetkých Google zoznamoch.
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
 
     for (const taskList of taskLists) {
       let pageToken = null;
@@ -1843,6 +1889,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
         });
 
         if (response.data.items) {
+          totalTasksScanned += response.data.items.length;
           for (const task of response.data.items) {
             if (task.title && searchRegex.test(task.title)) {
               allMatchingTasks.push({ taskListId: taskList.id, task });
@@ -1905,16 +1952,6 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
       errors
     });
 
-    // Count total tasks across all lists for debugging
-    let totalTasksScanned = 0;
-    for (const taskList of taskLists) {
-      let pgToken = null;
-      do {
-        const r = await tasksApi.tasks.list({ tasklist: taskList.id, maxResults: 100, showCompleted: true, showHidden: true, pageToken: pgToken });
-        totalTasksScanned += (r.data.items || []).length;
-        pgToken = r.data.nextPageToken;
-      } while (pgToken);
-    }
 
     res.json({
       success: true,
@@ -1925,7 +1962,7 @@ router.post('/delete-by-search', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('[Google Tasks] Delete by search error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri mazaní: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri mazaní: ' + userFacingError(error) });
   }
 });
 
@@ -2101,11 +2138,20 @@ router.post('/sync-completed', authenticateToken, requireWorkspace, async (req, 
     });
   } catch (error) {
     logger.error('[Google Tasks] Sync completed error', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + error.message });
+    res.status(500).json({ message: 'Chyba pri synchronizácii: ' + userFacingError(error) });
   }
 });
 
 // Helper functions
+// Rekurzívne pridá id všetkých podúloh (ľubovoľnej hĺbky) do množiny idSet.
+function collectSubtaskIds(subtasks, idSet) {
+  if (!subtasks) return;
+  for (const subtask of subtasks) {
+    if (subtask?.id) idSet.add(subtask.id);
+    if (subtask?.subtasks) collectSubtaskIds(subtask.subtasks, idSet);
+  }
+}
+
 function findSubtaskById(subtasks, id) {
   if (!subtasks) return null;
   for (const subtask of subtasks) {
@@ -2269,9 +2315,11 @@ const autoSyncTaskToGoogleTasks = async (taskData, action) => {
     if (workspaceId) {
       const members = await WorkspaceMember.find({ workspaceId }, 'userId').lean();
       const memberUserIds = members.map(m => m.userId);
-      users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true });
+      // -avatarData: Base64 avatar (až MB na používateľa) sync nepotrebuje;
+      // user.save() nižšie ukladá len zmenené cesty, takže projekcia je bezpečná.
+      users = await User.find({ _id: { $in: memberUserIds }, 'googleTasks.enabled': true }).select('-avatarData');
     } else if (action === 'delete') {
-      users = await User.find({ 'googleTasks.enabled': true });
+      users = await User.find({ 'googleTasks.enabled': true }).select('-avatarData');
     } else {
       logger.warn('[Auto-sync Tasks] Missing workspaceId — skipping to avoid cross-workspace leak', {
         taskId,
@@ -2475,7 +2523,14 @@ let pollingIo = null; // Socket.IO instance for emitting updates
  * Apply a single Google Task change to the CRM (completion, title, due date).
  * Returns true if a CRM task was updated.
  */
-const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
+// allowedWorkspaceIds: workspace-y, kde je používateľ členom. Použije sa, keď
+// sa wsId nepodarilo zistiť (podúlohy) — bez neho by sa podúloha hľadala
+// naprieč VŠETKÝMI workspace-mi a zmena z Google Tasks bývalého člena by
+// prepísala úlohu v tíme, z ktorého už odišiel.
+const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId, allowedWorkspaceIds = null) => {
+  const wsFilter = wsId
+    ? { workspaceId: wsId }
+    : (Array.isArray(allowedWorkspaceIds) ? { workspaceId: { $in: allowedWorkspaceIds } } : {});
   const isCompleted = googleTask.status === 'completed';
   // Strip workspace prefix "[Workspace] " that we add on outbound sync,
   // otherwise the bracketed prefix leaks back into CRM titles on inbound updates.
@@ -2490,14 +2545,14 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   let taskIndex = -1;
 
   if (isValidObjectId(crmTaskId)) {
-    task = await Task.findOne({ _id: crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+    task = await Task.findOne({ _id: crmTaskId, ...wsFilter });
   }
 
   if (!task) {
     // Search in contacts (works for both ObjectId and UUID strings)
     contact = await Contact.findOne({
       'tasks.id': crmTaskId,
-      ...(wsId ? { workspaceId: wsId } : {})
+      ...wsFilter
     });
     if (contact) {
       taskIndex = contact.tasks.findIndex(t => t.id === crmTaskId);
@@ -2507,7 +2562,7 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
 
   if (!task) {
     // Check subtasks in global tasks
-    const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...(wsId ? { workspaceId: wsId } : {}) });
+    const parentTasks = await Task.find({ 'subtasks.id': crmTaskId, ...wsFilter });
     for (const parentTask of parentTasks) {
       const subtask = findSubtaskById(parentTask.subtasks, crmTaskId);
       if (subtask) {
@@ -2571,8 +2626,10 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
 
   // Due date
   if (googleDue && googleDue !== crmDue) {
-    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = new Date(googleDue);
-    else task.dueDate = new Date(googleDue);
+    // dueDate je v schéme String (YYYY-MM-DD); Date objekt by Mongoose uložil
+    // cez toString() ako "Sat Mar 28 2026 …" — priraďujeme priamo reťazec.
+    if (contact && taskIndex !== -1) contact.tasks[taskIndex].dueDate = googleDue;
+    else task.dueDate = googleDue;
     changed = true;
   } else if (!googleDue && crmDue) {
     // Due date removed in Google
@@ -2624,9 +2681,29 @@ const applyGoogleTaskChange = async (googleTask, crmTaskId, wsId) => {
   return changed;
 };
 
+// Ochrana proti prekrývaniu cyklov: setInterval (5 min) by pri pomalom
+// Google API / veľa používateľoch spustil ďalší cyklus, kým predošlý beží —
+// dva paralelné cykly by spracovali tie isté zmeny a zdvojnásobili záťaž.
+let pollInProgress = false;
+
 const pollGoogleTasksChanges = async () => {
+  if (pollInProgress) {
+    logger.warn('[Google Tasks Poll] Predošlý cyklus ešte beží — tento sa preskakuje');
+    return;
+  }
+  pollInProgress = true;
   try {
-    const users = await User.find({ 'googleTasks.enabled': true });
+    await pollGoogleTasksChangesOnce();
+  } finally {
+    pollInProgress = false;
+  }
+};
+
+const pollGoogleTasksChangesOnce = async () => {
+  try {
+    // -avatarData: polling každých 5 min by inak ťahal Base64 avatar každého
+    // pripojeného používateľa (save() ukladá len zmenené cesty).
+    const users = await User.find({ 'googleTasks.enabled': true }).select('-avatarData');
     if (users.length === 0) return;
 
     // Heartbeat log — bežal v debug fáze ako [POLL_DEBUG] Cycle start, teraz
@@ -2723,7 +2800,7 @@ const pollGoogleTasksChanges = async () => {
             continue;
           }
 
-          const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId);
+          const result = await applyGoogleTaskChange(googleTask, crmTaskId, wsId, userWorkspaceIds);
           if (result === 'deleted') {
             // Clean up mapping for task deleted from Google
             await User.findByIdAndUpdate(user._id, {
@@ -2757,12 +2834,20 @@ const startGoogleTasksPolling = (io) => {
   pollingIo = io;
   // Poll every 5 minutes (Atlas M0 can't handle 30s polling — too many IOPS)
   pollingInterval = setInterval(pollGoogleTasksChanges, 300000);
+  pollingInterval.unref();
   // Run first poll after 90 seconds (let server stabilize)
-  setTimeout(pollGoogleTasksChanges, 90000);
+  pollingStartTimer = setTimeout(pollGoogleTasksChanges, 90000);
+  pollingStartTimer.unref();
   logger.info('[Google Tasks Poll] Bidirectional polling started (5min interval)');
 };
 
+let pollingStartTimer = null;
+
 const stopGoogleTasksPolling = () => {
+  if (pollingStartTimer) {
+    clearTimeout(pollingStartTimer);
+    pollingStartTimer = null;
+  }
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;

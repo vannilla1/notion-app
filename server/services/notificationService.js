@@ -162,22 +162,63 @@ const getApnJwt = () => {
 };
 
 // Send a single notification to APNs via HTTP/2
+// Orezanie reťazcových hodnôt v notification.data pred vložením do push
+// payloadu. Web push aj APNs majú limit ~4 KB a data obsahujú používateľské
+// texty bez maxlength (názov úlohy, kontaktu, workspace-u…) — dlhá hodnota
+// by zhodila doručenie celej notifikácie (413 / PayloadTooLarge).
+const PUSH_DATA_MAX_LEN = 300;
+const truncatePushData = (data) => {
+  if (!data || typeof data !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    out[k] = typeof v === 'string' ? v.slice(0, PUSH_DATA_MAX_LEN) : v;
+  }
+  return out;
+};
+
+// Perzistentné HTTP/2 spojenie per host (production/sandbox). Apple odporúča
+// spojenie s APNs udržiavať — nové TLS spojenie pre každé zariadenie a každý
+// push znamenalo ~100–300 ms navyše a riziko throttlingu pri väčšom objeme.
+// Session sa zahodí pri chybe, GOAWAY, zatvorení alebo po nečinnosti a ďalší
+// push otvorí novú.
+const APNS_IDLE_MS = 5 * 60 * 1000;
+const APNS_REQUEST_TIMEOUT_MS = 10000;
+const apnsSessions = new Map(); // host → { session, active }
+
+const getApnsSession = (host) => {
+  const existing = apnsSessions.get(host);
+  if (existing && !existing.session.closed && !existing.session.destroyed) return existing;
+
+  const entry = { session: http2.connect(`https://${host}`), active: 0 };
+  const { session } = entry;
+  const drop = () => { if (apnsSessions.get(host) === entry) apnsSessions.delete(host); };
+  session.on('error', (err) => {
+    logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
+    drop();
+  });
+  session.on('goaway', drop);
+  session.on('close', drop);
+  session.setTimeout(APNS_IDLE_MS, () => {
+    drop();
+    session.close();
+  });
+  // Nečinná session nesmie držať proces nažive (graceful shutdown, skripty).
+  session.unref();
+  apnsSessions.set(host, entry);
+  return entry;
+};
+
+const closeApnsSessions = () => {
+  for (const { session } of apnsSessions.values()) {
+    try { session.close(); } catch { /* best-effort */ }
+  }
+  apnsSessions.clear();
+};
+
 const sendToAPNs = (deviceToken, payload, sandbox = false) => {
   return new Promise((resolve, reject) => {
     const host = sandbox ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
     const jwt = getApnJwt();
-
-    let client;
-    try {
-      client = http2.connect(`https://${host}`);
-    } catch (err) {
-      return reject(new Error(`HTTP/2 connect failed: ${err.message}`));
-    }
-
-    client.on('error', (err) => {
-      logger.warn('[APNs HTTP/2] Connection error', { error: err.message, host });
-      reject(err);
-    });
 
     const headers = {
       ':method': 'POST',
@@ -190,10 +231,39 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
       'content-type': 'application/json'
     };
 
-    const req = client.request(headers);
+    let entry;
+    let req;
+    try {
+      entry = getApnsSession(host);
+      req = entry.session.request(headers);
+    } catch (err) {
+      if (entry) apnsSessions.delete(host);
+      return reject(new Error(`HTTP/2 request failed: ${err.message}`));
+    }
+
+    // Počas requestu session drží proces (inak by unref() mohol ukončiť skript
+    // pred odpoveďou); po poslednom requeste sa znova uvoľní.
+    entry.active += 1;
+    if (entry.active === 1) entry.session.ref();
+
+    // Timer sa ruší pri každom ukončení, inak by každý push nechal 10 s
+    // visiaci timer. settled: 'close' streamu po chybe session nesmie
+    // promise vyriešiť druhýkrát.
+    let timer = null;
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      entry.active -= 1;
+      if (entry.active === 0 && !entry.session.destroyed) entry.session.unref();
+      fn(value);
+    };
+
     let responseData = '';
     let statusCode = 0;
 
+    req.setEncoding('utf8');
     req.on('response', (hdrs) => {
       statusCode = hdrs[':status'];
     });
@@ -203,32 +273,36 @@ const sendToAPNs = (deviceToken, payload, sandbox = false) => {
     });
 
     req.on('end', () => {
-      client.close();
       if (statusCode === 200) {
-        resolve({ success: true, status: statusCode });
+        finish(resolve, { success: true, status: statusCode });
       } else {
         let reason = 'Unknown';
         try {
           const parsed = JSON.parse(responseData);
           reason = parsed.reason || reason;
         } catch {}
-        resolve({ success: false, status: statusCode, reason });
+        finish(resolve, { success: false, status: statusCode, reason });
       }
     });
 
-    req.on('error', (err) => {
-      client.close();
-      reject(err);
-    });
+    req.on('error', (err) => finish(reject, err));
+    // Stream zrušený bez odpovede (zánik session) — inak by promise visel.
+    req.on('close', () => finish(reject, new Error('APNs stream closed without response')));
 
     req.write(JSON.stringify(payload));
     req.end();
 
-    // Timeout after 10s
-    setTimeout(() => {
-      try { client.close(); } catch {}
-      reject(new Error('APNs request timeout'));
-    }, 10000);
+    // Timeout 10 s: zrušíme stream aj session. destroy() namiesto close():
+    // close() je v http2 GRACEFUL a čaká na dobehnutie streamov — zaseknuté
+    // spojenie by sa inak nikdy neuvoľnilo; ďalší push otvorí nové.
+    timer = setTimeout(() => {
+      timer = null;
+      try { req.close(http2.constants.NGHTTP2_CANCEL); } catch {}
+      if (apnsSessions.get(host) === entry) apnsSessions.delete(host);
+      try { entry.session.destroy(); } catch {}
+      finish(reject, new Error('APNs request timeout'));
+    }, APNS_REQUEST_TIMEOUT_MS);
+    timer.unref?.();
   });
 };
 
@@ -246,13 +320,15 @@ const getAPNsStatus = () => ({
 /**
  * Send APNs push notification to iOS devices via native HTTP/2
  */
-const sendAPNsNotification = async (userId, payload) => {
+// preloadedDevices: createNotification zariadenia už načítal (rozhoduje
+// podľa nich, ktoré kanály spustiť) — netreba ich ťahať z DB druhýkrát.
+const sendAPNsNotification = async (userId, payload, preloadedDevices = null) => {
   if (!apnConfigured) return { sent: 0, failed: 0 };
 
   const result = { sent: 0, failed: 0, removed: 0 };
 
   try {
-    const devices = await APNsDevice.find({ userId });
+    const devices = Array.isArray(preloadedDevices) ? preloadedDevices : await APNsDevice.find({ userId });
     if (devices.length === 0) return result;
 
     const url = generateNotificationUrl(payload.type, payload.data);
@@ -299,7 +375,7 @@ const sendAPNsNotification = async (userId, payload) => {
       url: url,
       type: payload.type,
       workspaceId: payload.data?.workspaceId ? String(payload.data.workspaceId) : undefined,
-      ...(payload.data || {})
+      ...truncatePushData(payload.data)
     };
 
     for (const device of devices) {
@@ -314,28 +390,39 @@ const sendAPNsNotification = async (userId, payload) => {
           if (!device.apnsEnvironment) {
             device.apnsEnvironment = primarySandbox ? 'sandbox' : 'production';
           }
-          await device.save();
+          // Push je doručený — zlyhanie zápisu ho nesmie započítať ako failed.
+          try { await device.save(); } catch (saveErr) {
+            logger.debug('[APNs] lastUsed save failed', { error: saveErr.message });
+          }
           continue;
         }
 
         // If primary failed with token error, try the other environment
+        let fallbackRes = null;
         if (res.reason === 'BadDeviceToken' || res.reason === 'DeviceTokenNotForTopic' || res.reason === 'Unregistered') {
           logger.info('[APNs] Primary failed, trying fallback', { reason: res.reason, primarySandbox });
-          const fallbackRes = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
+          fallbackRes = await sendToAPNs(device.deviceToken, apnsPayload, !primarySandbox);
 
           if (fallbackRes.success) {
             result.sent++;
             device.lastUsed = new Date();
             device.apnsEnvironment = !primarySandbox ? 'sandbox' : 'production';
-            await device.save();
+            try { await device.save(); } catch (saveErr) {
+              logger.debug('[APNs] lastUsed save failed', { error: saveErr.message });
+            }
             logger.info('[APNs] Fallback succeeded', { env: device.apnsEnvironment });
             continue;
           }
         }
 
-        // Both failed — remove truly invalid tokens
+        // Both failed — remove truly invalid tokens. BadDeviceToken v OBOCH
+        // prostrediach (sandbox aj production) = token je neplatný všade;
+        // inak by sa pri každej notifikácii opakovali 2 zbytočné HTTP/2
+        // spojenia na Apple. DeviceTokenNotForTopic nemažeme — môže ísť
+        // o chybu konfigurácie servera (bundle id), nie o zlý token.
         result.failed++;
-        if (res.status === 410 || res.reason === 'Unregistered') {
+        const badInBothEnvs = res.reason === 'BadDeviceToken' && fallbackRes?.reason === 'BadDeviceToken';
+        if (res.status === 410 || res.reason === 'Unregistered' || badInBothEnvs) {
           await APNsDevice.deleteOne({ _id: device._id });
           result.removed++;
           logger.info('[APNs] Removed invalid device', { reason: res.reason });
@@ -465,17 +552,22 @@ const initialize = (socketIo) => {
 const generateNotificationUrl = (type, data = {}) => {
   logger.debug('[NotificationService] generateNotificationUrl', { type, data });
 
+  // URL-encoding identifikátorov — väčšina sú ObjectId (bez zmeny), ale
+  // subtask.id je obyčajný String od klienta; znaky & = # ? by inak
+  // rozbili/podvrhli query parametre deep-linku (web push, APNs, FCM).
+  const enc = (v) => encodeURIComponent(String(v ?? ''));
+
   // Helper: append ws=<workspaceId> so the client can switch workspace
   // before navigating to the target entity. Required for multi-workspace users.
   const withWs = (url) => {
     if (!data.workspaceId) return url;
     const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}ws=${data.workspaceId}`;
+    return `${url}${sep}ws=${enc(data.workspaceId)}`;
   };
 
   // Contact notifications -> /crm with contact expansion
   if (type?.startsWith('contact') && data.contactId) {
-    return withWs(`/crm?expandContact=${data.contactId}`);
+    return withWs(`/crm?expandContact=${enc(data.contactId)}`);
   }
 
   // Task notifications -> /tasks with task highlight
@@ -484,19 +576,19 @@ const generateNotificationUrl = (type, data = {}) => {
   // highlightTask a user by skončil vo filtrovanom zozname bez zvýraznenia.
   // highlightTask stačí na scroll + flash animáciu.
   if (type?.startsWith('task') && data.taskId) {
-    return withWs(`/tasks?highlightTask=${data.taskId}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}`);
   }
 
   // Subtask notifications -> /tasks with parent task highlight (rovnaký dôvod
   // ako vyššie — žiadny contactId v notifikačnej URL).
   if (type?.startsWith('subtask') && data.taskId) {
-    return withWs(`/tasks?highlightTask=${data.taskId}&subtask=${data.subtaskId || ''}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}&subtask=${enc(data.subtaskId || '')}`);
   }
 
   // Message notifications -> /messages with message highlight (+ comment scroll)
   if (type?.startsWith('message') && data.messageId) {
-    let url = `/messages?highlight=${data.messageId}`;
-    if (data.commentId) url += `&comment=${data.commentId}`;
+    let url = `/messages?highlight=${enc(data.messageId)}`;
+    if (data.commentId) url += `&comment=${enc(data.commentId)}`;
     return withWs(url);
   }
 
@@ -507,14 +599,14 @@ const generateNotificationUrl = (type, data = {}) => {
 
   // Fallback: try to determine URL from data fields alone
   if (data.messageId) {
-    let url = `/messages?highlight=${data.messageId}`;
-    if (data.commentId) url += `&comment=${data.commentId}`;
+    let url = `/messages?highlight=${enc(data.messageId)}`;
+    if (data.commentId) url += `&comment=${enc(data.commentId)}`;
     return withWs(url);
   }
-  if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${data.contactId}`);
+  if (data.contactId && !data.taskId) return withWs(`/crm?expandContact=${enc(data.contactId)}`);
   if (data.taskId) {
     // Viď poznámku vyššie — contactId do task URL nedávame.
-    return withWs(`/tasks?highlightTask=${data.taskId}`);
+    return withWs(`/tasks?highlightTask=${enc(data.taskId)}`);
   }
 
   logger.warn('[NotificationService] No URL match, returning /app', { type, data });
@@ -527,6 +619,21 @@ const generateNotificationUrl = (type, data = {}) => {
  * @param {Object} payload - Notification payload
  * @returns {Object} Result with sent/failed counts
  */
+// timeout (ms): bez neho čaká https.request na zavesený push endpoint
+// neobmedzene a sekvenčná slučka cez subscriptiony zastaví doručenie na
+// ostatné zariadenia používateľa. Socket timeout nemá statusCode, takže ho
+// retry logika vyššie korektne zopakuje (max 2×). TTL = default web-push.
+const WEBPUSH_OPTIONS = { timeout: 10000 };
+
+// lastUsed web push subscription — mimo try bloku odoslania (viď volajúcich).
+const touchSubscription = async (subId) => {
+  try {
+    await PushSubscription.updateOne({ _id: subId }, { lastUsed: new Date() });
+  } catch (err) {
+    logger.debug('[Push] lastUsed update failed', { error: err.message });
+  }
+};
+
 const sendPushNotification = async (userId, payload) => {
   const result = { sent: 0, failed: 0, removed: 0 };
 
@@ -565,7 +672,7 @@ const sendPushNotification = async (userId, payload) => {
       data: {
         url,
         type: payload.type,
-        ...payload.data
+        ...truncatePushData(payload.data)
       },
       tag: payload.tag || payload.type || 'default'
     });
@@ -579,14 +686,15 @@ const sendPushNotification = async (userId, payload) => {
           await webpush.sendNotification({
             endpoint: sub.endpoint,
             keys: sub.keys
-          }, pushPayload);
+          }, pushPayload, WEBPUSH_OPTIONS);
 
-          // Update last used timestamp
-          sub.lastUsed = new Date();
-          await sub.save();
+          // Doručené — započítame HNEĎ. Predtým bol sub.save() v tom istom try:
+          // jeho zlyhanie (DB blip) catch vyhodnotil ako sieťovú chybu bez
+          // statusCode → retry → používateľ dostal tú istú notifikáciu znova.
           result.sent++;
           metrics.notifications.pushSent++;
           sent = true;
+          await touchSubscription(sub._id);
         } catch (error) {
           // Remove invalid subscriptions immediately — no retry needed
           if (error.statusCode === 410 || error.statusCode === 404) {
@@ -616,6 +724,9 @@ const sendPushNotification = async (userId, payload) => {
             message: error.message,
             attempts: attempt + 1
           });
+          // Bez break by sa pri NEopakovateľnej chybe (400/401/403/413) cyklus
+          // točil ďalej a push sa poslal ešte 2× a `failed` sa zvýšil 3×.
+          break;
         }
       }
     }
@@ -640,11 +751,15 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
     const subscriptions = await PushSubscription.find({ userId });
     if (subscriptions.length === 0) return result;
 
-    // Filter out iOS subscriptions (Apple push endpoints)
-    const desktopSubs = subscriptions.filter(sub =>
-      !sub.endpoint.includes('web.push.apple.com') &&
-      !sub.endpoint.includes('windows.push.apple.com')
-    );
+    // Filter out iOS subscriptions. Endpoint web.push.apple.com používa aj
+    // Safari na macOS (desktop web push) — filter len podľa domény vypínal
+    // push na Macu každému, kto má aj iOS appku. iOS rozpoznáme podľa
+    // userAgent uloženého pri subscribe; bez userAgent subscription
+    // ponecháme (radšej duplicita s APNs než výpadok na desktope).
+    const isIosWebPush = (sub) =>
+      String(sub.endpoint || '').includes('web.push.apple.com') &&
+      /iPhone|iPad|iPod/i.test(sub.userAgent || '');
+    const desktopSubs = subscriptions.filter(sub => !isIosWebPush(sub));
 
     if (desktopSubs.length === 0) return result;
 
@@ -654,16 +769,15 @@ const sendPushNotificationExcludeIOS = async (userId, payload) => {
       body: String(payload.body || payload.message || '').slice(0, 200),
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-72x72.png',
-      data: { url, type: payload.type, ...payload.data },
+      data: { url, type: payload.type, ...truncatePushData(payload.data) },
       tag: payload.tag || payload.type || 'default'
     });
 
     for (const sub of desktopSubs) {
       try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload);
-        sub.lastUsed = new Date();
-        await sub.save();
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, pushPayload, WEBPUSH_OPTIONS);
         result.sent++;
+        await touchSubscription(sub._id); // zlyhanie zápisu nemení výsledok doručenia
       } catch (error) {
         if (error.statusCode === 410 || error.statusCode === 404) {
           await PushSubscription.deleteOne({ _id: sub._id });
@@ -706,11 +820,16 @@ const classifyByType = (type) => (DIRECT_TYPES.has(type) ? 'direct' : 'general')
 
 // Map a notification type to the user-preference key that gates its push.
 // Returns null for types that are always pushed (direct).
-const getPushPrefKey = (type, category) => {
+const getPushPrefKey = (type, category, data = null) => {
   if (category === 'direct') return null; // direct is always pushed
+  // Prechod na „overdue" posiela dueDateChecker ako typ *.dueDate s
+  // data.urgency = 'overdue' (enum typov 'task.overdue' neobsahuje) — bez
+  // tohto bola preferencia „Po termíne" v nastaveniach mŕtva a overdue
+  // pushe riadila preferencia „Pripomienky termínov".
+  if ((type === 'task.dueDate' || type === 'subtask.dueDate') && data?.urgency === 'overdue') return 'pushOverdue';
   if (type === 'task.dueDate' || type === 'subtask.dueDate') return 'pushDeadlines';
   if (type === 'task.overdue' || type === 'subtask.overdue') return 'pushOverdue';
-  if (type === 'workspace.memberAdded') return 'pushNewMember';
+  if (type === 'workspace.memberAdded' || type === 'workspace.memberLeft') return 'pushNewMember';
   return 'pushTeamActivity'; // default bucket for everything else general
 };
 
@@ -794,7 +913,11 @@ const createNotification = async ({
     metrics.notifications.created++;
 
     // Trim user's notification history to last 150 (fire-and-forget).
-    setImmediate(() => trimUserHistory(userId));
+    // Len pri ~každom 10. inserte: trim stojí 2 dotazy (countDocuments + find
+    // so sortom), ktoré bežali pri KAŽDEJ notifikácii. História tak môže
+    // dočasne prekročiť limit o pár záznamov; staršie aj tak maže TTL index
+    // po 30 dňoch.
+    if (Math.random() < 0.1) setImmediate(() => trimUserHistory(userId));
 
     // Send real-time notification via Socket.IO
     if (io) {
@@ -838,7 +961,7 @@ const createNotification = async ({
         // POKIAĽ si ho user explicitne nevypol v notificationPreferences
         // ("každá notifikácia sa zobrazí" — 2026-07). Chýbajúca preferencia
         // = zapnuté. Explicitné false (vypnuté v UI) sa rešpektuje.
-        const prefKey = getPushPrefKey(notification.type, notification.category);
+        const prefKey = getPushPrefKey(notification.type, notification.category, notification.data);
         if (prefKey) {
           const recipient = await User.findById(userId, 'notificationPreferences').lean();
           const enabled = recipient?.notificationPreferences?.[prefKey] !== false;
@@ -861,12 +984,12 @@ const createNotification = async ({
 
         // iOS native
         if (apnsDevices.length > 0) {
-          jobs.push(sendAPNsNotification(userId, pushPayload));
+          jobs.push(sendAPNsNotification(userId, pushPayload, apnsDevices));
         }
 
         // Android native (FCM data-only) — podobná rola ako APNs pre iOS
         if (fcmDevices.length > 0) {
-          jobs.push(sendFCMNotification(userId, pushPayload, url));
+          jobs.push(sendFCMNotification(userId, pushPayload, url, fcmDevices));
         }
 
         // Web Push — ak má user iOS devices, vynechaj Apple web push endpointy
@@ -908,18 +1031,19 @@ const createNotification = async ({
 /**
  * Notify multiple users about an event
  */
+// Fan-out na viacerých príjemcov paralelne (poradie výsledkov zachované).
+// Predtým sekvenčný await createNotification pre každého člena — latencia
+// volajúceho handlera (napr. PUT úlohy) rástla lineárne s veľkosťou tímu.
+// allSettled: zlyhanie jedného príjemcu nezastaví ostatných.
+const createNotificationsFor = async (payloads) => {
+  const settled = await Promise.allSettled(payloads.map(p => createNotification(p)));
+  return settled.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
+};
+
 const notifyUsers = async (userIds, notificationData) => {
-  const notifications = [];
-  for (const userId of userIds) {
-    const notification = await createNotification({
-      ...notificationData,
-      userId
-    });
-    if (notification) {
-      notifications.push(notification);
-    }
-  }
-  return notifications;
+  return createNotificationsFor(
+    Array.from(userIds).map(userId => ({ ...notificationData, userId }))
+  );
 };
 
 /**
@@ -1192,16 +1316,11 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
         return [];
       }
       // Per-recipient notify so completion events can carry the right category.
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: categoryForRecipient(id)
-        });
-        if (n) out.push(n);
-      }
-      return out;
+      return createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: categoryForRecipient(id)
+      })));
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for task notification', { error: error.message });
       return [];
@@ -1221,16 +1340,13 @@ const notifyTaskChange = async (type, task, actor, excludeUserIds = [], workspac
   }
 
   if (recipientIds.size === 0) return [];
-  const out = [];
-  for (const id of Array.from(recipientIds)) {
-    const n = await createNotification({
-      ...notificationData,
-      userId: id,
-      category: categoryForRecipient(id)
-    });
-    if (n) out.push(n);
-  }
-  return out;
+  // Paralelne (createNotificationsFor = Promise.allSettled) — sekvenčný
+  // await na každého príjemcu predlžoval odpoveď tasks/contacts routes.
+  return createNotificationsFor(Array.from(recipientIds).map(id => ({
+    ...notificationData,
+    userId: id,
+    category: categoryForRecipient(id)
+  })));
 };
 
 /**
@@ -1300,15 +1416,11 @@ const notifyTaskPriorityChanged = async (task, oldPriority, newPriority, actor, 
 
       if (recipientIds.length === 0) return [];
 
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: 'general'
-        });
-        if (n) out.push(n);
-      }
+      const out = await createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: 'general'
+      })));
       logger.info('[NotificationService] Priority notif created', { count: out.length, userIds: out.map((n) => n.userId?.toString()) });
       return out;
     } catch (error) {
@@ -1465,16 +1577,11 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
         });
 
       if (recipientIds.length === 0) return [];
-      const out = [];
-      for (const id of recipientIds) {
-        const n = await createNotification({
-          ...notificationData,
-          userId: id,
-          category: categoryForRecipient(id)
-        });
-        if (n) out.push(n);
-      }
-      return out;
+      return createNotificationsFor(recipientIds.map(id => ({
+        ...notificationData,
+        userId: id,
+        category: categoryForRecipient(id)
+      })));
     } catch (error) {
       logger.error('[NotificationService] Error fetching workspace members for subtask notification', { error: error.message });
       return [];
@@ -1492,16 +1599,13 @@ const notifySubtaskChange = async (type, subtask, parentTask, actor, excludeUser
   }
 
   if (recipientIds.size === 0) return [];
-  const out = [];
-  for (const id of Array.from(recipientIds)) {
-    const n = await createNotification({
-      ...notificationData,
-      userId: id,
-      category: categoryForRecipient(id)
-    });
-    if (n) out.push(n);
-  }
-  return out;
+  // Paralelne (createNotificationsFor = Promise.allSettled) — sekvenčný
+  // await na každého príjemcu predlžoval odpoveď tasks/contacts routes.
+  return createNotificationsFor(Array.from(recipientIds).map(id => ({
+    ...notificationData,
+    userId: id,
+    category: categoryForRecipient(id)
+  })));
 };
 
 /**
@@ -1586,6 +1690,7 @@ const resetMetrics = () => {
 
 module.exports = {
   initialize,
+  closeApnsSessions,
   createNotification,
   notifyUsers,
   notifyTaskPriorityChanged,

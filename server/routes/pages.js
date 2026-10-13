@@ -20,8 +20,18 @@ const isValidObjectId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
 // GET /api/pages — list all pages in the active workspace
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const pages = await Page.find({ workspaceId: req.workspaceId }).sort({ updatedAt: -1 });
-    res.json(pages);
+    // Zoznam/strom potrebuje len metadáta — `content` (až 500 000 znakov na
+    // stránku) sa do zoznamu neposiela; plný obsah vracia GET /:id. Projekcia
+    // + lean() využije index { workspaceId, updatedAt }. `id` dopĺňame ručne,
+    // lebo lean() obchádza toJSON transform modelu (Page.js).
+    const pages = await Page.find(
+      { workspaceId: req.workspaceId },
+      'title icon parentId userId workspaceId createdAt updatedAt'
+    )
+      .sort({ updatedAt: -1 })
+      .limit(1000)
+      .lean();
+    res.json(pages.map(p => ({ ...p, id: p._id.toString() })));
   } catch (error) {
     logger.error('GET /pages error', { error: error.message, userId: req.user.id, workspaceId: req.workspaceId });
     res.status(500).json({ message: 'Chyba servera' });
@@ -48,10 +58,27 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   }
 });
 
+const PAGE_TITLE_MAX = 500;
+const PAGE_CONTENT_MAX = 500000;
+const pageTooLarge = (title, content) => {
+  if (title != null && String(title).length > PAGE_TITLE_MAX) {
+    return { message: `Názov stránky môže mať najviac ${PAGE_TITLE_MAX} znakov`, code: 'CONTENT_TOO_LARGE' };
+  }
+  if (content != null && String(content).length > PAGE_CONTENT_MAX) {
+    return { message: 'Obsah stránky je príliš dlhý', code: 'CONTENT_TOO_LARGE' };
+  }
+  return null;
+};
+
 // POST /api/pages — create a page in the active workspace
 router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { title, icon, parentId, content } = req.body;
+
+    // Príliš dlhý obsah/názov odmietneme (413) namiesto tichého orezania —
+    // substring bez chyby = strata dát, o ktorej sa používateľ nedozvie.
+    const tooLarge = pageTooLarge(title, content);
+    if (tooLarge) return res.status(413).json(tooLarge);
 
     if (parentId) {
       if (!isValidObjectId(parentId)) {
@@ -69,7 +96,9 @@ router.post('/', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId,
       userId: req.user.id,
       title: title ? String(title).substring(0, 500) : 'Untitled',
-      icon: icon || null,
+      // Ikona je emoji/krátky reťazec — objekt by spadol na CastError → 500,
+      // dĺžka nemá limit v schéme.
+      icon: (typeof icon === 'string' && icon.length <= 64) ? icon : null,
       parentId: parentId || null,
       content: content ? String(content).substring(0, 500000) : ''
     });
@@ -103,8 +132,16 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     const { title, icon, content, parentId } = req.body;
 
+    const tooLarge = pageTooLarge(title, content);
+    if (tooLarge) return res.status(413).json(tooLarge);
+
     if (title !== undefined) page.title = String(title).substring(0, 500);
-    if (icon !== undefined) page.icon = icon;
+    if (icon !== undefined) {
+      if (icon !== null && (typeof icon !== 'string' || icon.length > 64)) {
+        return res.status(400).json({ message: 'Neplatná ikona' });
+      }
+      page.icon = icon;
+    }
     if (content !== undefined) page.content = String(content).substring(0, 500000);
     if (parentId !== undefined) {
       if (parentId === null) {
@@ -113,10 +150,30 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         if (!isValidObjectId(parentId)) {
           return res.status(400).json({ message: 'Neplatné ID rodičovskej stránky' });
         }
+        if (String(parentId).toLowerCase() === req.params.id.toLowerCase()) {
+          return res.status(400).json({ message: 'Stránka nemôže byť sama sebe rodičom' });
+        }
         // Reparent must stay inside the same workspace.
-        const parentPage = await Page.findOne({ _id: parentId, workspaceId: req.workspaceId });
+        const parentPage = await Page.findOne(
+          { _id: parentId, workspaceId: req.workspaceId },
+          'parentId'
+        ).lean();
         if (!parentPage) {
           return res.status(404).json({ message: 'Rodičovská stránka nenájdená' });
+        }
+        // Cyklus: nový rodič nesmie byť potomkom presúvanej stránky — inak sa
+        // podstrom odpojí od koreňa a DELETE sa spolieha len na maxDepth brzdu.
+        // Prechádzame reťaz predkov nového rodiča (max 50 krokov ako v DELETE).
+        let ancestorId = parentPage.parentId;
+        for (let depth = 0; depth < 50 && ancestorId; depth++) {
+          if (ancestorId.toString() === req.params.id.toLowerCase()) {
+            return res.status(400).json({ message: 'Stránku nemožno presunúť pod vlastného potomka' });
+          }
+          const ancestor = await Page.findOne(
+            { _id: ancestorId, workspaceId: req.workspaceId },
+            'parentId'
+          ).lean();
+          ancestorId = ancestor?.parentId || null;
         }
         page.parentId = parentId;
       }

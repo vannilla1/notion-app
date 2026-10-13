@@ -107,7 +107,7 @@ describe('/api/workspaces route', () => {
       expect(res.body.role).toBe('owner');
       expect(res.body.inviteCode).toBeDefined();
       // inviteCode format (viď Workspace.generateInviteCode)
-      expect(res.body.inviteCode).toMatch(/^[A-Z0-9]{8}$/);
+      expect(res.body.inviteCode).toMatch(/^[A-F0-9]{12}$/);
 
       // Owner membership bol vytvorený
       const memberships = await WorkspaceMember.find({
@@ -483,7 +483,7 @@ describe('/api/workspaces route', () => {
         .set(authHeader(ownerCtx.token));
 
       expect(res.status).toBe(200);
-      expect(res.body.inviteCode).toMatch(/^[A-Z0-9]{8}$/);
+      expect(res.body.inviteCode).toMatch(/^[A-F0-9]{12}$/);
       expect(res.body.inviteCode).not.toBe(before.inviteCode);
     });
   });

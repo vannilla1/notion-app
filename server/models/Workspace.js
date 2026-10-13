@@ -38,7 +38,10 @@ const workspaceSchema = new mongoose.Schema({
   // Settings
   settings: {
     allowMemberInvites: { type: Boolean, default: false }, // Can members invite others?
-    defaultMemberRole: { type: String, enum: ['member', 'admin'], default: 'member' }
+    // WorkspaceMember.role pozná len owner/manager/member. 'admin' ostáva v
+    // enum-e len kvôli legacy dokumentom (inak by save() takého workspace
+    // padol na ValidationError) — join ho mapuje na 'member'.
+    defaultMemberRole: { type: String, enum: ['member', 'manager', 'admin'], default: 'member' }
   },
   // Extra paid seats beyond the 2 included in Pro plan
   paidSeats: {
@@ -69,6 +72,9 @@ workspaceSchema.statics.generateSlug = async function(name) {
     .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+  // Názov len z cyriliky/emoji/symbolov → prázdny slug by padol na
+  // required validácii (500). Fallback s náhodným suffixom.
+  if (!slug) slug = 'ws-' + crypto.randomBytes(3).toString('hex');
 
   // Check if slug exists and add number if needed
   let finalSlug = slug;
@@ -81,9 +87,11 @@ workspaceSchema.statics.generateSlug = async function(name) {
   return finalSlug;
 };
 
-// Generate invite code
+// Generate invite code — 12 hex znakov = 48 bitov entropie (predtým 8 znakov
+// = 32 bitov, pri 100 req/min brute-force reálne dosiahnuteľné). Existujúce
+// 8-znakové kódy ostávajú platné; /join má navyše vlastný rate limit.
 workspaceSchema.statics.generateInviteCode = function() {
-  return crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 character code
+  return crypto.randomBytes(6).toString('hex').toUpperCase();
 };
 
 // Indexes (slug and inviteCode already indexed via unique: true in schema)

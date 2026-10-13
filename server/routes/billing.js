@@ -1,6 +1,9 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-11-20.acacia' });
+// Zdieľaný lazy klient (services/stripeClient): 15 s timeout + 2 sieťové
+// retry; modul sa dá načítať aj bez STRIPE_SECRET_KEY.
+const { stripe } = require('../services/stripeClient');
 const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const { authenticateToken } = require('../middleware/auth');
@@ -57,10 +60,34 @@ const getOrCreateCustomer = async (user) => {
     metadata: { userId: user._id.toString() }
   });
 
-  user.subscription = user.subscription || {};
-  user.subscription.stripeCustomerId = customer.id;
-  await user.save();
+  // Atomický zápis len ak customer ID ešte nikto nenastavil — dva paralelné
+  // /checkout (dvojklik, dve karty) by inak vytvorili 2 Stripe zákazníkov
+  // a posledný save() by ten prvý osirelo prepísal.
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      $or: [
+        { 'subscription.stripeCustomerId': null },
+        { 'subscription.stripeCustomerId': { $exists: false } }
+      ]
+    },
+    { $set: { 'subscription.stripeCustomerId': customer.id } },
+    { new: true, projection: { 'subscription.stripeCustomerId': 1 } }
+  );
 
+  if (!updated) {
+    // Iný request vyhral — náš práve vytvorený zákazník je zbytočný.
+    const winner = await User.findById(user._id).select('subscription.stripeCustomerId').lean();
+    const winnerId = winner?.subscription?.stripeCustomerId;
+    if (!winnerId) throw new Error('User not found while assigning Stripe customer');
+    stripe.customers.del(customer.id).catch((err) => {
+      logger.warn('[Billing] Failed to delete duplicate Stripe customer', { error: err.message, customerId: customer.id });
+    });
+    if (user.subscription) user.subscription.stripeCustomerId = winnerId;
+    return winnerId;
+  }
+
+  if (user.subscription) user.subscription.stripeCustomerId = customer.id;
   return customer.id;
 };
 
@@ -71,6 +98,12 @@ const isStripeConfigured = () => {
 };
 
 // ===== Routes =====
+
+// Adresa webu pre Stripe návratové URL. CORS_ORIGIN môže byť po novom
+// zoznam oddelený čiarkou (server/index.js) — celý reťazec by dal Stripe
+// neplatnú URL a každý checkout/portál by skončil chybou 500.
+const appOrigin = () => String(process.env.CORS_ORIGIN || process.env.CLIENT_URL || 'https://prplcrm.eu')
+  .split(',')[0].trim().replace(/\/+$/, '');
 
 // Get billing status
 router.get('/status', authenticateToken, async (req, res) => {
@@ -209,7 +242,12 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       return res.status(503).json({ message: 'Billing not configured' });
     }
 
-    const { plan, period, promoCode: promoCodeStr } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
+    const { plan, period } = req.body; // plan: 'team'|'pro', period: 'monthly'|'yearly'
+    // Promo kód len ako krátky string — pole/objekt by spadol na
+    // .toUpperCase() (500) namiesto toho, aby sa ticho ignoroval.
+    const promoCodeStr = typeof req.body.promoCode === 'string' && req.body.promoCode.length <= 64
+      ? req.body.promoCode.trim()
+      : null;
 
     if (!['team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
@@ -224,17 +262,22 @@ router.post('/checkout', authenticateToken, async (req, res) => {
     }
 
     const user = await User.findById(req.user.id);
-    const customerId = await getOrCreateCustomer(user);
+    if (!user) {
+      return res.status(404).json({ message: 'Používateľ nenájdený' });
+    }
 
-    // If user already has an active subscription, use Stripe billing portal instead
+    // If user already has an active subscription, use Stripe billing portal instead.
+    // Kontrola PRED Apple guardom: kto platí cez Stripe aj cez Apple (dvojitá
+    // platba), musí sa vedieť dostať do portálu a Stripe predplatné zrušiť.
     if (user.subscription?.stripeSubscriptionId) {
       try {
         const stripeSub = await stripe.subscriptions.retrieve(user.subscription.stripeSubscriptionId);
         if (['active', 'trialing', 'past_due'].includes(stripeSub.status)) {
           // Redirect to billing portal for plan change
+          const portalCustomerId = await getOrCreateCustomer(user);
           const portalSession = await stripe.billingPortal.sessions.create({
-            customer: customerId,
-            return_url: `${process.env.CORS_ORIGIN}/app/billing`
+            customer: portalCustomerId,
+            return_url: `${appOrigin()}/app/billing`
           });
           return res.json({ url: portalSession.url, type: 'portal' });
         }
@@ -243,6 +286,19 @@ router.post('/checkout', authenticateToken, async (req, res) => {
         logger.warn('[Billing] Existing subscription check failed', { error: err.message });
       }
     }
+
+    // Double-billing guard: aktívny plán platený cez Apple IAP sa mení len
+    // v iOS Nastaveniach. Stripe checkout by vytvoril druhé predplatné a
+    // updateUserSubscription by prepísal source na 'stripe', kým Apple
+    // ďalej obnovuje to pôvodné.
+    if (user.subscription?.source === 'apple' && user.subscription?.plan && user.subscription.plan !== 'free') {
+      return res.status(409).json({
+        message: 'Predplatné je spravované cez App Store. Zmeňte ho v nastaveniach iOS (Apple ID → Predplatné).',
+        code: 'APPLE_MANAGED'
+      });
+    }
+
+    const customerId = await getOrCreateCustomer(user);
 
     // Build checkout session options
     const checkoutOptions = {
@@ -253,8 +309,8 @@ router.post('/checkout', authenticateToken, async (req, res) => {
         price: priceId,
         quantity: 1
       }],
-      success_url: `${process.env.CORS_ORIGIN}/app/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CORS_ORIGIN}/app/billing?canceled=true`,
+      success_url: `${appOrigin()}/app/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appOrigin()}/app/billing?canceled=true`,
       metadata: {
         userId: user._id.toString(),
         plan,
@@ -269,7 +325,10 @@ router.post('/checkout', authenticateToken, async (req, res) => {
       billing_address_collection: 'auto'
     };
 
-    // If user provided a promo code, attach Stripe promotion code
+    // If user provided a promo code, attach Stripe promotion code.
+    // Použitie kódu (usedCount/redemptions) sa NEzapisuje tu, ale až vo
+    // webhooku checkout.session.completed — opustený checkout (zavretá
+    // Stripe stránka) by inak kód s maxUsesPerUser=1 navždy „spotreboval“.
     let appliedPromoCode = null;
     if (promoCodeStr) {
       const promoDoc = await PromoCode.findOne({ code: promoCodeStr.toUpperCase() });
@@ -295,15 +354,7 @@ router.post('/checkout', authenticateToken, async (req, res) => {
 
     const session = await stripe.checkout.sessions.create(checkoutOptions);
 
-    // Record promo code usage after successful session creation
     if (appliedPromoCode) {
-      appliedPromoCode.usedCount += 1;
-      appliedPromoCode.redemptions.push({
-        userId: user._id,
-        plan,
-        period
-      });
-      await appliedPromoCode.save();
       logger.info('[Billing] Promo code applied to checkout', {
         code: appliedPromoCode.code,
         userId: user._id.toString(),
@@ -346,7 +397,7 @@ router.post('/portal', authenticateToken, async (req, res) => {
 
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: user.subscription.stripeCustomerId,
-      return_url: `${process.env.CORS_ORIGIN}/app/billing`
+      return_url: `${appOrigin()}/app/billing`
     });
 
     res.json({ url: portalSession.url });
@@ -359,9 +410,15 @@ router.post('/portal', authenticateToken, async (req, res) => {
 // Verify checkout session (called after redirect from Stripe)
 router.get('/verify-session/:sessionId', authenticateToken, async (req, res) => {
   try {
+    if (!isStripeConfigured()) {
+      return res.status(503).json({ message: 'Billing not configured' });
+    }
+
     const session = await stripe.checkout.sessions.retrieve(req.params.sessionId);
 
-    if (session.metadata?.userId !== req.user.id) {
+    // req.user.id je pri Redis cache hite string, pri miss/bez Redis
+    // ObjectId — striktné !== by vlastníkovi session vrátilo 403.
+    if (String(session.metadata?.userId || '') !== String(req.user.id)) {
       return res.status(403).json({ message: 'Neplatná session' });
     }
 
@@ -372,6 +429,9 @@ router.get('/verify-session/:sessionId', authenticateToken, async (req, res) => 
       period: session.metadata?.period
     });
   } catch (error) {
+    if (error.statusCode === 404 || error.code === 'resource_missing') {
+      return res.status(404).json({ message: 'Session neexistuje' });
+    }
     logger.error('[Billing] Verify session error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
   }
@@ -430,7 +490,7 @@ router.post('/validate-promo', authenticateToken, async (req, res) => {
   try {
     const { code, plan, period } = req.body;
 
-    if (!code) {
+    if (!code || typeof code !== 'string' || code.length > 64) {
       return res.status(400).json({ message: 'Zadajte promo kód' });
     }
 
@@ -560,16 +620,67 @@ module.exports.handleWebhook = async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    // Billing-critical — broken subscription/payment sync. Vraciame 200 (aby
-    // Stripe neretryoval donekonečna), ale chybu MUSÍME vidieť v Diagnostike.
+    // Billing-critical — broken subscription/payment sync, chybu MUSÍME
+    // vidieť v Diagnostike.
+    const transient = isTransientWebhookError(error);
     error.name = error.name === 'Error' ? 'StripeWebhookProcessingError' : error.name;
     recordError(error, req).catch(() => {});
-    // Return 200 to prevent Stripe from retrying (we logged the error)
-    res.json({ received: true, error: error.message });
+    if (transient) {
+      // Prechodná chyba (výpadok DB, timeout Stripe API) — 500, aby Stripe
+      // event zopakoval (exponenciálny backoff, max ~3 dni). Handlery sú
+      // idempotentné (paidUntil zo Stripe dát, unique stripeInvoiceId,
+      // redemptions.sessionId), takže retry je bezpečný.
+      return res.status(500).json({ received: false });
+    }
+    // Logická chyba v dátach — retry by dopadol rovnako, preto 200. Telo
+    // bez error.message (vidí ho Stripe Dashboard).
+    res.json({ received: true });
   }
 };
 
+/**
+ * Chyby, pri ktorých má zmysel, aby Stripe webhook zopakoval:
+ * sieť/výpadok MongoDB, Stripe API 5xx/429/sieť, timeouty.
+ */
+function isTransientWebhookError(error) {
+  if (!error) return false;
+  if (error.transient === true) return true;
+  const name = error.name || '';
+  if (/^Mongo(Network|ServerSelection|NotConnected|Pool|WaitQueue)/.test(name)) return true;
+  if (name === 'MongoServerError' && Array.isArray(error.errorLabels) && error.errorLabels.includes('RetryableWriteError')) return true;
+  if (typeof error.hasErrorLabel === 'function' && (error.hasErrorLabel('TransientTransactionError') || error.hasErrorLabel('RetryableWriteError'))) return true;
+  if (['StripeConnectionError', 'StripeAPIError', 'StripeRateLimitError'].includes(error.type)) return true;
+  if (error.statusCode === 429 || (error.statusCode >= 500 && error.statusCode < 600)) return true;
+  if (['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN'].includes(error.code)) return true;
+  if (/buffering timed out|topology.*(closed|destroyed)|connection.*closed/i.test(error.message || '')) return true;
+  return false;
+}
+
 // ===== Webhook handlers =====
+
+// Objekty v event.data.object sa renderujú podľa API verzie webhook
+// endpointu v Stripe Dashboarde, nie podľa apiVersion SDK. Od verzie
+// 2025-03-31.basil sa current_period_end presunul do items.data[] a
+// invoice.subscription do invoice.parent.subscription_details — čítame
+// preto oba tvary a pri chýbajúcej hodnote paidUntil nemeníme.
+const getPeriodEnd = (sub) => {
+  const ts = sub?.current_period_end ?? sub?.items?.data?.[0]?.current_period_end;
+  return Number.isFinite(ts) ? new Date(ts * 1000) : null;
+};
+
+const getInvoiceSubscriptionId = (invoice) => {
+  const ref = invoice?.subscription ?? invoice?.parent?.subscription_details?.subscription;
+  if (!ref) return null;
+  return typeof ref === 'string' ? ref : ref.id || null;
+};
+
+const getSubscriptionDiscount = (sub) => {
+  const d = sub?.discount ?? sub?.discounts?.[0] ?? null;
+  // Pri novších API verziách je discounts[] len zoznam ID (bez expand).
+  return d && typeof d === 'object' ? d : null;
+};
+
+const STRIPE_ACCESS_STATUSES = ['active', 'trialing', 'past_due'];
 
 async function handleCheckoutCompleted(session) {
   const userId = session.metadata?.userId;
@@ -588,20 +699,27 @@ async function handleCheckoutCompleted(session) {
   if (!subscriptionId) return;
 
   const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-  const priceId = stripeSub.items.data[0]?.price?.id;
+  const priceId = stripeSub.items?.data?.[0]?.price?.id;
   const plan = session.metadata?.plan || getPlanByPriceId(priceId);
   const period = session.metadata?.period || getBillingPeriod(priceId);
+  const paidUntil = getPeriodEnd(stripeSub);
 
-  user.subscription = {
-    ...user.subscription.toObject(),
-    plan: plan || user.subscription.plan,
-    stripeCustomerId: session.customer,
-    stripeSubscriptionId: subscriptionId,
-    stripePriceId: priceId,
-    billingPeriod: period,
-    paidUntil: new Date(stripeSub.current_period_end * 1000),
-    cancelAtPeriodEnd: stripeSub.cancel_at_period_end
-  };
+  // Jednotlivé polia namiesto priradenia celého objektu — save() potom
+  // pošle $set len na zmenené cesty a neprepíše paralelné zápisy iných
+  // pod-polí (notifications.*, apple*, discount) starým stavom.
+  const sub = user.subscription;
+  sub.plan = plan || sub.plan;
+  sub.source = 'stripe';
+  sub.stripeCustomerId = session.customer;
+  sub.stripeSubscriptionId = subscriptionId;
+  sub.stripePriceId = priceId || sub.stripePriceId;
+  sub.billingPeriod = period || sub.billingPeriod;
+  if (paidUntil) sub.paidUntil = paidUntil;
+  sub.cancelAtPeriodEnd = !!stripeSub.cancel_at_period_end;
+  // Prípadný predošlý Apple plán už nie je aktívny zdroj (checkout je pri
+  // aktívnom Apple pláne blokovaný) — appleOriginalTransactionId ostáva,
+  // aby sa neskoršie Apple notifikácie vedeli spárovať.
+  sub.appleProductId = null;
 
   await user.save();
   logger.info('[Stripe Webhook] Checkout completed — plan activated', {
@@ -610,6 +728,34 @@ async function handleCheckoutCompleted(session) {
     period,
     paidUntil: user.subscription.paidUntil
   });
+
+  await recordPromoRedemption(session, user._id, plan, period);
+}
+
+/**
+ * Započíta použitie nášho promo kódu až po dokončenom checkoute.
+ * Atomický $inc + $push (žiadny lost update pri paralelných platbách) a
+ * idempotentný cez `redemptions.sessionId` — Stripe retry toho istého
+ * eventu použitie nezapočíta druhýkrát.
+ */
+async function recordPromoRedemption(session, userId, plan, period) {
+  const promoCodeId = session.metadata?.promoCodeId;
+  if (!promoCodeId || !mongoose.Types.ObjectId.isValid(promoCodeId)) return;
+
+  const result = await PromoCode.updateOne(
+    { _id: promoCodeId, 'redemptions.sessionId': { $ne: session.id } },
+    {
+      $inc: { usedCount: 1 },
+      $push: { redemptions: { userId, plan, period, sessionId: session.id } }
+    }
+  );
+  if (result.modifiedCount > 0) {
+    logger.info('[Billing] Promo code redemption recorded', {
+      promoCodeId,
+      userId: String(userId),
+      sessionId: session.id
+    });
+  }
 }
 
 async function handleSubscriptionUpdated(subscription) {
@@ -621,38 +767,68 @@ async function handleSubscriptionUpdated(subscription) {
       logger.warn('[Stripe Webhook] No user found for subscription', { subscriptionId: subscription.id });
       return;
     }
+    // Zákazník môže mať v Stripe viac predplatných (staré incomplete/
+    // canceled z nedokončeného 3DS, druhé cez portál) a Stripe negarantuje
+    // poradie eventov. Oneskorený event STARÉHO neaktívneho predplatného
+    // nesmie downgradnuť používateľa s iným aktuálnym predplatným.
+    const currentId = byCustomer.subscription?.stripeSubscriptionId;
+    if (currentId && currentId !== subscription.id && !STRIPE_ACCESS_STATUSES.includes(subscription.status)) {
+      logger.info('[Stripe Webhook] Ignoring event for non-current subscription', {
+        userId: byCustomer._id.toString(),
+        subscriptionId: subscription.id,
+        status: subscription.status
+      });
+      return;
+    }
     return updateUserSubscription(byCustomer, subscription);
   }
   return updateUserSubscription(user, subscription);
 }
 
 async function updateUserSubscription(user, subscription) {
-  const priceId = subscription.items.data[0]?.price?.id;
+  const priceId = subscription.items?.data?.[0]?.price?.id;
   const plan = getPlanByPriceId(priceId);
   const period = getBillingPeriod(priceId);
+  const sub = user.subscription;
+  const prevPlan = sub.plan;
 
-  const isActive = ['active', 'trialing'].includes(subscription.status);
+  // past_due: Stripe ešte opakuje platbu (Smart Retries) — prístup aj
+  // source ponechávame; finálny downgrade príde cez subscription.deleted.
+  const keepsAccess = STRIPE_ACCESS_STATUSES.includes(subscription.status);
 
-  user.subscription = {
-    ...user.subscription.toObject(),
-    stripeSubscriptionId: subscription.id,
-    stripeCustomerId: subscription.customer,
-    stripePriceId: priceId,
-    // source='stripe' keď je plán aktívny cez Stripe. Pri downgrade na free
-    // (isActive=false) nastavíme null. Bráni to konfliktu s 'apple' source.
-    source: isActive ? 'stripe' : null,
-    plan: isActive ? (plan || user.subscription.plan) : 'free',
-    billingPeriod: period || user.subscription.billingPeriod,
-    paidUntil: new Date(subscription.current_period_end * 1000),
-    cancelAtPeriodEnd: subscription.cancel_at_period_end
-  };
+  // Neaktívne Stripe predplatné nesmie zrušiť aktívny Apple plán
+  // (používateľ prešiel zo Stripe na App Store).
+  if (!keepsAccess && sub.source === 'apple' && prevPlan !== 'free') {
+    logger.info('[Stripe Webhook] Inactive Stripe subscription for Apple-managed user — plan untouched', {
+      userId: user._id.toString(),
+      subscriptionId: subscription.id,
+      status: subscription.status
+    });
+    if (sub.stripeSubscriptionId === subscription.id) {
+      sub.stripeSubscriptionId = null;
+      sub.stripePriceId = null;
+      await user.save();
+    }
+    return;
+  }
 
-  // If subscription is past_due, keep the plan but log warning
+  const paidUntil = getPeriodEnd(subscription);
+
+  // Jednotlivé polia (nie celý objekt) — viď handleCheckoutCompleted.
+  sub.stripeSubscriptionId = subscription.id;
+  sub.stripeCustomerId = subscription.customer;
+  sub.stripePriceId = priceId || sub.stripePriceId;
+  sub.source = keepsAccess ? 'stripe' : null;
+  sub.plan = keepsAccess ? (plan || prevPlan) : 'free';
+  sub.billingPeriod = period || sub.billingPeriod;
+  if (paidUntil) sub.paidUntil = paidUntil;
+  sub.cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
+
   if (subscription.status === 'past_due') {
-    user.subscription.plan = plan || user.subscription.plan;
     logger.warn('[Stripe Webhook] Subscription past due', {
       userId: user._id.toString(),
-      subscriptionId: subscription.id
+      subscriptionId: subscription.id,
+      planMapped: !!plan
     });
   }
 
@@ -672,13 +848,28 @@ async function handleSubscriptionDeleted(subscription) {
     return;
   }
 
-  // Downgrade to free
-  user.subscription.plan = 'free';
-  user.subscription.stripeSubscriptionId = null;
-  user.subscription.stripePriceId = null;
-  user.subscription.billingPeriod = null;
-  user.subscription.cancelAtPeriodEnd = false;
+  const sub = user.subscription;
+  sub.stripeSubscriptionId = null;
+  sub.stripePriceId = null;
   // Keep stripeCustomerId for future use
+
+  if (sub.source === 'apple' && sub.plan !== 'free') {
+    // Aktívny plán už spravuje App Store — Stripe zmazanie ho nerušíme.
+    await user.save();
+    logger.info('[Stripe Webhook] Stripe subscription deleted, Apple plan kept', {
+      userId: user._id.toString(),
+      subscriptionId: subscription.id
+    });
+    return;
+  }
+
+  // Downgrade to free — source/paidUntil vyčistíme, inak by /status
+  // hlásil `source: 'stripe'` so starým paidUntil pri free pláne.
+  sub.plan = 'free';
+  sub.source = null;
+  sub.paidUntil = null;
+  sub.billingPeriod = null;
+  sub.cancelAtPeriodEnd = false;
 
   await user.save();
   logger.info('[Stripe Webhook] Subscription deleted — downgraded to free', {
@@ -688,14 +879,21 @@ async function handleSubscriptionDeleted(subscription) {
 }
 
 async function handleInvoicePaid(invoice) {
-  if (!invoice.subscription) return;
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  if (!subscriptionId) return;
 
   const user = await User.findOne({ 'subscription.stripeCustomerId': invoice.customer });
   if (!user) return;
 
-  const stripeSub = await stripe.subscriptions.retrieve(invoice.subscription);
-  user.subscription.paidUntil = new Date(stripeSub.current_period_end * 1000);
-  await user.save();
+  const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
+  const paidUntil = getPeriodEnd(stripeSub);
+  // paidUntil posúvame len pre aktuálne predplatné používateľa (alebo keď
+  // ešte žiadne nemá uložené — checkout event môže prísť neskôr).
+  const currentId = user.subscription.stripeSubscriptionId;
+  if (paidUntil && (!currentId || currentId === subscriptionId)) {
+    user.subscription.paidUntil = paidUntil;
+    await user.save();
+  }
 
   logger.info('[Stripe Webhook] Invoice paid — paidUntil updated', {
     userId: user._id.toString(),
@@ -726,10 +924,11 @@ async function createCommissionIfReferred(invoice, stripeSub, payer) {
   // (formát 'promo_...'), alebo subscription.discount.coupon.id ('coupon_...').
   // Promotion code je high-level wrapper okolo Couponu — preferujeme ho lebo
   // promotion code je customer-facing 'JOHN10' string, coupon je vnútorný.
-  const discount = stripeSub.discount;
+  const discount = getSubscriptionDiscount(stripeSub);
   if (!discount) return; // žiadny kód aplikovaný → žiadna provízia
 
-  const promotionCodeId = discount.promotion_code || discount.coupon?.id;
+  const couponRef = discount.coupon ?? discount.source?.coupon;
+  const promotionCodeId = discount.promotion_code || (typeof couponRef === 'string' ? couponRef : couponRef?.id);
   if (!promotionCodeId) return;
 
   // Lookup nášho PromoCode podľa Stripe promotion code / coupon ID
@@ -780,7 +979,7 @@ async function createCommissionIfReferred(invoice, stripeSub, payer) {
       referrerId: promo.referrerId,
       referredUserId: payer._id,
       stripeInvoiceId: invoice.id,
-      stripeSubscriptionId: invoice.subscription,
+      stripeSubscriptionId: getInvoiceSubscriptionId(invoice),
       paymentAmount,
       commissionAmount,
       commissionPercent: promo.commissionPercent,
@@ -837,12 +1036,70 @@ async function handleChargeRefunded(charge) {
 
   if (commission.status === 'revoked') return; // už revoked
 
-  commission.status = 'revoked';
-  commission.notes = (commission.notes || '') + `\n[${new Date().toISOString()}] Auto-revoked: Stripe charge ${charge.id} refunded`;
-  await commission.save();
-  logger.info('[Affiliate] Commission revoked due to refund', {
+  // charge.refunded event chodí aj pri čiastočnom refunde (amount_refunded
+  // < amount, charge.refunded=false). Vtedy províziu len prepočítame zo
+  // zostávajúcej sumy; úplne revokujeme iba pri plnom refunde.
+  // amount_refunded je kumulatívne → výpočet je idempotentný.
+  const amount = charge.amount || 0;
+  const refunded = charge.amount_refunded || 0;
+  const fullRefund = charge.refunded === true || (amount > 0 && refunded >= amount);
+  const prevStatus = commission.status;
+  const prevAmount = commission.commissionAmount || 0;
+  const stamp = new Date().toISOString();
+
+  let update;
+  let delta; // o koľko klesne zárobok affiliate partnera
+  if (fullRefund) {
+    delta = prevAmount;
+    update = {
+      $set: {
+        status: 'revoked',
+        notes: (commission.notes || '') + `\n[${stamp}] Auto-revoked: Stripe charge ${charge.id} refunded`
+      }
+    };
+  } else {
+    const remaining = Math.max(0, amount - refunded) / 100;
+    const newAmount = Math.round(remaining * ((commission.commissionPercent || 0) / 100) * 100) / 100;
+    if (newAmount >= prevAmount) return; // už prepočítané (retry eventu)
+    delta = Math.round((prevAmount - newAmount) * 100) / 100;
+    update = {
+      $set: {
+        commissionAmount: newAmount,
+        notes: (commission.notes || '') + `\n[${stamp}] Partial refund ${refunded / 100} € (charge ${charge.id}): ${prevAmount} → ${newAmount} €`
+      }
+    };
+  }
+
+  // Guard na pôvodný stav — commissionScheduler môže medzitým prepnúť
+  // pending → eligible; v tom prípade by sme counter neopravili.
+  const applied = await Commission.findOneAndUpdate(
+    { _id: commission._id, status: prevStatus, commissionAmount: prevAmount },
+    update,
+    { new: true }
+  );
+  if (!applied) {
+    logger.warn('[Affiliate] Commission changed concurrently during refund — will be retried by Stripe', {
+      commissionId: commission._id.toString()
+    });
+    const err = new Error('Commission changed concurrently');
+    err.transient = true; // webhook vráti 500 a Stripe event zopakuje
+    throw err;
+  }
+
+  // Eligible provízia už bola pripočítaná do User.affiliate.totalEarnedEur.
+  if (prevStatus === 'eligible' && delta > 0) {
+    await User.updateOne(
+      { _id: commission.referrerId },
+      { $inc: { 'affiliate.totalEarnedEur': -delta } }
+    );
+  }
+
+  logger.info(fullRefund ? '[Affiliate] Commission revoked due to refund' : '[Affiliate] Commission reduced due to partial refund', {
     commissionId: commission._id.toString(),
-    chargeId: charge.id
+    chargeId: charge.id,
+    previousAmount: prevAmount,
+    newAmount: applied.commissionAmount,
+    status: applied.status
   });
 }
 

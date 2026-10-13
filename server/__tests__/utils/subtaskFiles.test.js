@@ -1,4 +1,4 @@
-const { withServerSubtaskFiles } = require('../../utils/subtaskFiles');
+const { withServerSubtaskFiles, countSubtaskNodes } = require('../../utils/subtaskFiles');
 
 /**
  * PUT úlohy nesmie prevziať files[] podúloh z tela požiadavky — inak sa dá
@@ -58,4 +58,90 @@ describe('withServerSubtaskFiles', () => {
     expect(withServerSubtaskFiles([], existing)).toEqual([]);
     expect(withServerSubtaskFiles([{ id: 's1' }], undefined)[0].files).toEqual([]);
   });
+
+  it('stav pripomienok, copiedFrom a createdAt berie zo servera; pri zmene termínu ich vynuluje', () => {
+    const server = [{
+      id: 'r1', title: 'R', dueDate: '2026-10-10', dueTime: '10:00',
+      reminderSent: true, timeRemindersSent: [15], createdAt: '2026-01-01T00:00:00.000Z',
+      copiedFrom: { contactId: 'c1', taskId: 't1' }
+    }];
+    const same = withServerSubtaskFiles([{ id: 'r1', title: 'R', dueDate: '2026-10-10', dueTime: '10:00', reminderSent: false, timeRemindersSent: [], createdAt: 'x', copiedFrom: { contactId: 'evil' } }], server);
+    expect(same[0].timeRemindersSent).toEqual([15]);
+    expect(same[0].createdAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(same[0].copiedFrom).toEqual({ contactId: 'c1', taskId: 't1' });
+    const moved = withServerSubtaskFiles([{ id: 'r1', title: 'R', dueDate: '2026-10-11', dueTime: '10:00' }], server);
+    expect(moved[0].timeRemindersSent).toEqual([]);
+  });
+
+  it('whitelist polí, typy a limity', () => {
+    const out = withServerSubtaskFiles([{
+      id: 'w1', title: 'x'.repeat(600), completed: 'ano', priority: 'urgent', dueTime: '25:99',
+      assignedTo: ['507f1f77bcf86cd799439011', { $ne: 1 }, 'bad'], hacked: true
+    }], []);
+    expect(out[0].title.length).toBe(500);
+    expect(out[0].completed).toBe(false);
+    expect(out[0].priority).toBeNull();
+    expect(out[0].dueTime).toBe('');
+    expect(out[0].assignedTo).toEqual(['507f1f77bcf86cd799439011']);
+    expect(out[0]).not.toHaveProperty('hacked');
+  });
+
+  it('duplicitné ID dostane nové a hĺbka stromu je obmedzená', () => {
+    const dup = withServerSubtaskFiles([{ id: 'd1' }, { id: 'd1' }], []);
+    expect(dup[0].id).toBe('d1');
+    expect(dup[1].id).not.toBe('d1');
+    let deep = { id: 'n0' };
+    let cur = deep;
+    for (let i = 1; i < 20; i++) { cur.subtasks = [{ id: `n${i}` }]; cur = cur.subtasks[0]; }
+    expect(countSubtaskNodes(withServerSubtaskFiles([deep], []))).toBe(10);
+  });
 });
+
+describe('withServerSubtaskFiles — staršie dáta sa pri uložení stromu neorežú', () => {
+  const OID_A = '64b7f0c2a1b2c3d4e5f60718';
+  it('nezmenená dlhá poznámka a staré priradenie ostanú; nová dlhá poznámka sa skráti', () => {
+    const longNotes = 'n'.repeat(15000);
+    const existing = [{ id: 's1', title: 'A', notes: longNotes, assignedTo: ['mkm', OID_A] }];
+    const keep = withServerSubtaskFiles([{ id: 's1', title: 'A', notes: longNotes, completed: true, assignedTo: ['mkm', OID_A] }], existing);
+    expect(keep[0].notes).toHaveLength(15000);
+    expect(keep[0].assignedTo).toEqual(['mkm', OID_A]);
+    expect(keep[0].completed).toBe(true);
+
+    const changed = withServerSubtaskFiles([{ id: 's1', title: 'A', notes: longNotes + 'x', assignedTo: ['other-legacy'] }], existing);
+    expect(changed[0].notes).toHaveLength(10000);
+    expect(changed[0].assignedTo).toEqual([]);
+  });
+
+  it('posun termínu vynuluje reminderSent aj lastUrgencyLevel', () => {
+    const existing = [{ id: 's1', title: 'A', dueDate: '2026-09-01', reminder: 1, reminderSent: true, lastUrgencyLevel: 'overdue' }];
+    const moved = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-10-20', reminder: 1 }], existing);
+    expect(moved[0].reminderSent).toBe(false);
+    expect(moved[0].lastUrgencyLevel).toBeNull();
+    const same = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-09-01', reminder: 1 }], existing);
+    expect(same[0].reminderSent).toBe(true);
+    expect(same[0].lastUrgencyLevel).toBe('overdue');
+  });
+
+  it('zmena len času nevynuluje úroveň ani pripomienku „X dní pred", len časové pripomienky', () => {
+    const existing = [{ id: 's1', title: 'A', dueDate: '2026-09-01', dueTime: '10:00', reminder: 1, reminderSent: true, lastUrgencyLevel: 'overdue', timeRemindersSent: [60] }];
+    const out = withServerSubtaskFiles([{ id: 's1', title: 'A', dueDate: '2026-09-01', dueTime: '14:00', reminder: 1 }], existing);
+    expect(out[0].reminderSent).toBe(true);
+    expect(out[0].lastUrgencyLevel).toBe('overdue');
+    expect(out[0].timeRemindersSent).toEqual([]);
+  });
+
+  it('nad stropom uzlov sa uložený uzol zachová najviac raz — strom sa nedá znásobiť', () => {
+    const existing = [{ id: 'R', title: 'R', subtasks: Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, title: `c${i}` })) }];
+    const incoming = [
+      ...Array.from({ length: 1000 }, () => ({})),
+      ...Array.from({ length: 5000 }, () => ({ id: 'R' }))
+    ];
+    const out = withServerSubtaskFiles(incoming, existing);
+    expect(countSubtaskNodes(out)).toBeLessThanOrEqual(1000 + 51);
+    const ids = [];
+    const walk = (n) => n.forEach(x => { ids.push(x.id); walk(x.subtasks || []); });
+    walk(out);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+

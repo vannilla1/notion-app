@@ -1,8 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, invalidateUserCache, signAuthToken } = require('../middleware/auth');
 const { adminLoginLimiter } = require('../middleware/rateLimiter');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
@@ -12,12 +11,17 @@ const Contact = require('../models/Contact');
 const logger = require('../utils/logger');
 const { escapeRegex } = require('../utils/regexHelpers');
 const Message = require('../models/Message');
+const Page = require('../models/Page');
+const Notification = require('../models/Notification');
+const Invitation = require('../models/Invitation');
 const AuditLog = require('../models/AuditLog');
 const PushSubscription = require('../models/PushSubscription');
 const APNsDevice = require('../models/APNsDevice');
 const PromoCode = require('../models/PromoCode');
 const ServerError = require('../models/ServerError');
 const auditService = require('../services/auditService');
+const { logSecurityEvent } = require('../services/securityAudit');
+const { normalizeEmail } = require('../utils/inputValidation');
 const subscriptionEmailService = require('../services/subscriptionEmailService');
 const EmailLog = require('../models/EmailLog');
 const onlineUsers = require('../services/onlineUsers');
@@ -28,6 +32,29 @@ const { deleteMessageBlobs } = require('../services/messageFiles');
 const healthMonitor = require('../jobs/healthMonitor');
 
 const router = express.Router();
+
+// ── Validácia ID vo vstupoch ──────────────────────────────────────
+// Nevalidný ObjectId v path/body skončí v Mongoose ako CastError → catch →
+// 500 „Chyba servera“, ktoré captureResponseErrors zapíše do Diagnostiky ako
+// serverovú chybu. Express `qs`/JSON parser navyše dovolí poslať objekt
+// (`{"$ne": null}`), ktorý Mongoose pre ObjectId path prepustí ako operátor —
+// preto prijímame iba 24-znakový hex reťazec.
+const isOid = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
+// Dátum z query — len neprázdny reťazec s platným dátumom, inak null.
+// `new Date('abc')` = Invalid Date by v Mongo filtri skončil CastError → 500.
+const parseDate = (v) => {
+  if (typeof v !== 'string' || !v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+};
+// { $gte, $lte } rozsah z ?from/?to, alebo null ak ani jedna hranica nie je
+// platná. `toSuffix` (napr. 'T23:59:59') posunie dátum bez času na koniec dňa.
+const dateRange = (from, to, toSuffix = '') => {
+  const f = parseDate(from);
+  const t = parseDate(typeof to === 'string' && to ? to + toSuffix : null);
+  if (!f && !t) return null;
+  return { ...(f ? { $gte: f } : {}), ...(t ? { $lte: t } : {}) };
+};
 
 // Middleware: require super admin (only support@prplcrm.eu)
 const SUPER_ADMIN_EMAIL = 'support@prplcrm.eu';
@@ -48,12 +75,23 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
       return res.status(403).json({ message: 'Prístup zamietnutý' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    // Heslo len ako string a účet musí heslo mať — bcrypt.compare s
+    // ne-stringom / null hashom hodí výnimku → 500 namiesto 401.
+    const isMatch = typeof password === 'string' && password.length <= 1024 && !!user.password &&
+      await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      // Durable stopa pokusov o super-admin login (throttled per IP)
+      logSecurityEvent('security.admin_login_failed', req, {});
+      auditService.logAction({
+        action: 'auth.login_failed', category: 'auth', email: SUPER_ADMIN_EMAIL,
+        details: { reason: 'admin_wrong_password' },
+        ipAddress: req.ip, userAgent: req.get('user-agent')
+      });
       return res.status(401).json({ message: 'Nesprávne heslo' });
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '4h' });
+    // signAuthToken pridá `tv` — zmena hesla super-admina zneplatní aj admin reláciu.
+    const token = signAuthToken(user, '4h');
 
     logger.info('Admin login', { userId: user._id });
     res.json({ token, user: { id: user._id, email: user.email, username: user.username } });
@@ -218,24 +256,29 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     if (role && ['admin', 'manager', 'user'].includes(role)) {
       filter.role = role;
     }
+    // Viacero $or podmienok (hasStripe=false + search) kombinujeme cez $and —
+    // druhé priradenie `filter.$or = …` predtým potichu prepísalo prvé, takže
+    // pri hľadaní sa filter „bez Stripe predplatného“ stratil.
+    const andConds = [];
     if (hasStripe === 'true') {
       filter['subscription.stripeSubscriptionId'] = { $exists: true, $ne: null };
     } else if (hasStripe === 'false') {
-      filter.$or = [
+      andConds.push({ $or: [
         { 'subscription.stripeSubscriptionId': { $exists: false } },
         { 'subscription.stripeSubscriptionId': null }
-      ];
+      ] });
     }
     if (hasDiscount === 'true') {
       filter['subscription.discount.type'] = { $exists: true, $ne: null };
     }
-    if (search && search.trim()) {
-      const safe = escapeRegex(String(search).slice(0, 100));
-      filter.$or = [
+    if (typeof search === 'string' && search.trim()) {
+      const safe = escapeRegex(search.slice(0, 100));
+      andConds.push({ $or: [
         { username: { $regex: safe, $options: 'i' } },
         { email: { $regex: safe, $options: 'i' } }
-      ];
+      ] });
     }
+    if (andConds.length) filter.$and = andConds;
 
     // Last login lookup z AuditLog. Robíme single aggregation (max createdAt)
     // na všetkých userov v poslednom rezultsete — efektívnejšie ako N+1.
@@ -401,6 +444,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
 // ─── UPDATE USER ROLE (system-wide) ─────────────────────────────
 router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { role } = req.body;
     if (!['admin', 'manager', 'user'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
@@ -422,6 +466,10 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
     const oldRole = targetUser.role;
     targetUser.role = role;
     await targetUser.save();
+    // middleware/auth cachuje usera 30 s (Redis/mem) a req.user.role sa používa
+    // na autorizáciu (routes/push.js) — bez invalidácie by nová rola platila
+    // až po vypršaní cache.
+    await invalidateUserCache(targetUser._id);
 
     logger.info('Admin role change', { targetUserId: req.params.userId, newRole: role, changedBy: req.user.id });
 
@@ -443,12 +491,19 @@ router.put('/users/:userId/role', authenticateToken, requireAdmin, async (req, r
 // ─── UPDATE WORKSPACE MEMBER ROLE ───────────────────────────────
 router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { workspaceId, role } = req.body;
     if (!['owner', 'manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná workspace rola' });
     }
     if (!workspaceId) {
       return res.status(400).json({ message: 'Chýba workspaceId' });
+    }
+    // Objekt typu {"$ne": null} by vo findOne({ userId, workspaceId }) prešiel
+    // ako operátor a zmenil rolu v PRVOM nájdenom členstve usera namiesto
+    // konkrétneho workspace-u (a do audit logu by sa zapísal objekt).
+    if (!isOid(workspaceId)) {
+      return res.status(400).json({ message: 'Neplatné workspaceId' });
     }
 
     const membership = await WorkspaceMember.findOne({
@@ -510,6 +565,7 @@ router.put('/users/:userId/workspace-role', authenticateToken, requireAdmin, asy
 // ─── UPDATE USER PLAN ───────────────────────────────────────────
 router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { plan } = req.body;
     if (!['free', 'team', 'pro'].includes(plan)) {
       return res.status(400).json({ message: 'Neplatný plán' });
@@ -521,8 +577,23 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
     }
 
     const oldPlan = targetUser.subscription?.plan || 'free';
-    targetUser.subscription = { plan };
-    await targetUser.save();
+    const paidManaged = !!(targetUser.subscription?.stripeSubscriptionId ||
+      (targetUser.subscription?.source === 'apple' && targetUser.subscription?.appleOriginalTransactionId));
+    // Len pole plan — priradenie celého objektu zmazalo stripeCustomerId,
+    // stripeSubscriptionId, appleOriginalTransactionId, source, paidUntil,
+    // zľavu aj stav pripomienok (webhooky by používateľa potom nenašli).
+    // Výnimka: starý paidUntil v minulosti (bývalý Stripe zákazník) — bez
+    // vynulovania by auto-expirácia nový platený plán pri ďalšom requeste
+    // hneď zrušila a poslala e-mail „plán vypršal".
+    const update = { 'subscription.plan': plan };
+    const paidUntil = targetUser.subscription?.paidUntil;
+    if (plan !== 'free' && !paidManaged && paidUntil && new Date(paidUntil) < new Date()) {
+      update['subscription.paidUntil'] = null;
+    }
+    await User.updateOne({ _id: targetUser._id }, { $set: update });
+    targetUser.subscription.plan = plan;
+    if ('subscription.paidUntil' in update) targetUser.subscription.paidUntil = null;
+    await invalidateUserCache(targetUser._id);
 
     logger.info('Admin plan change', { targetUserId: req.params.userId, newPlan: plan, changedBy: req.user.id });
 
@@ -546,7 +617,12 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
       ipAddress: req.ip, userAgent: req.get('user-agent')
     });
 
-    res.json({ message: 'Plán bol aktualizovaný', plan });
+    res.json({
+      message: 'Plán bol aktualizovaný',
+      plan,
+      // Plán spravuje Stripe/App Store — ďalší webhook ho môže prepísať.
+      ...(paidManaged && { warning: 'Používateľ má aktívne platené predplatné (Stripe/App Store); ďalšia zmena predplatného plán prepíše.' })
+    });
   } catch (error) {
     logger.error('Admin plan change error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri zmene plánu' });
@@ -556,6 +632,7 @@ router.put('/users/:userId/plan', authenticateToken, requireAdmin, async (req, r
 // ─── DELETE USER ────────────────────────────────────────────────
 router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     // ObjectId vs string porovnanie — viď PUT /users/:userId/role komentár.
     // Bez .toString() táto ochrana nefungovala; self-delete bol nepriamo
     // blokovaný len ochranou "iný admin". Po odinštalovaní admin role by
@@ -630,6 +707,8 @@ router.delete('/users/:userId', authenticateToken, requireAdmin, async (req, res
 
     // 3) Final delete user document
     await User.findByIdAndDelete(targetUserId);
+    // Inak by zmazaný user s platným JWT ešte 30 s prechádzal authenticateToken.
+    await invalidateUserCache(targetUserId);
 
     logger.info('Admin delete user', { targetUserId: req.params.userId, deletedBy: req.user.id });
 
@@ -861,7 +940,11 @@ router.get('/workspaces/:id', authenticateToken, requireAdmin, async (req, res) 
     // Get members with user details
     const members = await WorkspaceMember.find({ workspaceId: id }).lean();
     const memberUserIds = members.map(m => m.userId);
-    const memberUsers = await User.find({ _id: { $in: memberUserIds } }).select('username email role subscription color avatar avatarData avatarMimetype').lean();
+    // avatarData (Base64 blob, aj niekoľko MB na usera) tu zámerne nenačítavame —
+    // admin UI zobrazuje len username/email a avatar sa servíruje cez
+    // /api/auth/avatar/:userId. Predtým detail workspace-u s 10 členmi
+    // znamenal desiatky MB čítania z Mongo + JSON serializácie.
+    const memberUsers = await User.find({ _id: { $in: memberUserIds } }).select('username email role subscription color avatar').lean();
     const memberMap = {};
     memberUsers.forEach(u => { memberMap[u._id.toString()] = u; });
 
@@ -938,7 +1021,22 @@ router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     const { id } = req.params;
     if (!id.match(/^[0-9a-fA-F]{24}$/)) return res.status(400).json({ message: 'Neplatné ID' });
 
-    const user = await User.findById(id).select('-password').lean();
+    // Okrem hesla vynechávame aj OAuth/sync tokeny, watch channel, tajný token
+    // verejného ICS feedu, reset hash, IBAN a Base64 avatar. Admin UI z nich
+    // nič nezobrazuje (z googleCalendar/googleTasks používa len `enabled` a
+    // `connectedAt`) a tajomstvá tretích strán nemajú opúšťať server —
+    // kompromitovaná admin session by inak znamenala prístup ku Google účtom
+    // používateľov a k ich kalendárovým feedom.
+    const user = await User.findById(id)
+      .select([
+        '-password', '-avatarData', '-avatarMimetype',
+        '-googleCalendar.accessToken', '-googleCalendar.refreshToken', '-googleCalendar.syncToken',
+        '-googleCalendar.watchChannelId', '-googleCalendar.watchResourceId',
+        '-googleTasks.accessToken', '-googleTasks.refreshToken', '-googleTasks.syncToken',
+        '-calendarFeedToken', '-resetPasswordTokenHash', '-resetPasswordExpires',
+        '-affiliate.payoutIban'
+      ].join(' '))
+      .lean();
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
     // Get workspace memberships
@@ -953,13 +1051,19 @@ router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
       workspace: wsMap[m.workspaceId.toString()] || null
     }));
 
-    // Activity counts
-    const [contactCount, taskCount, messagesSent, messagesReceived] = await Promise.all([
-      Contact.countDocuments({ userId: id }),
-      Task.countDocuments({ $or: [{ userId: id }, { createdBy: id }, { assignedTo: id }] }),
-      Message.countDocuments({ fromUserId: id }),
-      Message.countDocuments({ toUserId: id })
-    ]);
+    // Activity counts — obmedzené na workspaces používateľa, aby dopyty šli
+    // cez existujúce compound indexy s prefixom workspaceId (bez neho
+    // každý počet = COLLSCAN celej kolekcie). Obsah v workspaces, z ktorých
+    // medzičasom odišiel, sa nezapočíta — admin detail je informatívny.
+    const wsFilter = { workspaceId: { $in: workspaceIds } };
+    const [contactCount, taskCount, messagesSent, messagesReceived] = workspaceIds.length
+      ? await Promise.all([
+          Contact.countDocuments({ ...wsFilter, userId: id }),
+          Task.countDocuments({ ...wsFilter, $or: [{ userId: id }, { createdBy: id }, { assignedTo: id }] }),
+          Message.countDocuments({ ...wsFilter, fromUserId: id }),
+          Message.countDocuments({ ...wsFilter, toUserId: id })
+        ])
+      : [0, 0, 0, 0];
 
     // Recent audit log
     const recentActivity = await AuditLog.find({ userId: id })
@@ -1180,25 +1284,28 @@ router.get('/audit-log', authenticateToken, requireAdmin, async (req, res) => {
     const skip = (parsedPage - 1) * parsedLimit;
 
     const query = {};
-    if (category) query.category = category;
-    if (action) query.action = action;
-    if (userId) query.userId = userId;
+    // Len primitívne reťazce — `?category[$regex]=(a+)+$` by qs premenil na
+    // objekt, ktorý Mongoose pre String path prepustí ako $regex operátor
+    // (obchádza escapeRegex nižšie); `?userId[$ne]=x` = CastError → 500.
+    if (typeof category === 'string' && category) query.category = category;
+    if (typeof action === 'string' && action) query.action = action;
+    if (userId) {
+      if (!isOid(userId)) return res.status(400).json({ message: 'Neplatné userId' });
+      query.userId = userId;
+    }
     if (includeSuperAdmin !== 'true') {
       const superAdmin = await User.findOne({ email: SUPER_ADMIN_EMAIL }).select('_id').lean();
       if (superAdmin && !userId) {
         query.userId = { $ne: superAdmin._id };
       }
     }
-    if (from || to) {
-      query.createdAt = {};
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
-    }
-    if (search) {
+    const createdRange = dateRange(from, to);
+    if (createdRange) query.createdAt = createdRange;
+    if (typeof search === 'string' && search) {
       // ReDoS hardening (audit MED-002): escapujeme regex meta-znaky
       // a obmedzujeme dĺžku, aby kompromitovaný admin token nemohol
       // poslať katastrofický pattern typu (a+)+ na DoS Mongo connection pool.
-      const safeSearch = escapeRegex(String(search).slice(0, 100));
+      const safeSearch = escapeRegex(search.slice(0, 100));
       query.$or = [
         { username: { $regex: safeSearch, $options: 'i' } },
         { email: { $regex: safeSearch, $options: 'i' } },
@@ -1282,24 +1389,49 @@ router.get('/audit-log/stats', authenticateToken, requireAdmin, async (req, res)
   }
 });
 
+// CSV bunka pre text, ktorý si volí bežný používateľ (username, email, názov
+// workspace-u…). Okrem escapovania úvodzoviek chráni aj proti CSV/formula
+// injection: hodnotu začínajúcu `=`, `+`, `-`, `@`, TAB alebo CR by Excel /
+// LibreOffice po otvorení exportu vyhodnotili ako vzorec (napr. =HYPERLINK /
+// DDE), preto ju prefixujeme apostrofom — rovnako ako export provízií nižšie.
+const csvCell = (v) => {
+  const s = String(v ?? '');
+  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+
 // Export users to CSV
 router.get('/export/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const users = await User.find().select('-password -avatarData').lean();
-    const members = await WorkspaceMember.find().lean();
+    // Projekcia len na exportované polia — predtým sa čítali celé dokumenty
+    // vrátane Google máp (syncedTaskIds a pod.) a OAuth tokenov.
+    const users = await User.find()
+      .select('username email role subscription.plan createdAt googleCalendar.enabled googleTasks.enabled')
+      .lean();
+    const members = await WorkspaceMember.find().select('userId workspaceId').lean();
     const workspaces = await Workspace.find().select('_id name').lean();
     const wsMap = {};
     workspaces.forEach(w => { wsMap[w._id.toString()] = w.name; });
+    // Mapa userId → názvy workspace-ov. Predtým `members.filter(...)` v slučke
+    // nad každým userom = O(U×M) porovnaní s .toString() alokáciami.
+    const wsByUser = new Map();
+    for (const m of members) {
+      const name = wsMap[String(m.workspaceId)];
+      if (!name) continue;
+      const k = String(m.userId);
+      if (!wsByUser.has(k)) wsByUser.set(k, []);
+      wsByUser.get(k).push(name);
+    }
 
     const header = 'Meno,Email,Rola,Plán,Workspace-y,Registrovaný,Google Calendar,Google Tasks\n';
     const rows = users.map(u => {
-      const userWs = members.filter(m => m.userId.toString() === u._id.toString()).map(m => wsMap[m.workspaceId.toString()] || '').filter(Boolean).join('; ');
+      const userWs = (wsByUser.get(String(u._id)) || []).join('; ');
       return [
-        `"${(u.username || '').replace(/"/g, '""')}"`,
-        `"${(u.email || '').replace(/"/g, '""')}"`,
+        csvCell(u.username),
+        csvCell(u.email),
         u.role || 'user',
         u.subscription?.plan || 'free',
-        `"${userWs}"`,
+        csvCell(userWs),
         u.createdAt ? new Date(u.createdAt).toLocaleDateString('sk-SK') : '',
         u.googleCalendar?.enabled ? 'Áno' : 'Nie',
         u.googleTasks?.enabled ? 'Áno' : 'Nie'
@@ -1317,21 +1449,27 @@ router.get('/export/users', authenticateToken, requireAdmin, async (req, res) =>
 // Export workspaces to CSV
 router.get('/export/workspaces', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const workspaces = await Workspace.find().lean();
-    const members = await WorkspaceMember.find().lean();
+    const workspaces = await Workspace.find().select('name slug ownerId paidSeats createdAt').lean();
+    const members = await WorkspaceMember.find().select('workspaceId').lean();
     const users = await User.find().select('_id username email').lean();
     const userMap = {};
     users.forEach(u => { userMap[u._id.toString()] = u; });
+    // Počty členov na jeden prechod — predtým O(W×M) `members.filter` v slučke.
+    const memberCountByWs = new Map();
+    for (const m of members) {
+      const k = String(m.workspaceId);
+      memberCountByWs.set(k, (memberCountByWs.get(k) || 0) + 1);
+    }
 
     const header = 'Názov,Slug,Vlastník,Email vlastníka,Počet členov,Platené miesta,Vytvorený\n';
     const rows = workspaces.map(w => {
       const owner = userMap[w.ownerId.toString()] || {};
-      const memberCount = members.filter(m => m.workspaceId.toString() === w._id.toString()).length;
+      const memberCount = memberCountByWs.get(String(w._id)) || 0;
       return [
-        `"${(w.name || '').replace(/"/g, '""')}"`,
-        `"${(w.slug || '').replace(/"/g, '""')}"`,
-        `"${(owner.username || '').replace(/"/g, '""')}"`,
-        `"${(owner.email || '').replace(/"/g, '""')}"`,
+        csvCell(w.name),
+        csvCell(w.slug),
+        csvCell(owner.username),
+        csvCell(owner.email),
         memberCount,
         w.paidSeats || 0,
         w.createdAt ? new Date(w.createdAt).toLocaleDateString('sk-SK') : ''
@@ -1386,7 +1524,13 @@ router.get('/health', authenticateToken, requireAdmin, async (req, res) => {
 router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { userIds, action, value } = req.body;
-    if (!userIds?.length || !['plan', 'role'].includes(action)) return res.status(400).json({ message: 'Neplatné parametre' });
+    // `userIds?.length` prešlo aj pre reťazec ('abc'.length = 3) → userIds.filter
+    // TypeError 500; nevalidné ID → CastError 500. Limit 500 chráni updateMany
+    // (UI posiela max. jednu stránku, t.j. ≤ 200 ID).
+    if (!Array.isArray(userIds) || userIds.length === 0 || userIds.length > 500
+        || !userIds.every(isOid) || !['plan', 'role'].includes(action)) {
+      return res.status(400).json({ message: 'Neplatné parametre' });
+    }
 
     const validPlans = ['free', 'team', 'pro'];
     const validRoles = ['admin', 'manager', 'user'];
@@ -1398,6 +1542,7 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 
     const updateQuery = action === 'plan' ? { 'subscription.plan': value } : { role: value };
     const result = await User.updateMany({ _id: { $in: filteredIds } }, updateQuery);
+    await Promise.all(filteredIds.map((id) => invalidateUserCache(id)));
 
     auditService.logAction({
       userId: req.user.id, username: req.user.username, email: req.user.email,
@@ -1410,6 +1555,7 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 
     res.json({ success: true, modified: result.modifiedCount });
   } catch (error) {
+    logger.error('Admin bulk update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri hromadnej úprave' });
   }
 });
@@ -1417,10 +1563,20 @@ router.put('/users/bulk', authenticateToken, requireAdmin, async (req, res) => {
 // Update user subscription details
 router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
     const { plan, paidUntil } = req.body;
+    // Mongoose enum/Date validácia by zlyhala až pri save() → 500 bez logu.
+    // Samotná logika zmeny plánu/paidUntil nižšie ostáva nezmenená.
+    if (plan && !['free', 'team', 'pro'].includes(plan)) {
+      return res.status(400).json({ message: 'Neplatný plán' });
+    }
+    if (paidUntil !== undefined && paidUntil !== null && paidUntil !== ''
+        && ((typeof paidUntil !== 'string' && typeof paidUntil !== 'number') || isNaN(new Date(paidUntil)))) {
+      return res.status(400).json({ message: 'Neplatný dátum' });
+    }
     const oldPlan = user.subscription?.plan;
     const oldPaidUntil = user.subscription?.paidUntil;
     if (plan) user.subscription.plan = plan;
@@ -1450,6 +1606,7 @@ router.put('/users/:userId/subscription', authenticateToken, requireAdmin, async
 
     res.json({ success: true, subscription: user.subscription });
   } catch (error) {
+    logger.error('Admin subscription update error', { error: error.message });
     res.status(500).json({ message: 'Chyba pri úprave predplatného' });
   }
 });
@@ -1465,11 +1622,19 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
 
     // Bloby príloh správ (R2) PRED deleteMany — best-effort, nikdy nehádže
     await deleteMessageBlobs({ workspaceId: id });
+    // Kaskáda v parite s DELETE /users (sole-owned workspaces) a so self-delete
+    // v routes/workspaces.js: predtým tu ostávali osirelé Pages, Notifications
+    // a Invitations a používateľom ostal currentWorkspaceId na neexistujúci
+    // workspace (prvý login po zmazaní potom padal na 404 workspace-u).
     await Promise.all([
       Contact.deleteMany({ workspaceId: id }),
       Task.deleteMany({ workspaceId: id }),
       Message.deleteMany({ workspaceId: id }),
+      Page.deleteMany({ workspaceId: id }),
+      Notification.deleteMany({ workspaceId: id }),
+      Invitation.deleteMany({ workspaceId: id }),
       WorkspaceMember.deleteMany({ workspaceId: id }),
+      User.updateMany({ currentWorkspaceId: id }, { $set: { currentWorkspaceId: null } }),
       Workspace.findByIdAndDelete(id)
     ]);
 
@@ -1490,6 +1655,7 @@ router.delete('/workspaces/:id', authenticateToken, requireAdmin, async (req, re
 // Apply discount to user
 router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
@@ -1502,26 +1668,37 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
     }
 
     // Validate value based on type
-    if (type === 'percentage' && (value < 1 || value > 100)) {
+    // Porovnania `value < 1 || value > 100` prešli aj pre reťazec '6' alebo
+    // undefined (obe false); pri freeMonths potom `getMonth() + '6'` dalo
+    // reťazec '96' → setMonth(96) posunulo paidUntil o 8 rokov. Preto najprv
+    // prevod na číslo a kontrola, že je konečné.
+    const numValue = type === 'planUpgrade' ? null : Number(value);
+    if (type !== 'planUpgrade' && !Number.isFinite(numValue)) {
+      return res.status(400).json({ message: 'Neplatná hodnota zľavy' });
+    }
+    if (type === 'percentage' && (numValue < 1 || numValue > 100)) {
       return res.status(400).json({ message: 'Percentuálna zľava musí byť medzi 1-100%' });
     }
-    if (type === 'fixed' && (value < 0.01 || value > 100)) {
+    if (type === 'fixed' && (numValue < 0.01 || numValue > 100)) {
       return res.status(400).json({ message: 'Fixná zľava musí byť medzi 0.01-100€' });
     }
-    if (type === 'freeMonths' && (value < 1 || value > 24)) {
+    if (type === 'freeMonths' && (numValue < 1 || numValue > 24)) {
       return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
     }
     if (type === 'planUpgrade' && !['team', 'pro'].includes(targetPlan)) {
       return res.status(400).json({ message: 'Neplatný cieľový plán' });
+    }
+    if (expiresAt && isNaN(new Date(expiresAt))) {
+      return res.status(400).json({ message: 'Neplatný dátum expirácie' });
     }
 
     const oldDiscount = user.subscription?.discount?.type ? { ...user.subscription.discount.toObject() } : null;
 
     user.subscription.discount = {
       type,
-      value: type === 'planUpgrade' ? null : value,
+      value: numValue,
       targetPlan: type === 'planUpgrade' ? targetPlan : null,
-      reason: reason || null,
+      reason: typeof reason === 'string' && reason ? reason.slice(0, 500) : null,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       createdAt: new Date(),
       createdBy: req.adminUser.username
@@ -1538,7 +1715,7 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
     // For freeMonths: extend paidUntil by X months
     if (type === 'freeMonths') {
       const current = user.subscription.paidUntil ? new Date(user.subscription.paidUntil) : new Date();
-      current.setMonth(current.getMonth() + value);
+      current.setMonth(current.getMonth() + numValue);
       user.subscription.paidUntil = current;
     }
 
@@ -1571,6 +1748,7 @@ router.put('/users/:userId/discount', authenticateToken, requireAdmin, async (re
 // Remove discount from user
 router.delete('/users/:userId/discount', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'Používateľ nenájdený' });
 
@@ -1607,7 +1785,10 @@ router.delete('/users/:userId/discount', authenticateToken, requireAdmin, async 
 // User growth over time (registrations per day for last 90 days)
 router.get('/charts/user-growth', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 90;
+    // Clamp 1..730 (UI ponúka 7/30/90/365) — cyklus nižšie iteruje po dňoch,
+    // takže neobmedzené ?days=100000000 znamenalo 10^8 iterácií + alokácií
+    // na jeden request. Rovnako ako /email-logs-stats.
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 90));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1646,7 +1827,7 @@ router.get('/charts/user-growth', authenticateToken, requireAdmin, async (req, r
 // Activity over time (audit log entries per day for last 30 days)
 router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1697,7 +1878,7 @@ router.get('/charts/activity', authenticateToken, requireAdmin, async (req, res)
 // odrážali produkčné metriky.
 router.get('/charts/workspaces-growth', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1742,7 +1923,7 @@ router.get('/charts/workspaces-growth', authenticateToken, requireAdmin, async (
 //  - pre PrplCRM scale je to akceptabilná aproximácia
 router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1778,7 +1959,7 @@ router.get('/charts/plans-distribution', authenticateToken, requireAdmin, async 
 // total za obdobie. Beží sériovo s ostatnými chart endpoint-mi v UI.
 router.get('/charts/summary', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const daysBack = parseInt(req.query.days) || 30;
+    const daysBack = Math.min(730, Math.max(1, parseInt(req.query.days) || 30));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
@@ -1915,14 +2096,16 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
     // poľom (väčšina, ale niektoré legacy kolekcie ho nemusia mať).
     const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    for (const name of collections) {
+    // Paralelne — predtým 16 kolekcií × 2 sekvenčné round-tripy na Atlas
+    // (~32 čakaní za sebou). Poradie výsledkov ostáva podľa `collections`.
+    const statsResults = await Promise.all(collections.map(async (name) => {
       try {
-        const stats = await db.command({ collStats: name });
-        let last7d = null;
-        try {
-          last7d = await db.collection(name).countDocuments({ createdAt: { $gte: week } });
-        } catch { /* createdAt may not exist on this collection */ }
-        collectionStats.push({
+        const [stats, last7d] = await Promise.all([
+          db.command({ collStats: name }),
+          db.collection(name).countDocuments({ createdAt: { $gte: week } })
+            .catch(() => null) // createdAt may not exist on this collection
+        ]);
+        return {
           name,
           count: stats.count,
           size: stats.size,
@@ -1931,11 +2114,12 @@ router.get('/storage', authenticateToken, requireAdmin, async (req, res) => {
           indexSize: stats.totalIndexSize,
           // null = createdAt sa nepodarilo zistiť, 0 = žiadne nové, čísla > 0 sú growth
           growth7d: last7d
-        });
+        };
       } catch {
-        // Collection might not exist yet
+        return null; // Collection might not exist yet
       }
-    }
+    }));
+    collectionStats.push(...statsResults.filter(Boolean));
 
     // Storage per workspace (contacts + tasks + messages) — excludujeme
     // workspaces super admina aby produkčné metriky neboli skreslené testovacími.
@@ -2169,7 +2353,9 @@ router.get('/workspace-comparison', authenticateToken, requireAdmin, async (req,
 
 // ─── PROMO CODES MANAGEMENT ──────────────────────────────────
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-11-20.acacia' });
+// Lazy klient — bez STRIPE_SECRET_KEY by require('stripe')(undefined) hodil
+// výnimku pri načítaní modulu a server by nenaštartoval.
+const { stripe } = require('../services/stripeClient');
 
 // List all promo codes
 router.get('/promo-codes', authenticateToken, requireAdmin, async (req, res) => {
@@ -2202,6 +2388,17 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
     // Validate required fields
     if (!code || !name || !type || value === undefined) {
       return res.status(400).json({ message: 'Vyplňte všetky povinné polia (kód, názov, typ, hodnota)' });
+    }
+    if (typeof code !== 'string' || code.length > 64 || typeof name !== 'string' || name.length > 200) {
+      return res.status(400).json({ message: 'Neplatný kód alebo názov' });
+    }
+    // Typ a hodnotu overíme ešte pred Stripe volaniami (inak by v Stripe
+    // vznikol coupon, ktorý Mongoose validácia potom odmietne → sirota).
+    if (!['percentage', 'fixed', 'freeMonths'].includes(type)) {
+      return res.status(400).json({ message: 'Neplatný typ zľavy' });
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return res.status(400).json({ message: 'Hodnota zľavy musí byť číslo' });
     }
 
     // Resolve effective duration + duration_in_months.
@@ -2248,7 +2445,27 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
       return res.status(400).json({ message: 'Počet voľných mesiacov musí byť 1-24' });
     }
 
-    // Create Stripe Coupon + Promotion Code
+    // Validácia affiliate polí — ak je referrerId set, user musí byť enrolled
+    // v affiliate programe (User.affiliate.enrolled = true). commissionPercent
+    // musí byť 1-100 (0 = "ignore affiliate fields"). Anti-fraud check.
+    let validReferrerId = null;
+    let validCommissionPercent = 0;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné ID referrera' });
+      const refUser = await User.findById(referrerId).select('affiliate.enrolled').lean();
+      if (!refUser) return res.status(400).json({ message: 'Referrer user nenájdený' });
+      if (!refUser.affiliate?.enrolled) {
+        return res.status(400).json({ message: 'Referrer nie je prihlásený v affiliate programe (User.affiliate.enrolled=false)' });
+      }
+      validReferrerId = referrerId;
+      const cp = Number(commissionPercent);
+      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
+        return res.status(400).json({ message: 'commissionPercent musí byť 1-100 pri affiliate kódoch' });
+      }
+      validCommissionPercent = cp;
+    }
+
+    // Create Stripe Coupon + Promotion Code (až po všetkých validáciách)
     let stripeCouponId = null;
     let stripePromotionCodeId = null;
 
@@ -2307,7 +2524,15 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
           promoCodeParams.expires_at = Math.floor(new Date(expiresAt).getTime() / 1000);
         }
 
-        const stripePromoCode = await stripe.promotionCodes.create(promoCodeParams);
+        let stripePromoCode;
+        try {
+          stripePromoCode = await stripe.promotionCodes.create(promoCodeParams);
+        } catch (promoErr) {
+          // Coupon bez promotion code by v Stripe ostal osirelý — zmažeme ho.
+          await stripe.coupons.del(stripeCouponId).catch(() => {});
+          stripeCouponId = null;
+          throw promoErr;
+        }
         stripePromotionCodeId = stripePromoCode.id;
 
         logger.info('[PromoCode] Stripe coupon + promotion code created', {
@@ -2319,25 +2544,6 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
         logger.error('[PromoCode] Stripe creation failed', { error: stripeErr.message });
         // Continue without Stripe — code will work for in-app discount display
       }
-    }
-
-    // Validácia affiliate polí — ak je referrerId set, user musí byť enrolled
-    // v affiliate programe (User.affiliate.enrolled = true). commissionPercent
-    // musí byť 1-100 (0 = "ignore affiliate fields"). Anti-fraud check.
-    let validReferrerId = null;
-    let validCommissionPercent = 0;
-    if (referrerId) {
-      const refUser = await User.findById(referrerId).select('affiliate.enrolled').lean();
-      if (!refUser) return res.status(400).json({ message: 'Referrer user nenájdený' });
-      if (!refUser.affiliate?.enrolled) {
-        return res.status(400).json({ message: 'Referrer nie je prihlásený v affiliate programe (User.affiliate.enrolled=false)' });
-      }
-      validReferrerId = referrerId;
-      const cp = Number(commissionPercent);
-      if (!Number.isFinite(cp) || cp < 1 || cp > 100) {
-        return res.status(400).json({ message: 'commissionPercent musí byť 1-100 pri affiliate kódoch' });
-      }
-      validCommissionPercent = cp;
     }
 
     const promoCode = new PromoCode({
@@ -2379,6 +2585,7 @@ router.post('/promo-codes', authenticateToken, requireAdmin, async (req, res) =>
 // Update promo code (toggle active, update limits)
 router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id);
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2468,6 +2675,7 @@ router.put('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res)
 // Delete promo code
 router.delete('/promo-codes/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id);
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2501,6 +2709,7 @@ router.delete('/promo-codes/:id', authenticateToken, requireAdmin, async (req, r
 // Get promo code stats
 router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const promoCode = await PromoCode.findById(req.params.id).populate('redemptions.userId', 'username email');
     if (!promoCode) return res.status(404).json({ message: 'Promo kód nenájdený' });
 
@@ -2540,7 +2749,8 @@ router.get('/promo-codes/:id/stats', authenticateToken, requireAdmin, async (req
 router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, parseInt(req.query.limit) || 30);
+    // Aj dolná hranica — záporný limit by šiel do skip()/limit() → MongoServerError 500
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
     const skip = (page - 1) * limit;
 
     const filter = {};
@@ -2557,8 +2767,8 @@ router.get('/errors', authenticateToken, requireAdmin, async (req, res) => {
         { path: { $regex: safeSearch, $options: 'i' } }
       ];
     }
-    if (req.query.from) filter.lastSeen = { ...filter.lastSeen, $gte: new Date(req.query.from) };
-    if (req.query.to) filter.lastSeen = { ...filter.lastSeen, $lte: new Date(req.query.to) };
+    const lastSeenRange = dateRange(req.query.from, req.query.to);
+    if (lastSeenRange) filter.lastSeen = lastSeenRange;
 
     const [errors, total] = await Promise.all([
       ServerError.find(filter)
@@ -2608,6 +2818,7 @@ router.get('/errors/stats', authenticateToken, requireAdmin, async (req, res) =>
 // GET /api/admin/errors/:id — detail
 router.get('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const err = await ServerError.findById(req.params.id)
       .populate('userId', 'username email')
       .populate('resolvedBy', 'username email')
@@ -2623,10 +2834,13 @@ router.get('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
 // PUT /api/admin/errors/:id/resolve — označiť opravené / znova otvoriť
 router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const { resolved, notes } = req.body;
     const update = {
       resolved: !!resolved,
-      notes: notes?.slice(0, 2000) || null
+      // Len reťazec — číslo/objekt → `.slice` TypeError 500, pole by prešlo
+      // Array.prototype.slice a padlo až na Mongoose cast do String.
+      notes: typeof notes === 'string' && notes ? notes.slice(0, 2000) : null
     };
     if (resolved) {
       update.resolvedBy = req.user.id;
@@ -2647,6 +2861,7 @@ router.put('/errors/:id/resolve', authenticateToken, requireAdmin, async (req, r
 // DELETE /api/admin/errors/:id — manuálne zmazať záznam
 router.delete('/errors/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const result = await ServerError.findByIdAndDelete(req.params.id);
     if (!result) return res.status(404).json({ message: 'Chyba nenájdená' });
     res.json({ success: true });
@@ -2706,7 +2921,7 @@ router.get('/performance/errors-by-route', authenticateToken, requireAdmin, asyn
     res.json({
       routes: metrics.topRoutes || [],
       statusCodes: metrics.statusCodes || {},
-      hourly: metrics.hourly || []
+      hourly: metrics.hourlyData || [] // getMetrics() exportuje `hourlyData`, nie `hourly`
     });
   } catch (error) {
     logger.error('Performance errors-by-route error', { error: error.message });
@@ -3008,15 +3223,13 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
     const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
     const q = {};
-    if (type) q.type = type;
-    if (status) q.status = status;
-    if (from || to) {
-      q.sentAt = {};
-      if (from) q.sentAt.$gte = new Date(from);
-      if (to) q.sentAt.$lte = new Date(to);
-    }
-    if (search) {
-      const safe = escapeRegex(String(search).slice(0, 100));
+    // Len reťazce — objekt z qs (`?type[$ne]=x`) by Mongoose prepustil ako operátor.
+    if (typeof type === 'string' && type) q.type = type;
+    if (typeof status === 'string' && status) q.status = status;
+    const sentRange = dateRange(from, to);
+    if (sentRange) q.sentAt = sentRange;
+    if (typeof search === 'string' && search) {
+      const safe = escapeRegex(search.slice(0, 100));
       const matchingUsers = await User.find({
         $or: [
           { email: { $regex: safe, $options: 'i' } },
@@ -3039,10 +3252,22 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
         .sort({ [sortField]: sortDir })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('userId', 'username email avatar avatarData avatarMimetype color')
+        .populate('userId', 'username email avatar color')
         .select('-htmlSnapshot') // omit big blob from list view
         .lean()
     ]);
+
+    // hasAvatarData potrebujeme len ako boolean — predtým populate ťahal
+    // celý Base64 avatarData (až MB na usera) pre každý z až 200 riadkov,
+    // len aby sa z neho spravilo `!!`. Zistíme to samostatným dopytom nad
+    // ID-čkami aktuálnej stránky s projekciou iba na _id.
+    const pageUserIds = [...new Set(logs.filter((l) => l.userId?._id).map((l) => String(l.userId._id)))];
+    const withAvatar = new Set(
+      pageUserIds.length
+        ? (await User.find({ _id: { $in: pageUserIds }, avatarData: { $nin: [null, ''] } }).select('_id').lean())
+          .map((u) => String(u._id))
+        : []
+    );
 
     res.json({
       total,
@@ -3056,7 +3281,7 @@ router.get('/email-logs', authenticateToken, requireAdmin, async (req, res) => {
           email: l.userId.email,
           color: l.userId.color,
           avatar: l.userId.avatar,
-          hasAvatarData: !!l.userId.avatarData
+          hasAvatarData: withAvatar.has(String(l.userId._id))
         } : null,
         userId: l.userId?._id || null
       }))
@@ -3201,6 +3426,12 @@ router.get('/users/:userId/email-logs', authenticateToken, requireAdmin, async (
  * Mode `dryRun=true` len vráti počet cieľových userov bez reálneho
  * odoslania — pre admin previewujúceho impact.
  */
+// Guard proti súbežnému spusteniu: handler odpovie { started: true } hneď
+// a slučka beží ~200 ms/mail na pozadí. Dedup cez EmailLog sa počíta iba
+// raz na začiatku, takže dva kliky admina (alebo retry klienta po timeoute)
+// by spustili dve paralelné slučky nad tou istou frontou → duplicitné maily
+// celej user base. Migračné endpointy nižšie majú rovnaký `running` guard.
+let broadcastRunning = false;
 router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmin, async (req, res) => {
   try {
     // activeWithinDays=null → všetci registrovaní userovia bez filtra.
@@ -3210,8 +3441,12 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
     const { activeWithinDays = null, dryRun = false } = req.body || {};
     const filter = {};
     if (activeWithinDays !== null) {
-      const since = new Date(Date.now() - parseInt(activeWithinDays) * 24 * 60 * 60 * 1000);
-      filter.createdAt = { $gte: since };
+      // parseInt('abc') = NaN → new Date(NaN) = Invalid Date vo filtri → CastError 500
+      const days = parseInt(activeWithinDays, 10);
+      if (!Number.isFinite(days) || days < 1 || days > 3650) {
+        return res.status(400).json({ message: 'Neplatný rozsah dní (1–3650)' });
+      }
+      filter.createdAt = { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
     }
 
     const targetUsers = await User.find(filter)
@@ -3237,36 +3472,48 @@ router.post('/email-broadcast/mobile-app-launch', authenticateToken, requireAdmi
       });
     }
 
-    // Async background send — nemôžeme blokovať admin response na 5 min.
-    // Vraciame okamžite { started: true } a admin v Email tabe sleduje progress
-    // cez log-y / countdown stats endpoint.
-    res.json({
-      started: true,
-      eligibleUsers: targetUsers.length,
-      alreadySent: targetUsers.length - queue.length,
-      toSend: queue.length
-    });
-
-    // Fire-and-forget loop with rate limiting
-    const subEmail = require('../services/subscriptionEmailService');
-    const triggeredBy = `admin:${req.adminUser?.username || req.user.username}-broadcast`;
-    let sent = 0, failed = 0;
-    for (const u of queue) {
-      try {
-        const result = await subEmail.sendMobileAppLaunch({ user: u, triggeredBy });
-        if (result.ok) sent++;
-        else failed++;
-      } catch (err) {
-        failed++;
-        logger.error('[Broadcast] mobile_app_launch error', { userId: String(u._id), error: err.message });
-      }
-      // 200ms throttle — 5 mails/sec, well under hostcreators SMTP limits
-      await new Promise((r) => setTimeout(r, 200));
+    if (broadcastRunning) {
+      return res.status(409).json({ message: 'Broadcast už beží — počkajte na dokončenie predchádzajúceho.' });
     }
-    logger.info('[Broadcast] mobile_app_launch complete', { sent, failed, total: queue.length });
+    broadcastRunning = true;
+    try {
+      // Async background send — nemôžeme blokovať admin response na 5 min.
+      // Vraciame okamžite { started: true } a admin v Email tabe sleduje progress
+      // cez log-y / countdown stats endpoint.
+      res.json({
+        started: true,
+        eligibleUsers: targetUsers.length,
+        alreadySent: targetUsers.length - queue.length,
+        toSend: queue.length
+      });
+
+      // Fire-and-forget loop with rate limiting
+      const subEmail = require('../services/subscriptionEmailService');
+      const triggeredBy = `admin:${req.adminUser?.username || req.user.username}-broadcast`;
+      let sent = 0, failed = 0;
+      for (const u of queue) {
+        try {
+          const result = await subEmail.sendMobileAppLaunch({ user: u, triggeredBy });
+          if (result.ok) sent++;
+          else failed++;
+        } catch (err) {
+          failed++;
+          logger.error('[Broadcast] mobile_app_launch error', { userId: String(u._id), error: err.message });
+        }
+        // 200ms throttle — 5 mails/sec, well under hostcreators SMTP limits
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      logger.info('[Broadcast] mobile_app_launch complete', { sent, failed, total: queue.length });
+    } finally {
+      broadcastRunning = false;
+    }
   } catch (err) {
     logger.error('Broadcast mobile_app_launch error', { error: err.message });
-    res.status(500).json({ message: 'Chyba broadcast', error: err.message });
+    // Odpoveď už mohla odísť (slučka beží po res.json) — druhý res.json by
+    // hodil ERR_HTTP_HEADERS_SENT ako unhandled rejection.
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Chyba broadcast' });
+    }
   }
 });
 
@@ -3295,14 +3542,26 @@ router.post('/migrate-encrypt-tokens', authenticateToken, requireAdmin, async (r
     // Načítavame iba minimum potrebných polí — nepublikujeme celé heslá hashe
     // ani avatary. dryRun mode vráti len počty bez zápisu.
     const dryRun = req.body?.dryRun === true;
-    const users = await User.find({
-      $or: [
-        { 'googleCalendar.accessToken': { $exists: true, $ne: null } },
-        { 'googleCalendar.refreshToken': { $exists: true, $ne: null } },
-        { 'googleTasks.accessToken': { $exists: true, $ne: null } },
-        { 'googleTasks.refreshToken': { $exists: true, $ne: null } }
-      ]
-    }).select('googleCalendar.accessToken googleCalendar.refreshToken googleTasks.accessToken googleTasks.refreshToken');
+    // Raw čítanie priamo z kolekcie (bez post('init') dešifrovania) jedným
+    // dopytom — predtým Mongoose find + findOne per používateľ (N+1).
+    const users = await User.collection.find(
+      {
+        $or: [
+          { 'googleCalendar.accessToken': { $exists: true, $ne: null } },
+          { 'googleCalendar.refreshToken': { $exists: true, $ne: null } },
+          { 'googleTasks.accessToken': { $exists: true, $ne: null } },
+          { 'googleTasks.refreshToken': { $exists: true, $ne: null } }
+        ]
+      },
+      {
+        projection: {
+          'googleCalendar.accessToken': 1,
+          'googleCalendar.refreshToken': 1,
+          'googleTasks.accessToken': 1,
+          'googleTasks.refreshToken': 1
+        }
+      }
+    ).toArray();
 
     const stats = {
       usersScanned: users.length,
@@ -3310,22 +3569,8 @@ router.post('/migrate-encrypt-tokens', authenticateToken, requireAdmin, async (r
     };
     PATHS.forEach((p) => { stats.perPath[p] = { plaintext: 0, encrypted: 0, migrated: 0 }; });
 
-    for (const user of users) {
-      // Skip post('init') hook — chceme raw hodnoty z DB, nie auto-decrypt-nuté.
-      // Najjednoduchšie: použijeme aggregation read alebo ťaháme znova lean.
-      const raw = await User.collection.findOne(
-        { _id: user._id },
-        {
-          projection: {
-            'googleCalendar.accessToken': 1,
-            'googleCalendar.refreshToken': 1,
-            'googleTasks.accessToken': 1,
-            'googleTasks.refreshToken': 1
-          }
-        }
-      );
-      if (!raw) continue;
-
+    const bulkOps = [];
+    for (const raw of users) {
       const updates = {};
       for (const path of PATHS) {
         const [outer, inner] = path.split('.');
@@ -3347,11 +3592,12 @@ router.post('/migrate-encrypt-tokens', authenticateToken, requireAdmin, async (r
       }
 
       if (!dryRun && Object.keys(updates).length > 0) {
-        // Použijeme priamy updateOne (bypass pre('save') hook ktorý by
-        // detekoval že hodnota je už šifrovaná a nepokazil to, ale aj tak
-        // chceme rýchly direct write bez hook-ovania).
-        await User.updateOne({ _id: user._id }, { $set: updates });
+        // Priamy zápis (bez pre('save') hooku) — hromadne nižšie.
+        bulkOps.push({ updateOne: { filter: { _id: raw._id }, update: { $set: updates } } });
       }
+    }
+    if (bulkOps.length > 0) {
+      await User.collection.bulkWrite(bulkOps, { ordered: false });
     }
 
     auditService.logAction({
@@ -3439,6 +3685,7 @@ router.post('/email-test', authenticateToken, requireAdmin, async (req, res) => 
 // Manuálny trigger reminder/winback emailu — pre support workflow
 router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { type } = req.body;
     const allowed = ['reminder_t7', 'reminder_t1', 'winback', 'expired', 'welcome_pro', 'subscription_assigned', 'discount_assigned'];
     if (!allowed.includes(type)) {
@@ -3483,170 +3730,10 @@ router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async 
   }
 });
 
-/**
- * Recovery script pre stratenú metadata referenciu na orphaned ContactFile docs.
- *
- * Pozadie:
- * Bug v PUT /api/tasks/:id (commit 729cf67 ho fixol) — Mongoose subdoc spread
- * cez {...task} nevracal schema fields, takže pri každom edit-e tasku sa
- * stratil files[] array. Binary data ostala v ContactFile collection (orphaned),
- * len metadata link zmizla z Contact.tasks[].files[].
- *
- * Tento endpoint dokáže RE-LINKNUŤ orphaned ContactFile docs späť do task.files[]
- * cez heuristiku: contactName + taskTitle regex + createdAt date window.
- *
- * Použitie:
- *   POST /api/admin/recover-task-files
- *   Body: { dryRun: true }   → vypíše čo by spravil, nemení nič
- *   Body: { dryRun: false }  → reálne re-linkuje
- *
- * Recovery map je hardcoded pre user-reportovaný incident 2026-05-13. Pre iné
- * incidenty treba endpoint upraviť alebo parametrizovať cez body.
- */
-router.post('/recover-task-files', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const Contact = require('../models/Contact');
-    const ContactFile = require('../models/ContactFile');
-    const dryRun = req.body?.dryRun !== false; // default true (safe)
-
-    // Mapovanie kontakt → task title regex (user incident 2026-05-13)
-    const RECOVERY_MAP = [
-      { contactName: 'Svidník',  taskTitleRegex: /SK\s*Kapišová/i,         label: 'Projekt SK Kapišová' },
-      { contactName: 'Snina',    taskTitleRegex: /SV\s*Nová\s*Sedlica/i,   label: 'Projekt SV Nová Sedlica' },
-      { contactName: 'Stropkov', taskTitleRegex: /SP\s*Breznica/i,         label: 'Projekt SP Breznica' },
-      { contactName: 'Sobrance', taskTitleRegex: /SO\s*Vyšné\s*Remety/i,   label: 'Projekt SO Vyšné Remety' }
-    ];
-
-    // Date window: 2026-05-13 ± 2 dni (incident reported on 13.5.2026)
-    const targetDate = new Date('2026-05-13T00:00:00Z');
-    const rangeMs = 2 * 24 * 60 * 60 * 1000;
-    const fromDate = new Date(targetDate.getTime() - rangeMs);
-    const toDate = new Date(targetDate.getTime() + rangeMs);
-
-    // Helper: detect mimetype z prvých Base64 bytes (magic numbers)
-    const detectMimetype = (base64) => {
-      const prefix = base64.slice(0, 12);
-      if (prefix.startsWith('/9j/')) return 'image/jpeg';        // FFD8FF
-      if (prefix.startsWith('iVBORw0KGgo')) return 'image/png';   // 89504E47
-      if (prefix.startsWith('R0lGOD')) return 'image/gif';        // GIF87/89
-      if (prefix.startsWith('UklGR')) return 'image/webp';        // RIFF WebP
-      if (prefix.startsWith('JVBERi0')) return 'application/pdf'; // %PDF
-      return 'application/octet-stream';
-    };
-    const extensionFor = (mime) => ({
-      'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
-      'image/webp': 'webp', 'application/pdf': 'pdf'
-    }[mime] || 'bin');
-
-    const results = [];
-    let totalRelinkable = 0;
-
-    for (const mapping of RECOVERY_MAP) {
-      const result = {
-        ...mapping,
-        contactFound: false,
-        taskFound: false,
-        orphanedFiles: 0,
-        relinked: 0,
-        errors: []
-      };
-
-      // 1. Nájdi kontakt po mene (cross-workspace — admin endpoint má prístup k všetkým)
-      const contact = await Contact.findOne({ name: mapping.contactName });
-      if (!contact) {
-        result.errors.push(`Contact "${mapping.contactName}" not found in DB`);
-        results.push(result);
-        continue;
-      }
-      result.contactFound = true;
-      result.contactId = contact._id.toString();
-      result.workspaceId = contact.workspaceId.toString();
-
-      // 2. Nájdi task v contact.tasks podľa title regex
-      const task = (contact.tasks || []).find((t) => mapping.taskTitleRegex.test(t.title || ''));
-      if (!task) {
-        result.errors.push(`Task matching ${mapping.taskTitleRegex} not found in contact "${mapping.contactName}"`);
-        results.push(result);
-        continue;
-      }
-      result.taskFound = true;
-      result.taskId = task.id;
-      result.taskTitle = task.title;
-      result.currentFiles = (task.files || []).length;
-
-      // 3. Nájdi orphaned ContactFiles pre tento contact v dátumovom okne
-      const currentFileIds = new Set((task.files || []).map((f) => f.id));
-      const candidateContactFiles = await ContactFile.find({
-        contactId: contact._id,
-        createdAt: { $gte: fromDate, $lte: toDate }
-      }).select('fileId data createdAt').lean();
-
-      const orphaned = candidateContactFiles.filter((cf) => !currentFileIds.has(cf.fileId));
-      result.orphanedFiles = orphaned.length;
-
-      if (orphaned.length === 0) {
-        results.push(result);
-        continue;
-      }
-
-      // 4. Generuj metadata pre orphaned files
-      const newFileEntries = orphaned.map((cf, idx) => {
-        const mime = detectMimetype(cf.data || '');
-        const ext = extensionFor(mime);
-        // Approximate size: Base64 length × 0.75 (Base64 overhead = 33%)
-        const approxSize = Math.round((cf.data?.length || 0) * 0.75);
-        return {
-          id: cf.fileId,
-          originalName: `recovered-photo-${idx + 1}.${ext}`,
-          mimetype: mime,
-          size: approxSize,
-          uploadedAt: cf.createdAt
-        };
-      });
-
-      result.relinkable = newFileEntries.map((f) => ({
-        id: f.id,
-        originalName: f.originalName,
-        mimetype: f.mimetype,
-        size: f.size
-      }));
-      totalRelinkable += newFileEntries.length;
-
-      // 5. Apply (ak nie dryRun)
-      if (!dryRun) {
-        const taskIndex = contact.tasks.findIndex((t) => t.id === task.id);
-        if (taskIndex >= 0) {
-          if (!contact.tasks[taskIndex].files) contact.tasks[taskIndex].files = [];
-          contact.tasks[taskIndex].files.push(...newFileEntries);
-          contact.markModified('tasks');
-          await contact.save();
-          result.relinked = newFileEntries.length;
-          logger.info('[Recovery] Re-linked orphaned files', {
-            contactName: mapping.contactName,
-            taskTitle: task.title,
-            count: newFileEntries.length
-          });
-        }
-      }
-
-      results.push(result);
-    }
-
-    res.json({
-      dryRun,
-      targetDate: targetDate.toISOString(),
-      window: `${fromDate.toISOString()} → ${toDate.toISOString()}`,
-      totalRelinkable,
-      results,
-      message: dryRun
-        ? `Dry-run: nájdených ${totalRelinkable} orphaned files. Spusti znova s dryRun:false pre reálnu obnovu.`
-        : `Recovery dokončené: ${totalRelinkable} files re-linknutých späť do projektov.`
-    });
-  } catch (error) {
-    logger.error('[Recovery] Error', { error: error.message, stack: error.stack });
-    res.status(500).json({ message: 'Chyba pri recovery', error: error.message });
-  }
-});
+// POST /recover-task-files (jednorazová obnova po incidente 2026-05-13 s
+// natvrdo zapísaným mapovaním zákazníckych kontaktov) bol odstránený —
+// obnova prebehla, endpoint ostával zbytočne živý v produkcii. Kód je v
+// git histórii (pred odstránením v audite 2026-10).
 
 // ════════════════════════════════════════════════════════════════════
 // AFFILIATE PROGRAM (Fáza 4-6: 2026-05-19)
@@ -3742,15 +3829,33 @@ router.get('/affiliates', authenticateToken, requireAdmin, async (req, res) => {
 router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { email, name, userId, payoutIban, payoutBankName, payoutNote } = req.body || {};
+    if (userId && !isOid(userId)) return res.status(400).json({ message: 'Neplatné userId' });
+    if (email !== undefined && email !== null && email !== '' && !normalizeEmail(email)) {
+      return res.status(400).json({ message: 'Neplatný e-mail' });
+    }
+    // Výplatné údaje: IBAN (bez medzier, veľké písmená) a dĺžky ako v
+    // affiliate.js /payout-info.
+    let cleanIban;
+    if (payoutIban !== undefined && payoutIban !== null && payoutIban !== '') {
+      if (typeof payoutIban !== 'string') return res.status(400).json({ message: 'Neplatný IBAN' });
+      cleanIban = payoutIban.replace(/\s+/g, '').toUpperCase();
+      if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(cleanIban)) {
+        return res.status(400).json({ message: 'Neplatný formát IBAN' });
+      }
+    }
+    if ((payoutBankName !== undefined && payoutBankName !== null && (typeof payoutBankName !== 'string' || payoutBankName.length > 100)) ||
+        (payoutNote !== undefined && payoutNote !== null && (typeof payoutNote !== 'string' || payoutNote.length > 500))) {
+      return res.status(400).json({ message: 'Názov banky (max 100) alebo poznámka (max 500) je neplatná' });
+    }
     let user = userId
       ? await User.findById(userId)
-      : await User.findOne({ email: (email || '').toLowerCase().trim() });
+      : await User.findOne({ email: normalizeEmail(email) || '' });
 
     let createdNew = false;
     if (!user) {
       // Externý affiliate — neexistujúci v CRM. Potrebujeme aspoň name a email.
-      const cleanEmail = (email || '').toLowerCase().trim();
-      const cleanName = (name || '').trim();
+      const cleanEmail = normalizeEmail(email) || '';
+      const cleanName = (typeof name === 'string' ? name : '').trim().slice(0, 50);
       if (!cleanEmail) return res.status(400).json({ message: 'Email je povinný' });
       if (!cleanName) {
         return res.status(400).json({
@@ -3770,6 +3875,10 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
         username: candidateUsername,
         email: cleanEmail,
         password: null, // bez hesla — nemôže sa prihlásiť cez password flow
+        // Žiadna prihlasovacia metóda (default by bol ['password'] bez hesla —
+        // UI pripojených účtov aj LAST_LOGIN_METHOD guard by klamali). Partner
+        // si prístup nastaví cez „Zabudnuté heslo“ alebo Google/Apple.
+        authProviders: [],
         // Random color z palette (pre konzistenciu s register flow)
         color: '#6D28D9'
       });
@@ -3781,9 +3890,9 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
     user.affiliate.enrolled = true;
     user.affiliate.status = 'active';
     user.affiliate.enrolledAt = user.affiliate.enrolledAt || new Date();
-    if (payoutIban !== undefined) user.affiliate.payoutIban = payoutIban;
-    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName;
-    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote;
+    if (payoutIban !== undefined) user.affiliate.payoutIban = cleanIban || '';
+    if (payoutBankName !== undefined) user.affiliate.payoutBankName = payoutBankName || '';
+    if (payoutNote !== undefined) user.affiliate.payoutNote = payoutNote || '';
     await user.save();
 
     logger.info('[Admin] Affiliate enrolled', { userId: user._id.toString(), email: user.email, createdNew });
@@ -3801,13 +3910,14 @@ router.post('/affiliates/enroll', authenticateToken, requireAdmin, async (req, r
     if (error.code === 11000) {
       return res.status(409).json({ message: 'User s týmto emailom alebo username už existuje', code: 'DUPLICATE' });
     }
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
 // PUT update affiliate payout info + status (admin akcia)
 router.put('/affiliates/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.userId)) return res.status(400).json({ message: 'Neplatné ID' });
     const { payoutIban, payoutBankName, payoutNote, status } = req.body || {};
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'User nenájdený' });
@@ -3838,35 +3948,47 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
     const limit = Math.min(200, Math.max(10, parseInt(req.query.limit) || 50));
 
     const q = {};
-    if (status) q.status = status;
-    if (referrerId) q.referrerId = referrerId;
-    if (from || to) {
-      q.paymentDate = {};
-      if (from) q.paymentDate.$gte = new Date(from);
-      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    if (['pending', 'eligible', 'paid', 'revoked'].includes(status)) q.status = status;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+      q.referrerId = referrerId;
+    }
+    // `to` prichádza ako dátum bez času → koniec dňa
+    const paymentRange = dateRange(from, to, 'T23:59:59');
+    if (paymentRange) q.paymentDate = paymentRange;
+
+    // Search PRED stránkovaním (username affiliateho/zákazníka alebo kód) —
+    // rovnaký prístup ako /email-logs. Predtým sa filtrovala už stránkovaná
+    // odpoveď, takže hľadanie našlo iba zhody na aktuálnej stránke a `total`
+    // ostal nefiltrovaný (stránkovanie s vyhľadávaním bolo nekonzistentné).
+    const listQ = { ...q };
+    if (typeof search === 'string' && search.trim()) {
+      const rx = { $regex: escapeRegex(search.trim().slice(0, 100)), $options: 'i' };
+      const [matchingUsers, matchingCodes] = await Promise.all([
+        User.find({ username: rx }).select('_id').limit(500).lean(),
+        PromoCode.find({ code: rx }).select('_id').limit(500).lean()
+      ]);
+      const userIds = matchingUsers.map((u) => u._id);
+      listQ.$or = [
+        { referrerId: { $in: userIds } },
+        { referredUserId: { $in: userIds } },
+        { promoCodeId: { $in: matchingCodes.map((p) => p._id) } }
+      ];
     }
 
-    let commissions = await Commission.find(q)
-      .sort({ paymentDate: -1 })
-      .populate('referrerId', 'username email')
-      .populate('referredUserId', 'username email')
-      .populate('promoCodeId', 'code name')
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
-    const total = await Commission.countDocuments(q);
+    const [commissions, total] = await Promise.all([
+      Commission.find(listQ)
+        .sort({ paymentDate: -1 })
+        .populate('referrerId', 'username email')
+        .populate('referredUserId', 'username email')
+        .populate('promoCodeId', 'code name')
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Commission.countDocuments(listQ)
+    ]);
 
-    // Search filter (post-fetch — small dataset, akceptovateľné)
-    if (search) {
-      const s = String(search).toLowerCase();
-      commissions = commissions.filter((c) =>
-        (c.referrerId?.username || '').toLowerCase().includes(s) ||
-        (c.referredUserId?.username || '').toLowerCase().includes(s) ||
-        (c.promoCodeId?.code || '').toLowerCase().includes(s)
-      );
-    }
-
-    // Aggregated summary pre header (nezávislé od page-u)
+    // Aggregated summary pre header (nezávislé od page-u aj od search-u)
     const summary = await Commission.aggregate([
       { $match: q },
       { $group: { _id: '$status', total: { $sum: '$commissionAmount' }, count: { $sum: 1 } } }
@@ -3888,12 +4010,17 @@ router.get('/commissions', authenticateToken, requireAdmin, async (req, res) => 
 // POST mark single commission as paid
 router.post('/commissions/:id/mark-paid', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    if (!isOid(req.params.id)) return res.status(400).json({ message: 'Neplatné ID' });
     const Commission = require('../models/Commission');
     const { paidMethod, paidReference, notes } = req.body || {};
     const c = await Commission.findById(req.params.id);
     if (!c) return res.status(404).json({ message: 'Commission nenájdené' });
     if (c.status !== 'eligible') {
       return res.status(400).json({ message: `Commission je v stave "${c.status}" — možno označiť ako paid iba stav "eligible"` });
+    }
+    // enum ['bank','stripe','paypal'] — inak ValidationError až pri save() → 500
+    if (paidMethod && !['bank', 'stripe', 'paypal'].includes(paidMethod)) {
+      return res.status(400).json({ message: 'Neplatná metóda platby' });
     }
     c.status = 'paid';
     c.paidAt = new Date();
@@ -3921,8 +4048,11 @@ router.post('/commissions/bulk-pay', authenticateToken, requireAdmin, async (req
     const Commission = require('../models/Commission');
     const { referrerId, paidReference, paidMethod, notes } = req.body || {};
     if (!referrerId) return res.status(400).json({ message: 'referrerId je povinné' });
+    if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
 
-    const eligible = await Commission.find({ referrerId, status: 'eligible' });
+    const eligible = await Commission.find({ referrerId, status: 'eligible' })
+      .select('_id commissionAmount notes').lean();
     const totalAmount = eligible.reduce((sum, c) => sum + c.commissionAmount, 0);
 
     const MIN_PAYOUT_EUR = 20;
@@ -3934,25 +4064,41 @@ router.post('/commissions/bulk-pay', authenticateToken, requireAdmin, async (req
       });
     }
 
+    // Per dokument s podmienkou status:'eligible' — medzi find a zápisom
+    // mohol refund webhook províziu revokovať; hromadný updateMany bez
+    // guardu by ju označil ako vyplatenú a pripočítal k totalPaidEur.
+    // Poznámka sa PRIPÁJA k existujúcej histórii (predtým ju prepísala).
     const now = new Date();
-    await Commission.updateMany(
-      { _id: { $in: eligible.map((c) => c._id) } },
-      {
-        $set: {
-          status: 'paid',
-          paidAt: now,
-          paidMethod: paidMethod || 'bank',
-          paidReference: paidReference || '',
-          notes: notes ? `\n[${now.toISOString()}] ${notes}` : ''
+    const noteSuffix = notes ? `\n[${now.toISOString()}] ${str(notes, 500)}` : '';
+    let paidCount = 0;
+    let paidAmount = 0;
+    for (const c of eligible) {
+      const result = await Commission.updateOne(
+        { _id: c._id, status: 'eligible' },
+        {
+          $set: {
+            status: 'paid',
+            paidAt: now,
+            paidMethod: str(paidMethod, 50) || 'bank',
+            paidReference: str(paidReference, 200),
+            notes: (c.notes || '') + noteSuffix
+          }
         }
+      );
+      if (result.modifiedCount > 0) {
+        paidCount++;
+        paidAmount += c.commissionAmount;
       }
-    );
+    }
+    paidAmount = Math.round(paidAmount * 100) / 100;
 
-    await User.findByIdAndUpdate(referrerId, {
-      $inc: { 'affiliate.totalPaidEur': Math.round(totalAmount * 100) / 100 }
-    });
+    if (paidAmount > 0) {
+      await User.findByIdAndUpdate(referrerId, {
+        $inc: { 'affiliate.totalPaidEur': paidAmount }
+      });
+    }
 
-    res.json({ success: true, paidCount: eligible.length, paidAmount: Math.round(totalAmount * 100) / 100 });
+    res.json({ success: true, paidCount, paidAmount });
   } catch (error) {
     logger.error('[Admin] Bulk pay error', { error: error.message });
     res.status(500).json({ message: 'Chyba servera' });
@@ -3965,13 +4111,13 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
     const Commission = require('../models/Commission');
     const { status, referrerId, from, to } = req.query;
     const q = {};
-    if (status) q.status = status;
-    if (referrerId) q.referrerId = referrerId;
-    if (from || to) {
-      q.paymentDate = {};
-      if (from) q.paymentDate.$gte = new Date(from);
-      if (to) q.paymentDate.$lte = new Date(to + 'T23:59:59');
+    if (['pending', 'eligible', 'paid', 'revoked'].includes(status)) q.status = status;
+    if (referrerId) {
+      if (!isOid(referrerId)) return res.status(400).json({ message: 'Neplatné referrerId' });
+      q.referrerId = referrerId;
     }
+    const paymentRange = dateRange(from, to, 'T23:59:59');
+    if (paymentRange) q.paymentDate = paymentRange;
     const rows = await Commission.find(q)
       .sort({ paymentDate: -1 })
       .populate('referrerId', 'username email')
@@ -3982,7 +4128,9 @@ router.get('/commissions/export.csv', authenticateToken, requireAdmin, async (re
     const esc = (v) => {
       if (v == null) return '';
       const s = String(v);
-      if (/^[=+\-@\t\r]/.test(s)) return `'${s.replace(/"/g, '""')}"`; // CSV injection protection
+      // CSV injection protection — apostrof VNÚTRI úvodzoviek. Predtým chýbala
+      // otváracia úvodzovka (`'text"`), takže bunka s čiarkou rozbila riadok.
+      if (/^[=+\-@\t\r]/.test(s)) return `"'${s.replace(/"/g, '""')}"`;
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 

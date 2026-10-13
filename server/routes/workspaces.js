@@ -1,17 +1,26 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
+const { joinWorkspaceLimiter } = require('../middleware/rateLimiter');
+const { isProEmail, getBaseSeatLimit, getMaxMembers } = require('../utils/planLimits');
 const { isIosNativeApp } = require('../utils/platform');
 const { logPlanGateHit } = require('../utils/planGate');
 const { requireWorkspace, requireWorkspaceAdmin, requireWorkspaceOwner, invalidateCache } = require('../middleware/workspace');
 const logger = require('../utils/logger');
 const { sendInvitationEmail } = require('../services/adminEmailService');
 const notificationService = require('../services/notificationService');
+const { joinWorkspaceRoom, leaveWorkspaceRoom, closeWorkspaceRoom } = require('../utils/socketRooms');
+
+// Farba prostredia sa na klientovi vkladá priamo do style={{ backgroundColor }}
+// (WorkspaceSwitcher.jsx) — akceptujeme len hex formát (#rgb až #rrggbbaa).
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
+const isValidHexColor = (value) => typeof value === 'string' && HEX_COLOR_RE.test(value);
 
 // Get all workspaces user is member of
 router.get('/', authenticateToken, async (req, res) => {
@@ -85,14 +94,15 @@ router.put('/reorder', authenticateToken, async (req, res) => {
 // Get current workspace details
 router.get('/current', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
-
-    const owner = await User.findById(req.workspace.ownerId);
+    // Z vlastníka čítame len subscription.plan — bez .select() by sa pri každom
+    // štarte klienta načítal celý User vrátane avatarData (Base64, až ~6,7 MB).
+    const [memberCount, owner] = await Promise.all([
+      WorkspaceMember.countDocuments({ workspaceId: req.workspace._id }),
+      User.findById(req.workspace.ownerId).select('subscription').lean()
+    ]);
     const paidSeats = req.workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = memberLimitsMap[ownerPlan] || 2;
-    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
+    const maxMembers = getMaxMembers(ownerPlan, paidSeats);
 
     const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
 
@@ -124,7 +134,9 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const { name, description, color } = req.body;
 
-    if (!name || name.trim().length === 0) {
+    // typeof kontroly — pole/číslo/objekt v JSON by inak spadli na .trim()
+    // s TypeError → 500 namiesto 400.
+    if (typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ message: 'Názov je povinný' });
     }
 
@@ -151,22 +163,40 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // Generate slug and invite code
-    const slug = await Workspace.generateSlug(name);
+    // Generate slug and invite code. generateSlug odstráni všetko mimo
+    // [a-z0-9] — pre názvy len z cyriliky/emoji/symbolov („Проект", „🚀")
+    // vráti '' a schéma (slug required) by padla na ValidationError → 500.
+    let slug = await Workspace.generateSlug(name);
+    if (!slug) slug = 'ws-' + crypto.randomBytes(4).toString('hex');
     const inviteCode = Workspace.generateInviteCode();
 
     // Create workspace
     const workspace = new Workspace({
       name: name.trim(),
       slug,
-      description: description?.trim() || '',
-      color: color || '#6366f1',
+      description: typeof description === 'string' ? description.trim().slice(0, 500) : '',
+      color: isValidHexColor(color) ? color : '#6366f1',
       ownerId: req.user.id,
       inviteCode,
       inviteCodeEnabled: true
     });
 
     await workspace.save();
+
+    // Súbežné POST / prejdú kontrolou počtu naraz (check-then-act) — po
+    // vložení overíme znova a nadbytočný workspace hneď zmažeme.
+    if (maxOwnedWorkspaces !== Infinity) {
+      const ownedAfter = await Workspace.find({ ownerId: req.user.id }).sort({ createdAt: 1, _id: 1 }).select('_id').lean();
+      const allowedIds = new Set(ownedAfter.slice(0, maxOwnedWorkspaces).map(w => String(w._id)));
+      if (!allowedIds.has(String(workspace._id))) {
+        await Workspace.deleteOne({ _id: workspace._id });
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxOwnedWorkspaces} pracovných prostredí.`
+          : `Váš plán umožňuje vlastniť max. ${maxOwnedWorkspaces} pracovných prostredí. Pre viac prejdite na vyšší plán.`;
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'workspaces', limit: maxOwnedWorkspaces });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+      }
+    }
 
     // Create owner membership
     const membership = new WorkspaceMember({
@@ -177,6 +207,7 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     await membership.save();
+    joinWorkspaceRoom(req, req.user.id, workspace._id);
 
     // Set as current workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
@@ -194,23 +225,35 @@ router.post('/', authenticateToken, async (req, res) => {
       role: 'owner'
     });
   } catch (error) {
+    // Súbežné POST / s rovnakým názvom: while-loop v generateSlug nie je
+    // atomický a unique index na slug hodí E11000 — nie je to chyba servera.
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'Názov prostredia je práve obsadený, skúste to znova' });
+    }
     logger.error('Create workspace error', { error: error.message, userId: req.user.id });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
 // Join workspace by invite code
-router.post('/join', authenticateToken, async (req, res) => {
+router.post('/join', authenticateToken, joinWorkspaceLimiter, async (req, res) => {
   try {
     const { inviteCode } = req.body;
 
-    if (!inviteCode) {
+    if (typeof inviteCode !== 'string' || inviteCode.trim().length === 0) {
       return res.status(400).json({ message: 'Kód pozvánky je povinný' });
+    }
+    // Kód má 8 (staré) alebo 12 hex znakov (Workspace.generateInviteCode) —
+    // iný formát v DB existovať nemôže, odpovedáme ako pri neplatnom kóde
+    // bez dotazu. Trim toleruje whitespace pri kopírovaní kódu.
+    const code = inviteCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,32}$/.test(code)) {
+      return res.status(404).json({ message: 'Neplatný alebo neaktívny kód pozvánky' });
     }
 
     // Find workspace by invite code
     const workspace = await Workspace.findOne({
-      inviteCode: inviteCode.toUpperCase(),
+      inviteCode: code,
       inviteCodeEnabled: true
     });
 
@@ -240,18 +283,19 @@ router.post('/join', authenticateToken, async (req, res) => {
     }
 
     // Check workspace member limits based on owner's plan and paid seats
-    const joiningUser = await User.findById(req.user.id);
-    const owner = await User.findById(workspace.ownerId);
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
+    // (len email + subscription — nie celý User s avatarData blobom)
+    const [joiningUser, owner, memberCount] = await Promise.all([
+      User.findById(req.user.id).select('email').lean(),
+      User.findById(workspace.ownerId).select('email subscription').lean(),
+      WorkspaceMember.countDocuments({ workspaceId: workspace._id })
+    ]);
 
     // Team Pro emails bypass capacity check
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase()) || proEmails.includes(joiningUser?.email?.toLowerCase());
+    const isTeamPro = isProEmail(owner?.email) || isProEmail(joiningUser?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const memberLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = memberLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
@@ -269,11 +313,33 @@ router.post('/join', authenticateToken, async (req, res) => {
     const membership = new WorkspaceMember({
       workspaceId: workspace._id,
       userId: req.user.id,
-      role: workspace.settings.defaultMemberRole || 'member',
+      // Legacy 'admin' (a čokoľvek neznáme) → 'member'; WorkspaceMember enum
+      // by 'admin' odmietol a join by skončil 500.
+      role: workspace.settings?.defaultMemberRole === 'manager' ? 'manager' : 'member',
       invitedBy: null // Joined via code
     });
 
-    await membership.save();
+    try {
+      await membership.save();
+    } catch (saveErr) {
+      // Súbežný join (dvojklik/retry): unique index { workspaceId, userId }
+      // hodil E11000, ale členstvo už existuje → rovnaká odpoveď ako vetva
+      // "už člen" vyššie namiesto 500.
+      if (saveErr.code !== 11000) throw saveErr;
+      const existing = await WorkspaceMember.findOne({ workspaceId: workspace._id, userId: req.user.id });
+      await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
+      return res.json({
+        message: 'Už ste členom tohto pracovného prostredia',
+        workspace: {
+          id: workspace._id,
+          name: workspace.name,
+          slug: workspace.slug,
+          role: existing?.role || membership.role
+        }
+      });
+    }
+
+    joinWorkspaceRoom(req, req.user.id, workspace._id);
 
     // Set as current workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: workspace._id });
@@ -363,13 +429,13 @@ router.post('/switch/:workspaceId', authenticateToken, async (req, res) => {
     // v jednom React render tiku atomicky nastavil currentWorkspaceId +
     // currentWorkspace. Second roundtrip GET /current by otvoril race window
     // (cross-workspace deep-link bug, commit c18a9b2).
-    const memberCount = await WorkspaceMember.countDocuments({ workspaceId: workspace._id });
-    const owner = await User.findById(workspace.ownerId);
+    const [memberCount, owner] = await Promise.all([
+      WorkspaceMember.countDocuments({ workspaceId: workspace._id }),
+      User.findById(workspace.ownerId).select('subscription').lean()
+    ]);
     const paidSeats = workspace.paidSeats || 0;
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const memberLimitsMap = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = memberLimitsMap[ownerPlan] || 2;
-    const maxMembers = baseLimit === Infinity ? Infinity : baseLimit + paidSeats;
+    const maxMembers = getMaxMembers(ownerPlan, paidSeats);
     const isOverLimit = maxMembers !== Infinity && memberCount > maxMembers;
 
     logger.info('Workspace switched', { workspaceId: objectId, userId: req.user.id });
@@ -409,7 +475,7 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
 
     const updates = {};
     if (name !== undefined) {
-      if (!name || name.trim().length === 0) {
+      if (typeof name !== 'string' || name.trim().length === 0) {
         return res.status(400).json({ message: 'Názov je povinný' });
       }
       if (name.length > 100) {
@@ -431,15 +497,35 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
       }
       updates.name = name.trim();
     }
-    if (description !== undefined) updates.description = description.trim();
-    if (color !== undefined) updates.color = color;
-    if (inviteCodeEnabled !== undefined) updates.inviteCodeEnabled = inviteCodeEnabled;
+    if (description !== undefined) {
+      if (typeof description !== 'string' || description.length > 500) {
+        return res.status(400).json({ message: 'Popis môže mať maximálne 500 znakov' });
+      }
+      updates.description = description.trim();
+    }
+    if (color !== undefined) {
+      if (!isValidHexColor(color)) {
+        return res.status(400).json({ message: 'Neplatná farba' });
+      }
+      updates.color = color;
+    }
+    if (inviteCodeEnabled !== undefined) {
+      if (typeof inviteCodeEnabled !== 'boolean') {
+        return res.status(400).json({ message: 'Neplatná hodnota inviteCodeEnabled' });
+      }
+      updates.inviteCodeEnabled = inviteCodeEnabled;
+    }
 
+    // runValidators — update dotazy inak obchádzajú schémové validátory
+    // (maxlength description 500 / name 100).
     const workspace = await Workspace.findByIdAndUpdate(
       req.workspace._id,
       updates,
-      { new: true }
+      { new: true, runValidators: true }
     );
+    // requireWorkspace kešuje celý Workspace dokument 60 s — bez invalidácie by
+    // GET /current žiadateľa vrátil starý názov/farbu/inviteCodeEnabled.
+    invalidateCache(req.user.id);
 
     logger.info('Workspace updated', { workspaceId: workspace._id, userId: req.user.id, updates: Object.keys(updates) });
 
@@ -459,20 +545,29 @@ router.put('/current', authenticateToken, requireWorkspaceAdmin, async (req, res
 });
 
 // Update paid seats (admin only)
+// Dokúpené miesta mení LEN super-admin (alebo budúci billing tok po
+// zaplatení seat add-onu). Predtým si ich owner/manager workspace vedel
+// nastaviť ľubovoľne a obísť tak limit členov plánu — paidSeats sa
+// pripočítava vo všetkých plan-gate kontrolách. Klient endpoint nepoužíva.
 router.put('/current/seats', authenticateToken, requireWorkspaceAdmin, async (req, res) => {
   try {
+    if (String(req.user.email || '').toLowerCase() !== 'support@prplcrm.eu') {
+      logger.warn('Seat change denied — not super admin', { userId: req.user.id, workspaceId: req.workspace?._id });
+      return res.status(403).json({ message: 'Počet miest mení len administrátor Prpl CRM' });
+    }
+
     const { paidSeats } = req.body;
 
-    if (paidSeats === undefined || typeof paidSeats !== 'number' || paidSeats < 0) {
-      return res.status(400).json({ message: 'Počet miest musí byť číslo väčšie alebo rovné 0' });
+    if (paidSeats === undefined || typeof paidSeats !== 'number' || !Number.isFinite(paidSeats) || paidSeats < 0 || paidSeats > 1000) {
+      return res.status(400).json({ message: 'Počet miest musí byť číslo 0 – 1000' });
     }
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { paidSeats: Math.floor(paidSeats) });
+    invalidateCache(req.user.id);
 
-    const owner = await User.findById(req.workspace.ownerId);
+    const owner = await User.findById(req.workspace.ownerId).select('subscription').lean();
     const ownerPlan = owner?.subscription?.plan || 'free';
-    const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-    const baseLimit = seatLimits[ownerPlan] || 2;
+    const baseLimit = getBaseSeatLimit(ownerPlan);
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspace._id });
 
     res.json({
@@ -493,6 +588,7 @@ router.post('/current/regenerate-invite', authenticateToken, requireWorkspaceAdm
     const newCode = Workspace.generateInviteCode();
 
     await Workspace.findByIdAndUpdate(req.workspace._id, { inviteCode: newCode });
+    invalidateCache(req.user.id);
 
     logger.info('Invite code regenerated', { workspaceId: req.workspace._id, userId: req.user.id });
 
@@ -509,7 +605,10 @@ router.get('/current/members', authenticateToken, requireWorkspace, async (req, 
     const members = await WorkspaceMember.find({ workspaceId: req.workspace._id })
       .populate('userId', 'username email color avatar');
 
-    const membersData = members.map(m => ({
+    // populate vráti null pre osirelé membership (User zmazaný mimo štandardného
+    // flow / ručný zásah v DB) — bez filtra by jedno také zhodilo celý zoznam
+    // členov na 500 pre všetkých členov workspace-u.
+    const membersData = members.filter(m => m.userId).map(m => ({
       id: m._id,
       userId: m.userId._id,
       username: m.userId.username,
@@ -520,6 +619,12 @@ router.get('/current/members', authenticateToken, requireWorkspace, async (req, 
       joinedAt: m.joinedAt,
       canEdit: req.workspaceMember.canAdmin() && m.role !== 'owner'
     }));
+    if (membersData.length !== members.length) {
+      logger.warn('Orphaned memberships skipped', {
+        workspaceId: req.workspace._id,
+        orphans: members.length - membersData.length
+      });
+    }
 
     res.json(membersData);
   } catch (error) {
@@ -533,6 +638,11 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
   try {
     const { memberId } = req.params;
     const { role } = req.body;
+
+    // Neplatný formát ID by inak skončil Mongoose CastError → 500 namiesto 400.
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: 'Neplatné ID člena' });
+    }
 
     if (!['manager', 'member'].includes(role)) {
       return res.status(400).json({ message: 'Neplatná rola' });
@@ -554,6 +664,9 @@ router.put('/current/members/:memberId/role', authenticateToken, requireWorkspac
 
     member.role = role;
     await member.save();
+    // Membership je kešovaná 60 s v requireWorkspace — bez invalidácie by člen
+    // ešte minútu pracoval so starými oprávneniami (canAdmin()).
+    invalidateCache(String(member.userId));
 
     logger.info('Member role updated', { workspaceId: req.workspace._id, memberId, newRole: role, userId: req.user.id });
 
@@ -569,6 +682,10 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
   try {
     const { memberId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: 'Neplatné ID člena' });
+    }
+
     const member = await WorkspaceMember.findOne({
       _id: memberId,
       workspaceId: req.workspace._id
@@ -583,11 +700,12 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
       return res.status(403).json({ message: 'Nie je možné odstrániť vlastníka' });
     }
 
-    // If removing self (leaving workspace)
-    if (member.userId.toString() === req.user.id) {
+    // If removing self (leaving workspace). req.user.id je ObjectId pri auth
+    // cache miss a string pri Redis hite — porovnávame ako string.
+    if (member.userId.toString() === String(req.user.id)) {
       // Clear current workspace if this is it
-      const user = await User.findById(req.user.id);
-      if (user.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
+      const user = await User.findById(req.user.id).select('currentWorkspaceId').lean();
+      if (user?.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
         // Find another workspace to switch to
         const otherMembership = await WorkspaceMember.findOne({
           userId: req.user.id,
@@ -601,9 +719,12 @@ router.delete('/current/members/:memberId', authenticateToken, requireWorkspaceA
     }
 
     await WorkspaceMember.deleteOne({ _id: memberId });
+    // Odstránený člen nesmie ďalších 60 s prechádzať requireWorkspace z cache.
+    invalidateCache(String(member.userId));
+    leaveWorkspaceRoom(req, String(member.userId), req.workspace._id);
 
     // Clear removed user's current workspace if needed
-    const removedUser = await User.findById(member.userId);
+    const removedUser = await User.findById(member.userId).select('currentWorkspaceId').lean();
     if (removedUser?.currentWorkspaceId?.toString() === req.workspace._id.toString()) {
       const otherMembership = await WorkspaceMember.findOne({
         userId: member.userId,
@@ -634,11 +755,15 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       });
     }
 
-    // Get leaving user info before deleting membership
-    const leavingUser = await User.findById(req.user.id, 'username');
+    // Meno odchádzajúceho je už v req.user (auth middleware) — ďalší dotaz na
+    // User bol zbytočný a pri medzičasom zmazanom účte by sa na null padlo až
+    // PO zmazaní membership (nekonzistentný stav + 500).
+    const leavingName = req.user.username || 'Používateľ';
     const workspaceName = req.workspace.name;
 
     await WorkspaceMember.deleteOne({ _id: req.workspaceMember._id });
+    invalidateCache(req.user.id);
+    leaveWorkspaceRoom(req, req.user.id, req.workspace._id);
 
     // Find another workspace to switch to
     const otherMembership = await WorkspaceMember.findOne({
@@ -656,20 +781,20 @@ router.post('/current/leave', authenticateToken, requireWorkspace, async (req, r
       role: { $in: ['owner', 'manager'] }
     });
 
-    for (const admin of admins) {
-      await notificationService.createNotification({
-        userId: admin.userId.toString(),
-        workspaceId: req.workspace._id,
-        type: 'workspace',
-        title: `${leavingUser.username} opustil/a prostredie`,
-        message: `Používateľ ${leavingUser.username} opustil/a pracovné prostredie "${workspaceName}".`,
-        actorId: req.user.id,
-        actorName: leavingUser.username,
-        relatedType: 'workspace',
-        relatedId: req.workspace._id.toString(),
-        relatedName: workspaceName
-      });
-    }
+    // Paralelne — každé createNotification je save + socket emit + push,
+    // sekvenčná slučka zbytočne násobila latenciu počtom adminov.
+    await Promise.all(admins.map(admin => notificationService.createNotification({
+      userId: admin.userId.toString(),
+      workspaceId: req.workspace._id,
+      type: 'workspace.memberLeft',
+      title: `${leavingName} opustil/a prostredie`,
+      message: `Používateľ ${leavingName} opustil/a pracovné prostredie "${workspaceName}".`,
+      actorId: req.user.id,
+      actorName: leavingName,
+      relatedType: 'workspace',
+      relatedId: req.workspace._id.toString(),
+      relatedName: workspaceName
+    })));
 
     logger.info('User left workspace', { workspaceId: req.workspace._id, userId: req.user.id, notified: admins.length });
 
@@ -688,6 +813,10 @@ router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requir
   try {
     const { newOwnerId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(newOwnerId)) {
+      return res.status(400).json({ message: 'Neplatné ID používateľa' });
+    }
+
     // Find new owner's membership
     const newOwnerMembership = await WorkspaceMember.findOne({
       workspaceId: req.workspace._id,
@@ -703,15 +832,22 @@ router.post('/current/transfer-ownership/:newOwnerId', authenticateToken, requir
       return res.status(400).json({ message: 'Vlastníctvo je možné previesť len na manažéra' });
     }
 
-    // Update roles - old owner becomes member
-    req.workspaceMember.role = 'member';
-    await req.workspaceMember.save();
+    // Poradie zápisov: najprv ownerId a povýšenie nového vlastníka, až
+    // nakoniec degradácia starého. Ak niektorý zápis zlyhá, prechodný stav
+    // "dvaja vlastníci" je bezpečný (starý vlastník operáciu zopakuje);
+    // pôvodné poradie mohlo nechať workspace úplne bez vlastníka.
+    await Workspace.findByIdAndUpdate(req.workspace._id, { ownerId: newOwnerId });
 
     newOwnerMembership.role = 'owner';
     await newOwnerMembership.save();
 
-    // Update workspace owner
-    await Workspace.findByIdAndUpdate(req.workspace._id, { ownerId: newOwnerId });
+    // Old owner becomes member
+    req.workspaceMember.role = 'member';
+    await req.workspaceMember.save();
+
+    // Obaja majú v cache staré membership (rola) aj starý Workspace.ownerId.
+    invalidateCache(req.user.id);
+    invalidateCache(String(newOwnerId));
 
     logger.info('Ownership transferred', { workspaceId: req.workspace._id, oldOwnerId: req.user.id, newOwnerId });
 
@@ -729,6 +865,7 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
 
     // Delete all memberships
     await WorkspaceMember.deleteMany({ workspaceId });
+    closeWorkspaceRoom(req, workspaceId);
 
     // Clear currentWorkspaceId for all affected users
     await User.updateMany(
@@ -736,11 +873,17 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
       { currentWorkspaceId: null }
     );
 
-    // Delete workspace data (contacts, tasks, messages, invitations)
+    // Delete workspace data (contacts, tasks, messages, invitations, pages, notifications)
     const Contact = require('../models/Contact');
     const Task = require('../models/Task');
     const Message = require('../models/Message');
+    const Page = require('../models/Page');
+    const Notification = require('../models/Notification');
     const { deleteMessageBlobs } = require('../services/messageFiles');
+    const { deleteWorkspaceFileBlobs } = require('../services/workspaceFiles');
+    // Prílohy kontaktov/projektov (ContactFile + R2) PRED zmazaním Contact/
+    // Task — fileId sa zisťujú z ich dokumentov. Best-effort, nehádže.
+    await deleteWorkspaceFileBlobs(workspaceId);
     await Contact.deleteMany({ workspaceId });
     await Task.deleteMany({ workspaceId });
     // Bloby príloh správ (R2) PRED deleteMany — po ňom už kľúče niet odkiaľ
@@ -748,9 +891,14 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
     await deleteMessageBlobs({ workspaceId });
     await Message.deleteMany({ workspaceId });
     await Invitation.deleteMany({ workspaceId });
+    // Stránky a notifikácie sú tiež viazané na workspaceId — predtým ostávali
+    // osirelé (Pages natrvalo, Notifications až do TTL expirácie).
+    await Page.deleteMany({ workspaceId });
+    await Notification.deleteMany({ workspaceId });
 
     // Delete workspace
     await Workspace.deleteOne({ _id: workspaceId });
+    invalidateCache(req.user.id);
 
     logger.info('Workspace deleted', { workspaceId, userId: req.user.id });
 
@@ -767,7 +915,14 @@ router.delete('/current', authenticateToken, requireWorkspaceOwner, async (req, 
 router.post('/current/invitations', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
   try {
     const { email, role } = req.body;
-    if (!email) return res.status(400).json({ message: 'Email je povinný' });
+    if (typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({ message: 'Email je povinný' });
+    }
+    // Permisívny formát local@domain.tld + limit dĺžky (RFC 5321: 254) —
+    // inak sa ľubovoľný reťazec uložil do Invitation a poslal do SMTP ako adresát.
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ message: 'Neplatný e-mail' });
+    }
 
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -795,18 +950,16 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
 
     // Check workspace capacity
     const workspace = await Workspace.findById(req.workspaceId);
-    const owner = await User.findById(workspace.ownerId);
+    const owner = await User.findById(workspace.ownerId).select('subscription').lean();
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: req.workspaceId });
 
     // Team Pro emails bypass capacity check entirely
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const inviterUser = await User.findById(req.user.id);
-    const isTeamPro = proEmails.includes(inviterUser?.email?.toLowerCase());
+    const inviterUser = await User.findById(req.user.id).select('email username').lean();
+    const isTeamPro = isProEmail(inviterUser?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
@@ -815,7 +968,8 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
             ? `Dosiahli ste limit ${baseSeatLimit} členov v tíme.`
             : `Váš plán umožňuje max. ${baseSeatLimit} členov. Pre viac členov prejdite na vyšší plán.`;
           logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
-          return res.status(400).json({ message, code: 'PLAN_LIMIT' });
+          // 403 ako pri POST / a POST /join — klient reaguje na `code`, nie na status.
+          return res.status(403).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }
@@ -832,20 +986,37 @@ router.post('/current/invitations', authenticateToken, requireWorkspace, require
     // inviterUser already fetched above for capacity check
     const inviteLink = `${process.env.CLIENT_URL || 'https://prplcrm.eu'}/invite/${invitation.token}`;
 
-    // Send invitation email (fire and forget — don't block response)
+    // Odoslanie e-mailu s pozvánkou. SMTP transporter nemá nastavené timeouty
+    // (nodemailer default: 2 min connection / 10 min socket), takže pri
+    // nedostupnom SMTP by tento request visel minúty. Čakáme max. 15 s —
+    // pozvánka aj odkaz sú už vytvorené a klient ich zobrazí; e-mail môže
+    // doraziť neskôr (vtedy sa iba zaloguje).
     let emailSent = false;
-    try {
-      emailSent = await sendInvitationEmail({
-        toEmail: normalizedEmail,
-        inviterName: inviterUser?.username || 'Člen tímu',
-        workspaceName: workspace.name,
-        role: invitation.role,
-        inviteLink,
-        expiresAt: invitation.expiresAt
-      });
-    } catch (emailErr) {
+    let emailTimer = null;
+    const emailPromise = sendInvitationEmail({
+      toEmail: normalizedEmail,
+      inviterName: inviterUser?.username || 'Člen tímu',
+      workspaceName: workspace.name,
+      role: invitation.role,
+      inviteLink,
+      expiresAt: invitation.expiresAt
+    }).catch((emailErr) => {
       logger.warn('Invitation email failed', { error: emailErr.message, email: normalizedEmail });
-    }
+      return false;
+    });
+    emailSent = await Promise.race([
+      emailPromise,
+      new Promise((resolve) => {
+        emailTimer = setTimeout(() => {
+          logger.warn('Invitation email timed out (15 s) — response sent without waiting', { email: normalizedEmail });
+          emailPromise.then((sent) => {
+            if (sent) logger.info('Invitation email eventually sent after timeout', { email: normalizedEmail });
+          });
+          resolve(false);
+        }, 15000);
+      })
+    ]);
+    if (emailTimer) clearTimeout(emailTimer);
 
     logger.info('Invitation sent', {
       workspaceId: req.workspaceId,
@@ -902,6 +1073,9 @@ router.get('/current/invitations', authenticateToken, requireWorkspace, requireW
 // Cancel invitation
 router.delete('/current/invitations/:invitationId', authenticateToken, requireWorkspace, requireWorkspaceAdmin, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.invitationId)) {
+      return res.status(400).json({ message: 'Neplatné ID pozvánky' });
+    }
     const invitation = await Invitation.findOneAndUpdate(
       { _id: req.params.invitationId, workspaceId: req.workspaceId, status: 'pending' },
       { status: 'cancelled' }
@@ -979,6 +1153,16 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       return res.status(410).json({ message: 'Pozvánka vypršala' });
     }
 
+    // Pozvánka platí len pre účet s pozvaným e-mailom — preposlaný odkaz
+    // (alebo odkaz z cudzej schránky) inak pridal do tímu kohokoľvek.
+    const userEmail = String(req.user.email || '').toLowerCase().trim();
+    if (invitation.email && invitation.email.toLowerCase() !== userEmail) {
+      return res.status(403).json({
+        message: `Pozvánka bola vystavená na adresu ${invitation.email}. Prihláste sa týmto účtom alebo požiadajte o novú pozvánku.`,
+        code: 'INVITE_EMAIL_MISMATCH'
+      });
+    }
+
     // Check if already a member
     const existingMember = await WorkspaceMember.findOne({
       workspaceId: invitation.workspaceId,
@@ -996,39 +1180,65 @@ router.post('/invitation/:token/accept', authenticateToken, async (req, res) => 
       return res.status(404).json({ message: 'Pracovné prostredie už neexistuje' });
     }
 
-    const owner = await User.findById(workspace.ownerId);
+    const owner = await User.findById(workspace.ownerId).select('email subscription').lean();
     const memberCount = await WorkspaceMember.countDocuments({ workspaceId: invitation.workspaceId });
 
     // Team Pro emails bypass capacity check
-    const proEmails = (process.env.PRO_EMAILS || 'project.manager@eperun.sk,martin.kosco@eperun.sk').split(',').map(e => e.trim()).filter(Boolean);
-    const isTeamPro = proEmails.includes(owner?.email?.toLowerCase());
+    const isTeamPro = isProEmail(owner?.email);
 
     if (!isTeamPro) {
       const ownerPlan = owner?.subscription?.plan || 'free';
-      const seatLimits = { free: 2, trial: 2, team: 10, pro: Infinity };
-      const baseSeatLimit = seatLimits[ownerPlan] || 2;
+      const baseSeatLimit = getBaseSeatLimit(ownerPlan);
       if (baseSeatLimit !== Infinity) {
         const maxSeats = baseSeatLimit + (workspace.paidSeats || 0);
         if (memberCount >= maxSeats) {
-          return res.status(400).json({ message: `Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.` });
+          // Apple 3.1.1 — iOS bez zmienky o pláne/dokupovaní; rovnaký tvar
+          // (code PLAN_LIMIT + audit záznam + 403) ako ostatné plan-gate miesta.
+          const message = isIosNativeApp(req)
+            ? 'Toto pracovné prostredie je plné.'
+            : 'Prostredie je plné. Vlastník musí prejsť na vyšší plán alebo dokúpiť miesta.';
+          logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'members', limit: baseSeatLimit });
+          return res.status(403).json({ message, code: 'PLAN_LIMIT' });
         }
       }
     }
 
-    // Create membership
-    await WorkspaceMember.create({
-      workspaceId: invitation.workspaceId,
-      userId: req.user.id,
-      role: invitation.role,
-      invitedBy: invitation.invitedBy
-    });
+    // Atomické „zabranie“ pozvánky (pending → accepted) PRED vytvorením
+    // členstva — dva súbežné requesty s tým istým tokenom inak oba prešli
+    // kontrolou pending.
+    const claimed = await Invitation.findOneAndUpdate(
+      { _id: invitation._id, status: 'pending' },
+      { $set: { status: 'accepted' } },
+      { new: true }
+    );
+    if (!claimed) {
+      return res.status(410).json({ message: 'Pozvánka už bola použitá' });
+    }
+
+    // Create membership. Unique index { workspaceId, userId } — pri dvojkliku
+    // / retry klienta prejde druhý request kontrolou "už člen" ešte pred
+    // vznikom membership a create() hodí E11000; členstvo však existuje,
+    // takže odpovedáme ako pri existujúcom členovi namiesto 500.
+    try {
+      await WorkspaceMember.create({
+        workspaceId: invitation.workspaceId,
+        userId: req.user.id,
+        role: invitation.role,
+        invitedBy: invitation.invitedBy
+      });
+    } catch (createErr) {
+      if (createErr.code !== 11000) {
+        // Členstvo nevzniklo — pozvánku vrátime do pending, nech sa dá zopakovať
+        await Invitation.updateOne({ _id: invitation._id }, { $set: { status: 'pending' } }).catch(() => {});
+        throw createErr;
+      }
+      return res.json({ message: 'Už ste členom tohto prostredia', workspaceId: invitation.workspaceId });
+    }
+
+    joinWorkspaceRoom(req, req.user.id, invitation.workspaceId);
 
     // Switch user to the new workspace
     await User.findByIdAndUpdate(req.user.id, { currentWorkspaceId: invitation.workspaceId });
-
-    // Mark invitation as accepted
-    invitation.status = 'accepted';
-    await invitation.save();
 
     logger.info('Invitation accepted', {
       workspaceId: invitation.workspaceId,

@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const WorkspaceMember = require('../models/WorkspaceMember');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const { recordError } = require('../services/serverErrorService');
@@ -14,7 +15,7 @@ const { attachmentFileFilter, sanitizeDisplayName, effectiveExtension } = requir
 const fileStorage = require('../services/fileStorage');
 const { publicAttachment, isInlineAttachment, collectMessageR2Keys, deleteBlobs, R2_KEY_PROJECTION } = require('../services/messageFiles');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan } = require('../utils/planGate');
 const { isIosNativeApp } = require('../utils/platform');
 
 // Projection that excludes ALL Base64 blobs so comment CRUD never pulls
@@ -27,7 +28,35 @@ const NO_BASE64_PROJECTION = {
   'comments.attachment.data': 0
 };
 
+const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
+
+// Textové polia tela: klient posiela FormData (stringy), ale express.json je
+// globálne a multer JSON telo prepustí — `{"subject": 123}` alebo
+// `{"text": {}}` by na .trim() spadli s TypeError → 500 (+ pri write routách
+// záznam v Diagnostike). Nestring = prázdny text.
+const str = (v) => (typeof v === 'string' ? v : '');
+
+// linkedId/linkedName nemajú v modeli maxlength, telo môže mať až 1 MB
+// (multer fieldSize / express.json) a hodnoty idú do každého výpisu (GET /
+// až 100 správ, /by-linked). Prázdne → null ako doteraz.
+const linkedField = (v, max) => {
+  const s = str(v).trim();
+  return s ? s.slice(0, max) : null;
+};
+
 const router = express.Router();
+
+// Neplatné ObjectId v URL → 400/404 hneď. Bez toho šlo „not-valid" priamo do
+// filtra _id / comments._id, Mongoose hodil CastError, catch vrátil 500 a pri
+// multer routách handleMessageWriteError chybu zapísal do Diagnostiky. Radí
+// sa ZA requireWorkspace, aby poradie 401 → 403 → 400 ostalo ako doteraz
+// (GET /:id a GET /:id/attachment majú rovnakú kontrolu inline).
+const requireMessageId = (req, res, next) => (
+  OBJECT_ID_RE.test(req.params.id) ? next() : res.status(400).json({ message: 'Neplatné ID' })
+);
+const requireCommentId = (req, res, next) => (
+  OBJECT_ID_RE.test(req.params.commentId) ? next() : res.status(404).json({ message: 'Komentár nenájdený' })
+);
 
 // ─── Prílohy správ: limity, filter, chyby ─────────────────────
 //
@@ -105,6 +134,17 @@ const diagnosticReq = (req) => Object.create(req, {
   }
 });
 
+// Neočakávaná chyba: SKUTOČNÁ príčina (so stackom) do logu aj Diagnostiky
+// a príznak pre captureResponseErrors, aby nezapísal už len syntetické
+// „HTTP 500 PUT /api/messages/:id/approve" bez stacku a bez správy chyby.
+const respondServerError = (error, req, res, label) => {
+  logger.error(label, { error: error.message, userId: req.user?.id });
+  recordError(error, diagnosticReq(req)).catch(() => {});
+  if (res.headersSent) return undefined;
+  if (res.locals) res.locals.__errorRecorded = true;
+  return res.status(500).json({ message: 'Chyba servera' });
+};
+
 // Zápis správy/prílohy zlyhal: plný dokument → 413 so slovenskou radou,
 // všetko ostatné → SKUTOČNÁ príčina do Diagnostiky (inak by captureResponseErrors
 // zachytil len syntetické „HTTP 500 POST /api/messages/:id/files" bez stacku).
@@ -124,10 +164,14 @@ const handleMessageWriteError = (error, req, res, label) => {
     });
     return rejectTooLarge(res);
   }
-  logger.error(label, { error: error.message, userId: req.user?.id });
-  recordError(error, diagnosticReq(req)).catch(() => {});
-  if (res.locals) res.locals.__errorRecorded = true;
-  return res.status(500).json({ message: 'Chyba servera' });
+  // Chyba VSTUPU (dueDate=abc, linkedType mimo enumu, prázdny predmet pri
+  // PUT) nie je pád servera: 400 bez záznamu do Diagnostiky — tam by vyzerala
+  // ako 500 „Chyba servera" bez súvisu s klientom.
+  if (error?.name === 'ValidationError' || error?.name === 'CastError') {
+    logger.warn(`${label}: invalid input`, { error: error.message, userId: req.user?.id });
+    return res.status(400).json({ message: 'Neplatné údaje správy', code: 'INVALID_INPUT' });
+  }
+  return respondServerError(error, req, res, label);
 };
 
 // Videá sú bez R2 zakázané: aj krátke video z telefónu presiahne 10 MB a
@@ -160,9 +204,17 @@ const messageFileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MESSAGE_FILE_LIMIT },
+  // files: 1 — routy berú len upload.single('file'); ďalšie súbory v tom
+  // istom requeste by multer inak bufferoval do RAM (každý až 50 MB).
+  // fields/fieldSize: textové polia formulára (predmet, popis ≤ 5000 znakov,
+  // možnosti ankety) s rezervou, nie neobmedzene.
+  limits: { fileSize: MESSAGE_FILE_LIMIT, files: 1, fields: 50, fieldSize: 64 * 1024 },
   fileFilter: messageFileFilter
 });
+
+// Strop príloh na jednu správu — dokument má aj tak limit 16 MB a UI
+// viac nepotrebuje; bez stropu sa dala jedna správa zahltiť súbormi.
+const MAX_FILES_PER_MESSAGE = 20;
 
 // Chyby z multer/busboy → slovenská hláška + kód, ktorý klient vie rozlíšiť.
 // Do 9/2026 sa používateľovi zobrazil surový anglický text („Unexpected end
@@ -254,8 +306,8 @@ const persistUpload = async (file) => {
  * Vráti telo 403 alebo null.
  */
 const messageStorageQuotaError = async (req, fileSize) => {
-  const uploader = await User.findById(req.user.id).select('subscription').lean();
-  const plan = uploader?.subscription?.plan || 'free';
+  // Kvóta úložiska patrí workspace → plán vlastníka
+  const plan = await getWorkspacePlan(req);
   const storageBytes = STORAGE_LIMITS[plan];
   if (!storageBytes) return null;
   const usedBytes = await computeWorkspaceFileBytes(req.workspaceId);
@@ -279,14 +331,34 @@ const messageStorageQuotaError = async (req, fileSize) => {
 const sendStoredAttachment = async (res, att, extraHeaders) => {
   let buffer;
   if (att.r2Key) {
+    // STREAM z R2 do odpovede (ako kontakty/úlohy) — downloadFile() skladal
+    // celú prílohu (až 50 MB) do RAM a paralelné sťahovania nemali strop.
+    let r2Object;
     try {
-      buffer = await fileStorage.downloadFile(att.r2Key);
+      r2Object = await fileStorage.getFileObject(att.r2Key);
     } catch (err) {
       if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
         return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
       }
       throw err;
     }
+    const { stream, contentLength } = r2Object;
+    setDownloadHeaders(res, att, {
+      ...(Number.isFinite(contentLength) && { 'Content-Length': String(contentLength) }),
+      ...extraHeaders
+    });
+    stream.on('error', (streamErr) => {
+      logger.error('Message file download: R2 stream failed', { r2Key: att.r2Key, error: streamErr.message });
+      if (res.headersSent) return res.destroy();
+      for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+      res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+    });
+    // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+    res.on('close', () => {
+      if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+    });
+    stream.pipe(res);
+    return undefined;
   } else if (att.data) {
     buffer = Buffer.from(att.data, 'base64');
   } else {
@@ -346,9 +418,18 @@ const stripAttachmentData = (msg) => {
 router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const userId = req.user.id.toString();
-    const { tab = 'received', status } = req.query;
+    const { tab = 'received', status, before } = req.query;
 
     const query = { workspaceId: req.workspaceId };
+    // Stránkovanie: ?before=<ISO createdAt najstaršej načítanej správy>
+    // vráti ďalších 100 starších (predtým natvrdo len posledných 100).
+    if (typeof before === 'string' && before) {
+      const beforeDate = new Date(before);
+      if (Number.isNaN(beforeDate.getTime())) {
+        return res.status(400).json({ message: 'Neplatný parameter before' });
+      }
+      query.createdAt = { $lt: beforeDate };
+    }
 
     if (tab === 'sent') {
       query.fromUserId = req.user.id;
@@ -358,7 +439,9 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
       query.toUserId = req.user.id;
     }
 
-    if (status && status !== 'all') {
+    // Len string: rozšírený query parser (qs) z ?status[$ne]=x spraví objekt
+    // a Mongoose (bez sanitizeFilter) by ho pustil do filtra ako operátor.
+    if (typeof status === 'string' && status && status !== 'all') {
       query.status = status;
     }
 
@@ -384,6 +467,12 @@ router.get('/by-linked', authenticateToken, requireWorkspace, async (req, res) =
     const { linkedType, linkedId } = req.query;
     if (!linkedType || !linkedId) {
       return res.status(400).json({ message: 'linkedType a linkedId sú povinné' });
+    }
+    // Len stringy z povoleného rozsahu: ?linkedType[$ne]=x&linkedId[$ne]=y by
+    // cez qs prešlo ako operátory a vrátilo správy CELÉHO workspace-u (aj
+    // cudzie vlákna), nie len prepojené s kontaktom/úlohou.
+    if (!['contact', 'task'].includes(linkedType) || typeof linkedId !== 'string' || linkedId.length > 128) {
+      return res.status(400).json({ message: 'Neplatné linkedType/linkedId' });
     }
 
     const messages = await Message.find(
@@ -413,7 +502,7 @@ router.get('/pending-count', authenticateToken, requireWorkspace, async (req, re
     });
     res.json({ count });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Pending count error');
   }
 });
 
@@ -451,7 +540,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json(stripAttachmentData(message));
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Get message error');
   }
 });
 
@@ -468,8 +557,16 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
       const { toUserId, type, subject, description, linkedType, linkedId, linkedName, dueDate } = req.body;
 
       // Validate required fields
-      if (!toUserId || !type || !subject) {
+      if (!toUserId || !type || !str(subject).trim()) {
         return res.status(400).json({ message: 'Príjemca, typ a predmet sú povinné' });
+      }
+
+      // Len string v tvare ObjectId: express.json je globálne a multer JSON
+      // telo prepustí, takže `{"toUserId": {"$ne": null}}` by šlo do filtra
+      // _id ako operátor (vybral by prvého používateľa) a kontrola self-send
+      // nižšie by sa na objekt nevzťahovala.
+      if (typeof toUserId !== 'string' || !OBJECT_ID_RE.test(toUserId)) {
+        return res.status(400).json({ message: 'Neplatný príjemca' });
       }
 
       if (!['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) {
@@ -491,8 +588,11 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         if (parsedPollOptions.length > 10) {
           return res.status(400).json({ message: 'Anketa môže mať maximálne 10 možností' });
         }
+        // JSON.parse môže vrátiť aj [null, 1, {}] — null by na .text spadol
+        // TypeError (500), číslo by vrátilo undefined.trim. Nestringové
+        // položky → '' → filter ich vyhodí → 400 nižšie.
         parsedPollOptions = parsedPollOptions
-          .map(opt => ({ text: (typeof opt === 'string' ? opt : opt.text || '').trim().substring(0, 200) }))
+          .map(opt => ({ text: (typeof opt === 'string' ? opt : (opt && typeof opt.text === 'string' ? opt.text : '')).trim().substring(0, 200) }))
           .filter(opt => opt.text.length > 0);
         if (parsedPollOptions.length < 2) {
           return res.status(400).json({ message: 'Anketa musí mať aspoň 2 neprázdne možnosti' });
@@ -500,8 +600,20 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         pollMultipleChoice = req.body.pollMultipleChoice === 'true' || req.body.pollMultipleChoice === true;
       }
 
-      // Get recipient
-      const recipient = await User.findById(toUserId);
+      // Príjemca musí byť členom AKTUÁLNEHO workspace-u — inak by sa dala
+      // poslať správa (+ notifikácia a socket event s predmetom) používateľovi
+      // z cudzieho tenanta a odpoveď by prezradila jeho username podľa ID.
+      // Index { workspaceId, userId } existuje (WorkspaceMember.js).
+      const membership = await WorkspaceMember.findOne({ workspaceId: req.workspaceId, userId: toUserId })
+        .select('_id')
+        .lean();
+      if (!membership) {
+        return res.status(404).json({ message: 'Príjemca nie je členom tohto pracovného prostredia' });
+      }
+
+      // Len _id + username — celý dokument nesie aj avatarData (base64, až
+      // niekoľko MB), ktoré auth cache zámerne vynecháva.
+      const recipient = await User.findById(toUserId).select('username').lean();
       if (!recipient) {
         return res.status(404).json({ message: 'Príjemca nenájdený' });
       }
@@ -527,12 +639,12 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         toUserId: recipient._id,
         toUsername: recipient.username,
         type,
-        subject: subject.trim().substring(0, 200),
-        description: (description || '').trim().substring(0, 5000),
+        subject: str(subject).trim().substring(0, 200),
+        description: str(description).trim().substring(0, 5000),
         attachment,
         linkedType: linkedType || null,
-        linkedId: linkedId || null,
-        linkedName: linkedName || null,
+        linkedId: linkedField(linkedId, 128),
+        linkedName: linkedField(linkedName, 200),
         dueDate: dueDate || null,
         pollOptions: type === 'poll' ? parsedPollOptions : [],
         pollMultipleChoice: type === 'poll' ? pollMultipleChoice : false,
@@ -550,11 +662,13 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
           workspaceId: req.workspaceId,
           type: 'message.created',
           title: `📨 Nový odkaz: ${typeLabel}`,
-          message: `${req.user.username} vám poslal odkaz "${subject}"`,
+          // Uložený (skrátený) predmet, nie surový z tela — multer fieldSize
+          // je 1 MB a FCM push má limit 4 KB.
+          message: `${req.user.username} vám poslal odkaz "${message.subject}"`,
           actorName: req.user.username,
           relatedType: 'message',
           relatedId: message._id.toString(),
-          relatedName: subject,
+          relatedName: message.subject,
           data: { messageId: message._id.toString(), workspaceId: req.workspaceId ? req.workspaceId.toString() : undefined }
         });
       } catch (notifErr) {
@@ -568,7 +682,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
           id: message._id.toString(),
           fromUsername: req.user.username,
           type,
-          subject,
+          subject: message.subject,
           status: 'pending'
         });
       }
@@ -584,8 +698,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
         category: 'message',
         targetType: 'message',
         targetId: message._id.toString(),
-        targetName: subject,
-        details: { subject, recipient: recipient.username, type },
+        targetName: message.subject,
+        details: { subject: message.subject, recipient: recipient.username, type },
         ipAddress: req.ip,
         userAgent: req.get('user-agent'),
         workspaceId: req.workspaceId || null
@@ -598,7 +712,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (r
 });
 
 // PUT /api/messages/:id — edit message (only sender can edit)
-router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
+router.put('/:id', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
@@ -617,14 +731,19 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
       // Update allowed fields
       const { subject, description, type, dueDate, linkedType, linkedId, linkedName, removeAttachment } = req.body;
 
-      if (subject !== undefined) message.subject = subject.trim().substring(0, 200);
-      if (description !== undefined) message.description = description.trim().substring(0, 5000);
+      if (subject !== undefined) message.subject = str(subject).trim().substring(0, 200);
+      if (description !== undefined) message.description = str(description).trim().substring(0, 5000);
+      // Anketu nejde vytvoriť ani zrušiť úpravou typu — pollOptions/hlasy by
+      // nezodpovedali typu (poll bez možností, resp. „info“ s hlasmi).
+      if (type !== undefined && type !== message.type && (type === 'poll' || message.type === 'poll')) {
+        return res.status(400).json({ message: 'Typ ankety sa nedá zmeniť úpravou správy' });
+      }
       if (type !== undefined && ['approval', 'info', 'request', 'proposal', 'poll'].includes(type)) message.type = type;
       if (dueDate !== undefined) message.dueDate = dueDate || null;
       if (linkedType !== undefined) {
         message.linkedType = linkedType || null;
-        message.linkedId = linkedId || null;
-        message.linkedName = linkedName || null;
+        message.linkedId = linkedField(linkedId, 128);
+        message.linkedName = linkedField(linkedName, 200);
       }
 
       // Handle attachment: new file replaces old, or remove existing.
@@ -670,7 +789,7 @@ router.put('/:id', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // PUT /api/messages/:id/approve — approve message (recipient or workspace admin)
-router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/approve', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const query = {
       _id: req.params.id,
@@ -683,7 +802,10 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
       query.toUserId = req.user.id;
     }
 
-    const message = await Message.findOne(query);
+    // Bez base64 blobov — mení sa len status/resolvedBy; save() posiela iba
+    // $set zmenených ciest a nevybrané polia nevaliduje (rovnaký vzor ako
+    // tasks.js EXCLUDE_FILE_DATA). Nezmigrovaná správa má inak až ~16 MB.
+    const message = await Message.findOne(query, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });
@@ -738,12 +860,12 @@ router.put('/:id/approve', authenticateToken, requireWorkspace, async (req, res)
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Approve message error');
   }
 });
 
 // PUT /api/messages/:id/reject — reject message (recipient or workspace admin)
-router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/reject', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const { reason } = req.body;
 
@@ -757,14 +879,17 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
       query.toUserId = req.user.id;
     }
 
-    const message = await Message.findOne(query);
+    // Bez base64 blobov — mení sa len status/resolvedBy; save() posiela iba
+    // $set zmenených ciest a nevybrané polia nevaliduje (rovnaký vzor ako
+    // tasks.js EXCLUDE_FILE_DATA). Nezmigrovaná správa má inak až ~16 MB.
+    const message = await Message.findOne(query, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo už bol vybavený' });
     }
 
     message.status = 'rejected';
-    message.rejectionReason = (reason || '').trim().substring(0, 1000);
+    message.rejectionReason = str(reason).trim().substring(0, 1000);
     message.resolvedBy = req.user.id;
     message.resolvedAt = new Date();
     await message.save();
@@ -776,7 +901,7 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
         workspaceId: req.workspaceId,
         type: 'message.rejected',
         title: '❌ Odkaz zamietnutý',
-        message: `${req.user.username} zamietol váš odkaz "${message.subject}"${reason ? ` — ${reason}` : ''}`,
+        message: `${req.user.username} zamietol váš odkaz "${message.subject}"${message.rejectionReason ? ` — ${message.rejectionReason}` : ''}`,
         actorName: req.user.username,
         relatedType: 'message',
         relatedId: message._id.toString(),
@@ -813,18 +938,18 @@ router.put('/:id/reject', authenticateToken, requireWorkspace, async (req, res) 
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Reject message error');
   }
 });
 
 // PUT /api/messages/:id/reopen — revert approval/rejection back to pending/commented
-router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/reopen', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const message = await Message.findOne({
       _id: req.params.id,
       workspaceId: req.workspaceId,
       status: { $in: ['approved', 'rejected'] }
-    });
+    }, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Odkaz nenájdený alebo nie je schválený/zamietnutý' });
@@ -902,7 +1027,7 @@ router.put('/:id/reopen', authenticateToken, requireWorkspace, async (req, res) 
 });
 
 // POST /api/messages/:id/vote — vote on a poll option
-router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:id/vote', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const { optionId } = req.body;
 
@@ -918,7 +1043,7 @@ router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) =
         { fromUserId: req.user.id },
         { toUserId: req.user.id }
       ]
-    });
+    }, NO_BASE64_PROJECTION);
 
     if (!message) {
       return res.status(404).json({ message: 'Anketa nenájdená' });
@@ -973,7 +1098,7 @@ router.post('/:id/vote', authenticateToken, requireWorkspace, async (req, res) =
 });
 
 // POST /api/messages/:id/comment — add comment (with optional attachment)
-router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:id/comment', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('attachment')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
 
@@ -981,7 +1106,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
     try {
       const { text } = req.body;
 
-      if (!text || !text.trim()) {
+      if (!str(text).trim()) {
         return res.status(400).json({ message: 'Text komentára je povinný' });
       }
 
@@ -1020,7 +1145,7 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
         _id: new mongoose.Types.ObjectId(),
         userId: req.user.id,
         username: req.user.username,
-        text: text.trim().substring(0, 2000),
+        text: str(text).trim().substring(0, 2000),
         createdAt: new Date()
       };
 
@@ -1082,16 +1207,16 @@ router.post('/:id/comment', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // PUT /api/messages/:id/comment/:commentId — edit comment (only author)
-router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text || !text.trim()) {
+    if (!str(text).trim()) {
       return res.status(400).json({ message: 'Text komentára je povinný' });
     }
 
     // PERF: atomic $set on the matched comment — no full doc save.
     // Authorship + workspace + membership enforced via filter.
-    const newText = text.trim().substring(0, 2000);
+    const newText = str(text).trim().substring(0, 2000);
     const result = await Message.updateOne(
       {
         _id: req.params.id,
@@ -1136,7 +1261,7 @@ router.put('/:id/comment/:commentId', authenticateToken, requireWorkspace, async
 });
 
 // DELETE /api/messages/:id/comment/:commentId — delete comment (only author)
-router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     // R2 kľúč prílohy komentára treba prečítať PRED $pull — po ňom už niet
     // odkiaľ. Rovnaký filter (vrátane autorstva) ako samotný $pull.
@@ -1216,7 +1341,7 @@ router.delete('/:id/comment/:commentId', authenticateToken, requireWorkspace, as
 //  - nový → pridanie
 // Reakciu môže pridať iba user, ktorý je sender alebo recipient odkazu
 // (workspace guard). Autor komentára nedostane notifikáciu za vlastnú reakciu.
-router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorkspace, async (req, res) => {
+router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const { type } = req.body;
     if (type !== null && type !== 'like' && type !== 'dislike') {
@@ -1269,9 +1394,17 @@ router.post('/:id/comment/:commentId/reaction', authenticateToken, requireWorksp
     }
 
     // Ak výsledný stav je reakcia (nie odstránenie), pridáme novú.
+    // Podmienka „používateľ ešte nemá reakciu" je priamo vo filtri
+    // ($elemMatch na komentár; pozičný $ sa viaže naň): dva rýchle kliknutia
+    // (double-tap) sa inak obe vyhodnotili z toho istého `meta` ešte pred
+    // zápisom prvého a obe spravili $push → 2 reakcie jedného používateľa.
+    // matchedCount 0 = reakcia medzitým pribudla → nič nepíšeme.
     if (finalType) {
       await Message.updateOne(
-        { _id: meta._id, 'comments._id': req.params.commentId },
+        {
+          _id: meta._id,
+          comments: { $elemMatch: { _id: req.params.commentId, 'reactions.userId': { $ne: req.user.id } } }
+        },
         {
           $push: {
             'comments.$.reactions': {
@@ -1412,7 +1545,7 @@ router.get('/:id/attachment', authenticateToken, requireWorkspace, async (req, r
 });
 
 // GET /api/messages/:id/comment/:commentId/attachment — download comment attachment
-router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, async (req, res) => {
+router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorkspace, requireMessageId, requireCommentId, async (req, res) => {
   try {
     const etag = `"cmt-${req.params.commentId}-attach"`;
     if (req.headers['if-none-match'] === etag) {
@@ -1457,7 +1590,7 @@ router.get('/:id/comment/:commentId/attachment', authenticateToken, requireWorks
 // ─── FILE ATTACHMENTS (same pattern as Tasks) ─────────────────
 
 // POST /api/messages/:id/files — add file to message
-router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
+router.post('/:id/files', authenticateToken, requireWorkspace, requireMessageId, (req, res) => {
   upload.single('file')(req, res, async (err) => {
     if (err) return respondUploadError(err, req, res);
     if (!req.file) return res.status(400).json({ message: 'Žiadny súbor' });
@@ -1471,6 +1604,9 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
       });
       if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
+      if ((message.files || []).length >= MAX_FILES_PER_MESSAGE) {
+        return res.status(400).json({ message: `Správa môže mať najviac ${MAX_FILES_PER_MESSAGE} príloh`, code: 'TOO_MANY_FILES' });
+      }
       const quotaError = await messageStorageQuotaError(req, req.file.size);
       if (quotaError) return res.status(403).json(quotaError);
       if (wouldExceedMessageDocLimit(message, req.file.size)) {
@@ -1492,7 +1628,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, (req, res) => {
 });
 
 // GET /api/messages/:id/files/:fileId/download — download file
-router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, async (req, res) => {
+router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     const etag = `"file-${req.params.fileId}"`;
     if (req.headers['if-none-match'] === etag) {
@@ -1526,21 +1662,31 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
 });
 
 // DELETE /api/messages/:id/files/:fileId — delete file from message
-router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
-    const message = await Message.findOne({
+    const filter = {
       _id: req.params.id,
       workspaceId: req.workspaceId,
       $or: [{ fromUserId: req.user.id }, { toUserId: req.user.id }]
-    });
-    if (!message) return res.status(404).json({ message: 'Odkaz nenájdený' });
+    };
+    // Len id + r2Key súborov (žiadne base64): kľúč blobu treba prečítať PRED
+    // $pull — po ňom už niet odkiaľ. Rovnaký atomický vzor ako DELETE
+    // komentára. Pôvodné read → filter → save() posielalo $set CELÉHO poľa
+    // files, takže dve súbežné operácie (mazanie dvoch súborov, mazanie +
+    // POST /:id/files) sa prepísali — posledný zápis vyhral.
+    const pre = await Message.findOne(filter, { 'files.id': 1, 'files.r2Key': 1 }).lean();
+    if (!pre) return res.status(404).json({ message: 'Odkaz nenájdený' });
 
-    const removed = (message.files || []).find(f => f.id === req.params.fileId);
-    message.files = message.files.filter(f => f.id !== req.params.fileId);
-    await message.save();
-    // Blob v R2 až po uložení metadát — keby save() zlyhal, súbor ostane.
-    if (removed?.r2Key) deleteBlobs([removed.r2Key]);
-    res.json(stripAttachmentData(message));
+    const removed = (pre.files || []).find(f => f.id === req.params.fileId) || null;
+    if (removed) {
+      await Message.updateOne(filter, { $pull: { files: { id: req.params.fileId } } });
+      // Blob v R2 až po zápise metadát — keby $pull zlyhal, súbor ostane.
+      if (removed.r2Key) deleteBlobs([removed.r2Key]);
+    }
+
+    const updated = await Message.findById(req.params.id, NO_BASE64_PROJECTION).lean();
+    if (!updated) return res.status(404).json({ message: 'Odkaz nenájdený' });
+    res.json(stripAttachmentData(updated));
   } catch (error) {
     logger.error('Delete message file error', { error: error.message, userId: req.user?.id });
     res.status(500).json({ message: 'Chyba servera' });
@@ -1548,7 +1694,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 });
 
 // DELETE /api/messages/:id — sender or workspace owner/manager can delete
-router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
+router.delete('/:id', authenticateToken, requireWorkspace, requireMessageId, async (req, res) => {
   try {
     // Len to, čo treba: odosielateľ/príjemca + R2 kľúče príloh (bez base64
     // a bez textu) — bloby sa mažú po deleteOne.
@@ -1561,7 +1707,9 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Odkaz nenájdený' });
     }
 
-    const isSender = message.fromUserId.toString() === req.user.id;
+    // req.user.id je ObjectId (lean z Monga) alebo string (Redis cache) —
+    // bez toString() by odosielateľ bez roly owner/manager dostal 403.
+    const isSender = message.fromUserId.toString() === req.user.id.toString();
     const isAdmin = req.workspaceMember.canAdmin();
 
     if (!isSender && !isAdmin) {
@@ -1586,7 +1734,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     res.json({ message: 'Odkaz bol vymazaný' });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera' });
+    respondServerError(error, req, res, 'Delete message error');
   }
 });
 

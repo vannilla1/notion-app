@@ -192,7 +192,8 @@ describe('oauthService', () => {
         username: 'passwordfan',
         email: 'shared@test.com',
         password: 'hashed-old-pw',
-        authProviders: ['password']
+        authProviders: ['password'],
+        emailVerified: true
       });
 
       const result = await findOrCreateUserFromProfile('google', {
@@ -210,6 +211,20 @@ describe('oauthService', () => {
       expect(result.user.emailVerified).toBe(true);
       // Password ostáva — len pridáva OAuth ako alternatívu
       expect(result.user.password).toBe('hashed-old-pw');
+    });
+
+    it('BLOCK — password účet s NEoverenym e-mailom sa neauto-linkne (pre-account hijack)', async () => {
+      await User.create({
+        username: 'squatter',
+        email: 'victim@test.com',
+        password: 'attacker-pw',
+        authProviders: ['password']
+      });
+      await expect(findOrCreateUserFromProfile('google', {
+        providerId: 'google-sub-victim',
+        email: 'victim@test.com',
+        emailVerified: true
+      })).rejects.toMatchObject({ code: 'EMAIL_EXISTS_UNVERIFIED', statusCode: 409 });
     });
 
     it('BLOCK — existujúci email + neoverený email vráti 409 EMAIL_EXISTS_UNVERIFIED', async () => {

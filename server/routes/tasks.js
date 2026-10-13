@@ -12,13 +12,17 @@ const fileStorage = require('../services/fileStorage');
 const { recordError } = require('../services/serverErrorService');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan, respondIfSubtaskLimitExceeded } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
 const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../utils/idempotency');
 
 // Projection to exclude Base64 file data from all nesting levels (up to 6 deep)
+// POZOR: len pre READ-ONLY dotazy. Dokument načítaný s touto projekciou sa
+// nesmie ukladať cez markModified('tasks') + save() — $set celého poľa by
+// legacy base64 `files[].data` (prílohy spred migrácie do R2) natrvalo
+// zmazal. Zápisové cesty preto načítavajú kontakt bez projekcie.
 const EXCLUDE_FILE_DATA = {
   'files.data': 0,
   'tasks.files.data': 0,
@@ -26,6 +30,17 @@ const EXCLUDE_FILE_DATA = {
   'tasks.subtasks.subtasks.files.data': 0,
   'tasks.subtasks.subtasks.subtasks.files.data': 0,
   'tasks.subtasks.subtasks.subtasks.subtasks.files.data': 0,
+};
+
+// To isté pre globálne Task dokumenty (bez `tasks.` prefixu). Zoznam úloh
+// celého workspace sa inak ťahal aj s prípadnými legacy Base64 dátami príloh
+// (fileSchema.data) – sťahovanie ide cez /files/:id/download s vlastným dotazom.
+const TASK_EXCLUDE_FILE_DATA = {
+  'files.data': 0,
+  'subtasks.files.data': 0,
+  'subtasks.subtasks.files.data': 0,
+  'subtasks.subtasks.subtasks.files.data': 0,
+  'subtasks.subtasks.subtasks.subtasks.files.data': 0,
 };
 
 const upload = multer({
@@ -60,6 +75,11 @@ const sanitizeTimeReminders = (raw) => {
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort((a, b) => b - a);
 };
+
+// Hodnota z tela požiadavky / z DB, ktorá sa smie dostať do `_id` filtra alebo
+// do `$in` nad ObjectId poľom. Objekt (operátorová injekcia) alebo reťazec
+// mimo tvaru ObjectId by Mongoose buď prepustil, alebo hodil CastError → 500.
+const isObjectIdString = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
 
 // Helper to sync to both Google Calendar and Google Tasks
 const autoSyncToGoogle = async (taskData, action) => {
@@ -185,13 +205,34 @@ const subtaskWithCloseFlag = (subtask, eligible) => {
 // Helper function to populate assigned users info
 const populateAssignedUsers = async (assignedToIds) => {
   if (!assignedToIds || assignedToIds.length === 0) return [];
-  const users = await User.find({ _id: { $in: assignedToIds } }, 'username color avatar').lean();
+  // Kontaktné úlohy majú assignedTo: [String] bez validácie — jediná
+  // necastovateľná hodnota ('abc', '') by zhodila celý dotaz CastError-om.
+  const ids = Array.from(assignedToIds).map(String).filter(isObjectIdString);
+  if (ids.length === 0) return [];
+  const users = await User.find({ _id: { $in: ids } }, 'username color avatar').lean();
   return users.map(u => ({
     id: u._id.toString(),
     username: u.username,
     color: u.color,
     avatar: u.avatar
   }));
+};
+
+// assignedTo z tela požiadavky — len platné ObjectId reťazce A LEN členovia
+// daného workspace. Predtým sa pole ukladalo doslovne a nové ID išli rovno do
+// notifyTaskAssignment/notifySubtaskAssignment (kategória 'direct' = vždy
+// push), takže prihlásený používateľ z workspace A vedel poslať push
+// notifikáciu s vlastným textom ľubovoľnému používateľovi systému – stačilo
+// poznať jeho ObjectId. Klient ponúka na priradenie práve členov
+// (GET /api/auth/users = WorkspaceMember), takže legitímne hodnoty prejdú;
+// nečlen (aj bývalý) sa ticho vypustí. Vracia reťazce – Task.assignedTo
+// (ObjectId) aj Contact.tasks.assignedTo (String) ich castujú.
+const sanitizeAssignedTo = async (ids, workspaceId) => {
+  const valid = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(isObjectIdString))];
+  if (valid.length === 0) return [];
+  const members = await WorkspaceMember.find({ workspaceId, userId: { $in: valid } }, 'userId').lean();
+  const memberIds = new Set(members.map(m => String(m.userId)));
+  return valid.filter(id => memberIds.has(id));
 };
 
 // Auto-invalidate tasks cache after any mutation
@@ -228,7 +269,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     // enrichment-u. Duplicity s embedded taskami nemôžu vzniknúť, lebo POST
     // /tasks vytvára BUĎ global BUĎ embedded, nikdy oboje.
     const [globalTasks, contacts] = await Promise.all([
-      Task.find({ workspaceId: req.workspaceId }).maxTimeMS(30000).lean(),
+      Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).maxTimeMS(30000).lean(),
 
       Contact.find(
         { workspaceId: req.workspaceId, 'tasks.0': { $exists: true } },
@@ -257,8 +298,13 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     globalTasks.forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id.toString())));
     contacts.forEach(c => (c.tasks || []).forEach(t => (t.assignedTo || []).forEach(id => allAssignedIds.add(id))));
 
-    // Fetch all assigned users at once
-    const assignedUsers = await User.find({ _id: { $in: Array.from(allAssignedIds) } }, 'username color avatar').lean();
+    // Fetch all assigned users at once. Neplatné hodnoty (kontaktné úlohy
+    // ukladajú assignedTo ako String) vynecháme — inak CastError → 500 pre
+    // celý zoznam úloh workspace, kým sa hodnota ručne neopraví v DB.
+    const assignedIdList = Array.from(allAssignedIds).filter(isObjectIdString);
+    const assignedUsers = assignedIdList.length > 0
+      ? await User.find({ _id: { $in: assignedIdList } }, 'username color avatar').lean()
+      : [];
     const usersMap = {};
     assignedUsers.forEach(u => {
       usersMap[u._id.toString()] = {
@@ -339,7 +385,11 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     res.json(allTasks);
   } catch (error) {
     logger.error('GET /tasks error', { error: error.message, workspaceId: req.workspaceId?.toString() });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
+    // Interný text chyby (CastError s cestou a modelom, názvy polí…) patrí do
+    // logu/Diagnostiky, nie klientovi; klient číta len `message`.
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -358,13 +408,22 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
       return res.status(403).json({ message, code: 'FEATURE_NOT_IN_PLAN' });
     }
     // Get global tasks
-    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).sort({ createdAt: -1 }).lean();
+    const globalTasks = await Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).sort({ createdAt: -1 }).lean();
 
     // Get contact tasks
     const contacts = await Contact.find(
       { workspaceId: req.workspaceId },
       EXCLUDE_FILE_DATA
     ).lean();
+
+    // Server beží v UTC (Render) — bez timeZone sa projekt vytvorený napr.
+    // o 23:30 SELČ ukázal v CSV s predchádzajúcim dňom. Neplatný dátum → ''.
+    const fmtSkDate = (d) => {
+      if (!d) return '';
+      const date = new Date(d);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleDateString('sk-SK', { timeZone: 'Europe/Bratislava' });
+    };
 
     const escCsv = (val) => {
       if (val == null) return '';
@@ -401,12 +460,12 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
         escCsv(task.description),
         task.completed ? 'Dokončený' : 'Aktívny',
         escCsv(priorityMap[task.priority] || task.priority),
-        escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+        escCsv(fmtSkDate(task.dueDate)),
         escCsv(contactNames.join(', ')),
         'Globálny',
         subtaskCount,
         completedSubtasks,
-        escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+        escCsv(fmtSkDate(task.createdAt))
       ].join(','));
     }
 
@@ -421,12 +480,12 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
           escCsv(task.description),
           task.completed ? 'Dokončený' : 'Aktívny',
           escCsv(priorityMap[task.priority] || task.priority),
-          escCsv(task.dueDate ? new Date(task.dueDate).toLocaleDateString('sk-SK') : ''),
+          escCsv(fmtSkDate(task.dueDate)),
           escCsv(contact.name),
           'Kontaktový',
           subtaskCount,
           completedSubtasks,
-          escCsv(task.createdAt ? new Date(task.createdAt).toLocaleDateString('sk-SK') : '')
+          escCsv(fmtSkDate(task.createdAt))
         ].join(','));
       }
     }
@@ -438,6 +497,11 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     res.setHeader('Content-Disposition', 'attachment; filename="projekty.csv"');
     res.send(csv);
   } catch (error) {
+    // Bez logu a recordError bola príčina 500-ky neviditeľná (captureResponseErrors
+    // zachytí len route+status bez stacku) — vzor z PUT podúlohy nižšie.
+    logger.error('CSV export error', { error: error.message, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
@@ -451,8 +515,9 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
     const { incremental, reset } = req.query;
     const userId = req.user.id;
 
-    // Get user to check previously exported task IDs
-    const user = await User.findById(userId);
+    // Get user to check previously exported task IDs. Len potrebné pole —
+    // bez projekcie sa ťahal celý dokument vrátane avatarData (Base64, až MB).
+    const user = await User.findById(userId).select('exportedTaskIds').lean();
     let exportedTaskIds = user?.exportedTaskIds || [];
 
     // If reset requested, clear export history
@@ -460,17 +525,23 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
       exportedTaskIds = [];
     }
 
-    // Only fetch contacts with tasks for current workspace, exclude files.data
-    const contacts = await Contact.find(
-      { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
-      { name: 1, tasks: 1 }
-    ).lean();
-    const globalTasks = await Task.find({ workspaceId: req.workspaceId }).lean();
+    // Only fetch contacts with tasks for current workspace, exclude files.data.
+    // Oba dotazy sú nezávislé — paralelne (Atlas M0 ~100-300 ms na dotaz).
+    const [contacts, globalTasks] = await Promise.all([
+      Contact.find(
+        { workspaceId: req.workspaceId, tasks: { $exists: true, $ne: [] } },
+        { name: 1, tasks: 1 }
+      ).lean(),
+      Task.find({ workspaceId: req.workspaceId }, TASK_EXCLUDE_FILE_DATA).lean()
+    ]);
     const events = [];
     const newExportedIds = [];
 
+    // Pri neplatnom dátume (podúlohy posiela klient verbatim) vráti null —
+    // inak by vzniklo `DUE;VALUE=DATE:NaNNaNNaN`.
     const formatICalDate = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
@@ -556,7 +627,7 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
       ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
+      if (dateStr) ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
       ical += `SUMMARY:${event.title.replace(/[,;\\]/g, '\\$&')}\r\n`;
       if (event.description) {
         ical += `DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, '\\$&')}\r\n`;
@@ -597,7 +668,7 @@ router.get('/export/calendar', authenticateToken, requireWorkspace, async (req, 
 router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('calendarFeedToken calendarFeedEnabled calendarFeedCreatedAt').lean();
 
     if (!user) {
       return res.status(404).json({ message: 'Používateľ nenájdený' });
@@ -637,7 +708,7 @@ router.post('/calendar/feed/generate', authenticateToken, async (req, res) => {
 router.get('/calendar/feed/status', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('calendarFeedToken calendarFeedEnabled calendarFeedCreatedAt').lean();
 
     if (!user) {
       return res.status(404).json({ message: 'Používateľ nenájdený' });
@@ -714,8 +785,9 @@ router.get('/calendar/feed/:token', async (req, res) => {
   try {
     const { token } = req.params;
 
-    // Find user by feed token
-    const user = await User.findOne({ calendarFeedToken: token, calendarFeedEnabled: true });
+    // Find user by feed token. Kalendárne klienty pollujú každých 15 min —
+    // bez projekcie sa zakaždým ťahal celý dokument vrátane avatarData.
+    const user = await User.findOne({ calendarFeedToken: token, calendarFeedEnabled: true }).select('_id currentWorkspaceId').lean();
 
     if (!user) {
       return res.status(404).send('Kalendár feed nebol nájdený alebo je deaktivovaný');
@@ -743,19 +815,28 @@ router.get('/calendar/feed/:token', async (req, res) => {
     }
 
     const workspaceFilter = { workspaceId: user.currentWorkspaceId };
-    const globalTasks = await Task.find(
-      { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
-      { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
-    ).lean();
-    const contacts = await Contact.find(
-      { ...workspaceFilter, 'tasks.dueDate': { $exists: true } },
-      { name: 1, tasks: 1 }
-    ).lean();
+    // Nezávislé dotazy paralelne — feed pollujú kalendárne klienty každých 15 min.
+    const [globalTasks, contacts] = await Promise.all([
+      Task.find(
+        { ...workspaceFilter, dueDate: { $exists: true, $ne: null } },
+        { title: 1, dueDate: 1, description: 1, completed: 1, priority: 1, subtasks: 1, createdAt: 1, updatedAt: 1 }
+      ).lean(),
+      Contact.find(
+        { ...workspaceFilter, 'tasks.dueDate': { $exists: true } },
+        { name: 1, tasks: 1 }
+      ).lean()
+    ]);
 
     const events = [];
 
+    // Neplatný dátum → null (volajúci riadok vynechá). `subtask.createdAt` a
+    // `dueDate` prichádzajú od klienta verbatim cez PUT /:id subtasks;
+    // `toISOString()` na Invalid Date hádže RangeError a jedna chybná hodnota
+    // v jednej podúlohe zhodila celý feed používateľa (500) pre všetky
+    // kalendárne klienty, kým sa hodnota neopravila v DB.
     const formatICalDate = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
@@ -764,6 +845,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
 
     const formatICalDateTime = (dateString) => {
       const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return null;
       return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     };
 
@@ -890,7 +972,7 @@ router.get('/calendar/feed/:token', async (req, res) => {
       ical += 'BEGIN:VTODO\r\n';
       ical += `UID:${event.uid}\r\n`;
       ical += `DTSTAMP:${dtstamp}\r\n`;
-      ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
+      if (dateStr) ical += `DUE;VALUE=DATE:${dateStr}\r\n`;
       ical += `SUMMARY:${escapeText(event.title)}\r\n`;
       if (description) {
         ical += `DESCRIPTION:${escapeText(description)}\r\n`;
@@ -906,11 +988,13 @@ router.get('/calendar/feed/:token', async (req, res) => {
         ical += 'STATUS:NEEDS-ACTION\r\n';
         ical += 'PERCENT-COMPLETE:0\r\n';
       }
-      if (event.createdAt) {
-        ical += `CREATED:${formatICalDateTime(event.createdAt)}\r\n`;
+      const createdStr = event.createdAt ? formatICalDateTime(event.createdAt) : null;
+      if (createdStr) {
+        ical += `CREATED:${createdStr}\r\n`;
       }
-      if (event.updatedAt) {
-        ical += `LAST-MODIFIED:${formatICalDateTime(event.updatedAt)}\r\n`;
+      const modifiedStr = event.updatedAt ? formatICalDateTime(event.updatedAt) : null;
+      if (modifiedStr) {
+        ical += `LAST-MODIFIED:${modifiedStr}\r\n`;
       }
       ical += 'END:VTODO\r\n';
     }
@@ -942,14 +1026,20 @@ router.put('/reorder', authenticateToken, requireWorkspace, async (req, res) => 
     const contactUpdates = {};
 
     for (const item of tasks) {
+      // Hodnoty z tela idú priamo do `_id` filtra a $set — objekt (operátorová
+      // injekcia) by zasiahol „ľubovoľný prvý“ dokument workspace, neplatný
+      // reťazec/order by hodil CastError → 500. Neplatné položky preskočíme.
+      if (!item || typeof item !== 'object') continue;
+      if (!Number.isFinite(Number(item.order))) continue;
       if (item.source === 'global') {
+        if (!isObjectIdString(item.id)) continue;
         bulkOps.push({
           updateOne: {
             filter: { _id: item.id, workspaceId: req.workspaceId },
             update: { $set: { order: item.order } }
           }
         });
-      } else if (item.source === 'contact' && item.contactId) {
+      } else if (item.source === 'contact' && isObjectIdString(item.contactId)) {
         if (!contactUpdates[item.contactId]) {
           contactUpdates[item.contactId] = [];
         }
@@ -961,17 +1051,17 @@ router.put('/reorder', authenticateToken, requireWorkspace, async (req, res) => 
       await Task.bulkWrite(bulkOps);
     }
 
-    // Update contact task orders
-    for (const [contactId, taskOrders] of Object.entries(contactUpdates)) {
+    // Update contact task orders — každý kontakt je samostatný dokument,
+    // findOne+save idú paralelne namiesto kontakt po kontakte.
+    await Promise.all(Object.entries(contactUpdates).map(async ([contactId, taskOrders]) => {
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
-      if (contact && contact.tasks) {
-        for (const item of taskOrders) {
-          const task = contact.tasks.find(t => t.id === item.id);
-          if (task) task.order = item.order;
-        }
-        await contact.save();
+      if (!contact || !contact.tasks) return;
+      for (const item of taskOrders) {
+        const task = contact.tasks.find(t => t.id === item.id);
+        if (task) task.order = item.order;
       }
-    }
+      await contact.save();
+    }));
 
     res.json({ message: 'Poradie aktualizované' });
   } catch (error) {
@@ -1005,12 +1095,16 @@ router.put('/reorder-subtasks', authenticateToken, requireWorkspace, async (req,
     subtasks.forEach(s => { orderMap[s.id] = s.order; });
 
     if (source === 'global') {
-      const task = await Task.findOne({ _id: taskId, workspaceId: req.workspaceId });
+      // ObjectId guard — inak CastError → 500 (UUID/objekt v `_id`).
+      const task = isObjectIdString(taskId)
+        ? await Task.findOne({ _id: taskId, workspaceId: req.workspaceId })
+        : null;
       if (!task) return res.status(404).json({ message: 'Projekt nenájdený' });
       reorderSubtasksRecursive(task.subtasks, orderMap);
       task.markModified('subtasks');
       await task.save();
     } else if (source === 'contact' && contactId) {
+      if (!isObjectIdString(contactId)) return res.status(400).json({ message: 'Neplatné dáta' });
       const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       if (!contact) return res.status(404).json({ message: 'Kontakt nenájdený' });
       const task = contact.tasks.find(t => t.id === taskId);
@@ -1061,6 +1155,9 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('GET /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1088,12 +1185,19 @@ const cloneSubtasksWithNewIds = (subtasks) => {
 // Create task - creates independent embedded tasks in each selected contact
 router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo, reminder, timeReminders } = req.body;
+    const { title, description, dueDate, dueTime, priority, contactId, contactIds, subtasks, assignedTo: rawAssignedTo, reminder, timeReminders } = req.body;
     const io = req.app.get('io');
 
-    if (!title || !title.trim()) {
+    // typeof — `title.trim()` na čísle/objekte hádzalo TypeError → 500 namiesto 400.
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
+    if (description != null && typeof description !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    // Len členovia workspace — viď sanitizeAssignedTo.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Support both old contactId (single) and new contactIds (array)
     let finalContactIds = [];
@@ -1103,9 +1207,8 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       finalContactIds = [contactId];
     }
 
-    // Check plan limits
-    const user = await User.findById(req.user.id);
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     // Free: 5 projektov/kontakt (znížené z 10 — overené že žiadny živý Free user
     // 2026-05-07 nemal > 5 projektov na kontakt, takže táto zmena nezablokuje
     // existujúcich userov pri pridávaní). Tím a Pro bez zmeny.
@@ -1203,19 +1306,31 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
     const createdTasks = [];
     const updatedContacts = [];
 
-    for (const cId of finalContactIds) {
-      const contact = await Contact.findOne({ _id: cId, workspaceId: req.workspaceId });
-      if (!contact) continue;
+    // Rovnaký vstup pre každý kontakt — stačí jeden dotaz pred slučkou
+    // (predtým N rovnakých dotazov na User pri projekte do N kontaktov).
+    const assignedUsers = await populateAssignedUsers(assignedTo);
 
-      // Check plan limit: tasks per contact
-      if (isLimited && contact.tasks && contact.tasks.length >= maxTasks) {
-        // Apple Guideline 3.1.1 — neutrálna správa pre iOS native shell.
-        const message = isIosNativeApp(req)
-          ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
-          : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
-        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
-        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
-      }
+    // Neplatné ID = ako nenájdený kontakt (inak CastError → 500 / operátor v `_id`).
+    const validContactIds = [...new Set(finalContactIds.filter(isObjectIdString).map(String))];
+    if (validContactIds.length > 50) {
+      return res.status(400).json({ message: 'Projekt možno naraz vytvoriť najviac v 50 kontaktoch' });
+    }
+    // Všetky kontakty jedným dopytom a limit overený PRED prvým zápisom —
+    // predtým sa projekt uložil do prvých kontaktov a 403 PLAN_LIMIT prišlo
+    // až pri ďalšom (čiastočne vykonaná operácia, klient ukázal chybu).
+    const foundContacts = await Contact.find({ _id: { $in: validContactIds }, workspaceId: req.workspaceId });
+    const contactsById = new Map(foundContacts.map(c => [String(c._id), c]));
+    const contactsInOrder = validContactIds.map(id => contactsById.get(id)).filter(Boolean);
+    if (isLimited && contactsInOrder.some(c => (c.tasks?.length || 0) >= maxTasks)) {
+      // Apple Guideline 3.1.1 — neutrálna správa pre iOS native shell.
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+    }
+
+    for (const contact of contactsInOrder) {
 
       // Create new embedded task for this contact
       const newTask = {
@@ -1244,8 +1359,6 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       contact.markModified('tasks');
       await contact.save();
 
-      // Get assigned users info
-      const assignedUsers = await populateAssignedUsers(assignedTo);
       createdTasks.push({
         ...newTask,
         contactId: contact._id.toString(),
@@ -1312,6 +1425,9 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       });
     }
   } catch (error) {
+    logger.error('POST /tasks error', { error: error.message, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1346,15 +1462,31 @@ const syncSubtasksToGoogle = async (subtasks, parentTitle, contactName, workspac
 // Update task (global or from contact)
 router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo, reminder } = req.body;
+    const { title, description, dueDate, dueTime, priority, completed, contactId, contactIds, source, assignedTo: rawAssignedTo, reminder } = req.body;
     const io = req.app.get('io');
+
+    // Typová kontrola textových polí (ak sú zadané). Ne-reťazec v title by pri
+    // globálnej úlohe zhodil save() validáciou (500), pri kontaktnej by sa
+    // uložil ako nezmysel; description/priority smú byť aj null.
+    if (title !== undefined && typeof title !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+    if ((description != null && typeof description !== 'string') || (priority != null && typeof priority !== 'string')) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    // Len členovia workspace — viď sanitizeAssignedTo. Počíta sa raz, všetky
+    // tri vetvy nižšie (contact / global / fallback) pracujú už s očisteným poľom.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // If source is 'contact', update in contacts
     if (source === 'contact') {
       // Optimization: if contactId is provided, use it directly
       // Otherwise use MongoDB query with index on tasks.id
       let contact;
-      if (contactId) {
+      // Neplatný contactId (nie ObjectId reťazec) → fallback lookup cez tasks.id
+      // namiesto CastError → 500.
+      if (isObjectIdString(contactId)) {
         contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
       } else {
         contact = await Contact.findOne({ 'tasks.id': req.params.id, workspaceId: req.workspaceId });
@@ -1385,8 +1517,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
               }));
             };
 
-            // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
+            // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
             let updatedSubtasks = req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks;
+            if (req.body.subtasks !== undefined && await respondIfSubtaskLimitExceeded(req, res, updatedSubtasks, task.subtasks)) return;
             if (completed === true) {
               updatedSubtasks = markAllSubtasksCompleted(updatedSubtasks);
             }
@@ -1472,7 +1605,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
                 originalAssignedTo,
                 newAssignedTo,
                 newlyAssigned,
-                assignedToFromBody: assignedTo
+                assignedToFromBody: rawAssignedTo
               });
             }
 
@@ -1494,8 +1627,8 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
               || completedChanged || assignedChanged || subtasksChanged || reminderChangedField;
             const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
-            // Diagnostic — kým ladíme; po stabilizácii môžeme znížiť na debug.
-            logger.info('[Task PUT contact] priority-only check', {
+            // Diagnostic — po stabilizácii znížené na debug (šum v produkčných logoch).
+            logger.debug('[Task PUT contact] priority-only check', {
               taskId: req.params.id, priorityChanged, titleChanged, descChanged,
               dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
               subtasksChanged, reminderChangedField, onlyPriorityChanged
@@ -1567,7 +1700,13 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
     // mohol updatnuť task z workspace B (task._id vie byť guessable v brute-
     // force scenári). Odhalené route integračnými testami (2026-04-15).
-    let task = await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    //
+    // ObjectId guard (ako v GET /:id a podúlohových routách): UUID kontaktnej
+    // úlohy bez `source: 'contact'` inak hodilo CastError → 500 a fallback
+    // vetva „try to find in contacts“ nižšie sa nikdy nevykonala.
+    let task = isObjectIdString(req.params.id)
+      ? await Task.findOne({ _id: req.params.id, workspaceId: req.workspaceId })
+      : null;
 
     if (task) {
       // Save original assignedTo before update
@@ -1585,12 +1724,17 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       let contactNames = [];
 
       if (contactIds !== undefined) {
-        finalContactIds = Array.isArray(contactIds) ? contactIds : [];
+        // Len platné ObjectId reťazce — objekt/neplatný reťazec v `$in` by
+        // prepustil operátor alebo hodil CastError → 500.
+        finalContactIds = (Array.isArray(contactIds) ? contactIds : []).filter(isObjectIdString);
         if (finalContactIds.length > 0) {
           const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       } else if (contactId !== undefined) {
+        if (contactId && !isObjectIdString(contactId)) {
+          return res.status(400).json({ message: 'Neplatné ID kontaktu' });
+        }
         finalContactIds = contactId ? [contactId] : [];
         if (contactId) {
           const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
@@ -1599,9 +1743,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           }
         }
       } else {
-        // Keep existing and fetch names
+        // Keep existing and fetch names (staré záznamy môžu niesť neplatné
+        // hodnoty — do `$in` idú len castovateľné, uložené pole sa nemení)
         if (finalContactIds.length > 0) {
-          const contacts = await Contact.find({ _id: { $in: finalContactIds }, workspaceId: req.workspaceId });
+          const contacts = await Contact.find({ _id: { $in: finalContactIds.filter(isObjectIdString) }, workspaceId: req.workspaceId });
           contactNames = contacts.map(c => c.name);
         }
       }
@@ -1655,8 +1800,10 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       }
       // Preserve subtasks if not explicitly provided
       if (req.body.subtasks !== undefined) {
-        // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
-        task.subtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+        // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
+        const nextSubtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+        if (await respondIfSubtaskLimitExceeded(req, res, nextSubtasks, task.subtasks)) return;
+        task.subtasks = nextSubtasks;
       }
 
       // Auto-complete all subtasks when main task is completed
@@ -1709,7 +1856,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           originalAssignedTo,
           newAssignedTo,
           newlyAssigned,
-          assignedToFromBody: assignedTo
+          assignedToFromBody: rawAssignedTo
         });
       }
 
@@ -1733,7 +1880,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       const otherFieldsChanged = titleChanged || descChanged || dueDateChanged || dueTimeChanged
         || completedChanged || assignedChanged || subtasksChanged || reminderChangedFlag;
       const onlyPriorityChanged = priorityChanged && !otherFieldsChanged;
-      logger.info('[Task PUT global] priority-only check', {
+      logger.debug('[Task PUT global] priority-only check', {
         taskId: req.params.id, priorityChanged, titleChanged, descChanged,
         dueDateChanged, dueTimeChanged, completedChanged, assignedChanged,
         subtasksChanged, reminderChangedFlag, onlyPriorityChanged
@@ -1796,7 +1943,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // Task not found in global tasks, try to find in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
       if (taskIndex !== -1) {
@@ -1813,6 +1960,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         // nepreserve schema fields. Bez .toObject() by sa pri každom PUT
         // stratili files, notes, lastUrgencyLevel, atď.
         const ctaskPlain = typeof ctask.toObject === 'function' ? ctask.toObject() : ctask;
+        let nextCtaskSubtasks = ctask.subtasks;
+        if (req.body.subtasks !== undefined) {
+          nextCtaskSubtasks = withServerSubtaskFiles(req.body.subtasks, ctask.subtasks);
+          if (await respondIfSubtaskLimitExceeded(req, res, nextCtaskSubtasks, ctask.subtasks)) return;
+        }
         contact.tasks[taskIndex] = {
           ...ctaskPlain,
           id: ctask.id,
@@ -1823,7 +1975,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
           priority: priority !== undefined ? priority : ctask.priority,
           completed: completed !== undefined ? completed : ctask.completed,
           assignedTo: assignedTo !== undefined ? assignedTo : ctask.assignedTo,
-          subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, ctask.subtasks) : ctask.subtasks,
+          subtasks: nextCtaskSubtasks,
           createdAt: ctask.createdAt,
           modifiedAt: new Date().toISOString()
         };
@@ -1865,7 +2017,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
             originalCtaskAssignedTo,
             newAssignedTo,
             newlyAssigned,
-            assignedToFromBody: assignedTo
+            assignedToFromBody: rawAssignedTo
           });
         }
 
@@ -1885,7 +2037,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
         const fbOtherChanged = fbTitleChanged || fbDescChanged || fbDueDateChanged || fbDueTimeChanged
           || fbCompletedChanged || fbAssignedChanged || fbSubtasksChanged;
         const fbOnlyPriorityChanged = fbPriorityChanged && !fbOtherChanged;
-        logger.info('[Task PUT fallback] priority-only check', {
+        logger.debug('[Task PUT fallback] priority-only check', {
           taskId: req.params.id, fbPriorityChanged, fbTitleChanged, fbDescChanged,
           fbDueDateChanged, fbDueTimeChanged, fbCompletedChanged, fbAssignedChanged,
           fbSubtasksChanged, fbOnlyPriorityChanged
@@ -1948,6 +2100,9 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('PUT /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1960,7 +2115,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     // If source is 'contact', delete from contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
         if (taskIndex !== -1) {
@@ -1974,6 +2129,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
           // Auto-delete from Google (cascades to every nested subtask too).
           autoDeleteTaskTreeFromGoogle(deletedTask);
+          deleteNodeFileBlobs(deletedTask, contact._id);
 
           // Send notification about deleted task
           await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -2004,12 +2160,16 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Try to delete from global tasks first.
     // KRITICKÉ P2: filtrujeme aj workspaceId — bez toho by user z workspace A
     // mohol DELETE taska z workspace B. Viď analogický fix v PUT /:id vyššie.
-    const task = await Task.findOneAndDelete({ _id: req.params.id, workspaceId: req.workspaceId });
+    // ObjectId guard — UUID bez `source` inak CastError → 500 (viď PUT /:id).
+    const task = isObjectIdString(req.params.id)
+      ? await Task.findOneAndDelete({ _id: req.params.id, workspaceId: req.workspaceId })
+      : null;
     if (task) {
       io.to(`workspace-${req.workspaceId}`).emit('task-deleted', { id: req.params.id, source: 'global' });
 
       // Auto-delete from Google (cascades through subtasks so nothing orphans).
       autoDeleteTaskTreeFromGoogle(task);
+      deleteNodeFileBlobs(task, null);
 
       // Send notification about deleted task
       await notificationService.notifyTaskChange('task.deleted', task, req.user, [], req.workspaceId);
@@ -2035,7 +2195,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
 
     // If not found in global tasks, try contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.id });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.id);
       if (taskIndex !== -1) {
@@ -2049,6 +2209,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
         // Auto-delete from Google (cascades through subtasks so nothing orphans).
         autoDeleteTaskTreeFromGoogle(deletedTask);
+        deleteNodeFileBlobs(deletedTask, contact._id);
 
         // Send notification about deleted task
         await notificationService.notifyTaskChange('task.deleted', deletedTask, req.user, [], req.workspaceId);
@@ -2076,6 +2237,9 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('DELETE /tasks/:id error', { error: error.message, id: req.params.id, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2145,7 +2309,23 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 
     const finalContactIds = contactIds && Array.isArray(contactIds) ? contactIds : [];
 
+    // Plánové limity rovnako ako POST / — duplikovanie ich predtým obchádzalo.
+    const plan = await getWorkspacePlan(req);
+    const taskLimits = { free: 5, team: 25, pro: Infinity };
+    const maxTasks = taskLimits[plan] || 5;
+    const isLimited = maxTasks !== Infinity;
+    const limitResponse = (scopeText) => {
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov ${scopeText}.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov ${scopeText}. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+    };
+
     if (finalContactIds.length === 0) {
+      if (isLimited && await Task.countDocuments({ workspaceId: req.workspaceId }) >= maxTasks) {
+        return limitResponse('bez priradenia ku kontaktu');
+      }
       // No contacts selected - create as global task
       const duplicatedTask = new Task({
         // Bez workspaceId save() padal na validácii (500) — duplikovanie
@@ -2181,10 +2361,20 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
     const duplicatedTasks = [];
     const updatedContacts = [];
 
-    for (const contactId of finalContactIds) {
-      const contact = await Contact.findOne({ _id: contactId, workspaceId: req.workspaceId });
-      if (!contact) continue;
+    // Neplatné ID = ako nenájdený kontakt; všetky kontakty jedným dopytom a
+    // limit overený pred prvým zápisom (viď POST /).
+    const validContactIds = [...new Set(finalContactIds.filter(isObjectIdString).map(String))];
+    if (validContactIds.length > 50) {
+      return res.status(400).json({ message: 'Projekt možno naraz duplikovať najviac do 50 kontaktov' });
+    }
+    const foundContacts = await Contact.find({ _id: { $in: validContactIds }, workspaceId: req.workspaceId });
+    const byId = new Map(foundContacts.map(c => [String(c._id), c]));
+    const contactsInOrder = validContactIds.map(id => byId.get(id)).filter(Boolean);
+    if (isLimited && contactsInOrder.some(c => (c.tasks?.length || 0) >= maxTasks)) {
+      return limitResponse('na kontakt');
+    }
 
+    for (const contact of contactsInOrder) {
       // Create new embedded task for this contact
       const now = new Date().toISOString();
       const newTask = {
@@ -2233,20 +2423,26 @@ router.post('/:id/duplicate', authenticateToken, requireWorkspace, enforceWorksp
 // Add subtask to task (global or from contact)
 router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWorkspaceLimits, async (req, res) => {
   try {
-    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo, timeReminders } = req.body;
+    const { title, source, parentSubtaskId, dueDate, dueTime, notes, priority, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
 
-    if (!title || !title.trim()) {
+    // typeof — `title.trim()` na čísle/objekte hádzalo TypeError → 500 namiesto 400.
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
+    if (notes != null && typeof notes !== 'string') {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    // Len členovia workspace — viď sanitizeAssignedTo.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Plan-limit pre podúlohy (subtasks). Limit platí pre celkový počet
     // podúloh v projekte (rekurzívne — vrátane vnorených). Predtým limit
     // existoval iba pre contact-path (POST /api/contacts/.../subtasks),
     // ale pre global path (POST /api/tasks/:taskId/subtasks) chýbal —
     // user mohol obísť limit cez global projekt.
-    const subtaskUser = await User.findById(req.user.id).select('subscription').lean();
-    const subtaskPlan = subtaskUser?.subscription?.plan || 'free';
+    const subtaskPlan = await getWorkspacePlan(req);
     const subtaskLimitsMap = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimitsMap[subtaskPlan] || 10;
     const isSubtaskLimited = maxSubtasks !== Infinity;
@@ -2296,7 +2492,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     // If source is specified as contact, look in contacts first
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -2399,7 +2595,7 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
     }
 
     // If not found in global, search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
@@ -2444,6 +2640,9 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 
     return res.status(404).json({ message: 'Task not found' });
   } catch (error) {
+    logger.error('Subtask create error', { error: error.message, taskId: req.params.taskId, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2451,8 +2650,17 @@ router.post('/:taskId/subtasks', authenticateToken, requireWorkspace, enforceWor
 // Update subtask (global or from contact)
 router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, async (req, res) => {
   try {
-    const { title, completed, source, dueDate, dueTime, notes, assignedTo, timeReminders } = req.body;
+    const { title, completed, source, dueDate, dueTime, notes, assignedTo: rawAssignedTo, timeReminders } = req.body;
     const io = req.app.get('io');
+
+    // Typová kontrola textových polí (ak sú zadané) — viď PUT /:id.
+    if ((title !== undefined && typeof title !== 'string') || (notes != null && typeof notes !== 'string')) {
+      return res.status(400).json({ message: 'Neplatné dáta' });
+    }
+
+    // Len členovia workspace — viď sanitizeAssignedTo. Musí byť hotové PRED
+    // volaním synchrónnej updateSubtaskInTask, ktorá pole preberá z closure.
+    const assignedTo = rawAssignedTo !== undefined ? await sanitizeAssignedTo(rawAssignedTo, req.workspaceId) : undefined;
 
     // Returns { updated, originalAssignedTo } for assignment notification logic
     const updateSubtaskInTask = (task) => {
@@ -2469,13 +2677,24 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
         const newReminders = timeReminders !== undefined
           ? sanitizeTimeReminders(timeReminders)
           : oldReminders;
+        // Úroveň naliehavosti a „X dní pred" sú len podľa dátumu; čas mení
+        // len časové pripomienky (timeRemindersSent).
+        const dateMoved = dueDate !== undefined && dueDate !== found.subtask.dueDate;
+        const dueMoved = dateMoved || newDueTime !== oldDueTime;
         const dueChangedForTimeReminders =
-          (dueDate !== undefined && dueDate !== found.subtask.dueDate) ||
-          newDueTime !== oldDueTime ||
-          JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
+          dueMoved || JSON.stringify(newReminders) !== JSON.stringify(oldReminders);
+
+        // Podúloha 1. úrovne je Mongoose subdokument — spread `{...subdoc}`
+        // vráti len interné $__/_doc, NIE schema polia (viď komentár pri
+        // PUT /:id). Bez .toObject() sa pri každej úprave podúlohy stratili
+        // files, reminder, reminderSent, lastUrgencyLevel, copiedFrom a order
+        // (po save() nahradené defaultmi). Vnorené podúlohy sú plain objekty.
+        const subPlain = typeof found.subtask.toObject === 'function'
+          ? found.subtask.toObject()
+          : found.subtask;
 
         found.parent[found.index] = {
-          ...found.subtask,
+          ...subPlain,
           id: found.subtask.id, // Ensure ID is preserved
           title: title !== undefined ? title : found.subtask.title,
           completed: completed !== undefined ? completed : found.subtask.completed,
@@ -2488,7 +2707,12 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
           createdAt: found.subtask.createdAt, // Preserve createdAt
           modifiedAt: new Date().toISOString(), // Set modification timestamp
           timeReminders: newReminders,
-          timeRemindersSent: dueChangedForTimeReminders ? [] : (found.subtask.timeRemindersSent || [])
+          timeRemindersSent: dueChangedForTimeReminders ? [] : (found.subtask.timeRemindersSent || []),
+          // Posunutý termín = nová úroveň naliehavosti a nová pripomienka.
+          // Plánovač upozorní len pri RASTE úrovne nad uloženú — bez vynulovania
+          // by podúloha presunutá z „po termíne" na budúci týždeň už nikdy
+          // neupozornila (pred .toObject() fixom sa to nulovalo náhodou).
+          ...(dateMoved ? { lastUrgencyLevel: null, reminderSent: false } : {})
         };
         return { updated: found.parent[found.index], originalAssignedTo };
       }
@@ -2497,7 +2721,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -2621,7 +2845,7 @@ router.put('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspace, 
     }
 
     // Search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
@@ -2732,7 +2956,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     // If source is contact, look in contacts
     if (source === 'contact') {
-      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+      const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
       if (contact) {
         const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
         if (taskIndex !== -1) {
@@ -2766,6 +2990,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
             // Auto-delete subtask from Google
             // Cascades through any nested sub-subtasks so they vanish from Google too.
             autoDeleteTaskTreeFromGoogle(deletedSubtask);
+            deleteNodeFileBlobs(deletedSubtask, contact._id);
 
             return res.json({ message: 'Subtask deleted' });
           }
@@ -2793,13 +3018,14 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
         // Cascades through any nested sub-subtasks so they vanish from Google too.
         autoDeleteTaskTreeFromGoogle(deletedSubtask);
+        deleteNodeFileBlobs(deletedSubtask, null);
 
         return res.json({ message: 'Subtask deleted' });
       }
     }
 
     // Search in contacts
-    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId }, EXCLUDE_FILE_DATA);
+    const contact = await Contact.findOne({ workspaceId: req.workspaceId, 'tasks.id': req.params.taskId });
     if (contact) {
       const taskIndex = contact.tasks.findIndex(t => t.id === req.params.taskId);
       if (taskIndex !== -1) {
@@ -2830,6 +3056,7 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
           // Cascades through any nested sub-subtasks so they vanish from Google too.
           autoDeleteTaskTreeFromGoogle(deletedSubtask);
+          deleteNodeFileBlobs(deletedSubtask, contact._id);
 
           return res.json({ message: 'Subtask deleted' });
         }
@@ -2838,6 +3065,9 @@ router.delete('/:taskId/subtasks/:subtaskId', authenticateToken, requireWorkspac
 
     return res.status(404).json({ message: 'Task or subtask not found' });
   } catch (error) {
+    logger.error('Subtask delete error', { error: error.message, taskId: req.params.taskId, subtaskId: req.params.subtaskId, workspaceId: req.workspaceId?.toString() });
+    recordError(error, req).catch(() => {});
+    if (res.locals) res.locals.__errorRecorded = true;
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2959,6 +3189,22 @@ const deleteTaskFileBlob = async (fileId, ownerContactId) => {
   }
 };
 
+// Zmazanie projektu/podúlohy: bloby VŠETKÝCH príloh v jeho strome (R2 +
+// ContactFile). Predtým sa mazali len metadáta a bloby ostávali ako siroty
+// (platený storage, ContactFile s legacy base64 aj Atlas kvóta). Mazanie je
+// viazané na vlastníka (contactId), takže presunuté/kopírované prílohy
+// iného kontaktu (iné fileId alebo prepísaný contactId) sa nedotkne.
+const collectNodeFileIds = (node, out = []) => {
+  for (const f of (node?.files || [])) if (f?.id) out.push(f.id);
+  for (const sub of (node?.subtasks || [])) collectNodeFileIds(sub, out);
+  return out;
+};
+const deleteNodeFileBlobs = (node, ownerContactId) => {
+  const ids = collectNodeFileIds(node);
+  if (ids.length === 0) return;
+  Promise.all(ids.map((id) => deleteTaskFileBlob(id, ownerContactId))).catch(() => {});
+};
+
 // Upload file to task
 router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorkspaceLimits, (req, res) => {
   trackUploadAbort(req, { target: 'príloha úlohy' });
@@ -3012,8 +3258,8 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
       // Plan gate + storage kvóta — zrkadlí POST /contacts/:id/files.
       // Historicky task upload nemal ani jedno (prílohy sa dali nahrávať
       // mimo plánu aj mimo kvóty cez 📎 pri úlohe).
-      const uploader = await User.findById(req.user.id).select('subscription').lean();
-      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      // Prílohy a kvóta úložiska patria workspace → plán vlastníka
+      const uploaderPlan = await getWorkspacePlan(req);
       if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
         const message = isIosNativeApp(req)
           // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
@@ -3100,7 +3346,12 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
             '[Task upload]',
             { taskId }
           );
-          if (!saved) return fail(404, { message: 'Úloha nenájdená' });
+          if (!saved) {
+            // Blob už je v R2/ContactFile, ale metadáta sa nedali uložiť (úloha/
+            // podúloha medzitým zmizla) — bez upratania by ostal navždy sirotou.
+            await deleteTaskFileBlob(fileId, null);
+            return fail(404, { message: 'Úloha nenájdená' });
+          }
           emitGlobalTaskFilesChanged(req, saved);
           if (uploadIdemKey) markMutationDone(uploadIdemKey);
           return res.json({ message: 'Súbor nahraný', file: fileMeta });
@@ -3136,7 +3387,11 @@ router.post('/:taskId/files', authenticateToken, requireWorkspace, enforceWorksp
         '[Task upload]',
         { taskId }
       );
-      if (!savedContact) return fail(404, { message: 'Projekt nenájdený' });
+      if (!savedContact) {
+        // Rovnaké upratanie ako pri globálnej úlohe — blob v rozsahu vlastníka.
+        await deleteTaskFileBlob(fileId, contact._id);
+        return fail(404, { message: 'Projekt nenájdený' });
+      }
 
       emitContactTaskFilesChanged(req, savedContact, taskId);
       if (uploadIdemKey) markMutationDone(uploadIdemKey);
@@ -3165,7 +3420,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
     // úloha, inak _id kontaktu (ContactFile.contactId pri uploade).
     let ownerContactId = null;
 
-    logger.info('Task file download request', { taskId, fileId, subtaskId });
+    logger.debug('Task file download request', { taskId, fileId, subtaskId });
 
     // Try global Task first (only if taskId is a valid ObjectId)
     if (mongoose.Types.ObjectId.isValid(taskId)) {
@@ -3180,7 +3435,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         } else {
           fileMeta = (task.files || []).find(f => f.id === fileId);
         }
-        if (fileMeta) logger.info('Task file download: found in global Task', { taskId, fileId });
+        if (fileMeta) logger.debug('Task file download: found in global Task', { taskId, fileId });
       }
     }
 
@@ -3201,7 +3456,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
         }
         if (fileMeta) {
           ownerContactId = contact._id;
-          logger.info('Task file download: found in contact task', { taskId, fileId });
+          logger.debug('Task file download: found in contact task', { taskId, fileId });
         } else logger.warn('Task file download: contact task found but no file', {
           taskId, fileId, subtaskId,
           taskFiles: (contactTask.files || []).map(f => f.id),
@@ -3241,20 +3496,62 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
+    // RFC 6266: ASCII fallback vo `filename=` (diakritika odstránená cez NFD,
+    // iné ne-ASCII znaky a úvodzovky/spätné lomky → '_'; res.set by pri
+    // ne-ASCII hodnote hodil ERR_INVALID_CHAR) + plný UTF-8 názov vo
+    // `filename*=`. Predtým bol vo `filename=` percent-enkódovaný názov, ktorý
+    // prehliadač/WebView pri priamom otvorení URL uložil doslova ako
+    // `fakt%C3%BAra%20%C4%8D.%205.pdf`. Webový klient hlavičku nečíta
+    // (sťahuje blob a názov berie z metadát), takže preň sa nič nemení.
+    const setDownloadHeaders = (contentLength) => {
+      const safeName = String(fileMeta.originalName || 'subor');
+      const asciiName = safeName
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\x20-\x7e]/g, '_')
+        .replace(/["\\]/g, '_') || 'subor';
+      // RFC 5987 attr-char: encodeURIComponent necháva ' ( ) * — doenkódovať.
+      const utf8Name = encodeURIComponent(safeName)
+        .replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+      res.set({
+        'Content-Type': fileMeta.mimetype || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+        'X-Content-Type-Options': 'nosniff'
+      });
+      if (Number.isFinite(contentLength)) res.set('Content-Length', String(contentLength));
+    };
+
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
+      // STREAM z R2 priamo do odpovede (ako contacts.js) — downloadFile()
+      // skladal celý súbor (až 50 MB) do Buffera a paralelné sťahovania
+      // nemali na 512 MB inštancii žiadny strop.
+      let r2Object;
       try {
-        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
-        logger.info('Task file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+        r2Object = await fileStorage.getFileObject(contactFile.r2Key);
       } catch (r2Err) {
         logger.error('Task file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
         return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
       }
+      const { stream, contentLength } = r2Object;
+      logger.debug('Task file download: from R2 (stream)', { fileId, r2Key: contactFile.r2Key, size: contentLength });
+      setDownloadHeaders(contentLength);
+      stream.on('error', (streamErr) => {
+        logger.error('Task file download: R2 stream failed', { fileId, r2Key: contactFile.r2Key, error: streamErr.message });
+        if (res.headersSent) return res.destroy();
+        for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+        res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      });
+      // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+      res.on('close', () => {
+        if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+      });
+      stream.pipe(res);
+      return;
     } else if (contactFile?.data) {
       fileBuffer = Buffer.from(contactFile.data, 'base64');
-      logger.info('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
+      logger.debug('Task file download: legacy base64 from ContactFile', { fileId, size: fileBuffer.length });
     } else if (fileMeta.data) {
       fileBuffer = Buffer.from(fileMeta.data, 'base64');
-      logger.info('Task file download: very-legacy embedded data, migrating', { fileId });
+      logger.debug('Task file download: very-legacy embedded data, migrating', { fileId });
       // contactId podľa vlastníka — bez neho by blob úlohy v kontakte
       // vyzeral ako globálny a scoped delete by ho nenašiel.
       ContactFile.updateOne(
@@ -3267,11 +3564,7 @@ router.get('/:taskId/files/:fileId/download', authenticateToken, requireWorkspac
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
-    res.set({
-      'Content-Type': fileMeta.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
-      'Content-Length': fileBuffer.length
-    });
+    setDownloadHeaders(fileBuffer.length);
     res.send(fileBuffer);
   } catch (error) {
     logger.error('Task file download error', { error: error.message, stack: error.stack, taskId: req.params.taskId, fileId: req.params.fileId, subtaskId: req.query.subtaskId });

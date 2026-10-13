@@ -110,8 +110,35 @@ function buildSuccessRedirect(token, opts = {}) {
   if (opts.linked) url.searchParams.set('linked', '1');
   url.searchParams.set('provider', opts.provider || 'google');
   // Hash fragment — nie je odoslaný v HTTP requestoch, len ostane v browseri.
-  url.hash = `token=${encodeURIComponent(token)}`;
+  // cnonce = väzba na prehliadač, ktorý flow spustil (AuthCallback ho porovná).
+  const hash = new URLSearchParams({ token });
+  if (opts.cnonce) hash.set('cnonce', opts.cnonce);
+  url.hash = hash.toString();
   return url.toString();
+}
+
+// Connect mód: identitu nepripájame v callbacku — FE potvrdí pending token
+// so svojím JWT (POST /api/auth/connections/complete).
+function buildConnectPendingRedirect(pending, opts = {}) {
+  const url = new URL(`${CLIENT_URL}/auth/callback`);
+  url.searchParams.set('mode', 'connect');
+  url.searchParams.set('provider', opts.provider || 'google');
+  if (opts.returnUrl) url.searchParams.set('returnUrl', opts.returnUrl);
+  url.hash = new URLSearchParams({ pending }).toString();
+  return url.toString();
+}
+
+// Výmena code za tokeny bez timeoutu visela pri degradácii Google až
+// do timeoutu klienta/proxy.
+const GOOGLE_TOKEN_TIMEOUT_MS = 10000;
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms} ms`)), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
 }
 
 function buildErrorRedirect(code, message) {
@@ -131,7 +158,8 @@ router.get('/login', async (req, res) => {
   }
   try {
     const returnUrl = sanitizeReturnUrl(req.query.returnUrl);
-    const state = oauthService.signState({ mode: 'login', returnUrl });
+    const cnonce = oauthService.normalizeClientNonce(req.query.cnonce);
+    const state = oauthService.signState({ mode: 'login', returnUrl, ...(cnonce && { cnonce }) });
     const client = createOAuth2Client();
     const authUrl = client.generateAuthUrl({
       access_type: 'online',  // login-only — nepotrebujeme refresh token
@@ -197,14 +225,22 @@ router.get('/callback', async (req, res) => {
   let stateData;
   try {
     stateData = oauthService.verifyState(state);
+    // Iný podpísaný objekt (napr. pending token prepojenia) nie je state.
+    if (!['login', 'connect'].includes(stateData.mode)) {
+      throw new oauthService.OAuthError('STATE_INVALID', 'Neplatný state');
+    }
   } catch (err) {
     logger.warn('[auth-google] invalid state', { error: err.message });
-    return res.redirect(buildErrorRedirect(err.code || 'STATE_INVALID', err.message));
+    return res.redirect(buildErrorRedirect(err.code || 'STATE_INVALID'));
   }
 
   try {
     const client = createOAuth2Client();
-    const { tokens } = await client.getToken({ code, redirect_uri: GOOGLE_OAUTH_REDIRECT_URI });
+    const { tokens } = await withTimeout(
+      client.getToken({ code, redirect_uri: GOOGLE_OAUTH_REDIRECT_URI }),
+      GOOGLE_TOKEN_TIMEOUT_MS,
+      'Google token exchange'
+    );
     if (!tokens.id_token) {
       throw new Error('Missing id_token in Google response');
     }
@@ -213,32 +249,19 @@ router.get('/callback', async (req, res) => {
     // ─── Connect flow ────────────────────────────────────────────────
     if (stateData.mode === 'connect') {
       if (!stateData.userId) {
-        return res.redirect(buildErrorRedirect('STATE_INVALID', 'Missing userId'));
+        return res.redirect(buildErrorRedirect('STATE_INVALID'));
       }
-      try {
-        await oauthService.connectProvider(stateData.userId, 'google', profile);
-        auditService.logAction({
-          userId: stateData.userId,
-          action: 'auth.oauth.connect',
-          category: 'auth',
-          details: { provider: 'google' },
-          ipAddress: req.ip
-        });
-        // Connect-mode redirect na settings page s flagom
-        const url = new URL(`${CLIENT_URL}/auth/callback`);
-        url.searchParams.set('mode', 'connect');
-        url.searchParams.set('provider', 'google');
-        url.searchParams.set('connected', '1');
-        if (stateData.returnUrl) url.searchParams.set('returnUrl', stateData.returnUrl);
-        return res.redirect(url.toString());
-      } catch (err) {
-        logger.warn('[auth-google] connect failed', {
-          error: err.message,
-          code: err.code,
-          userId: stateData.userId
-        });
-        return res.redirect(buildErrorRedirect(err.code || 'CONNECT_FAILED', err.message));
-      }
+      // Prepojenie dokončí až FE so svojím JWT (CSRF ochrana — viď
+      // oauthService.signConnectPending).
+      const pending = oauthService.signConnectPending({
+        userId: stateData.userId,
+        provider: 'google',
+        profile
+      });
+      return res.redirect(buildConnectPendingRedirect(pending, {
+        provider: 'google',
+        returnUrl: stateData.returnUrl
+      }));
     }
 
     // ─── Login flow ──────────────────────────────────────────────────
@@ -247,7 +270,7 @@ router.get('/callback', async (req, res) => {
       result = await oauthService.findOrCreateUserFromProfile('google', profile);
     } catch (err) {
       logger.warn('[auth-google] login findOrCreate failed', { error: err.message, code: err.code });
-      return res.redirect(buildErrorRedirect(err.code || 'LOGIN_FAILED', err.message));
+      return res.redirect(buildErrorRedirect(err.code || 'LOGIN_FAILED'));
     }
 
     const token = oauthService.issueAuthToken(result.user);
@@ -269,7 +292,8 @@ router.get('/callback', async (req, res) => {
       returnUrl: stateData.returnUrl,
       isNew: result.isNew,
       linked: result.linked === true,
-      provider: 'google'
+      provider: 'google',
+      cnonce: stateData.cnonce
     }));
   } catch (err) {
     logger.error('[auth-google] callback error', {

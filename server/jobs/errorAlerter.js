@@ -49,10 +49,13 @@ async function checkAndAlert(threshold = NEW_THRESHOLD, spikeThreshold = SPIKE_T
     // ── Podmienka 1: nové fingerprinty za poslednú hodinu ──
     // countDocuments zvlášť — limit(20) na liste by pri väčšom náraze
     // skreslil vykazovaný počet (visel by na "20").
-    const newCount = await ServerError.countDocuments({ firstSeen: { $gte: since } });
+    // createdAt namiesto firstSeen: obe sa nastavujú len pri vzniku záznamu
+    // (serverErrorService, routes/errors.js), ale len createdAt má index
+    // (TTL) — firstSeen dotaz robil každú hodinu scan celej kolekcie.
+    const newCount = await ServerError.countDocuments({ createdAt: { $gte: since } });
     const newErrors = newCount > 0
       ? await ServerError.find(
-          { firstSeen: { $gte: since } },
+          { createdAt: { $gte: since } },
           { name: 1, message: 1, source: 1, path: 1, count: 1, statusCode: 1 }
         ).sort({ count: -1 }).limit(15).lean()
       : [];
@@ -178,19 +181,35 @@ function escapeHtml(s) {
  * založí spike baseline a nechá procesu čas na stabilizáciu (errory
  * z cold-cache boot problémov nespustia alert hneď po deployi).
  */
+// Handly časovačov (ako healthMonitor / commissionScheduler) — job sa dá
+// zastaviť a druhé volanie nespustí paralelný interval (dvojité alerty).
+let timeoutHandle = null;
+let intervalHandle = null;
+
 function scheduleErrorAlerter() {
-  setTimeout(() => {
+  if (intervalHandle) return;
+  timeoutHandle = setTimeout(() => {
     checkAndAlert().catch(() => {});
   }, 10 * 60 * 1000);
+  timeoutHandle.unref?.();
 
-  setInterval(() => {
+  intervalHandle = setInterval(() => {
     checkAndAlert().catch(() => {});
   }, INTERVAL_MS);
+  intervalHandle.unref?.();
 
   logger.info(`[ErrorAlerter] Scheduled — every 1h, new>${NEW_THRESHOLD} fingerprints alebo +${SPIKE_THRESHOLD} výskytov`);
 }
 
+function stop() {
+  clearTimeout(timeoutHandle);
+  clearInterval(intervalHandle);
+  timeoutHandle = null;
+  intervalHandle = null;
+}
+
 module.exports = {
   scheduleErrorAlerter,
+  stop,
   checkAndAlert, // exportované pre testy / manual trigger
 };

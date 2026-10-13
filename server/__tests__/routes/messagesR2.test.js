@@ -24,6 +24,13 @@ jest.mock('../../services/fileStorage', () => {
       if (!o) throw noSuchKey();
       return o.buffer;
     }),
+    // Stiahnutie prílohy streamuje (messages.js sendStoredAttachment)
+    getFileObject: jest.fn(async (key) => {
+      const o = store.get(key);
+      if (!o) throw noSuchKey();
+      const { Readable } = require('stream');
+      return { stream: Readable.from([o.buffer]), contentLength: o.buffer.length, contentType: o.contentType };
+    }),
     deleteFile: jest.fn(async (key) => { store.delete(key); }),
     fileExists: jest.fn(async (key) => store.has(key)),
     getFileStream: jest.fn(),

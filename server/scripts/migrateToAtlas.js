@@ -7,10 +7,14 @@
  *
  * Reads from current MONGODB_URI in .env, copies all collections to the new URI.
  * Uses cursors to read one document at a time (handles slow source servers).
+ *
+ * Neprázdne cieľové kolekcie sa prepíšu (drop) len s
+ * ALLOW_DESTRUCTIVE_SCRIPTS=true a argumentom --confirm, inak sa preskočia.
  */
 
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
+const { isDestructiveRunAllowed } = require('./lib/destructiveGuard');
 
 const SOURCE_URI = process.env.MONGODB_URI;
 const TARGET_URI = process.argv[2];
@@ -74,11 +78,20 @@ async function migrate() {
         continue;
       }
 
-      // Drop target collection if it exists (fresh migration)
-      try {
-        await targetColl.drop();
-      } catch (e) {
-        // Collection doesn't exist yet, that's fine
+      // Drop target collection if it exists (fresh migration). Len s
+      // poistkou — zámena argumentu za produkčnú URI by inak zmazala dáta.
+      if (!isDestructiveRunAllowed()) {
+        const targetCount = await targetColl.countDocuments().catch(() => 0);
+        if (targetCount > 0) {
+          console.log(`    → Cieľ má ${targetCount} dokumentov — preskakujem (bez --confirm sa nemaže)\n`);
+          continue;
+        }
+      } else {
+        try {
+          await targetColl.drop();
+        } catch (e) {
+          // Collection doesn't exist yet, that's fine
+        }
       }
 
       // Copy documents using cursor (one at a time)

@@ -236,6 +236,13 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  // Verzia prihlasovacích JWT (claim `tv`). Inkrementuje sa pri zmene a
+  // resete hesla → všetky staršie JWT prestanú platiť (middleware/auth.js).
+  // Existujúce dokumenty bez poľa = 0 = zhoda so staršími tokenmi bez `tv`.
+  tokenVersion: {
+    type: Number,
+    default: 0
+  },
   lastCalendarExport: {
     type: Date,
     default: null
@@ -312,7 +319,21 @@ const userSchema = new mongoose.Schema({
     watchResourceId: { type: String, default: null },
     watchExpiry: { type: Date, default: null },
     // Sync token for incremental event list (only changed events since last sync)
-    syncToken: { type: String, default: null }
+    syncToken: { type: String, default: null },
+    // Push kanály pre per-workspace kalendáre „Prpl CRM — {workspace}“.
+    // Legacy watch vyššie sleduje len calendarId ('primary'), kým udalosti
+    // sa od PR2 zapisujú do per-workspace kalendárov — zmeny urobené v
+    // Google (presun termínu, zmazanie) by sa do CRM inak nikdy nedostali.
+    workspaceWatches: {
+      type: [new mongoose.Schema({
+        channelId: { type: String, required: true },
+        calendarId: { type: String, required: true },
+        resourceId: { type: String, default: null },
+        expiry: { type: Date, default: null },
+        syncToken: { type: String, default: null }
+      }, { _id: false })],
+      default: []
+    }
   },
   // Google Tasks integration — same per-workspace model as Calendar above.
   googleTasks: {
@@ -368,7 +389,22 @@ const userSchema = new mongoose.Schema({
     virtuals: true,
     transform: function(doc, ret) {
       ret.id = ret._id.toString();
+      // Obrana do hĺbky — res.json(user) / socket emit nikdy nepošle
+      // heslo, reset token, OAuth tokeny ani tajný token kalendárového feedu.
       delete ret.password;
+      delete ret.resetPasswordTokenHash;
+      delete ret.resetPasswordExpires;
+      delete ret.calendarFeedToken;
+      delete ret.restoreTokens;
+      delete ret.tokenVersion;
+      if (ret.googleCalendar) {
+        delete ret.googleCalendar.accessToken;
+        delete ret.googleCalendar.refreshToken;
+      }
+      if (ret.googleTasks) {
+        delete ret.googleTasks.accessToken;
+        delete ret.googleTasks.refreshToken;
+      }
       return ret;
     }
   },
@@ -385,6 +421,24 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ 'googleCalendar.enabled': 1 });
 userSchema.index({ 'googleTasks.enabled': 1 });
 userSchema.index({ role: 1 });
+// Stripe webhooky hľadajú používateľa podľa subscription/customer ID pri
+// každom evente; Google Calendar webhook (neautentifikovaný) podľa
+// watchChannelId — bez indexu išlo zakaždým o COLLSCAN celej kolekcie.
+userSchema.index({ 'subscription.stripeSubscriptionId': 1 }, { sparse: true });
+userSchema.index({ 'subscription.stripeCustomerId': 1 }, { sparse: true });
+// Jedna Apple transakcia (originalTransactionId) = jeden účet. Check-then-
+// act v /apple/verify nestačí pri súbehu. Partial filter: default null by
+// v unique indexe kolidoval (sparse vynecháva len chýbajúce pole).
+userSchema.index(
+  { 'subscription.appleOriginalTransactionId': 1 },
+  {
+    unique: true,
+    name: 'uniq_apple_original_tx',
+    partialFilterExpression: { 'subscription.appleOriginalTransactionId': { $type: 'string' } }
+  }
+);
+userSchema.index({ 'googleCalendar.watchChannelId': 1 }, { sparse: true });
+userSchema.index({ 'googleCalendar.workspaceWatches.channelId': 1 }, { sparse: true });
 
 // At-rest encryption pre OAuth tokeny (audit MED-003 v2).
 //
@@ -452,9 +506,26 @@ userSchema.post('init', function (doc) {
       // a následný API call s ňou zlyhá → /reconnect flow user pre-založí.
       if (decrypted !== null && decrypted !== value) {
         doc.set(path, decrypted);
+        // doc.set() cestu označí ako modified → každé user.save() (profil,
+        // billing webhook, push preferencie…) by token znova zapísalo a
+        // prepísalo medzitým obnovený token iným requestom (lost update).
+        // Vrátime ju do stavu 'init'; pre('save') šifruje len reálnu zmenu.
+        doc.unmarkModified(path);
       }
     }
   }
 });
 
-module.exports = mongoose.model('User', userSchema);
+const UserModel = mongoose.model('User', userSchema);
+
+// Mongoose pri štarte volá init().catch(noop) — zlyhaný build indexu (napr.
+// unique uniq_apple_original_tx pri duplicitných appleOriginalTransactionId)
+// by inak prebehol úplne potichu. Server beží ďalej, len chýba ochrana.
+UserModel.on('index', (err) => {
+  if (!err) return;
+  try {
+    require('../utils/logger').error('[User] Index build failed', { error: err.message, code: err.code });
+  } catch { /* logger nesmie zhodiť štart */ }
+});
+
+module.exports = UserModel;

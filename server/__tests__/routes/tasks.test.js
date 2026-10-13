@@ -400,6 +400,48 @@ describe('/api/tasks route', () => {
     });
   });
 
+  describe('PUT /:taskId/subtasks/:subtaskId', () => {
+    it('posun termínu podúlohy vynuluje úroveň naliehavosti a pripomienku; prílohy ostanú', async () => {
+      const task = await Task.create({
+        workspaceId: ownerCtx.workspace._id,
+        userId: ownerCtx.user._id,
+        title: 'Projekt',
+        subtasks: [{
+          id: 'sub-1', title: 'Podúloha', dueDate: '2026-09-01', reminder: 1,
+          reminderSent: true, lastUrgencyLevel: 'overdue',
+          files: [{ id: 'f-1', originalName: 'a.pdf', mimetype: 'application/pdf', size: 1 }]
+        }]
+      });
+
+      const res = await request(app)
+        .put(`/api/tasks/${task._id}/subtasks/sub-1`)
+        .set(authHeader(ownerCtx.token))
+        .send({ dueDate: '2026-11-20' });
+      expect(res.status).toBe(200);
+
+      const sub = (await Task.findById(task._id).lean()).subtasks[0];
+      expect(sub.dueDate).toBe('2026-11-20');
+      expect(sub.lastUrgencyLevel).toBeNull();
+      expect(sub.reminderSent).toBe(false);
+      expect(sub.files.map(f => f.id)).toEqual(['f-1']);
+
+      // Úprava bez zmeny termínu stav nemení
+      await Task.updateOne({ _id: task._id }, { $set: { 'subtasks.0.lastUrgencyLevel': 'warning' } });
+      await request(app)
+        .put(`/api/tasks/${task._id}/subtasks/sub-1`)
+        .set(authHeader(ownerCtx.token))
+        .send({ title: 'Premenovaná' });
+      expect((await Task.findById(task._id).lean()).subtasks[0].lastUrgencyLevel).toBe('warning');
+
+      // Zmena len času (formulár posiela dátum aj čas) — úroveň ostáva
+      await request(app)
+        .put(`/api/tasks/${task._id}/subtasks/sub-1`)
+        .set(authHeader(ownerCtx.token))
+        .send({ dueDate: '2026-11-20', dueTime: '14:00' });
+      expect((await Task.findById(task._id).lean()).subtasks[0].lastUrgencyLevel).toBe('warning');
+    });
+  });
+
   describe('DELETE /:id', () => {
     it('zmaže môj global task', async () => {
       const t = await Task.create({

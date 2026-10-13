@@ -156,7 +156,8 @@ describe('auth-google routes', () => {
         username: 'classic',
         email: 'classic@test.com',
         password: 'h',
-        authProviders: ['password']
+        authProviders: ['password'],
+        emailVerified: true
       });
 
       mockGetToken.mockResolvedValue({ tokens: { id_token: 'idt' } });
@@ -179,6 +180,40 @@ describe('auth-google routes', () => {
       const refreshed = await User.findById(existing._id);
       expect(refreshed.googleId).toBe('google-classic');
       expect(refreshed.authProviders.sort()).toEqual(['google', 'password']);
+    });
+
+    it('LOGIN flow — NElinkne password účet s neovereným e-mailom (pre-account hijack)', async () => {
+      const squatter = await User.create({
+        username: 'squatter',
+        email: 'victim@test.com',
+        password: 'h',
+        authProviders: ['password']
+      });
+      mockGetToken.mockResolvedValue({ tokens: { id_token: 'idt' } });
+      mockVerifyIdToken.mockResolvedValue({
+        getPayload: () => ({ sub: 'google-victim', email: 'victim@test.com', email_verified: true })
+      });
+      const state = oauthService.signState({ mode: 'login' });
+      const res = await request(app)
+        .get('/api/auth/google/callback')
+        .query({ code: 'c', state });
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toMatch(/error=EMAIL_EXISTS_UNVERIFIED/);
+      const refreshed = await User.findById(squatter._id);
+      expect(refreshed.googleId).toBeUndefined();
+    });
+
+    it('LOGIN flow — cnonce zo /login sa vráti vo fragmente spolu s tokenom', async () => {
+      mockGetToken.mockResolvedValue({ tokens: { id_token: 'idt' } });
+      mockVerifyIdToken.mockResolvedValue({
+        getPayload: () => ({ sub: 'google-cn', email: 'cnonce@test.com', email_verified: true })
+      });
+      const state = oauthService.signState({ mode: 'login', cnonce: 'abcdef0123456789abcdef' });
+      const res = await request(app)
+        .get('/api/auth/google/callback')
+        .query({ code: 'c', state });
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toMatch(/#token=[^&]+&cnonce=abcdef0123456789abcdef/);
     });
 
     it('LOGIN flow — block unverified email', async () => {
@@ -232,11 +267,17 @@ describe('auth-google routes', () => {
         .query({ code: 'c', state });
 
       expect(res.status).toBe(302);
-      expect(res.headers.location).toMatch(/connected=1/);
+      // Callback už NEPRIPÁJA — vydá pending token, prepojenie dokončí FE
+      // so svojím JWT (POST /api/auth/connections/complete).
+      expect(res.headers.location).toMatch(/mode=connect/);
       expect(res.headers.location).toMatch(/provider=google/);
+      const pending = new URLSearchParams(res.headers.location.split('#')[1]).get('pending');
+      const data = oauthService.verifyConnectPending(pending);
+      expect(data.userId).toBe(user._id.toString());
+      expect(data.profile.providerId).toBe('google-conn-x');
 
       const refreshed = await User.findById(user._id);
-      expect(refreshed.googleId).toBe('google-conn-x');
+      expect(refreshed.googleId).toBeUndefined();
     });
   });
 

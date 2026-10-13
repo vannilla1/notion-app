@@ -17,7 +17,12 @@
 const BLOCKED_EXTENSIONS = new Set([
   // Windows spustiteľné / skripty
   'exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl', 'msc', 'hta',
-  'vbs', 'vbe', 'jse', 'wsf', 'wsh', 'ps1', 'psm1', 'reg', 'lnk',
+  'vbs', 'vbe', 'jse', 'wsf', 'wsh', 'ws', 'sct', 'ps1', 'psm1', 'reg', 'lnk',
+  // Windows inštalátory / balíky / doplnky (msp+mst = Windows Installer,
+  // xll = Excel add-in — rozšírený malvér vektor, appx/msix = Store balíky,
+  // gadget = sidebar gadget). Zámerne BEZ .js/.chm/.application — produktové
+  // rozhodnutie, riziko blokovania legitímnych súborov.
+  'msp', 'mst', 'xll', 'appx', 'msix', 'appxbundle', 'msixbundle', 'gadget',
   // Unix / mac spustiteľné a balíky
   'sh', 'bash', 'zsh', 'command', 'app', 'dmg', 'pkg', 'deb', 'rpm',
   // Mobil / Java

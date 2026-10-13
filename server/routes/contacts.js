@@ -6,13 +6,14 @@ const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace, enforceWorkspaceLimits } = require('../middleware/workspace');
 const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
+const { getMaxMembers } = require('../utils/planLimits');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const Workspace = require('../models/Workspace');
 const Task = require('../models/Task');
 const fileStorage = require('../services/fileStorage');
 const User = require('../models/User');
 const { STORAGE_LIMITS, computeWorkspaceFileBytes } = require('../utils/storageQuota');
-const { logPlanGateHit } = require('../utils/planGate');
+const { logPlanGateHit, getWorkspacePlan, respondIfSubtaskLimitExceeded } = require('../utils/planGate');
 const { attachmentFileFilter, sanitizeDisplayName, hasBlockedExtension } = require('../utils/uploadFilter');
 const { withServerSubtaskFiles } = require('../utils/subtaskFiles');
 const { trackUploadAbort, handleUploadError, rejectMissingFilePart, respondToHeldUploadKey } = require('../utils/uploadTracking');
@@ -124,6 +125,20 @@ const { claimMutationKey, releaseMutationKey, markMutationDone } = require('../u
 
 const router = express.Router();
 
+// Všetky :id / :contactId v tomto súbore sú ObjectId kontaktu. Neplatná
+// hodnota by inak skončila CastError → 500 „Chyba servera" + falošný záznam
+// UnhandledServerResponse v Diagnostike (finish-hook). Rovnaká guard ako
+// tasks.js GET /:id. router.param beží pred authenticateToken, takže
+// neplatné id bez tokenu dostane 404 namiesto 401 — skutoční klienti
+// posielajú len id, ktoré dostali zo servera.
+const ensureObjectId = (req, res, next, value) => (
+  /^[0-9a-fA-F]{24}$/.test(String(value))
+    ? next()
+    : res.status(404).json({ message: 'Kontakt nenájdený' })
+);
+router.param('id', ensureObjectId);
+router.param('contactId', ensureObjectId);
+
 // Auto-invalidate contacts cache after any mutation (POST/PUT/DELETE)
 router.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
@@ -153,6 +168,9 @@ const upload = multer({
 // Validation helpers
 const isValidEmail = (email) => {
   if (!email) return true;
+  // Dĺžka PRED regexom — regex nižšie backtrackuje kvadraticky a 1 MB reťazec
+  // by na minúty zablokoval event loop celého servera (RFC 5321: max 254).
+  if (typeof email !== 'string' || email.length > 254) return false;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
@@ -161,6 +179,34 @@ const isValidPhone = (phone) => {
   if (!phone) return true;
   const phoneRegex = /^[+]?[0-9\s-]+$/;
   return phoneRegex.test(phone);
+};
+
+// Typ a dĺžka textových polí kontaktu (POST / a PUT /:id). Objekt či pole
+// v `name`/`notes` by inak skončili CastError → 500 a jedinou hranicou
+// dĺžky bol 1 MB JSON limit. Limity sú zámerne štedré a odmietajú 400 —
+// tiché orezanie by stratilo dáta. null/undefined = pole neposlané.
+const FIELD_MAX = { name: 300, email: 254, phone: 50, company: 300, website: 2048, notes: 50000 };
+// `previous` (PUT): nezmenená hodnota zo staršieho kontaktu (napr. poznámka
+// dlhšia než limit z čias pred limitom) ostáva povolená — inak by sa kontakt
+// nedal upraviť vôbec, ani jeho iné pole.
+const badContactField = (body, previous = null) => Object.keys(FIELD_MAX).find(
+  k => body?.[k] != null && !(previous && body[k] === previous[k]) &&
+    (typeof body[k] !== 'string' || body[k].length > FIELD_MAX[k])
+);
+// status nemá v schéme enum a findOneAndUpdate beží bez runValidators —
+// klient (ContactForm, CSV export statusMap) pozná len tieto štyri.
+const ALLOWED_STATUS = new Set(['new', 'active', 'completed', 'cancelled']);
+
+// Vstupy úloh/podúloh kontaktu. priority: len reťazec ≤ 20 znakov alebo
+// null (podúloha má default null); allow-list hodnôt sa zámerne nevynucuje
+// (staršie dáta). Iný typ → undefined = „neposlané" (POST default, PUT
+// ponechá pôvodnú hodnotu). assignedTo: pole reťazcov (max 100); samotný
+// reťazec sa zabalí ako doteraz robil Mongoose cast; objekt → [].
+const cleanTaskPriority = (p) => (p === null || (typeof p === 'string' && p.length <= 20) ? p : undefined);
+const cleanAssignees = (a) => {
+  if (a === undefined) return undefined;
+  const arr = Array.isArray(a) ? a : (typeof a === 'string' && a ? [a] : []);
+  return arr.filter(x => typeof x === 'string').slice(0, 100);
 };
 
 // Helper function to convert contact to plain object with deep copy of nested subtasks
@@ -434,7 +480,7 @@ router.get('/', authenticateToken, requireWorkspace, async (req, res) => {
     res.json(contactsWithId);
   } catch (error) {
     logger.error('GET /contacts error', { error: error.message, workspaceId: req.workspaceId?.toString() });
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -517,6 +563,7 @@ router.get('/export/csv', authenticateToken, requireWorkspace, async (req, res) 
     res.setHeader('Content-Disposition', 'attachment; filename="kontakty.csv"');
     res.send(csv);
   } catch (error) {
+    logger.error('CSV export error', { error: error.message, stack: error.stack, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba pri exporte' });
   }
 });
@@ -534,6 +581,7 @@ router.get('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     }
     res.json({ ...contact, id: contact._id.toString() });
   } catch (error) {
+    logger.error('GET /contacts/:id error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -543,9 +591,19 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
-    // Check plan contact limit
-    const user = await User.findById(req.user.id);
-    const plan = user?.subscription?.plan || 'free';
+    const badField = badContactField(req.body);
+    if (badField) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    }
+    // '' sa správa ako neposlané (nižšie `status || 'new'`)
+    if (status != null && status !== '' && !ALLOWED_STATUS.has(status)) {
+      return res.status(400).json({ message: 'Neplatný stav kontaktu' });
+    }
+
+    // Check plan contact limit (len subscription — celý User nesie base64 avatar
+    // a Google sync mapy, desiatky–stovky kB; viď /export/csv a upload)
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     const contactLimits = { free: 5, team: 25, pro: Infinity };
     const maxContacts = contactLimits[plan] || 5;
     if (maxContacts !== Infinity) {
@@ -585,6 +643,21 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
 
     await contact.save();
 
+    // Súbežné POST prejdú kontrolou počtu naraz (check-then-act) — po
+    // vložení overíme znova a nadbytočný kontakt hneď zmažeme.
+    if (maxContacts !== Infinity) {
+      const firstIds = await Contact.find({ workspaceId: req.workspaceId })
+        .sort({ createdAt: 1, _id: 1 }).limit(maxContacts).select('_id').lean();
+      if (!firstIds.some(c => String(c._id) === String(contact._id))) {
+        await Contact.deleteOne({ _id: contact._id });
+        const message = isIosNativeApp(req)
+          ? `Dosiahli ste limit ${maxContacts} kontaktov pre toto prostredie.`
+          : `Váš plán umožňuje max. ${maxContacts} kontaktov. Pre viac kontaktov prejdite na vyšší plán.`;
+        logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'contacts', limit: maxContacts });
+        return res.status(403).json({ message, code: 'PLAN_LIMIT' });
+      }
+    }
+
     const io = req.app.get('io');
     const contactData = contactToPlainObject(contact);
     io.to(`workspace-${req.workspaceId}`).emit('contact-created', contactData);
@@ -610,6 +683,7 @@ router.post('/', authenticateToken, requireWorkspace, enforceWorkspaceLimits, as
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Create contact error', { error: error.message, stack: error.stack, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -659,9 +733,8 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
 
     // 3a) Member-over-limit (zrkadlí enforceWorkspaceLimits) — ak je cieľ nad
     // seat limitom vlastníka, je v read-only režime a nepridávame doň obsah.
-    const memberLimits = { free: 2, trial: 2, team: 10 };
     if (ownerPlan !== 'pro') {
-      const maxMembers = (memberLimits[ownerPlan] || 2) + (targetWs.paidSeats || 0);
+      const maxMembers = getMaxMembers(ownerPlan, targetWs.paidSeats || 0);
       const memberCount = await WorkspaceMember.countDocuments({ workspaceId: targetWorkspaceId });
       if (memberCount > maxMembers) {
         return res.status(403).json({ message: 'Cieľové prostredie prekročilo limit členov a je len na čítanie.' });
@@ -739,7 +812,16 @@ router.post('/:id/copy-to-workspace', authenticateToken, requireWorkspace, async
       }
       let buffer = null;
       try {
-        const cf = await ContactFile.findOne({ fileId: fileMeta.id }, { r2Key: 1, data: 1 }).lean();
+        // Blob musí patriť do zdrojového workspace-u — rovnaká druhá vrstva
+        // obrany ako pri sťahovaní (blobBelongsToWorkspace, nižšie v súbore);
+        // files[] metadáta boli klientom editovateľné, cudzí fileId sa nesmie
+        // dať cez kópiu kontaktu prečítať. Legacy blob bez contactId prechádza.
+        const cf = await ContactFile.findOne({ fileId: fileMeta.id }, { r2Key: 1, data: 1, contactId: 1 }).lean();
+        if (cf && !(await blobBelongsToWorkspace(cf, source._id, sourceWorkspaceId))) {
+          logger.warn('[Copy] Príloha — blob patrí inému prostrediu (preskakujem)', { fileId: fileMeta.id });
+          copyStats.skippedError++;
+          return null;
+        }
         if (cf?.r2Key && fileStorage.isR2Available()) buffer = await fileStorage.downloadFile(cf.r2Key);
         else if (cf?.data) buffer = Buffer.from(cf.data, 'base64');
         else if (fileMeta.data) buffer = Buffer.from(fileMeta.data, 'base64');
@@ -948,12 +1030,11 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
   try {
     const { name, email, phone, company, website, notes, status } = req.body;
 
-    if (email && !isValidEmail(email)) {
-      return res.status(400).json({ message: 'Neplatný formát emailu' });
-    }
-
-    if (phone && !isValidPhone(phone)) {
-      return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
+    // Typ/dĺžka polí: rýchla kontrola typu hneď, dĺžka sa porovná s pôvodným
+    // kontaktom nižšie (nezmenené staršie hodnoty ostávajú povolené).
+    const badType = Object.keys(FIELD_MAX).find(k => req.body?.[k] != null && typeof req.body[k] !== 'string');
+    if (badType) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badType}` });
     }
 
     // Načítame pôvodný kontakt PRED updatom — potrebujeme:
@@ -971,7 +1052,28 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
+    const badField = badContactField(req.body, previousContact);
+    if (badField) {
+      return res.status(400).json({ message: `Neplatná hodnota poľa ${badField}` });
+    }
+
+    // Formát až po kontrole dĺžky (regex nesmie dostať neohraničený vstup);
+    // nezmenená staršia hodnota ostáva povolená ako pri ostatných poliach.
+    if (email && email !== previousContact.email && !isValidEmail(email)) {
+      return res.status(400).json({ message: 'Neplatný formát emailu' });
+    }
+
+    if (phone && phone !== previousContact.phone && !isValidPhone(phone)) {
+      return res.status(400).json({ message: 'Telefón môže obsahovať len čísla, medzery, pomlčky a znak +' });
+    }
+
     const previousStatus = previousContact.status;
+
+    // Nezmenená (legacy) hodnota ostáva povolená — starší kontakt s iným
+    // stavom sa musí dať ďalej editovať (napr. len poznámka).
+    if (status != null && status !== '' && !ALLOWED_STATUS.has(status) && status !== previousStatus) {
+      return res.status(400).json({ message: 'Neplatný stav kontaktu' });
+    }
 
     const contact = await Contact.findOneAndUpdate(
       { _id: req.params.id, workspaceId: req.workspaceId },
@@ -1027,6 +1129,7 @@ router.put('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Update contact error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1052,16 +1155,19 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     // Bez tohto zostanú orphaned files (MongoDB base64 alebo R2 objects)
     // aj po zmazaní kontaktu. R2 účtuje per-GB, nie per-object, ale aj tak
     // sa hromadí storage cost ak by sme to nemazali.
+    //
+    // Poradie: r2Keys sa načítajú PRED mazaním, ale bloby v R2 a ContactFile
+    // riadky sa mažú až PO úspešnom zmazaní kontaktu. Keby Task.updateMany
+    // alebo findByIdAndDelete zlyhali (výpadok DB, timeout), kontakt by
+    // v DB ostal s metadátami bez dát a bloby by boli nenávratne preč.
+    // Sirota v ContactFile po zlyhaní deleteMany je opraviteľná skriptom.
+    let r2Files = [];
     if (fileStorage.isR2Available()) {
-      // Najprv získať všetky r2Keys patriace k tomuto kontaktu
-      const r2Files = await ContactFile.find(
+      r2Files = await ContactFile.find(
         { contactId: req.params.id, r2Key: { $ne: null } },
         { r2Key: 1 }
       ).lean();
-      // Paralel delete z R2 (fire-and-forget, individual errors logged inside)
-      Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
     }
-    await ContactFile.deleteMany({ contactId: req.params.id });
 
     // Odpoj zmazaný kontakt od samostatných (global) projektov priradených
     // cez contactIds — inak by ostal висieť dangling contactId (projekt by na
@@ -1074,6 +1180,10 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
     );
 
     await Contact.findByIdAndDelete(req.params.id);
+
+    // Paralel delete z R2 (fire-and-forget, individual errors logged inside)
+    Promise.all(r2Files.map(cf => fileStorage.deleteFile(cf.r2Key))).catch(() => {});
+    await ContactFile.deleteMany({ contactId: req.params.id });
 
     const io = req.app.get('io');
     io.to(`workspace-${req.workspaceId}`).emit('contact-deleted', { id: req.params.id });
@@ -1099,6 +1209,7 @@ router.delete('/:id', authenticateToken, requireWorkspace, async (req, res) => {
       workspaceId: req.workspaceId || null
     });
   } catch (error) {
+    logger.error('Delete contact error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1110,14 +1221,31 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
   try {
     const { title, description, dueDate, dueTime, priority, assignedTo } = req.body;
 
-    if (!title || !title.trim()) {
+    // typeof — číslo/objekt v title padalo na .trim() → 500
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Názov projektu je povinný' });
     }
 
+    if (!/^[0-9a-fA-F]{24}$/.test(String(req.params.contactId))) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
     const contact = await Contact.findOne({ _id: req.params.contactId, workspaceId: req.workspaceId });
 
     if (!contact) {
       return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    // Plánový limit projektov na kontakt — rovnako ako POST /api/tasks
+    // (predtým sa limit cez túto cestu dal obísť).
+    const plan = await getWorkspacePlan(req);
+    const taskLimits = { free: 5, team: 25, pro: Infinity };
+    const maxTasks = taskLimits[plan] || 5;
+    if (maxTasks !== Infinity && (contact.tasks?.length || 0) >= maxTasks) {
+      const message = isIosNativeApp(req)
+        ? `Dosiahli ste limit ${maxTasks} projektov na kontakt.`
+        : `Váš plán umožňuje max. ${maxTasks} projektov na kontakt. Pre viac prejdite na vyšší plán.`;
+      logPlanGateHit(req, { code: 'PLAN_LIMIT', feature: 'tasks', limit: maxTasks });
+      return res.status(403).json({ message, code: 'PLAN_LIMIT' });
     }
 
     const now = new Date().toISOString();
@@ -1127,9 +1255,9 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
       description: description || '',
       dueDate: dueDate || null,
       dueTime: dueDate ? (dueTime || '') : '',
-      priority: priority || 'medium',
+      priority: cleanTaskPriority(priority) || 'medium',
       completed: false,
-      assignedTo: assignedTo || [],
+      assignedTo: cleanAssignees(assignedTo) || [],
       subtasks: [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
@@ -1157,6 +1285,7 @@ router.post('/:contactId/tasks', authenticateToken, requireWorkspace, enforceWor
 
     res.status(201).json(task);
   } catch (error) {
+    logger.error('Create contact task error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1185,6 +1314,12 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
     // (vracia interné _doc/$__ properties). Bez .toObject() by sa stratili
     // files, notes, lastUrgencyLevel pri každom edit-e tasku cez tento route.
     const taskPlain = typeof task.toObject === 'function' ? task.toObject() : task;
+    const nextPriority = cleanTaskPriority(priority); // undefined = ponechať
+    let nextSubtasks = task.subtasks;
+    if (req.body.subtasks !== undefined) {
+      nextSubtasks = withServerSubtaskFiles(req.body.subtasks, task.subtasks);
+      if (await respondIfSubtaskLimitExceeded(req, res, nextSubtasks, task.subtasks)) return;
+    }
     contact.tasks[taskIndex] = {
       ...taskPlain,
       id: task.id,
@@ -1192,11 +1327,11 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
       description: description !== undefined ? description : task.description,
       dueDate: dueDate !== undefined ? dueDate : task.dueDate,
       dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (task.dueTime || ''),
-      priority: priority !== undefined ? priority : task.priority,
+      priority: nextPriority !== undefined ? nextPriority : task.priority,
       completed: completed !== undefined ? completed : task.completed,
-      assignedTo: assignedTo !== undefined ? assignedTo : task.assignedTo,
-      // files[] podúloh vždy zo servera — viď utils/subtaskFiles.js
-      subtasks: req.body.subtasks !== undefined ? withServerSubtaskFiles(req.body.subtasks, task.subtasks) : task.subtasks,
+      assignedTo: cleanAssignees(assignedTo) ?? task.assignedTo,
+      // files[] a stav pripomienok podúloh vždy zo servera — viď utils/subtaskFiles.js
+      subtasks: nextSubtasks,
       createdAt: task.createdAt,
       modifiedAt: new Date().toISOString()
     };
@@ -1223,6 +1358,7 @@ router.put('/:contactId/tasks/:taskId', authenticateToken, requireWorkspace, asy
 
     res.json(contact.tasks[taskIndex]);
   } catch (error) {
+    logger.error('Update contact task error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1268,7 +1404,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
   try {
     const { title, parentSubtaskId, dueDate, dueTime, notes, priority } = req.body;
 
-    if (!title || !title.trim()) {
+    if (typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ message: 'Nazov ulohy je povinny' });
     }
 
@@ -1287,8 +1423,8 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
     }
 
     // Check plan limit for subtasks per task
-    const user = await User.findById(req.user.id);
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     const subtaskLimits = { free: 10, team: 25, pro: Infinity };
     const maxSubtasks = subtaskLimits[plan] || 10;
     if (maxSubtasks !== Infinity) {
@@ -1311,7 +1447,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
       dueDate: dueDate || null,
       dueTime: dueDate ? (dueTime || '') : '',
       notes: notes || '',
-      priority: priority || null,
+      priority: cleanTaskPriority(priority) || null,
       subtasks: [],
       createdAt: now,
       modifiedAt: now // Set on creation for "new" filter
@@ -1362,6 +1498,7 @@ router.post('/:contactId/tasks/:taskId/subtasks', authenticateToken, requireWork
 
     res.status(201).json(subtask);
   } catch (error) {
+    logger.error('Create contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1392,8 +1529,20 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       return res.status(404).json({ message: 'Subtask not found' });
     }
 
+    // Podúlohy 1. úrovne sú Mongoose subdokumenty (subtaskSchema) — spread
+    // {...subdoc} skopíruje len interné $__/_doc, nie schémové polia, a
+    // priradenie cez index ich potom zahodí: files, assignedTo, timeReminders,
+    // order, copiedFrom… by sa po každom edit-e vrátili na defaulty. Rovnaký
+    // fix ako pri úlohe vyššie (taskPlain) a v tasks.js. Hlbšie úrovne sú
+    // plain objekty (netypované Array) — toObject nemajú, spread je v poriadku.
+    const subPlain = typeof found.subtask.toObject === 'function' ? found.subtask.toObject() : found.subtask;
+    // Posunutý termín → plánovač musí znovu upozorniť (viď tasks.js PUT subtask).
+    const nextDueDate = dueDate !== undefined ? dueDate : found.subtask.dueDate;
+    const nextDueTime = dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || '');
+    const dateMoved = nextDueDate !== found.subtask.dueDate;
+    const dueMoved = dateMoved || (nextDueTime || '') !== (found.subtask.dueTime || '');
     found.parent[found.index] = {
-      ...found.subtask,
+      ...subPlain,
       id: found.subtask.id, // Ensure ID is preserved
       title: title !== undefined ? title : found.subtask.title,
       completed: completed !== undefined ? completed : found.subtask.completed,
@@ -1401,9 +1550,12 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
       dueTime: dueTime !== undefined ? (dueDate !== undefined ? (dueDate ? dueTime : '') : dueTime) : (found.subtask.dueTime || ''),
       notes: notes !== undefined ? notes : found.subtask.notes,
       priority: found.subtask.priority, // Preserve priority
-      subtasks: found.subtask.subtasks || [], // Preserve nested subtasks
+      subtasks: subPlain.subtasks || [], // Preserve nested subtasks
       createdAt: found.subtask.createdAt, // Preserve createdAt
-      modifiedAt: new Date().toISOString() // Set modification timestamp
+      modifiedAt: new Date().toISOString(), // Set modification timestamp
+      // Dátum → úroveň naliehavosti a „X dní pred"; čas → len časové pripomienky.
+      ...(dateMoved ? { lastUrgencyLevel: null, reminderSent: false } : {}),
+      ...(dueMoved ? { timeRemindersSent: [] } : {})
     };
 
     contact.markModified('tasks');
@@ -1428,6 +1580,7 @@ router.put('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken, r
 
     res.json(found.parent[found.index]);
   } catch (error) {
+    logger.error('Update contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1472,6 +1625,7 @@ router.delete('/:contactId/tasks/:taskId/subtasks/:subtaskId', authenticateToken
 
     res.json({ message: 'Subtask deleted' });
   } catch (error) {
+    logger.error('Delete contact subtask error', { error: error.message, stack: error.stack, contactId: req.params.contactId, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -1618,8 +1772,8 @@ router.post('/:contactId/tasks/:taskId/transfer', authenticateToken, requireWork
     }
 
     // Limity plánu na CIEĽOVEJ strane (zrkadlí bežné vytváranie)
-    const user = await User.findById(req.user.id);
-    const plan = user?.subscription?.plan || 'free';
+    // Plánové limity workspace = vyšší z plánov vlastníka a člena (utils/planGate.getWorkspacePlan)
+    const plan = await getWorkspacePlan(req);
     if (!targetTask) {
       const taskLimits = { free: 5, team: 25, pro: Infinity };
       const maxTasks = taskLimits[plan] || 5;
@@ -2023,6 +2177,18 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
     releaseIdem();
     return res.status(status).json(body);
   };
+  // Cleanup osirelého blobu: po úspešnom uploade do R2 / vytvorení ContactFile
+  // môže ešte padnúť save() metadát (ValidationError, výpadok DB, kontakt
+  // medzitým zmazaný) — bez cleanupu by R2 objekt a ContactFile riadok ostali
+  // natrvalo. Kopírovacie cesty (copyOneFile, transfer) to už robia. Best-effort.
+  let uploadedKey = null;
+  let createdFileId = null;
+  const cleanupOrphan = () => {
+    if (uploadedKey) fileStorage.deleteFile(uploadedKey).catch(() => {});
+    if (createdFileId) ContactFile.deleteOne({ fileId: createdFileId }).catch(() => {});
+    uploadedKey = null;
+    createdFileId = null;
+  };
   upload.single('file')(req, res, async (err) => {
     try {
       // multer/busboy chyby → 400 so slovenskou správou + `code` (predtým
@@ -2049,8 +2215,8 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
 
       // Plan-feature gate: file attachments len pre Tím+. Plus per-plan
       // celková storage kvóta (Tím=1GB, Pro=10GB).
-      const uploader = await User.findById(req.user.id).select('subscription').lean();
-      const uploaderPlan = uploader?.subscription?.plan || 'free';
+      // Prílohy a kvóta úložiska patria workspace → plán vlastníka
+      const uploaderPlan = await getWorkspacePlan(req);
       if (uploaderPlan === 'free' || uploaderPlan === 'trial') {
         const message = isIosNativeApp(req)
           // Apple 3.1.1 — iOS bez akejkoľvek zmienky o pláne / tier.
@@ -2096,7 +2262,10 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       // — v názve by rozbili Stiahnuť v iOS appke (viď sanitizeDisplayName).
       // Vlastný názov so spustiteľnou príponou („foto.exe") sa ignoruje —
       // súbor prešiel blocklistom pod pôvodným názvom a tak sa aj uloží.
-      const customDisplay = sanitizeDisplayName((req.body.customName || '').trim().slice(0, 200));
+      // String() — multer pri opakovanom poli customName vráti pole a .trim
+      // by padol na TypeError → 500 + falošný záznam v Diagnostike (PATCH
+      // rename nižšie to už robí rovnako).
+      const customDisplay = sanitizeDisplayName(String(req.body.customName ?? '').trim().slice(0, 200));
       const displayName = (customDisplay && !hasBlockedExtension(customDisplay) ? customDisplay : null)
         || sanitizeDisplayName(req.file.originalname)
         || 'súbor';
@@ -2117,12 +2286,14 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       if (fileStorage.isR2Available()) {
         const r2Key = fileStorage.contactFileKey(fileId);
         await fileStorage.uploadFile(r2Key, req.file.buffer, req.file.mimetype);
+        uploadedKey = r2Key;
         await ContactFile.create({
           contactId: contact._id,
           fileId: fileId,
           r2Key: r2Key,
           data: null
         });
+        createdFileId = fileId;
         logger.debug('[Contact upload] Stored in R2', { fileId, r2Key, size: req.file.size });
       } else {
         // base64 sa počíta AŽ tu vo fallbacku — nepodmienená konverzia
@@ -2132,6 +2303,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           fileId: fileId,
           data: req.file.buffer.toString('base64')
         });
+        createdFileId = fileId;
         logger.warn('[Contact upload] R2 unavailable, stored as base64 in MongoDB', { fileId });
       }
 
@@ -2153,10 +2325,14 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
           docToSave = await Contact.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
           if (!docToSave) {
             releaseIdem();
+            cleanupOrphan();
             return res.status(404).json({ message: 'Kontakt už neexistuje.' });
           }
         }
       }
+      // Metadáta uložené — blob už nie je sirota, catch ho nesmie zmazať
+      uploadedKey = null;
+      createdFileId = null;
 
       const io = req.app.get('io');
       if (io) {
@@ -2176,6 +2352,7 @@ router.post('/:id/files', authenticateToken, requireWorkspace, enforceWorkspaceL
       res.status(201).json(responseData);
     } catch (error) {
       releaseIdem();
+      cleanupOrphan();
       logger.error('File upload error', { error: error.message });
       // SKUTOČNÝ error (stack) do Diagnostiky — finish-hook by inak zapísal
       // len generické „HTTP 500" bez príčiny (rovnako ako tasks.js upload).
@@ -2262,15 +2439,48 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'Súbor nenájdený' });
     }
 
+    // Download hlavičky — spoločné pre stream z R2 aj legacy Buffer.
+    // RFC 6266: res.attachment() pošle `filename*=UTF-8''…` (+ latin1
+    // fallback vo filename="…"). Ručná hlavička dávala percent-encoded názov
+    // priamo do filename="…" — WKWebView / Android WebView by ponúkli
+    // „Zmluva%20%C4%8D.pdf". Rovnako ako messages.js; + nosniff.
+    const setDownloadHeaders = (contentLength) => {
+      res.attachment(sanitizeDisplayName(fileMeta.originalName) || 'priloha');
+      res.set({
+        'Content-Type': fileMeta.mimetype || 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      if (Number.isFinite(contentLength)) res.set('Content-Length', String(contentLength));
+    };
+
     if (contactFile?.r2Key && fileStorage.isR2Available()) {
-      // Modern path — fetch z R2
+      // Modern path — STREAM z R2 priamo do odpovede. downloadFile() skladal
+      // celý súbor (až 50 MB) do Buffera a paralelné sťahovania nemali na
+      // 512 MB inštancii žiadny strop. Chyba pred prvým bajtom → 500 JSON,
+      // chyba uprostred tela → prerušenie spojenia (prehliadač označí súbor
+      // ako neúplný namiesto tichého orezania).
+      let r2Object;
       try {
-        fileBuffer = await fileStorage.downloadFile(contactFile.r2Key);
-        logger.info('Contact file download: from R2', { fileId, r2Key: contactFile.r2Key, size: fileBuffer.length });
+        r2Object = await fileStorage.getFileObject(contactFile.r2Key);
       } catch (r2Err) {
         logger.error('Contact file download: R2 fetch failed', { fileId, r2Key: contactFile.r2Key, error: r2Err.message });
         return res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
       }
+      const { stream, contentLength } = r2Object;
+      logger.info('Contact file download: from R2 (stream)', { fileId, r2Key: contactFile.r2Key, size: contentLength });
+      setDownloadHeaders(contentLength);
+      stream.on('error', (streamErr) => {
+        logger.error('Contact file download: R2 stream failed', { fileId, r2Key: contactFile.r2Key, error: streamErr.message });
+        if (res.headersSent) return res.destroy();
+        for (const h of ['Content-Type', 'Content-Disposition', 'Content-Length']) res.removeHeader(h);
+        res.status(500).json({ message: 'Chyba pri sťahovaní súboru z úložiska' });
+      });
+      // Klient zrušil sťahovanie — nedoťahuj zvyšok z R2
+      res.on('close', () => {
+        if (!res.writableEnded && typeof stream.destroy === 'function') stream.destroy();
+      });
+      stream.pipe(res);
+      return;
     } else if (contactFile?.data) {
       // Legacy: base64 v ContactFile collection
       fileBuffer = Buffer.from(contactFile.data, 'base64');
@@ -2289,12 +2499,7 @@ router.get('/:id/files/:fileId/download', authenticateToken, requireWorkspace, a
       return res.status(404).json({ message: 'Dáta súboru nenájdené — súbor treba znovu nahrať' });
     }
 
-    res.set({
-      'Content-Type': fileMeta.mimetype,
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileMeta.originalName)}"`,
-      'Content-Length': fileBuffer.length
-    });
-
+    setDownloadHeaders(fileBuffer.length);
     res.send(fileBuffer);
   } catch (error) {
     logger.error('Contact file download error', { error: error.message, stack: error.stack, contactId: req.params.id, fileId: req.params.fileId });
@@ -2336,6 +2541,7 @@ router.delete('/:id/files/:fileId', authenticateToken, requireWorkspace, async (
 
     res.json({ message: 'Súbor vymazaný' });
   } catch (error) {
+    logger.error('Delete contact file error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });
@@ -2369,6 +2575,7 @@ router.patch('/:id/files/:fileId', authenticateToken, requireWorkspace, async (r
 
     res.json({ message: 'Názov upravený', originalName: newName });
   } catch (error) {
+    logger.error('Rename contact file error', { error: error.message, stack: error.stack, contactId: req.params.id, workspaceId: req.workspaceId?.toString() });
     res.status(500).json({ message: 'Chyba servera' });
   }
 });

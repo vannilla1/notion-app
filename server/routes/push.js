@@ -16,8 +16,12 @@ const rateLimiter = {
   windowMs: 60000, // 1 minute window
 
   check(userId) {
+    // req.user.id je ObjectId (auth cache miss) alebo string (Redis hit).
+    // Map porovnáva objekty podľa identity — s ObjectId kľúčom by každý
+    // request založil nový záznam a limit by sa nikdy neuplatnil.
+    const key = String(userId);
     const now = Date.now();
-    const userRequests = this.requests.get(userId) || [];
+    const userRequests = this.requests.get(key) || [];
 
     // Clean old requests
     const validRequests = userRequests.filter(time => now - time < this.windowMs);
@@ -27,7 +31,7 @@ const rateLimiter = {
     }
 
     validRequests.push(now);
-    this.requests.set(userId, validRequests);
+    this.requests.set(key, validRequests);
     return true;
   },
 
@@ -45,16 +49,35 @@ const rateLimiter = {
   }
 };
 
-// Cleanup rate limiter every 5 minutes
-setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000);
+// Cleanup rate limiter every 5 minutes. .unref() — module-level časovač nesmie
+// držať proces nažive (graceful shutdown, Jest), rovnako ako v jobs/*.
+setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000).unref();
 
-// Validate endpoint URL
+// Známe push služby prehliadačov (Chrome/Edge/Opera/Samsung → FCM, Firefox →
+// Mozilla autopush, Edge legacy → WNS, Safari → Apple).
+const KNOWN_PUSH_HOST_SUFFIXES = ['.googleapis.com', '.push.services.mozilla.com', '.notify.windows.com', '.push.apple.com'];
+const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|.*\.localhost)$/i;
+const IP_LITERAL_RE = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
+
+// Validate endpoint URL. Server na endpoint posiela POST (web-push), takže
+// ľubovoľná URL od klienta = SSRF: odmietame IP literály, lokálne/interné
+// hosty a neštandardné porty. Neznámy verejný host (menej bežný prehliadač)
+// pustíme, ale zalogujeme.
 const isValidEndpoint = (endpoint) => {
-  if (!endpoint || typeof endpoint !== 'string') return false;
+  // Horný limit dĺžky — reálne push endpointy (FCM/APNs/Mozilla) majú ~100–300 znakov.
+  if (!endpoint || typeof endpoint !== 'string' || endpoint.length > 2048) return false;
   try {
     const url = new URL(endpoint);
     // Only allow HTTPS endpoints (required for web push)
-    return url.protocol === 'https:';
+    if (url.protocol !== 'https:') return false;
+    if (url.port && url.port !== '443') return false;
+    if (url.username || url.password) return false;
+    const host = url.hostname.toLowerCase();
+    if (!host || IP_LITERAL_RE.test(host) || PRIVATE_HOST_RE.test(host) || !host.includes('.')) return false;
+    if (!KNOWN_PUSH_HOST_SUFFIXES.some(sfx => host.endsWith(sfx))) {
+      logger.warn('[Push] Subscription endpoint on unknown push service host', { host });
+    }
+    return true;
   } catch {
     return false;
   }
@@ -86,6 +109,14 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
     if (!keys || !keys.p256dh || !keys.auth) {
       logger.warn('[Push] Missing subscription keys', { userId });
       return res.status(400).json({ message: 'Missing subscription keys' });
+    }
+
+    // Typ + horný limit dĺžky — regex.test() by pole ['abc'] pretypovalo na
+    // 'abc' a pustilo ďalej; p256dh je 65 B → 87 znakov base64url, auth 16 B → 22.
+    if (typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string'
+        || keys.p256dh.length > 200 || keys.auth.length > 100) {
+      logger.warn('[Push] Invalid key type/length', { userId });
+      return res.status(400).json({ message: 'Invalid key format' });
     }
 
     // Validate key formats (base64url)
@@ -329,6 +360,12 @@ router.post('/apns/register', authenticateToken, async (req, res) => {
     }
 
     const normalized = deviceToken.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    // Dĺžka sa musí overiť až PO normalizácii — 32+ ne-hex znakov by inak
+    // prešlo a upsertlo prázdny/skrátený token, na ktorý APNs trvalo zlyháva.
+    // Reálny APNs token má 64 hex znakov; 512 je rezerva.
+    if (normalized.length < 32 || normalized.length > 512) {
+      return res.status(400).json({ message: 'Invalid device token' });
+    }
 
     await APNsDevice.findOneAndUpdate(
       { deviceToken: normalized },
@@ -358,7 +395,11 @@ router.post('/apns/register', authenticateToken, async (req, res) => {
 router.post('/apns/unregister', authenticateToken, async (req, res) => {
   try {
     const { deviceToken } = req.body;
-    const normalized = (deviceToken || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    // Ne-string (objekt/číslo) by spadol na .replace() s TypeError → 500.
+    if (typeof deviceToken !== 'string') {
+      return res.status(400).json({ message: 'Invalid device token' });
+    }
+    const normalized = deviceToken.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
 
     await APNsDevice.deleteOne({ deviceToken: normalized, userId: req.user.id });
 
@@ -391,7 +432,8 @@ router.get('/apns/status', authenticateToken, async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[APNs] Status error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -419,7 +461,8 @@ router.post('/apns/test', authenticateToken, async (req, res) => {
     });
     res.json({ message: 'Test odoslaný', result });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[APNs] Test error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -431,9 +474,21 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
     const { fcmToken, platform, appVersion, packageName } = req.body;
     const userId = req.user.id;
 
-    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20) {
+    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20 || fcmToken.length > 4096) {
       return res.status(400).json({ message: 'Invalid FCM token' });
     }
+
+    // findOneAndUpdate s upsert neaplikuje schémové validátory (enum platform)
+    // a objekt v packageName/appVersion by skončil CastError → 500. Hodnoty
+    // sanitizujeme podľa modelu FcmDevice (enum ['android', 'android-native']);
+    // Android shell (FcmRegistrar.kt) posiela 'android' + krátke stringy.
+    const safePlatform = ['android', 'android-native'].includes(platform) ? platform : 'android';
+    const safePackageName = (typeof packageName === 'string' && packageName)
+      ? packageName.slice(0, 100)
+      : 'eu.prplcrm.app';
+    const safeAppVersion = (typeof appVersion === 'string' && appVersion)
+      ? appVersion.slice(0, 50)
+      : null;
 
     // FCM tokens sú globálne unikátne — findOneAndUpdate by token zabezpečuje
     // že ak rovnaký token bol predtým zaregistrovaný pre iného usera (uninštalovaná
@@ -443,9 +498,9 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
       {
         userId,
         fcmToken,
-        platform: platform || 'android',
-        packageName: packageName || 'eu.prplcrm.app',
-        appVersion: appVersion || null,
+        platform: safePlatform,
+        packageName: safePackageName,
+        appVersion: safeAppVersion,
         lastUsed: new Date()
       },
       { upsert: true, new: true }
@@ -463,7 +518,9 @@ router.post('/fcm/register', authenticateToken, async (req, res) => {
 router.post('/fcm/unregister', authenticateToken, async (req, res) => {
   try {
     const { fcmToken } = req.body;
-    if (!fcmToken) {
+    // typeof — objekt { "$ne": "" } by prešiel `!fcmToken` a deleteOne by
+    // zmazal ľubovoľné (prvé) zariadenie používateľa (operátorová injekcia).
+    if (typeof fcmToken !== 'string' || fcmToken.length === 0 || fcmToken.length > 4096) {
       return res.status(400).json({ message: 'fcmToken required' });
     }
     await FcmDevice.deleteOne({ fcmToken, userId: req.user.id });
@@ -495,7 +552,8 @@ router.get('/fcm/status', authenticateToken, async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[FCM] Status error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 
@@ -514,7 +572,8 @@ router.post('/fcm/test', authenticateToken, async (req, res) => {
     }, '/app');
     res.json({ message: 'Test odoslaný', result });
   } catch (error) {
-    res.status(500).json({ message: 'Chyba servera', error: error.message });
+    logger.error('[FCM] Test error', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ message: 'Chyba servera' });
   }
 });
 

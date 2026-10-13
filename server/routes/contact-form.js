@@ -11,14 +11,24 @@ const contactLimiter = rateLimit({
   message: { message: 'Príliš veľa správ. Skúste to znova neskôr.' }
 });
 
+// Samostatná schránka support@ (iný účet ako transakčné SMTP_HOST/USER/PASS).
+// Hodnoty sa dajú prepísať env premennými; defaulty zachovávajú súčasnú
+// produkčnú konfiguráciu. Timeouty — bez nich zaseknutý SMTP držal request
+// (a socket) až do default 10 min nodemailer socketTimeout.
+if (!process.env.SMTP_PASSWORD) {
+  logger.warn('[ContactForm] SMTP_PASSWORD nie je nastavené — kontaktný formulár nebude odosielať e-maily');
+}
 const transporter = nodemailer.createTransport({
-  host: 'smtp.hostcreators.sk',
-  port: 465,
-  secure: true,
+  host: process.env.CONTACT_SMTP_HOST || 'smtp.hostcreators.sk',
+  port: parseInt(process.env.CONTACT_SMTP_PORT, 10) || 465,
+  secure: (process.env.CONTACT_SMTP_PORT || '465') === '465',
   auth: {
-    user: 'support@prplcrm.eu',
+    user: process.env.CONTACT_SMTP_USER || 'support@prplcrm.eu',
     pass: process.env.SMTP_PASSWORD
-  }
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000
 });
 
 router.post('/', contactLimiter, async (req, res) => {
@@ -27,6 +37,13 @@ router.post('/', contactLimiter, async (req, res) => {
 
     if (!name || !email || !message) {
       return res.status(400).json({ message: 'Vyplňte všetky povinné polia.' });
+    }
+
+    // Typová kontrola — číslo/objekt/pole by prešli kontrolou dĺžky
+    // (undefined > 200 je false) a `name.replace` nižšie by hodil TypeError
+    // → 500; pole ['a','b'] by sa do e-mailu dostalo ako „a,b".
+    if (typeof name !== 'string' || typeof email !== 'string' || typeof message !== 'string') {
+      return res.status(400).json({ message: 'Neplatný formát údajov.' });
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

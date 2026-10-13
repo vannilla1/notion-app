@@ -42,6 +42,9 @@ const findT7Candidates = async () => {
       $lte: new Date(now.getTime() + 8 * DAY_MS)
     },
     'subscription.stripeSubscriptionId': { $in: [null, undefined] },
+    // Apple IAP obnovuje App Store — pripomienky so Stripe promo kódmi a
+    // odkazom na web checkout by boli zavádzajúce (a proti Guideline 3.1.1).
+    'subscription.source': { $ne: 'apple' },
     $or: [
       { 'subscription.notifications.t7ReminderSentAt': null },
       { 'subscription.notifications.t7ReminderSentAt': { $exists: false } }
@@ -58,6 +61,9 @@ const findT1Candidates = async () => {
       $lte: new Date(now.getTime() + 1.5 * DAY_MS)
     },
     'subscription.stripeSubscriptionId': { $in: [null, undefined] },
+    // Apple IAP obnovuje App Store — pripomienky so Stripe promo kódmi a
+    // odkazom na web checkout by boli zavádzajúce (a proti Guideline 3.1.1).
+    'subscription.source': { $ne: 'apple' },
     $or: [
       { 'subscription.notifications.t1ReminderSentAt': null },
       { 'subscription.notifications.t1ReminderSentAt': { $exists: false } }
@@ -161,20 +167,34 @@ const runOnce = async () => {
   }
 };
 
+let remindersStartTimer = null;
+let remindersInterval = null;
+
 const scheduleSubscriptionReminders = () => {
-  setTimeout(() => {
+  remindersStartTimer = setTimeout(() => {
     runOnce().catch((err) => logger.error('[SubscriptionReminders] Initial run failed', { error: err.message }));
   }, INITIAL_DELAY_MS);
+  remindersStartTimer.unref();
 
-  setInterval(() => {
+  remindersInterval = setInterval(() => {
     runOnce().catch((err) => logger.error('[SubscriptionReminders] Scheduled run failed', { error: err.message }));
   }, RUN_INTERVAL_MS);
+  remindersInterval.unref();
 
   logger.info('[SubscriptionReminders] Scheduled — every 24 hours');
 };
 
+// Graceful shutdown
+const stopSubscriptionReminders = () => {
+  clearTimeout(remindersStartTimer);
+  clearInterval(remindersInterval);
+  remindersStartTimer = null;
+  remindersInterval = null;
+};
+
 module.exports = {
   scheduleSubscriptionReminders,
+  stopSubscriptionReminders,
   runOnce,
   findT7Candidates,
   findT1Candidates,

@@ -19,6 +19,7 @@ const router = express.Router();
 
 const { authenticateToken } = require('../middleware/auth');
 const { requireWorkspace } = require('../middleware/workspace');
+const Contact = require('../models/Contact');
 const ContactFile = require('../models/ContactFile');
 const fileStorage = require('../services/fileStorage');
 const { listWorkspaceAttachments } = require('../utils/attachmentIndex');
@@ -31,6 +32,10 @@ const { recordError } = require('../services/serverErrorService');
 const MAX_ZIP_BYTES = 200 * 1024 * 1024;
 const MAX_ZIP_FILES = 500;
 const JOB_TTL_MS = 15 * 60 * 1000;
+// Strop živých jobov naraz — mapa je in-memory a každý job nesie až
+// MAX_ZIP_FILES položiek s názvami a trail-om; bez stropu rastie s každým
+// POST-om (sweep beží len pri ďalšom requeste).
+const MAX_LIVE_JOBS = 500;
 
 // In-memory jednorazové joby. Reštart Renderu ich stratí — používateľ dá
 // stiahnuť znova (15 min TTL), takže perzistencia nemá zmysel.
@@ -133,6 +138,13 @@ router.post('/export', authenticateToken, requireWorkspace, async (req, res) => 
     }
 
     sweepJobs();
+    // Jeden živý odkaz na používateľa — klient ho spotrebuje hneď po POST-e
+    // (navigácia), starší nespotrebovaný job (zavretá karta, zablokovaná
+    // navigácia) by inak ležal v pamäti celých 15 min aj s 500 položkami.
+    for (const [id, j] of jobs) if (j.userId === req.user.id) jobs.delete(id);
+    if (jobs.size >= MAX_LIVE_JOBS) {
+      return res.status(503).json({ message: 'Server je vyťažený, skúste o chvíľu znova' });
+    }
     // 256 bitov entropie — token JE autorizácia (GET nemá hlavičky)
     const jobId = crypto.randomBytes(32).toString('hex');
     jobs.set(jobId, {
@@ -156,6 +168,7 @@ router.post('/export', authenticateToken, requireWorkspace, async (req, res) => 
 
 // ── Stiahnutie ZIP-u (autorizácia jednorazovým tokenom v URL) ────────────
 router.get('/export/:jobId', async (req, res) => {
+  sweepJobs();
   const job = jobs.get(req.params.jobId);
   if (!job || job.expiresAt < Date.now()) {
     jobs.delete(req.params.jobId);
@@ -194,8 +207,20 @@ router.get('/export/:jobId', async (req, res) => {
 
   try {
     const ids = job.entries.map(e => e.fileId);
-    const blobs = await ContactFile.find({ fileId: { $in: ids } }).lean();
+    // Projekcia BEZ `data` — legacy base64 bloby (nemigrované riadky) by sa
+    // inak natiahli všetky naraz (až 500 × base64) do RAM ešte pred prvým
+    // zápisom do archívu. Dotiahnu sa lenivo po jednom v cykle nižšie.
+    const blobs = await ContactFile.find({ fileId: { $in: ids } }, { fileId: 1, r2Key: 1, contactId: 1 }).lean();
     const byId = new Map(blobs.map(b => [b.fileId, b]));
+    // Druhá vrstva obrany ako blobBelongsToWorkspace pri sťahovaní jedného
+    // súboru (contacts.js): blob s contactId mimo tohto workspace-u do ZIP-u
+    // nejde, aj keby sa jeho fileId dostal do metadát files[] — regresia
+    // v spracovaní metadát by sa inak cez export zmenila na hromadný únik.
+    // contactId null = legacy / globálna úloha, väzbu na workspace nenesie.
+    const ownerIds = [...new Set(blobs.map(b => b.contactId).filter(Boolean).map(String))];
+    const okContacts = new Set(ownerIds.length
+      ? (await Contact.find({ _id: { $in: ownerIds }, workspaceId: job.workspaceId }, { _id: 1 }).lean()).map(c => String(c._id))
+      : []);
     const used = new Set();
     const manifest = ['Kontakt;Projekt;Úloha;Súbor;Veľkosť (B);Nahraté'];
 
@@ -211,13 +236,27 @@ router.get('/export/:jobId', async (req, res) => {
         csvCell(entry.uploadedAt ? new Date(entry.uploadedAt).toISOString().slice(0, 10) : '')
       ].join(';'));
 
+      if (rec && rec.contactId && !okContacts.has(String(rec.contactId))) {
+        failed++;
+        logger.warn('[Attachments] Blob patrí inému prostrediu — preskočený', { fileId: entry.fileId });
+        continue;
+      }
+
       try {
         if (rec && rec.r2Key && fileStorage.isR2Available()) {
           // Stream priamo z R2 do ZIP-u — súbor sa nikdy nedrží celý v RAM
           const stream = await fileStorage.getFileStream(rec.r2Key);
           archive.append(stream, { name: path });
-        } else if (rec && rec.data) {
-          archive.append(Buffer.from(rec.data, 'base64'), { name: path }); // legacy base64
+        } else if (rec) {
+          // Legacy base64 (nemigrovaný riadok / R2 nedostupné) — blob sa
+          // načíta až tu, takže v pamäti je vždy najviac jeden
+          const legacy = await ContactFile.findOne({ _id: rec._id }, { data: 1 }).lean();
+          if (legacy?.data) {
+            archive.append(Buffer.from(legacy.data, 'base64'), { name: path });
+          } else {
+            failed++;
+            logger.warn('[Attachments] Príloha bez obsahu — preskočená', { fileId: entry.fileId });
+          }
         } else {
           failed++;
           logger.warn('[Attachments] Príloha bez obsahu — preskočená', { fileId: entry.fileId });

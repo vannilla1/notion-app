@@ -104,6 +104,16 @@ describe('/api/push route', () => {
       expect(res.body.message).toMatch(/endpoint/i);
     });
 
+    it('400 pri internom / IP endpointe (SSRF ochrana)', async () => {
+      for (const endpoint of ['https://127.0.0.1/x', 'https://localhost/x', 'https://10.0.0.5:8443/x', 'https://metadata.internal/x']) {
+        const res = await request(app)
+          .post('/api/push/subscribe')
+          .set(authHeader(ctx.token))
+          .send({ endpoint, keys: { p256dh: 'a', auth: 'b' } });
+        expect(res.status).toBe(400);
+      }
+    });
+
     it('400 pri chýbajúcich keys', async () => {
       const res = await request(app)
         .post('/api/push/subscribe')

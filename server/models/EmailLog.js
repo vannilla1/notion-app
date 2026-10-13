@@ -24,8 +24,8 @@ const emailLogSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    default: null,
-    index: true
+    default: null
+    // index: compound { userId, sentAt } nižšie
   },
   toEmail: { type: String, required: true, index: true },
 
@@ -34,7 +34,7 @@ const emailLogSchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    index: true,
+    // index: compound { type, sentAt } nižšie
     enum: [
       // Transactional (subscription)
       'subscription_assigned',
