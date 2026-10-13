@@ -419,9 +419,20 @@ body {
   border: 2px solid var(--border-color);
   border-radius: var(--radius);
   font-size: 14px;
+  /* Explicitná výška riadku: pri `normal` berie WebKit na iOS pre pole s heslom
+     metriky iného (vnútorného) písma než pre placeholder — kurzor bol vyšší
+     a posunutý nadol oproti textu (Safari aj appka). 1.15 ≈ doterajšia
+     `normal` výška, rozmery polí sa nemenia. */
+  line-height: 1.15;
   transition: all var(--transition);
   background: var(--bg-card);
   color: var(--text-primary);
+}
+
+/* Polia s heslom mimo .form-input (inline štýly: admin login, odpojenie účtu)
+   — rovnaká oprava kurzora. */
+input[type="password"] {
+  line-height: 1.15;
 }
 
 .form-input:hover {
