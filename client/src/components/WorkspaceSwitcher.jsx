@@ -4,6 +4,7 @@ import { switchWorkspace as switchWorkspaceApi } from '../api/workspaces';
 import { setStoredWorkspaceId } from '../utils/workspaceStorage';
 import api from '../api/api';
 import { getWorkspaceRoleLabel, WORKSPACE_COLORS } from '../utils/constants';
+import { sideInsets } from '../utils/platform';
 import './WorkspaceSwitcher.css';
 
 const WorkspaceSwitcher = () => {
@@ -74,8 +75,9 @@ const WorkspaceSwitcher = () => {
       if (!wrap || !panel) return;
       const btn = wrap.getBoundingClientRect();
       const width = panel.offsetWidth;
-      const overflowsLeft = btn.right - width < 8;               // right:0 by pretieklo vľavo
-      const fitsFromLeft = btn.left + width <= window.innerWidth - 8;
+      const inset = sideInsets();
+      const overflowsLeft = btn.right - width < 8 + inset.left;  // right:0 by pretieklo vľavo
+      const fitsFromLeft = btn.left + width <= window.innerWidth - 8 - inset.right;
       setAlignLeft(overflowsLeft && fitsFromLeft);
     };
     place();

@@ -81,7 +81,7 @@ function UserAffiliate() {
 
   if (loading) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Načítavam...</div>
+      <div className="sa-pad"><div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Načítavam...</div></div>
     );
   }
 
@@ -96,6 +96,7 @@ function UserAffiliate() {
             <UserMenu user={user} onLogout={logout} onUserUpdate={updateUser} />
           </div>
         </header>
+        <div className="sa-pad">
         <div style={{ maxWidth: 600, margin: '60px auto', padding: 24, textAlign: 'center' }}>
           <div style={{ fontSize: 56, marginBottom: 16 }}>🤝</div>
           <h1 style={{ fontSize: 24, marginBottom: 8 }}>Affiliate program</h1>
@@ -106,16 +107,17 @@ function UserAffiliate() {
           </p>
           <button onClick={() => navigate('/app')} className="btn btn-primary">← Späť do aplikácie</button>
         </div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div style={{ padding: 40, color: '#dc2626' }}>
+      <div className="sa-pad"><div style={{ padding: 40, color: '#dc2626' }}>
         Chyba: {error.message || 'Nepodarilo sa načítať dáta'}
         <button onClick={load} className="btn btn-secondary" style={{ marginLeft: 12 }}>Skúsiť znova</button>
-      </div>
+      </div></div>
     );
   }
 

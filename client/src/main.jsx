@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { reportError, installGlobalErrorHandlers } from './utils/reportError';
 import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
 import { initIapBridge } from './utils/iapBridge';
+import { sideInsets } from './utils/platform';
 import './styles/index.css';
 
 // In-house error tracking (nahrada Sentry). Poradie záleží — breadcrumbs
@@ -55,6 +56,31 @@ window.addEventListener('vite:preloadError', (event) => {
   } catch { /* never break boot */ }
 })();
 
+// Bočné systémové odstupy (zvislá stavová lišta iPhone Duo, výrez v Safari na
+// šírku) → trieda sa-side na <html>. CSS podľa nej upraví len rozloženia,
+// ktoré by sa do užšej plochy nezmestili; bez odstupov sa nemení nič. iOS
+// shell mení --sa-left/--sa-right inline na <html> (zloženie/rozloženie),
+// preto sledujeme aj atribút style, nielen zmenu veľkosti okna.
+(function markSideInsets() {
+  try {
+    const root = document.documentElement;
+    let raf = 0;
+    const sync = () => {
+      raf = 0;
+      const { left, right } = sideInsets();
+      root.classList.toggle('sa-side', left + right > 0);
+    };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(sync); };
+    // env(safe-area-inset-*) sa po otočení môže prepočítať až po udalosti
+    // resize → ešte jedno meranie s odstupom.
+    const scheduleTwice = () => { schedule(); setTimeout(schedule, 400); };
+    sync();
+    window.addEventListener('resize', scheduleTwice);
+    window.addEventListener('orientationchange', scheduleTwice);
+    new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['style'] });
+  } catch { /* never break boot */ }
+})();
+
 // Minimal local error boundary — renders fallback UI a chybu hlási cez
 // reportError() do in-house Diagnostiky (viď componentDidCatch nižšie).
 class AppErrorBoundary extends React.Component {
@@ -85,7 +111,7 @@ class AppErrorBoundary extends React.Component {
   render() {
     if (!this.state.hasError) return this.props.children;
     return (
-      <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'sans-serif' }}>
+      <div style={{ padding: '40px calc(40px + var(--sa-right, 0px)) 40px calc(40px + var(--sa-left, 0px))', textAlign: 'center', fontFamily: 'sans-serif' }}>
         <h2 style={{ color: '#EF4444', marginBottom: '12px' }}>Nastala neocakavana chyba</h2>
         <p style={{ color: '#64748b', marginBottom: '20px' }}>
           Skuste obnovit stranku.

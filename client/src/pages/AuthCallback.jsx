@@ -189,7 +189,7 @@ function AuthCallback() {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      padding: '24px',
+      padding: '24px calc(24px + var(--sa-right, 0px)) 24px calc(24px + var(--sa-left, 0px))',
       backgroundColor: 'var(--bg-color, #f8fafc)',
       color: 'var(--text-color, #0f172a)'
     }}>

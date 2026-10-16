@@ -92,3 +92,20 @@ export const hasLimitedInlinePdf = () => {
     return false;
   }
 };
+
+// Bočné systémové odstupy (zvislá stavová lišta iPhone Duo, výrez v Safari
+// na šírku) žijú v CSS premenných --sa-left/--sa-right (env() alebo hodnota
+// z iOS shellu); zmeriame ich dočasným prvkom. Mimo prehliadača { 0, 0 }.
+export const sideInsets = () => {
+  try {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;box-sizing:content-box;padding-left:var(--sa-left,0px);padding-right:var(--sa-right,0px)';
+    document.body.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const insets = { left: parseFloat(cs.paddingLeft) || 0, right: parseFloat(cs.paddingRight) || 0 };
+    probe.remove();
+    return insets;
+  } catch {
+    return { left: 0, right: 0 };
+  }
+};

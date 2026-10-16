@@ -102,6 +102,7 @@ class RouteErrorBoundary extends Component {
     if (this.state.hasError) {
       const msg = this.state.error?.message || 'Unknown error';
       return (
+        <div className="sa-pad">
         <div style={{
           padding: '24px', maxWidth: '600px', margin: '40px auto',
           background: '#fee2e2', border: '1px solid #fca5a5',
@@ -118,6 +119,7 @@ class RouteErrorBoundary extends Component {
           >
             Obnoviť stránku
           </button>
+        </div>
         </div>
       );
     }
@@ -151,7 +153,8 @@ function LoadingGate() {
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
-      color: 'var(--text-secondary, #64748b)', padding: '24px'
+      color: 'var(--text-secondary, #64748b)',
+      padding: '24px calc(24px + var(--sa-right, 0px)) 24px calc(24px + var(--sa-left, 0px))'
     }}>
       <div style={{ textAlign: 'center', maxWidth: 360 }}>
         <div>Načítavam…</div>

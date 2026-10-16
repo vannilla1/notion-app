@@ -4880,9 +4880,25 @@ a.detail-value:hover {
   }
 }
 
+/* Bočný systémový odstup (iPhone Duo rozložený: 84px zvislá stavová lišta)
+   zúži obsah pod šírku, pre ktorú sú 2 stĺpce navrhnuté → 1 stĺpec namiesto
+   pretečenia. Trieda .sa-side sa nastaví v main.jsx len pri odstupe; pod
+   900px platí jednostĺpcové pravidlo nižšie ako doteraz. */
+@media (min-width: 900.02px) and (max-width: 1200px) {
+  .sa-side .dashboard-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Jeden dlhý názov projektu (nowrap) inak roztiahol stĺpec nad šírku
+     displeja a celý prehľad sa posúval do strán; takto sa skráti „…". */
+  .dashboard-grid > * {
+    min-width: 0;
   }
 
   .dashboard-section.full-width {
@@ -5634,8 +5650,15 @@ body.ios-app {
   }
 }
 
-/* iPhone specific fixes */
-@media (max-width: 430px) {
+/* iPhone specific fixes
+   Druhá podmienka = nízky široký displej do 480px, t. j. vonkajší displej
+   iPhone Duo (466 × 678, z toho 84 zaberá zvislá stavová lišta → použiteľná
+   šírka 382 ako pri bežnom iPhone). Vysoké telefóny 431–480 (Pro Max,
+   Android) majú pomer strán ~0,46 a ostávajú bez zmeny. Rozmery celej
+   obrazovky (device-*) sa s klávesnicou nemenia — samotný aspect-ratio by
+   blok pri písaní zapínal; max-device-width vylúči úzke okná na veľkej
+   obrazovke (tablet, monitor). */
+@media (max-width: 430px), (max-width: 480px) and (min-aspect-ratio: 3/5) and (min-device-aspect-ratio: 3/5) and (max-device-width: 480px) {
   /* Header improvements */
   .crm-header {
     padding: 8px 10px;
@@ -6234,6 +6257,17 @@ body.ios-app {
   textarea,
   input {
     font-size: 16px;
+  }
+}
+
+/* Telefóny 431–480px (iPhone 16/17 Pro Max má 440): rovnaká poistka proti
+   priblíženiu stránky pri ťuknutí do poľa ako v bloku „iPhone specific
+   fixes" (triedy ako .form-input/.search-input inak vracajú 14px). */
+@media (max-width: 480px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }
 
@@ -9546,7 +9580,7 @@ body.ios-app {
 
   .tasks-page .task-edit-form .form-input {
     padding: 12px 14px !important;
-    font-size: 15px !important;
+    font-size: 16px !important; /* < 16px → iOS pri ťuknutí priblíži stránku */
     border-radius: 10px !important;
   }
 
@@ -13326,7 +13360,8 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
   background-origin: border-box;
 }
 
-.crm-content {
+.crm-content,
+.sa-pad {
   padding-left: var(--sa-left);
   padding-right: var(--sa-right);
 }
@@ -13338,6 +13373,14 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
 
 .toast-container {
   right: calc(20px + var(--sa-right));
+}
+
+@media (min-width: 768.1px) and (max-width: 1279px) {
+  /* Safari na iPhone na šírku: výrez berie z oboch strán ~60px, statický
+     panel vľavo uvoľní šírku obsahu (bez odstupov od 769px bez zmeny). */
+  .crm-sidebar {
+    max-width: max(200px, calc(100vw - var(--sa-left) - var(--sa-right) - 509px));
+  }
 }
 
 @media (max-width: 768px) {
