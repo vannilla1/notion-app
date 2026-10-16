@@ -29,6 +29,10 @@ struct ContentView: View {
                 loadError: $loadError,
                 pushManager: pushManager
             )
+            // Pozadie webu až k bočným okrajom (iPhone Duo: zvislá stavová lišta
+            // na vonkajšom displeji, iPhone na šírku: výrez). Obsah odsadí web
+            // cez --sa-left/--sa-right (env(safe-area-inset-*) + injekcia nižšie).
+            .ignoresSafeArea(.container, edges: [.leading, .trailing])
 
             if isLoading {
                 SplashView()
@@ -344,7 +348,7 @@ enum WKKeyboardDisplayFix {
 }
 
 /// WKWebView, ktorý ohlási zmenu systémových odstupov (safe area) okna.
-/// Web dostane --safe-area-top/bottom z natívu; doteraz len raz pri načítaní
+/// Web dostane --safe-area-top/bottom (a --sa-left/right) z natívu; doteraz len raz pri načítaní
 /// stránky. Na iPhone Duo sa po rozložení/zložení appka presunie na iný
 /// displej s inou polohou systémových líšt (Apple: „Re-read the size whenever
 /// it changes") a rovnako pri otočení iPhonu — hlavička by ostala pod
@@ -365,7 +369,7 @@ final class SafeAreaAwareWebView: WKWebView {
 
     private func reportIfChanged() {
         guard let insets = window?.safeAreaInsets else { return }
-        if let last = lastReported, last.top == insets.top, last.bottom == insets.bottom { return }
+        if let last = lastReported, last == insets { return }
         lastReported = insets
         onSafeAreaChange?(self, insets)
     }
@@ -1314,9 +1318,13 @@ struct WebView: UIViewRepresentable {
         func injectSafeArea(into webView: WKWebView, insets: UIEdgeInsets) {
             let top = Int(insets.top)
             let bottom = Int(insets.bottom)
+            let left = Int(insets.left)
+            let right = Int(insets.right)
             let js = """
             document.documentElement.style.setProperty('--safe-area-top', '\(top)px');
             document.documentElement.style.setProperty('--safe-area-bottom', '\(bottom)px');
+            document.documentElement.style.setProperty('--sa-left', '\(left)px');
+            document.documentElement.style.setProperty('--sa-right', '\(right)px');
             var s = document.getElementById('ios-safe-area-style');
             if (!s) { s = document.createElement('style'); s.id = 'ios-safe-area-style'; document.head.appendChild(s); }
             s.textContent = '.crm-header { padding-top: \(top + 16)px !important; }';
