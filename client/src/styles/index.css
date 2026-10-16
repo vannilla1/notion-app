@@ -13287,3 +13287,75 @@ body:has(.user-menu-dropdown, .notif-panel, .workspace-dropdown) .help-guide-btn
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+
+/* =============================================================================
+ * Bočné systémové odstupy (safe-area left/right)
+ * -----------------------------------------------------------------------------
+ * iPhone Duo má na vonkajšom displeji stavovú lištu zvislo pri pravom okraji
+ * (~84 bodov) a iPhone na šírku má výrez na boku. Pozadia (hlavička, spodná
+ * lišta, zatemnenie okien) siahajú až k okraju, obsah ostáva mimo lišty.
+ * Priehľadný okraj (border) posunie obsah dovnútra a pozadie sa pod ním
+ * vykreslí (background-clip: border-box), takže netreba poznať pôvodný
+ * padding v jednotlivých vrstvách. Kde odstupy nie sú (iPhone na výšku,
+ * Android, desktop), sú obe premenné 0 → žiadna zmena.
+ * ============================================================================= */
+:root {
+  --sa-left: 0px;
+  --sa-right: 0px;
+}
+
+@supports (padding: env(safe-area-inset-left)) {
+  :root {
+    --sa-left: env(safe-area-inset-left, 0px);
+    --sa-right: env(safe-area-inset-right, 0px);
+  }
+}
+
+.crm-header,
+.bottom-nav,
+.crm-container > .crm-main,
+.modal-overlay,
+.sa-modal-overlay,
+.announcement-modal-overlay,
+.workspace-leave-overlay,
+.login-container,
+.invite-page,
+.workspace-setup {
+  border-left: var(--sa-left) solid transparent;
+  border-right: var(--sa-right) solid transparent;
+  background-origin: border-box;
+}
+
+.crm-content {
+  padding-left: var(--sa-left);
+  padding-right: var(--sa-right);
+}
+
+.notification {
+  left: calc(50% + (var(--sa-left) - var(--sa-right)) / 2);
+  max-width: calc(90% - var(--sa-left) - var(--sa-right));
+}
+
+.toast-container {
+  right: calc(20px + var(--sa-right));
+}
+
+@media (max-width: 768px) {
+  /* Vysúvací panel filtrov je fixed od ľavého okraja. */
+  .crm-sidebar {
+    border-left: var(--sa-left) solid transparent;
+    background-origin: border-box;
+  }
+}
+
+@media (max-width: 480px) {
+  .toast-container {
+    left: calc(10px + var(--sa-left));
+    right: calc(10px + var(--sa-right));
+  }
+
+  .notif-panel {
+    left: calc(8px + var(--sa-left));
+    right: calc(8px + var(--sa-right));
+  }
+}

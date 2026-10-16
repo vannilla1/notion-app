@@ -152,8 +152,8 @@ const PushPermissionBanner = () => {
 const styles = `
   .push-permission-banner {
     position: fixed;
-    left: 12px;
-    right: 12px;
+    left: calc(12px + var(--sa-left, 0px));
+    right: calc(12px + var(--sa-right, 0px));
     bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
     z-index: 9998;
     background: #1f2937;

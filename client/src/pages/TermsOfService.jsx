@@ -24,7 +24,7 @@ export default function TermsOfService() {
   const s = { section: { marginBottom: '24px' }, h2: { fontSize: '20px', marginBottom: '8px' }, ul: { paddingLeft: '20px' }, a: { color: '#6366f1' } };
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '40px 20px', fontFamily: 'Inter, sans-serif', color: '#1e293b', lineHeight: '1.7' }}>
+    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '40px calc(20px + var(--sa-right, 0px)) 40px calc(20px + var(--sa-left, 0px))', fontFamily: 'Inter, sans-serif', color: '#1e293b', lineHeight: '1.7' }}>
       <h1 style={{ fontSize: '28px', marginBottom: '8px' }}>Všeobecné obchodné podmienky</h1>
       <p style={{ color: '#64748b', marginBottom: '32px' }}>Posledná aktualizácia: 21. apríla 2026</p>
 

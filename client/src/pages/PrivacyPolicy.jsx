@@ -29,7 +29,7 @@ export default function PrivacyPolicy() {
     <div style={{
       maxWidth: '800px',
       margin: '0 auto',
-      padding: '40px 20px',
+      padding: '40px calc(20px + var(--sa-right, 0px)) 40px calc(20px + var(--sa-left, 0px))',
       fontFamily: 'Inter, sans-serif',
       color: '#1e293b',
       lineHeight: '1.7'

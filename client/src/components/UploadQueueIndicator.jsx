@@ -66,7 +66,7 @@ export default function UploadQueueIndicator() {
   return (
     <div
       style={{
-        position: 'fixed', left: 16, bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+        position: 'fixed', left: 'calc(16px + var(--sa-left, 0px))', bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
         zIndex: 900, maxWidth: 'min(340px, calc(100vw - 32px))',
         display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
         // Medzery medzi kartami nesmú blokovať kliky na stránku pod nimi

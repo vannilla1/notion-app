@@ -149,7 +149,7 @@ const HelpGuide = ({ section, tips, title, children }) => {
         .help-guide-btn {
           position: fixed;
           bottom: 20px;
-          right: 20px;
+          right: calc(20px + var(--sa-right, 0px));
           width: 44px;
           height: 44px;
           border-radius: 50%;
