@@ -23,16 +23,15 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            WebView(
-                url: URL(string: "https://prplcrm.eu/app")!,
-                isLoading: $isLoading,
-                loadError: $loadError,
-                pushManager: pushManager
-            )
-            // Pozadie webu až k bočným okrajom (iPhone Duo: zvislá stavová lišta
-            // na vonkajšom displeji, iPhone na šírku: výrez). Obsah odsadí web
-            // cez --sa-left/--sa-right (env(safe-area-inset-*) + injekcia nižšie).
-            .ignoresSafeArea(.container, edges: [.leading, .trailing])
+            GeometryReader { geo in
+                WebView(
+                    url: URL(string: "https://prplcrm.eu/app")!,
+                    isLoading: $isLoading,
+                    loadError: $loadError,
+                    pushManager: pushManager
+                )
+                .ignoresSafeArea(.container, edges: Self.sideEdgesToFill(geo.safeAreaInsets))
+            }
 
             if isLoading {
                 SplashView()
@@ -163,6 +162,17 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+extension ContentView {
+    /// Bočný systémový odstup len na JEDNEJ strane = zvislá stavová lišta
+    /// (iPhone Duo, oba displeje) → web siaha až k okraju a obsah odsadí sám
+    /// cez --sa-left/--sa-right. Výrez na oboch stranách (iPhone na šírku)
+    /// ostáva po starom mimo webu: inak by web videl celú šírku a prepol sa
+    /// z mobilného na tabletové rozloženie, ktoré sa do užšej plochy nezmestí.
+    static func sideEdgesToFill(_ insets: EdgeInsets) -> Edge.Set {
+        (insets.leading > 0) != (insets.trailing > 0) ? [.leading, .trailing] : []
     }
 }
 
@@ -357,6 +367,13 @@ final class SafeAreaAwareWebView: WKWebView {
     var onSafeAreaChange: ((WKWebView, UIEdgeInsets) -> Void)?
     private var lastReported: UIEdgeInsets?
 
+    /// Hore/dole odstupy okna (web je vždy pod lištami), po bokoch len časť,
+    /// ktorú web naozaj prekrýva (0, keď je webview odsadený natívne).
+    var effectiveSafeAreaInsets: UIEdgeInsets? {
+        guard let w = window?.safeAreaInsets else { return nil }
+        return UIEdgeInsets(top: w.top, left: safeAreaInsets.left, bottom: w.bottom, right: safeAreaInsets.right)
+    }
+
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
         reportIfChanged()
@@ -368,7 +385,7 @@ final class SafeAreaAwareWebView: WKWebView {
     }
 
     private func reportIfChanged() {
-        guard let insets = window?.safeAreaInsets else { return }
+        guard let insets = effectiveSafeAreaInsets else { return }
         if let last = lastReported, last == insets { return }
         lastReported = insets
         onSafeAreaChange?(self, insets)
@@ -1298,8 +1315,8 @@ struct WebView: UIViewRepresentable {
             // zmeny počas relácie — otočenie, iPhone Duo fold — rieši
             // SafeAreaAwareWebView.onSafeAreaChange).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if let window = webView.window {
-                    self.injectSafeArea(into: webView, insets: window.safeAreaInsets)
+                if let insets = (webView as? SafeAreaAwareWebView)?.effectiveSafeAreaInsets {
+                    self.injectSafeArea(into: webView, insets: insets)
                 }
             }
 
