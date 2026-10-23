@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
-import { reportError, installGlobalErrorHandlers } from './utils/reportError';
+import { reportError, installGlobalErrorHandlers, scheduleChunkRecoveryReset } from './utils/reportError';
 import { installBreadcrumbInstrumentation } from './utils/breadcrumbs';
 import { initIapBridge } from './utils/iapBridge';
 import { sideInsets } from './utils/platform';
@@ -14,25 +14,17 @@ import './styles/index.css';
 // chybe mali context aspoň pár "app boot" udalostí.
 installBreadcrumbInstrumentation();
 installGlobalErrorHandlers();
+scheduleChunkRecoveryReset();
 // iOS appka: neukončené Apple IAP transakcie (zlyhaný /verify) sa overia
 // znova hneď po štarte, nie až po otvorení stránky predplatného.
 initIapBridge();
 
-// Po deployi nový service worker hneď prevezme otvorené taby a zmaže starý
-// precache (skipWaiting + clientsClaim + cleanupOutdatedCaches). Tab so starým
-// bundlom potom pri prechode na lazy route žiada chunk so starým hashom →
-// „Failed to fetch dynamically imported module“. Vite to hlási udalosťou
-// vite:preloadError — jedno automatické obnovenie načíta nový bundle.
-// Poistka proti slučke: druhá chyba do 30 s už ide do RouteErrorBoundary.
-window.addEventListener('vite:preloadError', (event) => {
-  const KEY = 'prpl_chunk_reload_at';
-  let last = 0;
-  try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch { /* storage nedostupný */ }
-  if (Date.now() - last < 30000) return;
-  try { sessionStorage.setItem(KEY, String(Date.now())); } catch { /* storage nedostupný */ }
-  event.preventDefault();
-  window.location.reload();
-});
+// Zlyhanie lazy chunku (starý bundle po deployi) rieši JEDNA cesta:
+// RouteErrorBoundary / globálne handlery → maybeAutoReload (utils/reportError).
+// Žiadny handler na 'vite:preloadError' s preventDefault(): Vite potom import
+// nezamietne, ale vyrieši ho s undefined a React.lazy ešte pred reloadom
+// spadne na „undefined is not an object (evaluating 'e._result.default')“
+// (Diagnostika 23. 10. 2026).
 
 // Platformové body classes — CSS cez ne cielene upravuje padding, tap targets,
 // safe-area insets. Analóg k 'ios-app' class ktorú injectuje Swift WKWebView

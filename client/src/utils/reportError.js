@@ -47,35 +47,156 @@ const IGNORED_PATTERNS = [
 // odkazuje na chunk hash čo už neexistuje. Auto-reload načíta nové HTML
 // s aktuálnymi hashmi, takže user nezostane na "broken" page.
 const CHUNK_LOAD_PATTERNS = [
-  /Importing a module script failed/i,
-  /Failed to fetch dynamically imported module/i,
+  /Importing a module script failed/i,            // Safari
+  /Failed to fetch dynamically imported module/i, // Chromium
+  /error loading dynamically imported module/i,   // Firefox
   /Loading chunk \d+ failed/i,
-  /ChunkLoadError/i
+  /ChunkLoadError/i,
+  /Unable to preload CSS/i                        // Vite preload CSS lazy route
 ];
 
-const RELOAD_FLAG_KEY = '__prpl_chunk_reload';
-const RELOAD_COOLDOWN_MS = 60 * 1000; // 1 min — zabráni reload-loopu
+const RECOVERY_KEY = '__prpl_chunk_recovery';
+const RECOVERY_WINDOW_MS = 10 * 60 * 1000; // najviac 2 automatické pokusy za 10 min
+// Workbox sťahuje precache po jednom súbore — na pomalej sieti trvá inštalácia
+// novej verzie aj 10+ s (overené: 29 zmenených súborov, 1,3 MB).
+const SW_ACTIVATE_TIMEOUT_MS = 20000;
+const STABLE_RESET_MS = 30000;
+// Jedna obnova na jedno načítanie stránky (boundary + globálny handler by
+// inak tú istú chybu započítali dvakrát a preskočili stupeň).
+let recoveryScheduled = false;
+let chunkErrorThisLoad = false;
+// Počet práve zobrazených „Načítavam…“ pri načítaní route (Suspense fallback)
+// — zaseknutý chunk ešte nie je dôkaz, že stránka funguje.
+let pendingRouteLoads = 0;
 
-function isChunkLoadError(message) {
+export function trackRouteLoad(delta) {
+  pendingRouteLoads = Math.max(0, pendingRouteLoads + delta);
+}
+
+export function isChunkLoadError(message) {
   return CHUNK_LOAD_PATTERNS.some(p => p.test(String(message || '')));
+}
+
+function readRecovery() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(RECOVERY_KEY) || 'null');
+    return s && typeof s.first === 'number' && typeof s.n === 'number' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+// 2. pokus: obyčajný reload nepomohol. Ak je na serveri novší service worker
+// (deploy), update() ho nainštaluje a počkáme na aktiváciu (skipWaiting +
+// clientsClaim) — reload potom dostane aktuálny index.html z jeho precache.
+// Precache zámerne NEmažeme: pri nezmenenom sw.js by sa už nenaplnil (stratil
+// by sa offline štart) a workbox pri chýbajúcej položke aj tak siahne na sieť.
+async function refreshServiceWorker() {
+  const work = (async () => {
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (!reg) return;
+    await reg.update();
+    const worker = reg.installing || reg.waiting;
+    if (!worker || worker.state === 'activated' || worker.state === 'redundant') return;
+    await new Promise((resolve) => {
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'activated' || worker.state === 'redundant') resolve();
+      });
+    });
+  })().catch(() => { /* SW nedostupný / update zlyhal — reload aj tak */ });
+  await Promise.race([work, new Promise(resolve => setTimeout(resolve, SW_ACTIVATE_TIMEOUT_MS))]);
 }
 
 // Exportované aj pre RouteErrorBoundary (App.jsx) — React v produkcii chyby
 // zachytené boundary NEposiela na window 'error', takže zlyhanie lazy chunku
 // po deployi by inak skončilo v červenom okne namiesto auto-reloadu.
+// Stupne za 10 min: 1) obyčajný reload, 2) (len online) aktualizovať service
+// worker a reload, 3) koniec — hlásenie do Diagnostiky + okno „Obnoviť stránku“.
+// Diagnostika 23. 10. 2026 (Safari, /admin/dashboard): chunk zlyhal opakovane.
 export function maybeAutoReload(message) {
   if (!isChunkLoadError(message)) return false;
+  chunkErrorThisLoad = true;
+  if (recoveryScheduled) return true;
+  // Bez siete reload nepomôže — skončil by na stránke prehliadača „bez
+  // pripojenia“ (a stratil rozpísaný formulár); okno s tlačidlom je lepšie.
+  if (navigator.onLine === false) return false;
   try {
-    // Reload-loop guard: nereload-uj ak už sme práve teraz reload-li.
-    const last = parseInt(sessionStorage.getItem(RELOAD_FLAG_KEY) || '0', 10);
-    if (Date.now() - last < RELOAD_COOLDOWN_MS) return false;
-    sessionStorage.setItem(RELOAD_FLAG_KEY, String(Date.now()));
-    // location.reload(true) je deprecated, modern way:
-    window.location.reload();
-    return true;
-  } catch {
+    const now = Date.now();
+    let state = readRecovery();
+    if (!state || now < state.first || now - state.first > RECOVERY_WINDOW_MS) state = { first: now, n: 0 };
+    if (state.n === 0) {
+      sessionStorage.setItem(RECOVERY_KEY, JSON.stringify({ first: state.first, n: 1 }));
+      recoveryScheduled = true;
+      window.location.reload();
+      return true;
+    }
+    if (state.n === 1) {
+      sessionStorage.setItem(RECOVERY_KEY, JSON.stringify({ first: state.first, n: 2 }));
+      recoveryScheduled = true;
+      const route = window.location.pathname;
+      refreshServiceWorker().finally(() => {
+        if (window.location.pathname === route) {
+          window.location.reload();
+          return;
+        }
+        // Používateľ medzitým odišiel na inú (funkčnú) stránku — reload by mu
+        // zahodil rozpísané údaje. Návrat na pokazenú stránku spustí 2. pokus znova.
+        recoveryScheduled = false;
+        try { sessionStorage.setItem(RECOVERY_KEY, JSON.stringify({ first: state.first, n: 1 })); } catch { /* noop */ }
+      });
+      return true;
+    }
     return false;
+  } catch {
+    return false; // sessionStorage nedostupný → bez automatiky, nikdy slučka
   }
+}
+
+// Úspešná obnova: stránka beží 30 s bez chyby chunku → počítadlo pokusov
+// späť na nulu, aby ďalší (nesúvisiaci) deploy znova dostal obe automatické
+// pokusy. Chyba v tomto načítaní počítadlo nechá (inak by sa slučka nezastavila).
+export function scheduleChunkRecoveryReset() {
+  const check = () => {
+    if (chunkErrorThisLoad || recoveryScheduled) return;
+    if (pendingRouteLoads > 0) { setTimeout(check, 5000); return; } // chunk sa ešte načítava
+    try { sessionStorage.removeItem(RECOVERY_KEY); } catch { /* storage nedostupný */ }
+  };
+  setTimeout(check, STABLE_RESET_MS);
+}
+
+// Naplánovaný reload sa neuskutočnil (iOS shell ho zrušil a otvoril Safari).
+// Ďalšia chyba chunku na tejto stránke musí znova dostať normálnu obnovu.
+export function markChunkReloadBlocked() {
+  recoveryScheduled = false;
+}
+
+// Kontext k hláseniu, keď automatická obnova nepomohla — Safari pri tejto
+// chybe neposiela URL ani stack, príčinu treba čítať z okolností.
+export function chunkRecoveryContext() {
+  const state = readRecovery();
+  let swControlled = false;
+  try { swControlled = !!navigator.serviceWorker?.controller; } catch { /* noop */ }
+  return {
+    online: navigator.onLine,
+    swControlled,
+    attempts: state ? state.n : 0,
+    firstAttemptAgoMs: state ? Date.now() - state.first : null,
+    route: typeof location !== 'undefined' ? location.pathname : ''
+  };
+}
+
+// Server ukladá z breadcrumbs len text (nie `data`), preto kontext ako text.
+export function describeChunkRecovery() {
+  const c = chunkRecoveryContext();
+  return `attempts=${c.attempts} online=${c.online ? 1 : 0} sw=${c.swControlled ? 1 : 0}`
+    + ` ago=${c.firstAttemptAgoMs ?? '-'}ms route=${c.route}`;
+}
+
+// Len pre testy.
+export function __resetChunkRecovery() {
+  recoveryScheduled = false;
+  chunkErrorThisLoad = false;
+  pendingRouteLoads = 0;
 }
 
 function isIgnored(payload) {
@@ -213,7 +334,9 @@ function safeUrl() {
 export function reportError(payload) {
   try {
     if (!payload || !payload.message) return;
-    if (isIgnored(payload)) return;
+    // Chunk chyba sem príde len keď automatická obnova nepomohla — hlásiť aj
+    // Chromium znenie, ktoré inak zachytí sieťový filter /Failed to fetch/.
+    if (!isChunkLoadError(payload.message) && isIgnored(payload)) return;
     if (isThirdPartyStack(payload.stack)) return; // rozšírenia/injektované skripty — nie naša chyba
     const enriched = {
       name: payload.name || 'Error',

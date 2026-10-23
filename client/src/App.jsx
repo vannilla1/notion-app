@@ -14,7 +14,8 @@ import WorkspaceSetup from './components/WorkspaceSetup';
 import { initializePush } from './services/pushNotifications';
 import { isIosNativeApp } from './utils/platform';
 import { removeStoredToken } from './utils/authStorage';
-import { reportError, maybeAutoReload } from './utils/reportError';
+import { reportError, maybeAutoReload, isChunkLoadError, describeChunkRecovery, trackRouteLoad, markChunkReloadBlocked } from './utils/reportError';
+import { addBreadcrumb } from './utils/breadcrumbs';
 
 // Lazy-load all routes. On iOS WKWebView, loading all pages + their
 // dependencies (heavy editors, recharts, etc.) at once pushes WebContent
@@ -61,25 +62,34 @@ try {
   }
 } catch { /* ponechaj 100vh */ }
 
-const RouteFallback = () => (
-  <div style={{
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
-    color: 'var(--text-secondary, #64748b)'
-  }}>
-    Načítavam…
-  </div>
-);
+const RouteFallback = () => {
+  // Kým sa route načítava, nevynulovať počítadlo obnovy chunkov (reportError.js).
+  useEffect(() => {
+    trackRouteLoad(1);
+    return () => trackRouteLoad(-1);
+  }, []);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      minHeight: FULL_VIEWPORT_HEIGHT, background: 'var(--bg-secondary, #f8fafc)',
+      color: 'var(--text-secondary, #64748b)'
+    }}>
+      Načítavam…
+    </div>
+  );
+};
 
 // Error boundary pre lazy chunk failures (FailedToFetch, network errors).
 // Bez tohto error v lazy import-e tichom spôsobom unmountuje strom → biela.
-class RouteErrorBoundary extends Component {
+export class RouteErrorBoundary extends Component {
   constructor(props) {
     super(props);
     this.state = { hasError: false, error: null };
   }
   static getDerivedStateFromError(error) {
-    return { hasError: true, error };
+    // Chunk chyba = takmer vždy starý bundle → automatické obnovenie; počas
+    // neho „Načítavam…“ namiesto bliknutia červeného okna.
+    return { hasError: true, error, recovering: isChunkLoadError(error?.message) };
   }
   componentDidCatch(error, info) {
     // Lazy chunk failures (Failed to fetch dynamically imported module).
@@ -89,17 +99,46 @@ class RouteErrorBoundary extends Component {
     // s 60 s cooldownom (sessionStorage), rovnako ako globálny 'error' handler.
     // React v produkcii chyby zachytené boundary na window 'error' neposiela,
     // takže bez tohto by sa auto-reload ani hlásenie do Diagnostiky nespustili.
-    if (maybeAutoReload(error?.message)) return;
+    if (maybeAutoReload(error?.message)) {
+      // Poistka: ak sa stránka do 25 s neobnoví (reload zrušený — napr. iOS
+      // shell otvára /ochrana-udajov v Safari; dlhšie než čakanie na SW),
+      // ukáž okno s tlačidlom späť do appky.
+      clearTimeout(this.recoverTimer);
+      this.recoverTimer = setTimeout(() => {
+        markChunkReloadBlocked();
+        this.setState({ recovering: false, reloadBlocked: true });
+      }, 25000);
+      return;
+    }
+    if (this.state.recovering) this.setState({ recovering: false });
+    const chunk = isChunkLoadError(error?.message);
+    const offline = navigator.onLine === false;
+    if (chunk && !offline) {
+      addBreadcrumb({ category: 'chunk', level: 'error', message: `chunk recovery exhausted ${describeChunkRecovery()}` });
+    }
     reportError({
-      name: error?.name,
+      // Vlastný názov = samostatný záznam v Diagnostike s čerstvými breadcrumbs.
+      name: chunk ? (offline ? 'ChunkLoadOffline' : 'ChunkRecoveryExhausted') : error?.name,
       message: error?.message || 'Route render error',
       stack: error?.stack,
       componentStack: info?.componentStack
     });
     console.error('[RouteErrorBoundary] caught:', error?.message);
   }
+  componentDidUpdate(prevProps, prevState) {
+    // Iná stránka → nový pokus (inak by červené okno ostalo na každej route).
+    // Len chyba spred zmeny route — nie tá, ktorú hodila práve nová route.
+    if (prevState.hasError && this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      clearTimeout(this.recoverTimer);
+      this.setState({ hasError: false, error: null, recovering: false, reloadBlocked: false });
+    }
+  }
+  componentWillUnmount() {
+    clearTimeout(this.recoverTimer);
+  }
   render() {
     if (this.state.hasError) {
+      if (this.state.recovering) return <RouteFallback />;
       const msg = this.state.error?.message || 'Unknown error';
       return (
         <div className="sa-pad">
@@ -111,13 +150,13 @@ class RouteErrorBoundary extends Component {
           <h2 style={{ margin: '0 0 12px' }}>Chyba pri načítaní stránky</h2>
           <p style={{ margin: '0 0 12px', fontSize: '14px' }}>{msg}</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => (this.state.reloadBlocked ? window.location.assign('/app') : window.location.reload())}
             style={{
               padding: '10px 20px', background: '#dc2626', color: 'white',
               border: 'none', borderRadius: '8px', cursor: 'pointer'
             }}
           >
-            Obnoviť stránku
+            {this.state.reloadBlocked ? 'Späť do aplikácie' : 'Obnoviť stránku'}
           </button>
         </div>
         </div>
@@ -595,7 +634,7 @@ function AppContent() {
       {/* Na stránke pozvánky (/invite/:token) spodná navigácia nemá čo robiť —
           na iPhone na šírku prekrývala tlačidlo „Prijať pozvánku". */}
       {isAuthenticated && !isAdminRoute && !location.pathname.startsWith('/invite/') && <BottomNav unreadCounts={unreadCounts} />}
-      <RouteErrorBoundary>
+      <RouteErrorBoundary resetKey={location.pathname}>
       <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route
