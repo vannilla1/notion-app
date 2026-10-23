@@ -238,6 +238,19 @@ describe('maybeAutoReload', () => {
     expect(JSON.parse(sessionStorage.getItem('__prpl_chunk_recovery')).n).toBe(2);
   });
 
+  it('2. pokus: ak používateľ medzitým prešiel na inú tiež pokazenú stránku, reload sa spraví', async () => {
+    let resolveUpdate;
+    stubServiceWorker({ update: () => new Promise((r) => { resolveUpdate = r; }), installing: null, waiting: null });
+    maybeAutoReload(SAFARI);
+    nextPageLoad();
+    maybeAutoReload(SAFARI);
+    await vi.waitFor(() => expect(resolveUpdate).toBeTypeOf('function'));
+    window.location.pathname = '/crm';
+    expect(maybeAutoReload(SAFARI)).toBe(true); // aj /crm má pokazený chunk
+    resolveUpdate();
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(2));
+  });
+
   it('zrušený reload (iOS shell): ďalšia chyba chunku znova dostane obnovu', () => {
     expect(maybeAutoReload(SAFARI)).toBe(true);   // reload zrušený, stránka žije ďalej
     expect(maybeAutoReload(SAFARI)).toBe(true);   // bez markChunkReloadBlocked by nič neurobil

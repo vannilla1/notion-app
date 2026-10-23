@@ -65,6 +65,7 @@ const STABLE_RESET_MS = 30000;
 // inak tú istú chybu započítali dvakrát a preskočili stupeň).
 let recoveryScheduled = false;
 let chunkErrorThisLoad = false;
+let lastChunkErrorPath = '';
 // Počet práve zobrazených „Načítavam…“ pri načítaní route (Suspense fallback)
 // — zaseknutý chunk ešte nie je dôkaz, že stránka funguje.
 let pendingRouteLoads = 0;
@@ -116,6 +117,7 @@ async function refreshServiceWorker() {
 export function maybeAutoReload(message) {
   if (!isChunkLoadError(message)) return false;
   chunkErrorThisLoad = true;
+  lastChunkErrorPath = window.location.pathname;
   if (recoveryScheduled) return true;
   // Bez siete reload nepomôže — skončil by na stránke prehliadača „bez
   // pripojenia“ (a stratil rozpísaný formulár); okno s tlačidlom je lepšie.
@@ -135,7 +137,9 @@ export function maybeAutoReload(message) {
       recoveryScheduled = true;
       const route = window.location.pathname;
       refreshServiceWorker().finally(() => {
-        if (window.location.pathname === route) {
+        const here = window.location.pathname;
+        // Reload aj keď používateľ medzitým prešiel na inú tiež pokazenú stránku.
+        if (here === route || here === lastChunkErrorPath) {
           window.location.reload();
           return;
         }
@@ -196,6 +200,7 @@ export function describeChunkRecovery() {
 export function __resetChunkRecovery() {
   recoveryScheduled = false;
   chunkErrorThisLoad = false;
+  lastChunkErrorPath = '';
   pendingRouteLoads = 0;
 }
 
